@@ -5,6 +5,8 @@
 # Usage: scripts/ci-main.sh
 # A failure opens one bug issue. .builder/ci-main-last holds the last commit a full run was started for: it is
 # written up front, so merges made while this run waits in the queue don't each start another.
+# Live provider sandbox tests (LIVE_SANDBOX=1) run in the first run of each UTC day only (#591): they spend the
+# providers' daily quotas. The day's stamp sits in the git common dir; a superseded run (nothing ran) gives the day back.
 set -uo pipefail
 {
 REPO="hislordshipprof/african-market-AI-Ecommerce"
@@ -17,6 +19,14 @@ WT="$(dirname "$ROOT")/E-commerce-worktrees/main-ci-$$"
 git -C "$ROOT" worktree add -q --detach "$WT" "$SHA" || { echo "ci-main SETUP: no worktree at $SHA"; exit 1; }
 trap 'git -C "$ROOT" worktree remove --force "$WT" 2>/dev/null || true' EXIT
 echo "$SHA" > "$ROOT/.builder/ci-main-last"
+LIVE_STAMP="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/ci-main-live-sandbox-day"
+TODAY=$(date -u +%Y-%m-%d)
+LIVE_SANDBOX=0
+if [ "$(cat "$LIVE_STAMP" 2>/dev/null)" != "$TODAY" ]; then
+  echo "$TODAY" > "$LIVE_STAMP"
+  LIVE_SANDBOX=1
+fi
+export LIVE_SANDBOX
 cp "$ROOT/.env.local" "$WT/.env.local"
 cd "$WT" || exit 1
 # CI_MAIN_LAST_FILE: ci-local.sh reads it once it holds the lock. If a later ci-main.sh has written a newer commit
@@ -27,6 +37,7 @@ if CI_SCOPE=full CI_DB=main E2E_PORT="${CI_MAIN_PORT:-3400}" CI_RUNNER="$(dirnam
   exit 0
 fi
 if grep -q "local-ci SUPERSEDED" "$LOG"; then
+  [ "$LIVE_SANDBOX" = 1 ] && rm -f "$LIVE_STAMP"
   echo "ci-main skipped $SHA: a newer run on main is queued"
   exit 0
 fi
