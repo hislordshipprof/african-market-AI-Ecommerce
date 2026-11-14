@@ -58,6 +58,7 @@ class StubCourier implements DeliveryProvider {
     return { externalId: `${this.name}-${req.externalDeliveryId}`, trackingUrl: null };
   }
   async cancel(): Promise<void> {}
+  async reschedule(): Promise<void> {}
   handleWebhook(): DeliveryWebhookEvent {
     throw new Error("not used");
   }
