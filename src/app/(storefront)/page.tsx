@@ -23,6 +23,7 @@ import { headers } from "next/headers";
 import { listDirectoryStores } from "@/lib/directory/stores";
 import { storefrontUrl } from "@/lib/directory/links";
 import { DirectoryHome } from "@/components/directory/directory-home";
+import { statePages } from "@/lib/directory/places";
 
 export default async function StorefrontPage() {
   const headerList = await headers();
@@ -34,7 +35,13 @@ export default async function StorefrontPage() {
       const href = storefrontUrl(store.slug, root, host);
       return href ? [{ ...store, href }] : [];
     });
-    return <DirectoryHome stores={stores} />;
+    const states = statePages(stores).map(({ code, name, slug, stores }) => ({
+      code,
+      name,
+      href: `/stores/${slug}`,
+      stores: stores.map(({ slug, name, city, href }) => ({ slug, name, city, href })),
+    }));
+    return <DirectoryHome stores={stores} states={states} />;
   }
   const { store, suspended } = await getStoreWithStatus();
   const checkout = checkCheckoutReady(store.stripeOnboardingStatus);

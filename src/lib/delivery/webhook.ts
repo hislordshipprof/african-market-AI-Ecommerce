@@ -58,7 +58,7 @@ export async function applyCourierWebhook(event: DeliveryWebhookEvent): Promise<
     await tx.delivery.update({
       where: { id: found.id },
       data: {
-        ...(event.courier && { courierJson: { ...event.courier, dropoffEta: event.courier.dropoffEta?.toISOString() ?? null } }),
+        ...(event.courier && { courierJson: { ...event.courier, pickupEta: event.courier.pickupEta?.toISOString() ?? null, dropoffEta: event.courier.dropoffEta?.toISOString() ?? null } }),
         ...(event.trackingUrl && { trackingUrl: event.trackingUrl }),
         ...(event.actualFeeCents !== null && { actualFeeCents: event.actualFeeCents }),
         ...(photoUrl && { proofUrl: photoUrl }),
