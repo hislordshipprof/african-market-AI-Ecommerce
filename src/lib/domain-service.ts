@@ -17,6 +17,10 @@ export async function addDomainToStore(
   if (!store) {
     return { ok: false, error: "Store not found", status: 404 };
   }
+  // Swapping in place would orphan the old domain on the Vercel project.
+  if (store.customDomain && store.customDomain !== domain) {
+    return { ok: false, error: "Store already has a custom domain; remove it first", status: 409 };
+  }
 
   const existing = await platformAdmin.store.findUnique({
     where: { customDomain: domain },

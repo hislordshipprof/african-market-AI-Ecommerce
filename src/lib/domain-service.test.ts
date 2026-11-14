@@ -85,6 +85,21 @@ describe("domain-service", () => {
       });
     });
 
+    it("refuses a second domain while the store still has one, without calling Vercel", async () => {
+      const addSpy = vi.spyOn(fakeAdapter, "addDomain");
+      mockFindUnique.mockResolvedValueOnce({ ...storeA, customDomain: "old.mamasmarket.com" });
+
+      const result = await addDomainToStore("store-a", "new.mamasmarket.com");
+
+      expect(result).toEqual({
+        ok: false,
+        error: "Store already has a custom domain; remove it first",
+        status: 409,
+      });
+      expect(addSpy).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
     it("returns 404 when store not found", async () => {
       mockFindUnique.mockResolvedValueOnce(null);
 
