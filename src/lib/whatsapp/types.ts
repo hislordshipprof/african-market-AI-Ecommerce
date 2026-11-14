@@ -31,6 +31,27 @@ export interface SendResult {
   waId: string | null;
 }
 
+/**
+ * What Embedded Signup returns for a store's own number (#558): the WABA and
+ * phone number ids, and the code exchanged server-side for a business token.
+ * In fake mode the ids and display number come from a form and there is no code.
+ */
+export interface ConnectStoreNumberInput {
+  wabaId: string;
+  phoneNumberId: string;
+  /** Number stays on the WhatsApp Business app (coexistence): not registered again. */
+  coexistence: boolean;
+  code?: string;
+  displayNumber?: string;
+}
+
+export interface ConnectedStoreNumber {
+  businessToken: string;
+  displayNumber: string;
+}
+
 export interface WhatsAppProvider {
   send(message: OutboundMessage): Promise<SendResult>;
+  /** Exchanges the code, subscribes the app to the WABA and registers the number. */
+  connectStoreNumber(input: ConnectStoreNumberInput): Promise<ConnectedStoreNumber>;
 }
