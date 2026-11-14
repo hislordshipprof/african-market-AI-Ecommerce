@@ -330,7 +330,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "copilotWeeklyReport" | "ownerReport" | "ownerReportItem" | "listingDraft" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -364,6 +364,7 @@ export async function storeScopedTransaction<T>(
       stockProposal: tx.stockProposal,
       copilotAlert: tx.copilotAlert,
       copilotDigest: tx.copilotDigest,
+      copilotWeeklyReport: tx.copilotWeeklyReport,
       ownerReport: tx.ownerReport,
       ownerReportItem: tx.ownerReportItem,
       listingDraft: tx.listingDraft,

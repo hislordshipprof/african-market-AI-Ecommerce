@@ -5,24 +5,27 @@ import { listOpenAlerts } from "@/lib/copilot/alerts";
 import { loadDigestHour } from "@/lib/copilot/digest";
 import { listPendingOwnerReports } from "@/lib/copilot/owner-report";
 import { inventoryReport } from "@/lib/copilot/inventory-report";
+import { listWeeklyReports } from "@/lib/copilot/weekly-report";
 import { loadCopilotPanel } from "@/lib/copilot/turn";
 import { AlertsPanel } from "./alerts-panel";
 import { CopilotPanel } from "./copilot-panel";
 import { DigestSetting } from "./digest-setting";
 import { OwnerReportPanel } from "./owner-report-panel";
 import { StockMovement } from "./stock-movement";
+import { WeeklyReports } from "./weekly-reports";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import { storeMayUse } from "@/lib/billing/plan";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
-  const [panel, alerts, digestHour, reports, reportsAllowed, movement] = await Promise.all([
+  const [panel, alerts, digestHour, reports, reportsAllowed, movement, weekly] = await Promise.all([
     loadCopilotPanel(session.store.id, session.user.id),
     listOpenAlerts(session.store.id),
     loadDigestHour(session.store.id),
     listPendingOwnerReports(session.store.id),
     storeMayUse(session.store.id, "copilot-reports"),
     inventoryReport(session.store.id),
+    listWeeklyReports(session.store.id),
   ]);
 
   return (
@@ -62,6 +65,7 @@ export default async function CopilotPage() {
           voiceAndPhotoWaiting={reports.length}
         />
         <StockMovement rows={movement.rows} totals={movement.totals} />
+        <WeeklyReports reports={weekly} />
         <DigestSetting hour={digestHour} />
       </main>
     </div>

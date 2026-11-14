@@ -146,6 +146,9 @@ _Avoid_: Store AI, store assistant
 **Daily digest**:
 The Store copilot's end-of-day summary for a store owner.
 
+**Weekly report**:
+The Store copilot's Monday email to a store owner about the store week just ended (Monday to Sunday, store time), against the week before. The last 8 are on the copilot page.
+
 **Copilot alert**:
 A stock alert the Store copilot raises for the store owner: sold out, running low (a counted listing at 5 or fewer, or a status listing marked low), or an order that needs a low or ask-store item. Owners only; at most 2 pushes per store per hour.
 

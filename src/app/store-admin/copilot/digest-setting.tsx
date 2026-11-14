@@ -31,7 +31,7 @@ export function DigestSetting({ hour: initialHour }: { hour: number }) {
   return (
     <section aria-label="Daily digest" className="mt-8 rounded-xl border border-border bg-card px-4 py-4">
       <label htmlFor={id} className="text-base font-semibold text-foreground">Daily digest email</label>
-      <p className="mt-1 text-sm text-muted-foreground">A summary of today&apos;s alerts, stock and sales, sent to owners at store time.</p>
+      <p className="mt-1 text-sm text-muted-foreground">A summary of today&apos;s alerts, stock and sales, sent to owners at store time. The weekly report goes out on Mondays at the same hour.</p>
       <div className="mt-3 flex items-center gap-3">
         <select
           id={id}
