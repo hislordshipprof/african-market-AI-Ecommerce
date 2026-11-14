@@ -91,4 +91,33 @@ fixture r6; reviewed
 err=$(review REVIEW_ROUND=2 REVIEW_FULL=1)
 if ! has "DELTA REVIEW" && [[ "$err" == *"REVIEW_FULL"* ]]; then ok "REVIEW_FULL=1 forces a full review"; else bad "REVIEW_FULL: $err"; fi
 
+# 7. A clean merge of a branch that is not on origin/main brings in code the reviewer never saw: full review.
+fixture r7; reviewed
+( cd "$WT" && g switch -qc helper && echo UNREVIEWED-HELPER > u.txt && g add u.txt && g commit -qm "Fix on helper" \
+  && g switch -q ticket-9 && sed -i.bak 's/^p 3$/p 3 guarded/' p.txt && rm p.txt.bak && g commit -qam fix \
+  && g merge -q --no-ff -m "Merge helper" helper )
+err=$(review REVIEW_ROUND=2)
+if ! has "DELTA REVIEW" && [[ "$err" == *"not on origin/main"* ]]; then ok "a merge of a branch not on origin/main forces a full review"; else bad "helper merge: $err / $(delta_file)"; fi
+
+# 8. Rename conflict: the branch renamed a.txt to b.txt, main renamed it to c.txt; the repair keeps b.txt.
+fixture r8
+( cd "$WT" && g mv a.txt b.txt && g commit -qm "Rename a to b" )
+reviewed
+( cd "$ROOT" && g mv a.txt c.txt && g commit -qm "Main renames a to c" && g push -q origin main )
+( cd "$WT" && g fetch -q origin main && { g merge --no-edit origin/main >/dev/null 2>&1 || true; } \
+  && g rm -q c.txt && g add -u && g commit -qm "Merge main, keep b.txt" )
+err=$(review REVIEW_ROUND=2)
+if has "merge resolution" && has "a.txt" && has "b.txt" && has "c.txt" && delta_file | grep -qF "c.txt"; then ok "a rename conflict names the renamed paths and its resolution is in the delta"; else bad "rename conflict: $err / $(delta_file)"; fi
+
+# 9. Merged-in lines count toward the 30%: main deleted a.txt, the repair keeps the branch's edited a.txt, so the
+# branch now adds all 200 lines relative to main.
+fixture r9
+( cd "$WT" && sed -i.bak 's/^line 5$/line 5 branch/' a.txt && rm a.txt.bak && g commit -qam "Branch edits line 5" )
+reviewed
+( cd "$ROOT" && g rm -q a.txt && g commit -qm "Main deletes a" && g push -q origin main )
+( cd "$WT" && g fetch -q origin main && { g merge --no-edit origin/main >/dev/null 2>&1 || true; } \
+  && g add a.txt && g commit -qm "Merge main, keep a.txt" )
+err=$(review REVIEW_ROUND=2)
+if ! has "DELTA REVIEW" && [[ "$err" == *"30%"* ]]; then ok "lines a merge brings back count toward the 30% threshold"; else bad "merged-in lines threshold: $err / $(delta_file)"; fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
