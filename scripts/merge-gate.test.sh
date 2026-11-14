@@ -70,6 +70,9 @@ case "$*" in
   "pr merge"*) echo "$*" >> "$FAKE_DIR/merged" ;;
   "pr checks"*) echo "${FAKE_NOT_GREEN:-0}" ;;
   *"/commits --paginate --jq "*) jq -r "${@: -1}" "$FAKE_DIR/pr-commits.json" ;;
+  *"--jq .title") echo "Add a thing" ;;
+  *"--jq .merge_commit_sha") echo "${FAKE_MERGED_SHA:-}" ;;
+  *"--jq .commit.message") printf '%b' "$FAKE_SQUASH_MSG" ;;
   *"--jq .merged") if [ -f "$FAKE_DIR/merged" ]; then echo true; else echo false; fi ;;
   *"--jq .state") echo "${FAKE_STATE:-open}" ;;
   *"--jq .head.sha") if [ -n "${FAKE_REMOTE:-}" ]; then remote rev-parse "$FAKE_REF"; else echo "$FAKE_HEAD"; fi ;;
@@ -82,7 +85,7 @@ EOF
 chmod +x "$T/bin/gh"
 # The commits API lists a merge commit with two parents; the squash body must leave it out.
 cat > "$T/pr-commits.json" <<'EOF'
-[{"sha":"c1","commit":{"message":"Add the feature"},"parents":[{"sha":"p0"}]},
+[{"sha":"c1","commit":{"message":"Add the feature\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"},"parents":[{"sha":"p0"}]},
  {"sha":"c2","commit":{"message":"Merge branch 'main' into ticket-90-x"},"parents":[{"sha":"c1"},{"sha":"m1"}]}]
 EOF
 in_proj() { rm -f "$T/merged"; ( cd "$P" && PATH="$T/bin:$PATH" FAKE_DIR="$T" FAKE_HEAD="$A" "$@" ) 2>&1; }
@@ -99,6 +102,18 @@ if [ "$rc" = 6 ] && [[ "$out" == *"merged PR #77 without a review"* ]]; then ok 
 # A PR whose branch is not named ticket-<n>-: found by number, and through the same gates.
 out=$(in_proj bash scripts/merge-ticket.sh --pr 408); rc=$?
 if [ "$rc" = 0 ] && grep -q 'pr merge 408 ' "$T/merged" 2>/dev/null; then ok "--pr merges a PR by its number"; else bad "--pr merges a PR by its number (rc=$rc: $out)"; fi
+# #413 N4: the squash subject is the PR title and number, the body the PR's own commits without AI trailers.
+merged_has() { grep -qF -- "$1" "$T/merged" 2>/dev/null; }
+if merged_has '--subject Add a thing (#408) --body' && merged_has '* Add the feature' && ! merged_has 'noreply@anthropic.com'; then
+  ok "the squash subject is the PR title, the body its commits without AI trailers"
+else bad "the squash subject is the PR title, the body its commits without AI trailers ($(cat "$T/merged" 2>/dev/null))"; fi
+out=$(DEPLOY=1 in_proj bash scripts/merge-ticket.sh --pr 408)
+merged_has '--subject Add a thing (#408) [deploy] --body' && ok "DEPLOY=1 ends the squash subject with [deploy]" || bad "DEPLOY=1 ends the squash subject with [deploy] ($(cat "$T/merged" 2>/dev/null))"
+out=$(FAKE_MERGED_SHA=$B FAKE_SQUASH_MSG='Add a thing (#408)\n\nCo-authored-by: Claude <noreply@anthropic.com>\n' in_proj bash scripts/merge-ticket.sh --pr 408)
+[[ "$out" == *"WARNING: the squash commit $B on main still carries an AI co-author"* ]] && ok "an AI co-author GitHub added after the merge is warned about" \
+  || bad "an AI co-author GitHub added after the merge is warned about ($out)"
+out=$(FAKE_MERGED_SHA=$B FAKE_SQUASH_MSG='Add a thing (#408)\n\n* Add the feature\n' in_proj bash scripts/merge-ticket.sh --pr 408)
+[[ "$out" != *WARNING* ]] && ok "a clean squash commit gets no warning" || bad "a clean squash commit gets no warning ($out)"
 echo "$B" > "$P/.builder/review-408.sha"
 out=$(in_proj bash scripts/merge-ticket.sh --pr 408); rc=$?
 if [ "$rc" = 1 ] && [ ! -f "$T/merged" ]; then ok "--pr still needs a review of the PR head"; else bad "--pr still needs a review of the PR head (rc=$rc: $out)"; fi
