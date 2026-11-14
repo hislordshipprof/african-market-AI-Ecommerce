@@ -604,7 +604,7 @@ test.describe("Catalog review (authenticated)", () => {
     }
   });
 
-  test("a pending save cannot be dismissed", async ({ page }) => {
+  test("a pending save cannot be dismissed, even by Cancel in the same turn", async ({ page }) => {
     test.setTimeout(90_000);
     const nameA = reviewProductName("pending");
     const saved = reviewProductName("pending-saved");
@@ -638,9 +638,18 @@ test.describe("Catalog review (authenticated)", () => {
         dialog.getByRole("button", { name }).evaluate((button) => {
           if (button instanceof HTMLElement) button.click();
         });
-      await clickControl("Save");
+      // Cancel in the same turn as Save, before isPending is true.
+      await dialog.getByRole("button", { name: "Save" }).evaluate((save) => {
+        const cancel = [...(save.parentElement?.querySelectorAll("button") ?? [])].find(
+          (button) => button.textContent?.trim() === "Cancel",
+        );
+        if (!(save instanceof HTMLElement) || !(cancel instanceof HTMLElement)) throw new Error("Save or Cancel is missing");
+        save.click();
+        cancel.click();
+      });
       await expect.poll(() => held, { timeout: 10000 }).toBe(true);
       await expect(dialog.getByRole("button", { name: "Saving…" })).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
 
       await page.keyboard.press("Escape");
       await expect(dialog).toBeVisible();
