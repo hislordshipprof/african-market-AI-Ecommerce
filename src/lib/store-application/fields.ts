@@ -22,3 +22,14 @@ export const APPLICATION_FIELDS = [
 export type ApplicationField = (typeof APPLICATION_FIELDS)[number];
 
 export const REJECT_REASON_MAX = 500;
+
+/** A first guess at the store's slug from its name; the admin can change it before approving. */
+export function suggestSlug(businessName: string): string {
+  return businessName
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 63)
+    .replace(/^-+|-+$/g, "");
+}

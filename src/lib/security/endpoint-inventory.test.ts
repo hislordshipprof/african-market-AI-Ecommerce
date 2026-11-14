@@ -7,6 +7,7 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/cart/actions.ts",
   "src/lib/checkout/actions.ts",
   "src/lib/customer-sign-in/actions.ts",
+  "src/lib/store-application/actions.ts",
   "src/lib/support/customer-actions.ts",
   "src/lib/order/issue-actions.ts",
   "src/lib/order/substitution-actions.ts",

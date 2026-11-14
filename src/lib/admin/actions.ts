@@ -168,8 +168,9 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     errors.themePreset = "Invalid theme preset";
   }
 
-  if (!["active", "suspended"].includes(status)) {
-    errors.status = "Status must be active or suspended";
+  // `setup` is where an approved store application starts (#554); saving the form keeps it there.
+  if (!["active", "suspended", "setup"].includes(status)) {
+    errors.status = "Status must be active, suspended or setup";
   }
 
   if (!Number.isFinite(prepTimeMinutes) || prepTimeMinutes < 0 || prepTimeMinutes > 480) {

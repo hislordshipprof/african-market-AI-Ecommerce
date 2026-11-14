@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import type { DirectoryStore } from "@/lib/directory/stores";
 import { storeInitials } from "@/lib/store-initials";
 import { cuisineLabels } from "@/lib/directory/listing-fields";
@@ -9,6 +10,7 @@ export function DirectoryHome({ stores }: { stores: (DirectoryStore & { href: st
     <div className={styles.page}>
       <header className={styles.bar}>
         <span className={styles.wordmark}>African Markets</span>
+        <Link className={styles.sell} href="/sell">Sell on African Markets</Link>
       </header>
       <main className={styles.main}>
         <section className={styles.intro}>
