@@ -383,6 +383,13 @@
   color: var(--color-on-primary);
 }
 
+a.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .chip,
 .ghost {
   border: 1px solid var(--color-line-strong);

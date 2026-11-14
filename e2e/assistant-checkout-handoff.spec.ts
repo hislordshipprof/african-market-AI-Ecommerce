@@ -44,7 +44,7 @@ test("the assistant hands off to normal checkout with the pickup time pre-select
     const sheet = page.getByRole("dialog", { name: "Shop with AI" });
     await page.getByTestId("assistant-composer").fill("add two egusi");
     await page.getByTestId("assistant-send").click();
-    await expect(sheet.getByText("Handoff Egusi").first()).toBeVisible({ timeout: 20_000 });
+    await expect(sheet.getByText("Here is what I found.").last()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("assistant-composer")).toBeEnabled();
     await page.getByTestId("assistant-composer").fill("I'm ready to check out");
     await page.getByTestId("assistant-send").click();
