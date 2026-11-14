@@ -27,6 +27,8 @@ vi.mock("../inngest/send", () => ({ sendOrderAuthorized: vi.fn().mockResolvedVal
 import { writeGeocodeCache } from "../address/cache";
 import { dispatchReadyOrder } from "../delivery/dispatch";
 import { placeOrder, quoteCheckout, type DeliveryRequest as CheckoutAddress } from "./service";
+import { slotOptions } from "./slots";
+import type { SlotSchedule } from "../order/slot-schedule";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+13015550199", email: "ada@t527.test" };
@@ -92,7 +94,7 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     await raw.$disconnect();
   }, 30_000);
 
-  async function seed(opts: { plan?: "pro" | "starter"; registered?: boolean; phone?: string | null; weightG?: number; frozen?: boolean; perishable?: boolean } = {}) {
+  async function seed(opts: { plan?: "pro" | "starter"; registered?: boolean; phone?: string | null; weightG?: number; frozen?: boolean; perishable?: boolean; slots?: SlotSchedule } = {}) {
     const stamp = crypto.randomUUID().slice(0, 8);
     const store = await raw.store.create({
       data: {
@@ -111,6 +113,9 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
         deliveryRadiusMi: 8,
         uberLocationId: opts.registered === false ? null : `org-${stamp}`,
         phone: opts.phone === undefined ? "+13015550100" : opts.phone,
+        ...(opts.slots
+          ? { storeDeliveryEnabled: true, storeDeliveryFeeCents: 500, pickupSlotSettings: opts.slots, storeDeliverySlotSettings: opts.slots }
+          : {}),
       },
     });
     storeIds.push(store.id);
@@ -256,5 +261,33 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
 
     await expect(placeOrder(store.id, 0, cart.id, CONTACT, "courier", null, null, paymentIntentId)).rejects.toThrow(/basket changed/i);
     expect(await storeScoped(store.id).order.count()).toBe(0);
+  });
+
+  it("with delivery and pickup slots (#565) on the store, a courier order still places on demand and a slotted store delivery order places in its slot", async () => {
+    const allDay = [{ start: 0, end: 1440 }];
+    const slots: SlotSchedule = { slotMinutes: 60, leadMinutes: 120, capacity: 1, daysAhead: 2, closedDates: [], windows: Array.from({ length: 7 }, () => allDay) };
+    const { store, cart } = await seed({ slots });
+    const uber = new StubCourier("uber", 749);
+
+    const courierQuote = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [uber] });
+    expect(courierQuote.problems).toEqual([]);
+    await saveAddress(store.id, cart.id);
+    const courierPlaced = await placeOrder(store.id, 0, cart.id, CONTACT, "courier", null, null, await authorize(store, cart.id, courierQuote.holdCents));
+    expect(await storeScoped(store.id).order.findUniqueOrThrow({ where: { id: courierPlaced.token } }))
+      .toMatchObject({ fulfillment: "courier", pickupSlot: null, deliveryFeeCents: 749 });
+
+    const offered = await slotOptions(storeScoped(store.id), store.id, store, "store-delivery", new Date());
+    expect(offered.required).toBe(true);
+    const slot = offered.slots[0]!.id;
+    const scoped = storeScoped(store.id);
+    const second = await scoped.cart.create({ data: { storeId: store.id } });
+    const variant = await scoped.listingVariant.findFirstOrThrow({});
+    await scoped.cartLine.create({ data: { storeId: store.id, cartId: second.id, variantId: variant.id, qty: 1, swapRule: "exact_only" } });
+    const deliveryQuote = await quoteCheckout(store.id, 0, second.id, CONTACT, "store-delivery", ADDRESS);
+    expect(deliveryQuote.problems).toEqual([]);
+    await saveAddress(store.id, second.id);
+    const slotted = await placeOrder(store.id, 0, second.id, CONTACT, "store-delivery", null, slot, await authorize(store, second.id, deliveryQuote.holdCents));
+    expect(await scoped.order.findUniqueOrThrow({ where: { id: slotted.token } }))
+      .toMatchObject({ fulfillment: "store-delivery", pickupSlot: slot, deliveryFeeCents: 500 });
   });
 });
