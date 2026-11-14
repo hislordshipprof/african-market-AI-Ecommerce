@@ -104,6 +104,14 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(saved.avoidIngredients).toEqual([{ term: `yellow onion ${suffix}`, ingredientId: onionId }]);
   });
 
+  it("removes saved needs the customer takes back, and the gate lifts with them (#503 N8)", async () => {
+    const ctx = await conversation(storeA);
+    await setShopperNeeds(ctx, { avoid_allergens: ["peanuts", "sesame"], require_claims: ["halal"], avoid_ingredients: [`yellow onion ${suffix}`, `fresh tomato ${suffix}`] });
+    const result = await setShopperNeeds(ctx, { remove: [" Peanuts", "halal", `yellow onion ${suffix}`, `fresh tomato ${suffix}`] });
+    expect(result).toMatchObject({ ok: true, avoidAllergens: ["sesame"], requireClaims: [], avoidIngredients: [], preferences: [] });
+    expect(await addToCart(ctx, { items: [{ variant_id: listing.peanut.variantId, qty: 1 }] })).toMatchObject({ ok: true, added: 1 });
+  });
+
   it("asks about a term that only names a form of a known ingredient: all blocks every form, only that form is a preference", async () => {
     const ctx = await conversation(storeA);
     const asked = await setShopperNeeds(ctx, { avoid_ingredients: [`fresh tomato ${suffix}`] });
