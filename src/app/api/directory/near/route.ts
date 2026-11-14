@@ -11,7 +11,7 @@ const NEAR_WINDOW_MS = 60_000;
 export const NEAR_BROWSER_LIMIT = 20;
 const NEAR_IP_LIMIT = 120;
 const browserId = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
-const coordinate = (limit: number) => z.string().regex(/^-?\d{1,3}(\.\d{1,8})?$/).pipe(z.coerce.number().min(-limit).max(limit));
+const coordinate = (limit: number) => z.string().regex(/^-?\d{1,3}(\.\d{1,8})?$/).transform(Number).pipe(z.number().min(-limit).max(limit));
 const coordinates = z.object({ lat: coordinate(90), lng: coordinate(180) });
 
 const BAD_INPUT = "Enter a 5-digit ZIP code or a city.";
