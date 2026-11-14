@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { clientIp } from "@/lib/assistant/client-ip";
 import { takeRateLimit } from "@/lib/rate-limit/app-limiter";
+import { readBrowserId } from "@/lib/cart/browser";
 import { parseInput } from "@/lib/security/parse-input";
 import { parseNearQuery } from "@/lib/directory/near-query";
 import { isUsPoint, locate, nearestStores, type Point } from "@/lib/directory/near";
@@ -10,7 +11,6 @@ import { storefrontUrl } from "@/lib/directory/links";
 const NEAR_WINDOW_MS = 60_000;
 export const NEAR_BROWSER_LIMIT = 20;
 const NEAR_IP_LIMIT = 120;
-const browserId = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
 const coordinate = (limit: number) => z.string().regex(/^-?\d{1,3}(\.\d{1,8})?$/).transform(Number).pipe(z.number().min(-limit).max(limit));
 const coordinates = z.object({ lat: coordinate(90), lng: coordinate(180) });
 
@@ -32,9 +32,9 @@ export async function GET(request: NextRequest) {
     if (!query) return NextResponse.json({ error: BAD_INPUT }, { status: 400 });
   }
 
-  const browser = parseInput(browserId, request.headers.get("x-shop-browser") ?? "");
+  const browser = readBrowserId(request.headers.get("x-shop-browser"), null);
   const [byBrowser, byIp] = await Promise.all([
-    takeRateLimit(`directory-near:browser:${browser.ok ? browser.data : "missing"}`, NEAR_BROWSER_LIMIT, NEAR_WINDOW_MS),
+    takeRateLimit(`directory-near:browser:${browser ?? "missing"}`, NEAR_BROWSER_LIMIT, NEAR_WINDOW_MS),
     takeRateLimit(`directory-near:ip:${clientIp(request.headers)}`, NEAR_IP_LIMIT, NEAR_WINDOW_MS),
   ]);
   const limited = !byBrowser.ok ? byBrowser : !byIp.ok ? byIp : null;
