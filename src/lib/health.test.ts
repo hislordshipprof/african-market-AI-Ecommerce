@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import {
@@ -8,9 +8,11 @@ import {
   runHealthChecks,
   requiredEnvVars,
   toMinimalResult,
+  HEALTH_QUERY_TIMEOUT_MS,
 } from "./health";
 import type { HealthResult } from "./health";
 import { runtimeDatabaseUrl } from "./env";
+import { withStatementTimeout } from "./db";
 
 describe("requiredEnvVars", () => {
   it("returns only core vars when VERCEL_ENV is absent", () => {
@@ -23,7 +25,9 @@ describe("requiredEnvVars", () => {
     expect(vars).toContain("BETTER_AUTH_SECRET");
     expect(vars).toContain("APP_RUNTIME_PASSWORD");
     expect(vars).toContain("RESEND_API_KEY");
-    expect(vars).toHaveLength(5);
+    expect(vars).toContain("INNGEST_EVENT_KEY");
+    expect(vars).toContain("INNGEST_SIGNING_KEY");
+    expect(vars).toHaveLength(7);
   });
 
   it("returns all vars when VERCEL_ENV is preview", () => {
@@ -52,6 +56,8 @@ describe("checkEnv", () => {
       BETTER_AUTH_SECRET: "s",
       APP_RUNTIME_PASSWORD: "p",
       RESEND_API_KEY: "r",
+      INNGEST_EVENT_KEY: "e",
+      INNGEST_SIGNING_KEY: "k",
       DATABASE_URL: "postgres://x",
       DATABASE_URL_UNPOOLED: "postgres://y",
     };
@@ -59,6 +65,8 @@ describe("checkEnv", () => {
       BETTER_AUTH_SECRET: true,
       APP_RUNTIME_PASSWORD: true,
       RESEND_API_KEY: true,
+      INNGEST_EVENT_KEY: true,
+      INNGEST_SIGNING_KEY: true,
       DATABASE_URL: true,
       DATABASE_URL_UNPOOLED: true,
     });
@@ -112,6 +120,48 @@ describe("checkDatabase", () => {
   });
 });
 
+describe("query timeouts", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const hang = () => new Promise<unknown[]>(() => {});
+
+  it("checkDatabase fails with the failure shape when the query exceeds 5 s", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = checkDatabase(hang);
+    await vi.advanceTimersByTimeAsync(HEALTH_QUERY_TIMEOUT_MS + 1);
+    await expect(pending).resolves.toEqual({ reachable: false, user: null });
+  });
+
+  it("checkMigrations fails with the failure shape when the query exceeds 5 s", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = checkMigrations(hang);
+    await vi.advanceTimersByTimeAsync(HEALTH_QUERY_TIMEOUT_MS + 1);
+    await expect(pending).resolves.toEqual({ upToDate: false });
+  });
+
+  it("withStatementTimeout sets statement_timeout in the same transaction, before the query", async () => {
+    const calls: string[] = [];
+    const tx = {
+      $executeRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        calls.push(strings.join(""));
+      }),
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        calls.push(strings.join(""));
+        return [{ current_user: "app_runtime" }];
+      }),
+    };
+    const client = { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) };
+    const rows = await withStatementTimeout(client as never)`SELECT current_user`;
+    expect(rows).toEqual([{ current_user: "app_runtime" }]);
+    expect(calls[0]).toBe("SET LOCAL statement_timeout = '5000'");
+    expect(calls[1]).toBe("SELECT current_user");
+  });
+});
+
 describe("checkMigrations", () => {
   it("returns upToDate true when no pending migrations", async () => {
     const queryRaw = vi.fn().mockResolvedValue([{ count: BigInt(0) }]);
@@ -126,9 +176,61 @@ describe("checkMigrations", () => {
   });
 
   it("returns upToDate false on query failure", async () => {
-    const queryRaw = vi.fn().mockRejectedValue(new Error("table not found"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const queryRaw = vi.fn().mockRejectedValue(new Error("connection refused"));
     const result = await checkMigrations(queryRaw);
     expect(result).toEqual({ upToDate: false });
+  });
+
+  it("returns upToDate true when _prisma_migrations does not exist (existence check)", async () => {
+    const queryRaw = vi.fn().mockResolvedValueOnce([{ present: false }]);
+    const result = await checkMigrations(queryRaw);
+    expect(result).toEqual({ upToDate: true });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns upToDate true when the count query throws 'relation does not exist'", async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ present: true }])
+      .mockRejectedValueOnce(new Error('relation "_prisma_migrations" does not exist'));
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: true });
+  });
+
+  it("returns upToDate true when the existence check throws 'relation does not exist'", async () => {
+    const queryRaw = vi
+      .fn()
+      .mockRejectedValue(new Error('relation "_prisma_migrations" does not exist'));
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: true });
+  });
+
+  it("returns upToDate false when the count query fails for another reason", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ present: true }])
+      .mockRejectedValueOnce(new Error("permission denied"));
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: false });
+  });
+
+  it("shares one 5 s budget across both queries", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const queryRaw = vi.fn().mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve([{ present: true }]), 3000)),
+    );
+    const pending = checkMigrations(queryRaw);
+    await vi.advanceTimersByTimeAsync(HEALTH_QUERY_TIMEOUT_MS + 1);
+    await expect(pending).resolves.toEqual({ upToDate: false });
+    vi.useRealTimers();
+  });
+
+  it("returns upToDate false when the table exists and migrations are pending", async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ present: true }])
+      .mockResolvedValueOnce([{ count: 1 }]);
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: false });
   });
 });
 
@@ -145,6 +247,8 @@ describe("runHealthChecks", () => {
     BETTER_AUTH_SECRET: "s",
     APP_RUNTIME_PASSWORD: "p",
     RESEND_API_KEY: "r",
+    INNGEST_EVENT_KEY: "e",
+    INNGEST_SIGNING_KEY: "k",
   };
 
   function makeQueryRaw(user = "app_runtime", pendingCount = BigInt(0)) {
@@ -178,7 +282,51 @@ describe("runHealthChecks", () => {
       queryRaw: makeQueryRaw(),
     });
     expect(result.status).toBe(200);
-    expect(Object.keys(result.body.env)).toHaveLength(5);
+    expect(Object.keys(result.body.env)).toHaveLength(7);
+    expect(toMinimalResult(result.status, result.body)).toEqual({ status: "ok", version: "abc123" });
+  });
+
+  it("returns 503 degraded in production without the Inngest event key", async () => {
+    const env: Record<string, string | undefined> = { ...productionEnv };
+    delete env.INNGEST_EVENT_KEY;
+    const result = await runHealthChecks({ env, queryRaw: makeQueryRaw() });
+    expect(result.status).toBe(503);
+    expect(result.body.env.INNGEST_EVENT_KEY).toBe(false);
+    expect(toMinimalResult(result.status, result.body).status).toBe("degraded");
+  });
+
+  it("reports missing Inngest keys in preview without failing", async () => {
+    const env: Record<string, string | undefined> = { ...productionEnv, VERCEL_ENV: "preview" };
+    delete env.INNGEST_EVENT_KEY;
+    delete env.INNGEST_SIGNING_KEY;
+    const result = await runHealthChecks({ env, queryRaw: makeQueryRaw() });
+    expect(result.status).toBe(200);
+    expect(result.body.env.INNGEST_EVENT_KEY).toBe(false);
+    expect(result.body.env.INNGEST_SIGNING_KEY).toBe(false);
+  });
+
+  it("logs INNGEST_DEV set in production once per process, without failing or exposing it", async () => {
+    vi.resetModules();
+    const health = await import("./health");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await health.runHealthChecks({
+      env: { ...productionEnv, INNGEST_DEV: "1" },
+      queryRaw: makeQueryRaw(),
+    });
+    await health.runHealthChecks({ env: { ...productionEnv, INNGEST_DEV: "1" }, queryRaw: makeQueryRaw() });
+    expect(result.status).toBe(200);
+    expect(health.toMinimalResult(result.status, result.body)).toEqual({ status: "ok", version: "abc123" });
+    expect(warn.mock.calls.filter(([message]) => String(message).includes("INNGEST_DEV"))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("does not log INNGEST_DEV in production when it does not parse as true", async () => {
+    vi.resetModules();
+    const health = await import("./health");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await health.runHealthChecks({ env: { ...productionEnv, INNGEST_DEV: "0" }, queryRaw: makeQueryRaw() });
+    expect(warn.mock.calls.some(([message]) => String(message).includes("INNGEST_DEV"))).toBe(false);
+    warn.mockRestore();
   });
 
   it("returns 503 in production when a deploy env var is missing", async () => {
@@ -301,6 +449,19 @@ describe.skipIf(!hasRuntime)("Health check proves app_runtime connection", () =>
   afterAll(async () => {
     await runtimePrisma?.$disconnect();
   });
+
+  it("withStatementTimeout runs the real health queries well inside the timeout", async () => {
+    const timed = withStatementTimeout(runtimePrisma as never);
+    const started = Date.now();
+    expect(await checkDatabase(timed)).toMatchObject({ reachable: true });
+    expect((await checkMigrations(timed)).upToDate).toBe(true);
+    expect(Date.now() - started).toBeLessThan(HEALTH_QUERY_TIMEOUT_MS);
+  });
+
+  it("the server cancels a query that exceeds the statement timeout", async () => {
+    const timed = withStatementTimeout(runtimePrisma as never);
+    await expect(timed`SELECT pg_sleep(6)`).rejects.toThrow(/statement timeout/i);
+  }, 10_000);
 
   it("SELECT current_user returns app_runtime", async () => {
     const queryRaw = runtimePrisma.$queryRaw.bind(runtimePrisma) as (

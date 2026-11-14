@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <rect width="200" height="200" rx="12" fill="#E7E9E2"/>
+  <g transform="translate(60,50)">
+    <path d="M40 10C40 4.477 44.477 0 50 0h0c5.523 0 10 4.477 10 10v10H40V10z" fill="#DCDFD6"/>
+    <rect x="20" y="20" width="60" height="70" rx="8" fill="#DCDFD6"/>
+    <path d="M35 45h30M50 38v14" stroke="#B0B8B2" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <text x="100" y="155" text-anchor="middle" fill="#55625A" font-family="system-ui,sans-serif" font-size="11" font-weight="500">No photo yet</text>
+</svg>

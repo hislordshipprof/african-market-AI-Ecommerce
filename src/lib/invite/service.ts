@@ -2,11 +2,14 @@ import { randomBytes, createHash } from "crypto";
 import { platformAdmin, platformAdminTransaction, storeScoped, lockStoreRow } from "../db";
 import { sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
+import { effectivePlan, staffLimit } from "../billing/plan";
 
 const INVITE_EXPIRY_HOURS = 72;
 const TOKEN_BYTES = 32;
 
 export type StoreRole = "owner" | "staff";
+
+export const STAFF_LIMIT_MESSAGE = `The Starter plan includes the owner and ${staffLimit("starter")} staff. Upgrade to Pro for unlimited staff.`;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -22,6 +25,7 @@ export interface CreateInviteInput {
   email: string;
   role: StoreRole;
   invitedById: string;
+  actorEmail: string;
   baseUrl: string;
   storeSlug: string;
   storeName: string;
@@ -40,6 +44,24 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
       throw new Error("User is already a member of this store");
     }
 
+    if (input.role === "staff") {
+      await lockStoreRow(tx, input.storeId);
+      const subscription = await tx.storeSubscription.findUnique({
+        where: { storeId: input.storeId },
+        select: { plan: true, status: true },
+      });
+      const limit = staffLimit(effectivePlan(subscription));
+      if (limit !== null) {
+        const [staff, invited] = await Promise.all([
+          tx.storeMembership.count({ where: { storeId: input.storeId, role: { not: "owner" } } }),
+          tx.storeInvite.count({
+            where: { storeId: input.storeId, role: "staff", usedAt: null, expiresAt: { gt: new Date() }, email: { not: email } },
+          }),
+        ]);
+        if (staff + invited >= limit) throw new Error(STAFF_LIMIT_MESSAGE);
+      }
+    }
+
     const pendingInvite = await tx.storeInvite.findFirst({
       where: { storeId: input.storeId, email, usedAt: null, expiresAt: { gt: new Date() } },
     });
@@ -50,7 +72,7 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
       });
     }
 
-    return tx.storeInvite.create({
+    const created = await tx.storeInvite.create({
       data: {
         storeId: input.storeId,
         email,
@@ -60,6 +82,20 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
         invitedById: input.invitedById,
       },
     });
+
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.invitedById,
+        actorEmail: input.actorEmail,
+        action: "invite.create",
+        entityType: "store_invite",
+        entityId: created.id,
+        after: { email, role: input.role },
+      },
+    });
+
+    return created;
   });
 
   const inviteUrl = `${input.baseUrl}/invite/${raw}?store=${input.storeSlug}`;

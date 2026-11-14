@@ -1,0 +1,507 @@
+{
+ "375-dark": {
+  "home": {
+   "checked": 185,
+   "overImage": 9,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code",
+    "5.05 #a3b1a7 #2b3f33 14 span Placeholder · the store adds its own photo"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   },
+   {
+    "name": "Shop your favorites",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 1",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 2",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 3",
+    "ring": true
+   },
+   {
+    "name": "Previous slide",
+    "ring": true
+   },
+   {
+    "name": "Next slide",
+    "ring": true
+   },
+   {
+    "name": "Your neighborhood store, onlineNo swaps ",
+    "ring": true
+   },
+   {
+    "name": "Egusi",
+    "ring": true
+   },
+   {
+    "name": "Garri",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 93,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 75,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code",
+    "5.06 #a3b1a7 #21412e 13 small 907 g / $8.99"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "drawer": {
+   "checked": 11,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 73,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 72,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 7,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  }
+ },
+ "1280-dark": {
+  "home": {
+   "checked": 272,
+   "overImage": 14,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code",
+    "5.05 #a3b1a7 #2b3f33 14 span Placeholder · the store adds its own photo"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "All aisles",
+    "ring": true
+   },
+   {
+    "name": "Tubers & Roots",
+    "ring": true
+   },
+   {
+    "name": "Grains & Flours",
+    "ring": true
+   },
+   {
+    "name": "Spices & Seasonings",
+    "ring": true
+   },
+   {
+    "name": "Oils & Butters",
+    "ring": true
+   },
+   {
+    "name": "Vegetables",
+    "ring": true
+   },
+   {
+    "name": "Fish & Meat",
+    "ring": true
+   },
+   {
+    "name": "Frozen",
+    "ring": true
+   },
+   {
+    "name": "Snacks",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 106,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 92,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code",
+    "5.06 #a3b1a7 #21412e 13 small $0.99 / 100 g",
+    "5.06 #a3b1a7 #21412e 13 small 907 g / $8.99"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "drawer": {
+   "checked": 11,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 80,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 77,
+   "overImage": 0,
+   "fails": [],
+   "near": [
+    "5.05 #a3b1a7 #2b3f33 13 small Set ZIP code"
+   ],
+   "small": [],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 7,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  }
+ },
+ "375-light": {
+  "home": {
+   "checked": 185,
+   "overImage": 9,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   },
+   {
+    "name": "Shop your favorites",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 1",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 2",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 3",
+    "ring": true
+   },
+   {
+    "name": "Previous slide",
+    "ring": true
+   },
+   {
+    "name": "Next slide",
+    "ring": true
+   },
+   {
+    "name": "Your neighborhood store, onlineNo swaps ",
+    "ring": true
+   },
+   {
+    "name": "Egusi",
+    "ring": true
+   },
+   {
+    "name": "Garri",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 93,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 75,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "drawer": {
+   "checked": 11,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 73,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 72,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 7,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  }
+ },
+ "1280-light": {
+  "home": {
+   "checked": 272,
+   "overImage": 14,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "All aisles",
+    "ring": true
+   },
+   {
+    "name": "Tubers & Roots",
+    "ring": true
+   },
+   {
+    "name": "Grains & Flours",
+    "ring": true
+   },
+   {
+    "name": "Spices & Seasonings",
+    "ring": true
+   },
+   {
+    "name": "Oils & Butters",
+    "ring": true
+   },
+   {
+    "name": "Vegetables",
+    "ring": true
+   },
+   {
+    "name": "Fish & Meat",
+    "ring": true
+   },
+   {
+    "name": "Frozen",
+    "ring": true
+   },
+   {
+    "name": "Snacks",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 106,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 92,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "drawer": {
+   "checked": 11,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 80,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 77,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 7,
+   "overImage": 0,
+   "fails": [],
+   "near": [],
+   "small": [],
+   "overflow": 0
+  }
+ }
+}

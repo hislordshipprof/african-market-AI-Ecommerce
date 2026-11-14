@@ -22,19 +22,32 @@ function loadEnvFile(filePath: string) {
   }
 }
 
+const E2E_PORT = process.env.E2E_PORT || "3000";
+
+// .env files cannot interpolate, so the auth origin follows E2E_PORT here.
+// Explicit values (CI job env, shell) still win.
+process.env.BETTER_AUTH_URL ??= `http://localhost:${E2E_PORT}`;
+process.env.BETTER_AUTH_TRUSTED_ORIGINS ??= `http://localhost:${E2E_PORT}`;
+process.env.STOREFRONT_REVALIDATION_SECRET ??= "e2e-storefront-revalidate";
+
 loadEnvFile(resolve(__dirname, ".env.e2e"));
 loadEnvFile(resolve(__dirname, ".env.local"));
+process.env.E2E_FAKE_ASSISTANT = "1";
+process.env.ASSISTANT_LIVE_TESTS = "0";
 
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Locally several build lanes share one machine. Playwright's default (half the CPU cores) runs about 12
+  // browsers per lane and starves memory. E2E_WORKERS overrides it; scripts/build-ticket.sh sets it per lane.
+  workers: process.env.CI ? 1 : Number(process.env.E2E_WORKERS) || 4,
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: `http://localhost:${E2E_PORT}`,
     trace: "on-first-retry",
   },
   projects: [
@@ -46,9 +59,27 @@ export default defineConfig({
   webServer: process.env.CI
     ? undefined
     : {
-        command: "npx next start",
-        url: "http://localhost:3000/api/health",
-        reuseExistingServer: true,
+        command: `pnpm exec next start -p ${E2E_PORT}`,
+        url: `http://localhost:${E2E_PORT}/api/health`,
+        // Reusing whatever already listens on the lane port served stale builds from deleted
+        // worktrees (ChunkLoadError on #110). Fail fast instead; opt in with E2E_REUSE_SERVER=1.
+        reuseExistingServer: process.env.E2E_REUSE_SERVER === "1",
         timeout: 120_000,
+        env: {
+          NEXT_PUBLIC_DEMO_FLOWS: "1",
+          E2E_STORE_OVERRIDE: "1",
+          E2E_FAKE_STRIPE: "1",
+          E2E_FAKE_ADDRESS: "1",
+          // `next start` is production. CI=true selects the fake Stripe provider and
+          // the in-memory email sender. VERCEL must stay unset. An empty key stops
+          // .env.local from hiding a missing-secret failure.
+          CI: "true",
+          ASSISTANT_CHAT_ENABLED: "1",
+          E2E_FAKE_ASSISTANT: "1",
+          ANTHROPIC_API_KEY: "e2e-fake-anthropic-key",
+          STRIPE_SECRET_KEY: "",
+          VERCEL_ENV: "preview",
+          STOREFRONT_REVALIDATION_SECRET: "e2e-storefront-revalidate",
+        },
       },
 });

@@ -103,49 +103,52 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 ### Palm & Shea (default)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #F3F4EF | #0F1712 |
-| surface | #FFFFFF | #16211A |
-| raised | #E7E9E2 | #1F2C24 |
+| bg | #F3F4EF | #0D1410 |
+| surface | #FFFFFF | #1E2C23 |
+| raised | #E7E9E2 | #2B3F33 |
 | ink | #15201A | #EEF2EC |
 | muted | #55625A | #A3B1A7 |
-| line | #DCDFD6 | #2A3A30 |
+| line | #DCDFD6 | #35463B |
+| line-strong | (uses line) | #71907D |
 | primary | #1F5A43 | #6CC08F |
 | primary-deep | #123726 | #1D3A2B |
 | accent | #A8DDB5 | #A8DDB5 |
-| soft | #E1EEE3 | #1B2E23 |
-| deal | #B42335 | #F0707E |
+| soft | #E1EEE3 | #21412E |
+| deal | #B42335 | #F28793 |
 | success | #2E7D4F | #6CC08F |
 
 ### Cocoa & Bottle Green (heritage)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #EFEDE8 | #151210 |
-| surface | #FBFAF7 | #1F1A17 |
-| raised | #E4E1DA | #2A241F |
+| bg | #EFEDE8 | #120F0D |
+| surface | #FBFAF7 | #2D2621 |
+| raised | #E4E1DA | #403730 |
 | ink | #2A1D17 | #F1ECE5 |
 | muted | #6A5C53 | #B3A69A |
-| line | #DAD5CC | #38302A |
-| primary | #0E3B2A | #5FB08A |
+| line | #DAD5CC | #48403A |
+| line-strong | (uses line) | #91847A |
+| primary | #0E3B2A | #66B791 |
 | primary-deep | #072419 | #1E3A2D |
 | accent | #E6C8BF | #E6C8BF |
-| soft | #E9E3DA | #2C2520 |
-| deal | #A1302A | #EF7B72 |
-| success | #2F6B45 | #5FB08A |
+| soft | #E9E3DA | #493526 |
+| deal | #A1302A | #F0867D |
+| success | #2F6B45 | #66B791 |
 
 ### Lagoon & Coral (any cuisine)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #F1F3F2 | #0C1619 |
-| surface | #FFFFFF | #122024 |
-| raised | #E4E8E7 | #1B2C31 |
+| bg | #F1F3F2 | #0C1314 |
+| surface | #FFFFFF | #1C2C2F |
+| raised | #E4E8E7 | #283E42 |
 | ink | #13252A | #E7F0F1 |
 | muted | #51666C | #9BB0B4 |
-| line | #D6DCDB | #24383D |
+| line | #D6DCDB | #32464A |
+| line-strong | (uses line) | #6D8F95 |
 | primary | #0F4A57 | #6FC2CF |
 | primary-deep | #082F38 | #103540 |
 | accent | #C23B52 | #F07F92 |
-| soft | #E0ECEC | #16303A |
-| deal | #C23B52 | #F07F92 |
+| soft | #E0ECEC | #253E48 |
+| deal | #C23B52 | #F18799 |
 | success | #0F6B3A | #6FC79A |
 
 ### Named Rules
@@ -154,6 +157,18 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 **The Store Color Nudge Rule.** If a store's brand color is under 4.5:1 against `bg` or against its own text, shade it darker (light theme) or mix it toward white (dark theme) in small steps until it passes. Tell the owner in the admin when this happens.
 
 **The Quiet Accent Rule.** The accent is a fill for promo bands and highlights only, never text, and under 5% of any screen.
+
+**The Dark Depth Rule.** In dark themes, `bg`, `surface` and `raised` sit at least 1.25:1 apart, ink stays at least 7:1 and muted at least 4.5:1 on each. `line` is the quiet divider; `line-strong` (dark only, at least 3:1 on every surface) edges inputs, selects, textareas, unselected chips and outlined or round buttons. Light themes have no `line-strong` and use `line`. A store's dark primary is nudged against `raised`, the lightest dark layer, so links stay AA on cards.
+
+**The Quiet Night Header Rule.** In dark themes the header sits on `surface` with ink text; primary is kept for the cart button and key accents. Header sublabels are at least 13px. Selected chips use the `soft` tint, a 2px primary ring and a check mark, so selection never relies on colour alone.
+
+**The Text Primary Rule.** Primary used as text (links, chip labels, step chips) uses `primary-text`, computed from `primary`: it clears 4.5:1 on `bg`, `surface`, `raised` and `soft`, and in dark 5.5:1 on all four, so tinted tiles stay AA. Fills keep `primary`. Light presets already pass, so their `primary-text` equals `primary`.
+
+**The Photo Well Rule** (owner, 2026-11-10). Product images (cards, quick view, product page, aisle tiles) sit on `photo-well`, a neutral ground per preset. Light keeps the soft tint (#EBF3EC Palm & Shea); dark uses a warm off-white (#ECEBE5 Palm & Shea, #EEEAE3 Cocoa, #EBEBE6 Lagoon) with a quiet inset edge, so brown cut-outs keep their edges. Cart, basket and assistant-card thumbnails take the well in dark only; in light they keep their own grounds (`bg` for cart and basket, `raised` for assistant cards). Text on the well uses `on-photo-well`.
+
+**The Scrim Rule.** Shades over photos (hero, collection and category tiles) use `scrim` (#080A09, `--sf-scrim`) at the alpha the text needs, never a hard-coded black.
+
+**The Logo Plate Rule.** The header logo sits on a white plate (#FFFFFF) in both themes, so dark lettering reads in dark mode. Before showing it, the storefront samples the logo: a transparent logo needs a fifth of its marked pixels at 3:1 against the plate; a logo that is nearly all opaque brings its own panel, so its lettering is measured against that panel's main colour. A logo that fails shows the store's initials on `primary-deep` instead. The plate stays hidden until the check answers, so the header never flashes a logo it then replaces.
 
 **The Separate Semantics Rule.** Deal, success and error colors belong to the system, not the brand. Errors always carry an icon and text, never color alone.
 
@@ -181,7 +196,7 @@ Mobile-first, with breakpoints at 768, 1024 and 1280px. Spacing on a 4/8 grid. P
 
 ## Elevation & Depth
 
-Flat by default. Depth comes from tonal layers (`bg` → `surface` → `raised`), not shadows. Product images have no shadow. Shadows appear only on floating layers (the sticky cart bar, bottom sheets, toasts) and only as a soft ambient lift.
+Flat by default. Depth comes from tonal layers (`bg` → `surface` → `raised`), not shadows. Product images have no drop shadow; in dark the photo well carries a quiet inset edge (The Photo Well Rule). Shadows appear only on floating layers (the sticky cart bar, bottom sheets, toasts) and only as a soft ambient lift.
 
 ## Shapes
 
@@ -228,6 +243,15 @@ Taken from the DoorDash, Instacart and Weee! teardowns (`research/ui/delivery-ap
 - Under reduced motion, the scene is frozen to its poster and nothing moves.
 - Images must be licensed for commercial use (record the source and license in `public/images/CREDITS.md`) or rendered by us. No AI-generated faces of real-looking people. Never stereotyped "Africa" clichés: real market textures, foods and colors from the research.
 
+The shared background is `StorySurface` (`src/components/story-surface/`, #35). Every story surface uses it; never build a second one.
+- **Scene:** a depth-parallax photograph, not modeled food. A real market photo and an offline depth map (`scripts/images/story-depth.py`) render through a small shader in React Three Fiber. The depth follows the pointer, with one slow breath as it wakes and a faint drift after that. Primitive shapes standing in for food are not acceptable.
+- **Poster first:** the canvas stays transparent until its first frame has drawn, then fades in over the poster it matches pixel for pixel at rest. Under 768px wide or 500px tall, under reduced motion, on save-data, without a capable WebGL2 GPU, or after any scene failure, the visitor keeps the poster and no canvas exists. Phones get their own tall crop.
+- **Crop:** hands and produce lead. Faces and stall signage stay out of frame, so food is the hero and nobody stares at the visitor.
+- **Composition:** phones anchor the form at the bottom, in thumb reach, under the hands and peppers. From 1024px the form sits right of the stall, with the scene's line at 20 to 26px at the lower left, so it never outranks the form's 28px heading. Below 1024px the line gives way to a small tag naming the place.
+- **Panel:** forms sit on `StoryCard`, a solid `card` fill, so AA holds over any part of the photo. Glass is not used here.
+- **Color scheme:** the surface follows `prefers-color-scheme` on its own, on the platform host too. Dark multiplies a warm dusk tone (`#94897F`) over the photo, which keeps the produce appetizing, instead of a flat black overlay.
+- **Motion:** the form is visible from first paint and only slides 16px, 500ms ease-out. The poster settles over 1.2s, once. Nothing loops except the scene's drift.
+
 **The Reduced Motion Rule.** Under `prefers-reduced-motion`, all transitions and animations are off. State changes still happen instantly.
 
 ## Do's and Don'ts
@@ -240,5 +264,16 @@ Taken from the DoorDash, Instacart and Weee! teardowns (`research/ui/delivery-ap
 **Don't**
 - Use yellow, amber, purple/indigo or gradient text.
 - Put eyebrow labels above headings, colored side borders on cards, or emoji as icons.
-- Use stock "smiling woman in a headwrap" heroes, flag colors or patterns as wallpaper.
+- Use stock "smiling woman in a headwrap" heroes, flag colors or patterns as wallpaper. The home page story strip shows a marked placeholder until the store adds its own photo (owner, 2026-11-10).
 - Show the platform's brand on a storefront beyond the "Powered by" footer.
+
+## Design round 4: storefront presentation
+
+This owner-approved direction supersedes the earlier rail, marquee and product-image treatments. It extends the existing store palette, typography, focus ring and shared components.
+
+- **Content grid:** `--sf-content-max` is 1440px, becoming 1536px at 1800px. `--sf-page-padding` is 16px on phones and 32px otherwise. Rail headings sit above their cards. The scroll viewport starts on the grid and ends at the right viewport edge, with no right padding. Products, deals, categories and collections use the same RailScroller, gap and card-width calculation: 2.25 cards on phones, 3.5 at 1024px, 4.5 at 1440px and 5.5 at 1920px. Short rails simply show all their cards. Arrow buttons, arrow keys, Home/End and touch scrolling remain available.
+- **Reveals:** 0 to 1 opacity and a 24px rise over 500ms ease-out, once at 18% intersection. Product children stagger by 30ms, capped at index seven. The JS-added `html.sf-reveal-ready` class enables hidden states only after hydration; content already in view is never hidden. Without JavaScript or with reduced motion, content stays visible. Focusing unrevealed content also exposes it.
+- **Local-name band:** one slim row of search chips and small accepted product cut-outs. Horizontal offset follows scroll progress through Motion's existing `useScroll` and `useTransform`; there is no timer or pause button. Keyboard focus exposes every chip. Reduced motion uses a static wrapping row.
+- **Images:** square, rounded photo tiles use edge-to-edge cover sizing. Accepted alpha cut-outs use contain sizing with 7.5% inset on each side and the existing contact shadow. Category images fill a circular clip with cover sizing and no inset or shadow. A missing image uses the photo well, a food-group icon and the product's own name (icon only under 120px); a failed request retries once before showing Photo unavailable.
+- **Source order:** listing-owned image when provided, linked master-product R2 image, accepted local cut-out, designed fallback. Stored R2 paths resolve through `R2_PUBLIC_URL` or the existing allowlisted catalog-image route. Retired Wikimedia URLs are attribution metadata only. The current Listing schema has no owned-image field; no schema or upload work is introduced here.
+- **Hero:** the first slide uses the locally hosted, licensed Bodija Market produce photograph credited in `public/images/CREDITS.md` and `/credits`. It remains the only preloaded home hero background.

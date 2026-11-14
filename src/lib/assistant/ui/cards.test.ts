@@ -1,0 +1,412 @@
+import { describe, expect, it } from "vitest";
+import { completionAnnouncement } from "./announce";
+import { cardsFromParts } from "./cards";
+
+const text = { type: "text", text: "The palm oil is $1.00 and <img onerror=x> [buy](http://evil)" };
+
+describe("assistant cards", () => {
+  it("turns an unfinished tool into an error when the turn failed", () => {
+    expect(cardsFromParts([
+      { type: "tool-add_to_cart", toolCallId: "blocked-tool", state: "input-available", input: {} },
+    ], { turnFailed: true })).toEqual([
+      expect.objectContaining({ kind: "tool-error", key: "blocked-tool:error" }),
+    ]);
+    expect(cardsFromParts([
+      { type: "tool-add_to_cart", toolCallId: "done", state: "output-available", output: { ok: false, message: "Gone" } },
+    ], { turnFailed: true })[0]?.kind).not.toBe("skeleton");
+  });
+
+  it("marks a search or recipe item the shopper's needs cannot confirm, so its card has no quick-add", () => {
+    const item = (name: string, cannotConfirm: boolean) => ({
+      listingId: `l-${name}`, name, variantId: `v-${name}`, packLabel: "Each", priceCents: 300, imageUrl: null, mayBeUnavailable: false, badge: "in-stock",
+      ...(cannotConfirm ? { cannotConfirm: true, needs: { "allergen:peanuts": "unknown" } } : {}),
+    });
+    const cards = cardsFromParts([
+      { type: "tool-search_catalog", toolCallId: "s", state: "output-available", input: { query: "paste" }, output: { ok: true, items: [item("Mystery", true), item("Plain", false)] } },
+      { type: "tool-get_recipe", toolCallId: "r", state: "output-available", output: { ok: true, inStock: [item("Curry", true)], lowOrOut: [] } },
+    ]);
+    expect(cards.map((card) => card.kind === "product" && [card.name, card.cannotConfirm])).toEqual([["Mystery", true], ["Plain", false], ["Curry", true]]);
+  });
+
+  it("maps every tool part state to exactly one card kind", () => {
+    const cards = cardsFromParts([
+      text,
+      { type: "tool-search_catalog", toolCallId: "s1", state: "input-streaming", input: { query: "egusi" } },
+      { type: "tool-show_products", toolCallId: "p1", state: "input-available", input: { listing_ids: ["a"] } },
+      {
+        type: "tool-search_catalog",
+        toolCallId: "s2",
+        state: "output-available",
+        input: { query: "egusi" },
+        output: {
+          ok: true,
+          items: [{
+            listingId: "l1",
+            name: "Egusi",
+            variantId: "v1",
+            packLabel: "400 g",
+            priceCents: 500,
+            imageUrl: null,
+            mayBeUnavailable: true,
+            badge: "ask-store",
+          }],
+        },
+      },
+      {
+        type: "tool-show_products",
+        toolCallId: "p2",
+        state: "output-available",
+        output: {
+          ok: true,
+          cards: [{
+            listingId: "l2",
+            name: "Stockfish",
+            imageUrl: "/images/stock.jpg",
+            mayBeUnavailable: false,
+            badge: "limited",
+            needs: { "allergen:peanuts": "unknown" },
+            cannotConfirm: true,
+            variants: [
+              { variantId: "v-b", label: "Large", priceCents: 900 },
+              { variantId: "v-a", label: "Small", priceCents: 700 },
+            ],
+          }],
+          notFound: ["missing-listing"],
+        },
+      },
+      {
+        type: "tool-add_to_cart",
+        toolCallId: "a1",
+        state: "output-available",
+        output: {
+          ok: true,
+          items: [{
+            ok: true,
+            added: 2,
+            lineId: "line-1",
+            name: "Egusi",
+            packLabel: "400 g",
+            limitedTo: 4,
+          }],
+        },
+      },
+      {
+        type: "tool-offer_choices",
+        toolCallId: "c1",
+        state: "output-available",
+        output: {
+          ok: true,
+          options: [
+            { listingId: "l1", variantId: "v1", name: "Egusi", packLabel: "400 g" },
+            { listingId: "l2", variantId: "v2", name: "Garri", packLabel: "1 kg" },
+          ],
+          notFound: [],
+        },
+      },
+      {
+        type: "tool-get_cart_summary",
+        toolCallId: "g1",
+        state: "output-available",
+        output: {
+          ok: true,
+          lines: [{ lineId: "line-1", name: "Egusi", packLabel: "400 g", qty: 2, lineTotalCents: 1000 }],
+          subtotalCents: 1000,
+          minimumOrderCents: 3500,
+          minimumMet: false,
+          missingCents: 2500,
+        },
+      },
+      {
+        type: "tool-search_catalog",
+        toolCallId: "e1",
+        state: "output-error",
+        errorText: "provider exploded <script>",
+      },
+      { type: "tool-prepare_checkout", toolCallId: "u1", state: "output-available", output: { ok: true } },
+      { type: "data-step-limit", data: { text: "I've done as much as I can in one go. Tell me what you'd like next." } },
+    ]);
+
+    expect(cards.map((card) => card.kind)).toEqual([
+      "skeleton",
+      "skeleton",
+      "product",
+      "product",
+      "missing",
+      "added",
+      "choices",
+      "summary",
+      "tool-error",
+    ]);
+    const error = cards.find((card) => card.kind === "tool-error");
+    expect(error).toMatchObject({ message: "Sorry, something went wrong. Please try again." });
+    expect(JSON.stringify(cards)).not.toContain("provider exploded");
+    const hiddenCartError = cardsFromParts([
+      { type: "tool-add_to_cart", toolCallId: "cart-err", state: "output-error", errorText: "not on this turn" },
+    ]);
+    expect(hiddenCartError).toEqual([]);
+    expect(JSON.stringify(cards)).not.toContain("missing-listing");
+    expect(JSON.stringify(cards)).not.toContain("$1.00");
+    const shown = cards.find((card) => card.kind === "product" && card.name === "Stockfish");
+    expect(shown).toMatchObject({ packLabel: "Small", priceCents: 700, priceLabel: "$7.00", askStore: false, cannotConfirm: true });
+    expect(cards.find((card) => card.kind === "product" && card.name === "Egusi")).toMatchObject({ askStore: true, cannotConfirm: false });
+    const choices = cards.find((card) => card.kind === "choices");
+    expect(choices && choices.kind === "choices" ? choices.options.map((option) => option.sendText) : []).toEqual([
+      "Egusi (400 g)",
+      "Garri (1 kg)",
+    ]);
+
+    const states = [
+      "input-streaming",
+      "input-available",
+      "approval-requested",
+      "approval-responded",
+      "output-available",
+      "output-error",
+      "output-denied",
+    ];
+    for (const state of states) {
+      for (const turnFailed of [false, true]) {
+        expect(cardsFromParts([
+          { type: "tool-prepare_checkout", toolCallId: "unknown-static", state, output: { ok: true }, errorText: "no" },
+        ], { turnFailed })).toEqual([]);
+        expect(cardsFromParts([
+          { type: "dynamic-tool", toolName: "not_a_tool", toolCallId: "unknown-dynamic", state, output: { ok: true } },
+        ], { turnFailed })).toEqual([]);
+        expect(cardsFromParts([
+          { type: "dynamic-tool", toolName: "constructor", toolCallId: "proto", state },
+        ], { turnFailed })).toEqual([]);
+        expect(cardsFromParts([
+          { type: "tool-toString", toolCallId: "proto-static", state },
+        ], { turnFailed })).toEqual([]);
+      }
+    }
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolCallId: "missing-name", state: "output-error", errorText: "no" },
+    ], { turnFailed: true })).toEqual([]);
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolName: "check_availability", toolCallId: "live", state: "input-streaming" },
+    ])).toEqual([{ kind: "skeleton", key: "live:skeleton" }]);
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolName: "search_catalog", toolCallId: "dyn-search", state: "output-error", errorText: "no" },
+    ])).toEqual([expect.objectContaining({ kind: "tool-error", key: "dyn-search:error" })]);
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolName: "add_to_cart", toolCallId: "dyn-cart", state: "output-error", errorText: "no" },
+    ])).toEqual([]);
+    expect(cardsFromParts([
+      { type: "tool-check_availability", toolCallId: "avail", state: "input-streaming" },
+    ])).toEqual([{ kind: "skeleton", key: "avail:skeleton" }]);
+    expect(cardsFromParts([
+      { type: "tool-check_availability", toolCallId: "avail-out", state: "output-available", output: { ok: true, items: [] } },
+    ])).toEqual([]);
+    expect(cardsFromParts([
+      { type: "tool-search_catalog", toolCallId: "approval", state: "approval-requested" },
+    ])).toEqual([]);
+    expect(cardsFromParts([
+      { type: "tool-search_catalog", toolCallId: "denied", state: "output-denied" },
+    ])).toEqual([]);
+  });
+
+  it("card prices come only from tool output", () => {
+    const cards = cardsFromParts([
+      { type: "text", text: "Only $1.00 today, or 50 cents." },
+      {
+        type: "tool-search_catalog",
+        toolCallId: "s",
+        state: "output-available",
+        input: { query: "egusi" },
+        output: {
+          items: [{ name: "Egusi", packLabel: "Each", priceCents: 1, imageUrl: null, mayBeUnavailable: false }],
+        },
+      },
+    ]);
+    expect(cards).toEqual([
+      expect.objectContaining({ kind: "product", priceCents: 1, priceLabel: "$0.01" }),
+    ]);
+    const pricey = cardsFromParts([{
+      type: "tool-show_products",
+      toolCallId: "p",
+      state: "output-available",
+      output: {
+        cards: [{
+          name: "Yam",
+          imageUrl: null,
+          variants: [{ variantId: "v", label: "Tuber", priceCents: 99999 }],
+        }],
+      },
+    }]);
+    expect(pricey[0]).toMatchObject({ priceLabel: "$999.99" });
+  });
+
+  it("added card falls back when stored output predates the enriched fields", () => {
+    const cards = cardsFromParts([{
+      type: "tool-add_to_cart",
+      toolCallId: "old",
+      state: "output-available",
+      output: { ok: true, added: 3, lineId: "line-old", qty: 3, swapRule: "exact_only" },
+    }]);
+    expect(cards).toEqual([
+      expect.objectContaining({
+        kind: "added",
+        legacy: true,
+        name: "Added to cart · Qty 3",
+        lineId: "line-old",
+        additionId: "old:0",
+        qtyAdded: 3,
+      }),
+    ]);
+  });
+
+  it("summary card shows the tool subtotal without recomputing", () => {
+    const cards = cardsFromParts([{
+      type: "tool-get_cart_summary",
+      toolCallId: "sum",
+      state: "output-available",
+      output: {
+        ok: true,
+        lines: [
+          { lineId: "a", name: "Egusi", packLabel: "Each", qty: 1, lineTotalCents: 100 },
+          { lineId: "b", name: "Garri", packLabel: "Each", qty: 1, lineTotalCents: 100 },
+        ],
+        subtotalCents: 250,
+        minimumOrderCents: 250,
+        minimumMet: true,
+        missingCents: 0,
+      },
+    }]);
+    expect(cards[0]).toMatchObject({
+      kind: "summary",
+      subtotalCents: 250,
+      subtotalLabel: "$2.50",
+      minimumMet: true,
+      missingLabel: "$0.00",
+    });
+  });
+
+  it("maps partial all-failed singleton-alias and zero-variant tool outputs safely", () => {
+    const cards = cardsFromParts([
+      {
+        type: "tool-add_to_cart",
+        toolCallId: "mix",
+        state: "output-available",
+        output: {
+          ok: true,
+          added: 1,
+          lineId: "should-not-duplicate",
+          name: "Alias",
+          items: [
+            { ok: true, added: 1, lineId: "line-a", name: "Egusi", packLabel: "Each" },
+            { ok: false, code: "variant_not_found", message: "That item is not in this store." },
+          ],
+        },
+      },
+      {
+        type: "tool-add_to_cart",
+        toolCallId: "none",
+        state: "output-available",
+        output: {
+          ok: true,
+          items: [{ ok: false, code: "unavailable", message: "That product is unavailable." }],
+        },
+      },
+      {
+        type: "tool-show_products",
+        toolCallId: "empty",
+        state: "output-available",
+        output: { ok: true, cards: [{ name: "Bare", imageUrl: null, variants: [] }], notFound: [] },
+      },
+      {
+        type: "tool-offer_choices",
+        toolCallId: "few",
+        state: "output-available",
+        output: { ok: false, code: "not_enough_choices", message: "There are not enough choices to pick from." },
+      },
+    ]);
+    expect(cards.filter((card) => card.kind === "added")).toHaveLength(1);
+    expect(JSON.stringify(cards)).not.toContain("should-not-duplicate");
+    expect(cards.filter((card) => card.kind === "missing").map((card) => card.kind === "missing" ? card.message : "")).toEqual([
+      "That item is not in this store.",
+      "That product is unavailable.",
+      "There are not enough choices to pick from.",
+    ]);
+    const twins = cardsFromParts([{
+      type: "tool-offer_choices",
+      toolCallId: "twin",
+      state: "output-available",
+      output: {
+        ok: true,
+        options: [
+          { listingId: "l1", variantId: "variant-aaaa", name: "Rice", packLabel: "Bag" },
+          { listingId: "l2", variantId: "variant-bbbb", name: "Rice", packLabel: "Bag" },
+        ],
+      },
+    }]);
+    const choice = twins.find((card) => card.kind === "choices");
+    expect(choice && choice.kind === "choices" ? choice.options.map((option) => option.sendText) : []).toEqual([
+      "Rice (Bag) · aaaa",
+      "Rice (Bag) · bbbb",
+    ]);
+  });
+
+  it("unknown tools add no completion summary and preserve the empty-message fallback", () => {
+    const unknown = { type: "tool-prepare_checkout", toolCallId: "gone", state: "input-available" };
+    expect(cardsFromParts([unknown], { turnFailed: true })).toEqual([]);
+    expect(completionAnnouncement({ parts: [unknown] })).toBe("Reply ready");
+    expect(completionAnnouncement({
+      parts: [{ type: "text", text: "Palm oil is in stock." }, unknown],
+    })).toBe("Palm oil is in stock.");
+  });
+
+  it("a summary names the gap to the store minimum", () => {
+    const cards = cardsFromParts([{
+      type: "tool-get_cart_summary",
+      toolCallId: "g1",
+      state: "output-available",
+      output: {
+        ok: true,
+        lines: [{ lineId: "l", name: "Egusi", qty: 1, lineTotalCents: 1099, packLabel: "8 oz" }],
+        subtotalCents: 1099,
+        minimumOrderCents: 3500,
+        missingCents: 2401,
+        minimumMet: false,
+      },
+    }]);
+    expect(cards[0]).toMatchObject({
+      kind: "summary",
+      gapLabel: "$24.01 more to reach the $35.00 minimum",
+    });
+  });
+});
+
+describe("product cards can be added to the basket", () => {
+  it("carry the listing and variant from search and show results", () => {
+    const [searched] = cardsFromParts([{
+      type: "tool-search_catalog",
+      toolCallId: "s",
+      state: "output-available",
+      input: { query: "yam" },
+      output: { items: [{ listingId: "l1", variantId: "v1", name: "Yam", packLabel: "1 tuber", priceCents: 899, imageUrl: null }] },
+    }]);
+    expect(searched).toMatchObject({ kind: "product", listingId: "l1", variantId: "v1" });
+    const [shown] = cardsFromParts([{
+      type: "tool-show_products",
+      toolCallId: "p",
+      state: "output-available",
+      output: { cards: [{ listingId: "l2", name: "Okra", imageUrl: null, variants: [
+        { variantId: "big", label: "1 lb", priceCents: 500 },
+        { variantId: "small", label: "8 oz", priceCents: 300 },
+      ] }] },
+    }]);
+    expect(shown).toMatchObject({ kind: "product", listingId: "l2", variantId: "small", priceCents: 300 });
+  });
+
+  it("have no add target when the tool output has no ids", () => {
+    const [card] = cardsFromParts([{
+      type: "tool-search_catalog",
+      toolCallId: "s",
+      state: "output-available",
+      input: { query: "yam" },
+      output: { items: [{ name: "Yam", packLabel: "Each", priceCents: 899, imageUrl: null }] },
+    }]);
+    expect(card).toMatchObject({ kind: "product", listingId: null, variantId: null });
+  });
+});

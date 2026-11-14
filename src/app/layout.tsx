@@ -56,12 +56,20 @@ export default async function RootLayout({
     );
   }
 
+  const headerList = await headers();
+  // Read by the story surface, for browsers that send Save-Data without navigator.connection.
+  const saveData = headerList.get("save-data")?.toLowerCase() === "on" ? "on" : undefined;
+
   const themeStyle = theme
     ? `body{${themeToCss(theme.light)}}@media(prefers-color-scheme:dark){body{${themeToCss(theme.dark)}}}`
     : "";
 
   return (
-    <html lang="en" className={cn(bricolage.variable, figtree.variable, "font-sans", geist.variable)}>
+    <html
+      lang="en"
+      data-save-data={saveData}
+      className={cn(bricolage.variable, figtree.variable, "font-sans", geist.variable)}
+    >
       <head>
         {themeStyle ? (
           <style dangerouslySetInnerHTML={{ __html: themeStyle }} />

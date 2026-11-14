@@ -1,90 +1,24 @@
 name: CI
 
+# Hosted CI runs on demand only, to save GitHub Actions minutes. The everyday gate is scripts/ci-local.sh,
+# which runs these same checks locally and records a "local-ci" commit status. The coordinator adds the
+# "run-ci" label for milestone PRs (money, auth, data isolation), or starts a run by hand (workflow_dispatch).
+# Pushes to PR branches and to main do not trigger it.
 on:
-  push:
-    branches: ["**"]
   pull_request:
     branches: [main]
+    types: [labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # One job: install, migrate, seed and build once, then unit tests and e2e (the old ci + e2e jobs did all of that twice).
   ci:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-ci'
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Setup database roles
-        run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
-            CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
-            GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
-            ALTER SCHEMA public OWNER TO app_owner;
-            CREATE ROLE app_runtime LOGIN PASSWORD 'app_runtime_ci' NOSUPERUSER NOBYPASSRLS;
-          SQL
-
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Run migrations
-        run: npx prisma migrate deploy
-        env:
-          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
-
-      - name: Seed database
-        run: pnpm db:seed
-        env:
-          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
-          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Test
-        run: pnpm test
-        env:
-          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
-          APP_RUNTIME_PASSWORD: app_runtime_ci
-
-      - name: Build
-        run: pnpm build
-        env:
-          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
-          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
-          APP_RUNTIME_PASSWORD: app_runtime_ci
-
-  e2e:
-    runs-on: ubuntu-latest
-    needs: ci
 
     services:
       postgres:
@@ -112,6 +46,14 @@ jobs:
       SEED_ADMIN_PASSWORD: CiTestPass99!
       SEED_ADMIN_TOTP_SECRET: JBSWY3DPEHPK3PXP
       AUTH_RATE_LIMIT_RELAXED: "1"
+      E2E_STORE_OVERRIDE: "1"
+      E2E_FAKE_STRIPE: "1"
+      E2E_FAKE_ADDRESS: "1"
+      ASSISTANT_CHAT_ENABLED: "1"
+      E2E_FAKE_ASSISTANT: "1"
+      ANTHROPIC_API_KEY: e2e-fake-anthropic-key
+      NEXT_PUBLIC_DEMO_FLOWS: "1"
+      STOREFRONT_REVALIDATION_SECRET: e2e-storefront-revalidate
 
     steps:
       - uses: actions/checkout@v4
@@ -128,9 +70,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup database roles
+      - name: Setup database roles and extensions
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
             CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
             GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
             ALTER SCHEMA public OWNER TO app_owner;
@@ -146,7 +89,16 @@ jobs:
       - name: Seed database
         run: pnpm db:seed
 
-      - name: Build application
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
         run: pnpm build
 
       - name: Install Playwright browsers

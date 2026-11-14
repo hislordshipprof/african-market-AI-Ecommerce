@@ -1,7 +1,12 @@
-import { betterAuth } from "better-auth";
+import { betterAuth, APIError } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { twoFactor } from "better-auth/plugins";
-import { authPrisma } from "./db";
+import { twoFactor, magicLink } from "better-auth/plugins";
+import { authPrisma, platform } from "./db";
+import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
+import { sendEmail } from "./email/send";
+import { magicLinkMessage } from "./magic-link-mail";
+import { scheduleAfterResponse } from "./schedule-after-response";
+import { isSlugRoutable, slugFromHost } from "./slug";
 
 const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
 
@@ -11,6 +16,46 @@ export function resolveAuthBaseUrl(
   if (env.BETTER_AUTH_URL) return env.BETTER_AUTH_URL;
   if (env.VERCEL_URL) return `https://${env.VERCEL_URL}`;
   return "http://localhost:3000";
+}
+
+export function resolveAuthAllowedHosts(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const hosts: string[] = [];
+
+  if (env.BETTER_AUTH_URL) {
+    try {
+      const host = new URL(env.BETTER_AUTH_URL).host;
+      hosts.push(host, `*.${host}`);
+    } catch {}
+  }
+
+  if (env.VERCEL_URL) {
+    hosts.push(env.VERCEL_URL, `*.${env.VERCEL_URL}`);
+  }
+
+  if (env.BETTER_AUTH_TRUSTED_ORIGINS) {
+    for (const origin of env.BETTER_AUTH_TRUSTED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)) {
+      try {
+        const host = new URL(origin).host;
+        hosts.push(host, `*.${host}`);
+      } catch {}
+    }
+  }
+
+  if (env.PLATFORM_ROOT_DOMAIN) {
+    hosts.push(env.PLATFORM_ROOT_DOMAIN, `*.${env.PLATFORM_ROOT_DOMAIN}`);
+  }
+
+  const port = env.PORT ?? "3000";
+  hosts.push(`localhost:${port}`, `*.localhost:${port}`);
+  if (port !== "3000") {
+    hosts.push("localhost:3000", "*.localhost:3000");
+  }
+
+  hosts.push("127.0.0.1:3000", `127.0.0.1:${port}`);
+
+  return [...new Set(hosts)];
 }
 
 export function resolveAuthTrustedOrigins(
@@ -30,7 +75,11 @@ export function resolveAuthTrustedOrigins(
     origins.push(`https://${env.VERCEL_URL}`);
   }
 
-  origins.push("http://localhost:3000", "http://*.localhost:3000");
+  const port = env.PORT ?? "3000";
+  origins.push(`http://localhost:${port}`, `http://*.localhost:${port}`);
+  if (port !== "3000") {
+    origins.push("http://localhost:3000", "http://*.localhost:3000");
+  }
 
   return [...new Set(origins)];
 }
@@ -54,8 +103,47 @@ validateAuthSecret();
 
 const baseUrl = resolveAuthBaseUrl();
 
+function requestHeaders(ctx: unknown): Headers | null {
+  if (!ctx || typeof ctx !== "object") return null;
+  const record = ctx as { headers?: unknown; request?: { headers?: unknown } };
+  if (record.headers instanceof Headers) return record.headers;
+  if (record.request?.headers instanceof Headers) return record.request.headers;
+  return null;
+}
+
+async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
+  const headers = requestHeaders(ctx);
+  if (!headers) return null;
+  const headerSlug = headers.get("x-store-slug")?.toLowerCase() ?? null;
+  const host = headers.get("host");
+  const slug =
+    headerSlug && isSlugRoutable(headerSlug)
+      ? headerSlug
+      : host
+        ? slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN)
+        : null;
+  if (!slug) return null;
+  try {
+    const store = await platform.store.findUnique({
+      where: { slug },
+      select: { name: true },
+    });
+    return store?.name ?? null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "lookup failed";
+    console.error(
+      JSON.stringify({ event: "magic_link_store_lookup_failed", message }),
+    );
+    return null;
+  }
+}
+
 export const auth = betterAuth({
-  baseURL: baseUrl,
+  baseURL: {
+    allowedHosts: resolveAuthAllowedHosts(),
+    protocol: "auto" as const,
+    fallback: resolveAuthBaseUrl(),
+  },
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
@@ -64,26 +152,51 @@ export const auth = betterAuth({
     twoFactor({
       issuer: "African Markets Platform",
     }),
+    magicLink({
+      expiresIn: 900,
+      sendMagicLink: async ({ email, url }, ctx) => {
+        const normalizedEmail = email.trim().toLowerCase();
+        const privileged = await isPrivilegedEmail(normalizedEmail);
+        if (privileged) return;
+        const storeName = await storeNameForMagicLink(ctx);
+        const message = magicLinkMessage({
+          to: normalizedEmail,
+          url,
+          storeName,
+          fromAddress: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+        });
+        scheduleAfterResponse(() => sendEmail(message));
+      },
+      disableSignUp: false,
+    }),
   ],
   rateLimit: {
     storage: "database",
     modelName: "rateLimit",
     window: 60,
-    max: 10,
+    max: relaxedAuth ? 1000 : 10,
     customRules: {
       "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
+      "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
   },
   databaseHooks: {
     session: {
       create: {
-        before: async (session) => {
+        before: async (session, ctx) => {
+          const path: string = (ctx as Record<string, unknown>)?.path as string ?? "";
+          if (path === "/magic-link/verify") {
+            const privileged = await isPrivilegedUser(session.userId);
+            if (privileged) {
+              throw new APIError("FORBIDDEN", { message: "This sign-in method is not available for staff accounts" });
+            }
+          }
           const user = await authPrisma.user.findUnique({
             where: { id: session.userId },
             select: { twoFactorEnabled: true },
           });
-          if (user?.twoFactorEnabled) {
+          if (user?.twoFactorEnabled && path.startsWith("/two-factor/")) {
             return { data: { twoFactorVerified: true } };
           }
         },

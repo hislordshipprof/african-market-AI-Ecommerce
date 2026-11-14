@@ -1,0 +1,3 @@
+interface:
+  display_name: "SuperMatt: QA"
+  short_description: "Run the changed program like its user and check it"

@@ -1,0 +1,7947 @@
+[
+  {
+    "id": "jollof-for-ten-1",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-2",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-3",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-4",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-5",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "jollof-for-ten-6",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-7",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-8",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-9",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-10",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "jollof-for-ten-11",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-12",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-13",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-14",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-15",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "jollof-for-ten-16",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-17",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-18",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-19",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "jollof-for-ten-20",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
+    ],
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "pepper-tatashe",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "egusi-soup-1",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 4 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-2",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 5 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-3",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 6 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-4",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 7 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-5",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup.",
+      "For 4 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "egusi-soup-6",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 5 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-7",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 6 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-8",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 7 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-9",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup for 4 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "egusi-soup-10",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Egusi soup.",
+      "For 5 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-1",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 2 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-2",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 3 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-3",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 4 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-4",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 2 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-5",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast, with teff and berbere.",
+      "For 3 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-6",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 4 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-7",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 2 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-8",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 3 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-9",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast for 4 people, with teff and berbere.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
+  },
+  {
+    "id": "ethiopian-breakfast-10",
+    "category": "recipe-to-cart",
+    "turns": [
+      "Ethiopian breakfast, with teff and berbere.",
+      "For 2 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": true
+    }
+  },
+  {
+    "id": "add-one-1",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Long grain parboiled rice."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-parboiled-long-grain",
+            "variantKeys": [
+              "rice-parboiled-long-grain-5lb"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-2",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Dried thyme."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "thyme-dried",
+            "variantKeys": [
+              "thyme-dried-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "thyme-dried",
+        "variantKey": "thyme-dried-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-3",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Curry powder (Nigerian style)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "curry-powder-nigerian",
+            "variantKeys": [
+              "curry-powder-nigerian-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "curry-powder-nigerian",
+        "variantKey": "curry-powder-nigerian-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-4",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Maggi Star seasoning cubes."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "maggi-star-cubes",
+            "variantKeys": [
+              "maggi-star-cubes-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "maggi-star-cubes",
+        "variantKey": "maggi-star-cubes-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-5",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Hard chicken (stewing hen)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "hard-chicken",
+            "variantKeys": [
+              "hard-chicken-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "hard-chicken",
+        "variantKey": "hard-chicken-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-6",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Red palm oil."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-red",
+            "variantKeys": [
+              "palm-oil-red-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "palm-oil-red",
+        "variantKey": "palm-oil-red-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-7",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Egusi (melon seeds), shelled."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-8",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Egusi, ground."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-9",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Fluted pumpkin leaves (ugu), fresh."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "ugu-leaves-fresh",
+            "variantKeys": [
+              "ugu-leaves-fresh-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "ugu-leaves-fresh",
+        "variantKey": "ugu-leaves-fresh-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-10",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Ground crayfish."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "crayfish-ground",
+            "variantKeys": [
+              "crayfish-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "crayfish-ground",
+        "variantKey": "crayfish-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-11",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Stockfish, cut pieces."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "stockfish-cut",
+            "variantKeys": [
+              "stockfish-cut-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "stockfish-cut",
+        "variantKey": "stockfish-cut-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-12",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Teff flour, ivory (white teff)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-13",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Teff flour, brown (red teff)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-brown",
+            "variantKeys": [
+              "teff-flour-brown-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-brown",
+        "variantKey": "teff-flour-brown-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-14",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Berbere (Ethiopian chili spice blend)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "berbere",
+            "variantKeys": [
+              "berbere-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "berbere",
+        "variantKey": "berbere-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-15",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb White yam (puna yam)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-16",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb White garri."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "garri-white",
+            "variantKeys": [
+              "garri-white-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "garri-white",
+        "variantKey": "garri-white-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-17",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Yellow garri (palm oil garri)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "garri-yellow",
+            "variantKeys": [
+              "garri-yellow-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "garri-yellow",
+        "variantKey": "garri-yellow-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-18",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Honey beans (ewa oloyin)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "beans-honey-oloyin",
+            "variantKeys": [
+              "beans-honey-oloyin-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "beans-honey-oloyin",
+        "variantKey": "beans-honey-oloyin-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-19",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Nigerian brown beans."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "beans-brown",
+            "variantKeys": [
+              "beans-brown-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "beans-brown",
+        "variantKey": "beans-brown-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-20",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Plantain, ripe (yellow/black)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "plantain-ripe",
+            "variantKeys": [
+              "plantain-ripe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "plantain-ripe",
+        "variantKey": "plantain-ripe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-21",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Plantain, green (unripe)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "plantain-green",
+            "variantKeys": [
+              "plantain-green-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "plantain-green",
+        "variantKey": "plantain-green-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-22",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Goat meat with skin, frozen."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "goat-meat-frozen",
+            "variantKeys": [
+              "goat-meat-frozen-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "goat-meat-frozen",
+        "variantKey": "goat-meat-frozen-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-23",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Dried ginger (ground)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "ginger-dried-ground",
+            "variantKeys": [
+              "ginger-dried-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "ginger-dried-ground",
+        "variantKey": "ginger-dried-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-24",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Bleached palm oil (ofada stew oil)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-bleached-ofada",
+            "variantKeys": [
+              "palm-oil-bleached-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "palm-oil-bleached-ofada",
+        "variantKey": "palm-oil-bleached-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-25",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb De Rica tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-de-rica",
+        "variantKey": "tomato-paste-de-rica-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-26",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Maggi Crayfish seasoning cubes."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "maggi-crayfish-cubes",
+            "variantKeys": [
+              "maggi-crayfish-cubes-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "maggi-crayfish-cubes",
+        "variantKey": "maggi-crayfish-cubes-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-27",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Knorr chicken cubes."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "knorr-chicken-cubes",
+            "variantKeys": [
+              "knorr-chicken-cubes-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "knorr-chicken-cubes",
+        "variantKey": "knorr-chicken-cubes-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-28",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Cassava fufu flour (akpu)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "cassava-fufu-flour",
+            "variantKeys": [
+              "cassava-fufu-flour-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "cassava-fufu-flour",
+        "variantKey": "cassava-fufu-flour-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-29",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Honeywell Semolina."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "semolina-honeywell",
+            "variantKeys": [
+              "semolina-honeywell-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "semolina-honeywell",
+        "variantKey": "semolina-honeywell-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-30",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Suya spice (yaji)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "suya-spice-yaji",
+            "variantKeys": [
+              "suya-spice-yaji-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "suya-spice-yaji",
+        "variantKey": "suya-spice-yaji-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-31",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Dried hibiscus flowers (zobo, bissap, sobolo, karkade)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "hibiscus-dried",
+            "variantKeys": [
+              "hibiscus-dried-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "hibiscus-dried",
+        "variantKey": "hibiscus-dried-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-32",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Cocoyam (taro)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "cocoyam-taro",
+            "variantKeys": [
+              "cocoyam-taro-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "cocoyam-taro",
+        "variantKey": "cocoyam-taro-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-33",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Gino pepper and onion tomato mix."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "gino-pepper-onion-paste",
+            "variantKeys": [
+              "gino-pepper-onion-paste-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "gino-pepper-onion-paste",
+        "variantKey": "gino-pepper-onion-paste-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-34",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Salted cod (makayabu, saltfish, bacalhau)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "salt-cod-makayabu-saltfish",
+            "variantKeys": [
+              "salt-cod-makayabu-saltfish-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "salt-cod-makayabu-saltfish",
+        "variantKey": "salt-cod-makayabu-saltfish-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-one-35",
+    "category": "single-item",
+    "turns": [
+      "Add 1 of the 5 lb Dried crayfish, whole."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "crayfish-whole-dried",
+            "variantKeys": [
+              "crayfish-whole-dried-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "crayfish-whole-dried",
+        "variantKey": "crayfish-whole-dried-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-twenty-five",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each of these: Long grain parboiled rice, Dried thyme, Curry powder (Nigerian style), Maggi Star seasoning cubes, Hard chicken (stewing hen), Red palm oil, Egusi (melon seeds), shelled, Egusi, ground, Fluted pumpkin leaves (ugu), fresh, Ground crayfish, Stockfish, cut pieces, Teff flour, ivory (white teff), Teff flour, brown (red teff), Berbere (Ethiopian chili spice blend), White yam (puna yam), White garri, Yellow garri (palm oil garri), Honey beans (ewa oloyin), Nigerian brown beans, Plantain, ripe (yellow/black), Plantain, green (unripe), Goat meat with skin, frozen, Dried ginger (ground), Bleached palm oil (ofada stew oil), De Rica tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-parboiled-long-grain",
+            "variantKeys": [
+              "rice-parboiled-long-grain-5lb",
+              "rice-parboiled-long-grain-10lb"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "thyme-dried",
+            "variantKeys": [
+              "thyme-dried-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "curry-powder-nigerian",
+            "variantKeys": [
+              "curry-powder-nigerian-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "maggi-star-cubes",
+            "variantKeys": [
+              "maggi-star-cubes-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "hard-chicken",
+            "variantKeys": [
+              "hard-chicken-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-red",
+            "variantKeys": [
+              "palm-oil-red-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "ugu-leaves-fresh",
+            "variantKeys": [
+              "ugu-leaves-fresh-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "crayfish-ground",
+            "variantKeys": [
+              "crayfish-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "stockfish-cut",
+            "variantKeys": [
+              "stockfish-cut-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-brown",
+            "variantKeys": [
+              "teff-flour-brown-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "berbere",
+            "variantKeys": [
+              "berbere-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "garri-white",
+            "variantKeys": [
+              "garri-white-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "garri-yellow",
+            "variantKeys": [
+              "garri-yellow-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "beans-honey-oloyin",
+            "variantKeys": [
+              "beans-honey-oloyin-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "beans-brown",
+            "variantKeys": [
+              "beans-brown-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "plantain-ripe",
+            "variantKeys": [
+              "plantain-ripe-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "plantain-green",
+            "variantKeys": [
+              "plantain-green-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "goat-meat-frozen",
+            "variantKeys": [
+              "goat-meat-frozen-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "ginger-dried-ground",
+            "variantKeys": [
+              "ginger-dried-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-bleached-ofada",
+            "variantKeys": [
+              "palm-oil-bleached-ofada-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "thyme-dried",
+        "variantKey": "thyme-dried-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "curry-powder-nigerian",
+        "variantKey": "curry-powder-nigerian-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "maggi-star-cubes",
+        "variantKey": "maggi-star-cubes-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "hard-chicken",
+        "variantKey": "hard-chicken-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "palm-oil-red",
+        "variantKey": "palm-oil-red-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "ugu-leaves-fresh",
+        "variantKey": "ugu-leaves-fresh-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "crayfish-ground",
+        "variantKey": "crayfish-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "stockfish-cut",
+        "variantKey": "stockfish-cut-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "teff-flour-brown",
+        "variantKey": "teff-flour-brown-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "berbere",
+        "variantKey": "berbere-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "garri-white",
+        "variantKey": "garri-white-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "garri-yellow",
+        "variantKey": "garri-yellow-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "beans-honey-oloyin",
+        "variantKey": "beans-honey-oloyin-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "beans-brown",
+        "variantKey": "beans-brown-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "plantain-ripe",
+        "variantKey": "plantain-ripe-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "plantain-green",
+        "variantKey": "plantain-green-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "goat-meat-frozen",
+        "variantKey": "goat-meat-frozen-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "ginger-dried-ground",
+        "variantKey": "ginger-dried-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "palm-oil-bleached-ofada",
+        "variantKey": "palm-oil-bleached-ofada-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "tomato-paste-de-rica",
+        "variantKey": "tomato-paste-de-rica-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-1",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Long grain parboiled rice, Maggi Star seasoning cubes, Egusi, ground."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-parboiled-long-grain",
+            "variantKeys": [
+              "rice-parboiled-long-grain-5lb",
+              "rice-parboiled-long-grain-10lb"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "maggi-star-cubes",
+            "variantKeys": [
+              "maggi-star-cubes-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "maggi-star-cubes",
+        "variantKey": "maggi-star-cubes-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-2",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Dried thyme, Hard chicken (stewing hen), Fluted pumpkin leaves (ugu), fresh."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "thyme-dried",
+            "variantKeys": [
+              "thyme-dried-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "hard-chicken",
+            "variantKeys": [
+              "hard-chicken-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "ugu-leaves-fresh",
+            "variantKeys": [
+              "ugu-leaves-fresh-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "thyme-dried",
+        "variantKey": "thyme-dried-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "hard-chicken",
+        "variantKey": "hard-chicken-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "ugu-leaves-fresh",
+        "variantKey": "ugu-leaves-fresh-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-3",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Curry powder (Nigerian style), Red palm oil, Ground crayfish."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "curry-powder-nigerian",
+            "variantKeys": [
+              "curry-powder-nigerian-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-red",
+            "variantKeys": [
+              "palm-oil-red-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "crayfish-ground",
+            "variantKeys": [
+              "crayfish-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "curry-powder-nigerian",
+        "variantKey": "curry-powder-nigerian-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "palm-oil-red",
+        "variantKey": "palm-oil-red-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "crayfish-ground",
+        "variantKey": "crayfish-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-4",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Maggi Star seasoning cubes, Egusi (melon seeds), shelled, Stockfish, cut pieces."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "maggi-star-cubes",
+            "variantKeys": [
+              "maggi-star-cubes-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "stockfish-cut",
+            "variantKeys": [
+              "stockfish-cut-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "maggi-star-cubes",
+        "variantKey": "maggi-star-cubes-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "stockfish-cut",
+        "variantKey": "stockfish-cut-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-5",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Hard chicken (stewing hen), Egusi, ground, Teff flour, ivory (white teff)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "hard-chicken",
+            "variantKeys": [
+              "hard-chicken-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "hard-chicken",
+        "variantKey": "hard-chicken-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-6",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Red palm oil, Fluted pumpkin leaves (ugu), fresh, Teff flour, brown (red teff)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-red",
+            "variantKeys": [
+              "palm-oil-red-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "ugu-leaves-fresh",
+            "variantKeys": [
+              "ugu-leaves-fresh-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-brown",
+            "variantKeys": [
+              "teff-flour-brown-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "palm-oil-red",
+        "variantKey": "palm-oil-red-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "ugu-leaves-fresh",
+        "variantKey": "ugu-leaves-fresh-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "teff-flour-brown",
+        "variantKey": "teff-flour-brown-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-7",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Egusi (melon seeds), shelled, Ground crayfish, Berbere (Ethiopian chili spice blend)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "crayfish-ground",
+            "variantKeys": [
+              "crayfish-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "berbere",
+            "variantKeys": [
+              "berbere-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "crayfish-ground",
+        "variantKey": "crayfish-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "berbere",
+        "variantKey": "berbere-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-8",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Egusi, ground, Stockfish, cut pieces, White yam (puna yam)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "stockfish-cut",
+            "variantKeys": [
+              "stockfish-cut-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "stockfish-cut",
+        "variantKey": "stockfish-cut-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-9",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Fluted pumpkin leaves (ugu), fresh, Teff flour, ivory (white teff), White garri."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "ugu-leaves-fresh",
+            "variantKeys": [
+              "ugu-leaves-fresh-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "garri-white",
+            "variantKeys": [
+              "garri-white-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "ugu-leaves-fresh",
+        "variantKey": "ugu-leaves-fresh-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "garri-white",
+        "variantKey": "garri-white-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-10",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Ground crayfish, Teff flour, brown (red teff), Yellow garri (palm oil garri)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "crayfish-ground",
+            "variantKeys": [
+              "crayfish-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-brown",
+            "variantKeys": [
+              "teff-flour-brown-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "garri-yellow",
+            "variantKeys": [
+              "garri-yellow-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "crayfish-ground",
+        "variantKey": "crayfish-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "teff-flour-brown",
+        "variantKey": "teff-flour-brown-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "garri-yellow",
+        "variantKey": "garri-yellow-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-11",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Stockfish, cut pieces, Berbere (Ethiopian chili spice blend), Honey beans (ewa oloyin)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "stockfish-cut",
+            "variantKeys": [
+              "stockfish-cut-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "berbere",
+            "variantKeys": [
+              "berbere-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "beans-honey-oloyin",
+            "variantKeys": [
+              "beans-honey-oloyin-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "stockfish-cut",
+        "variantKey": "stockfish-cut-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "berbere",
+        "variantKey": "berbere-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "beans-honey-oloyin",
+        "variantKey": "beans-honey-oloyin-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-12",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Teff flour, ivory (white teff), White yam (puna yam), Nigerian brown beans."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "beans-brown",
+            "variantKeys": [
+              "beans-brown-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "beans-brown",
+        "variantKey": "beans-brown-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-13",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Teff flour, brown (red teff), White garri, Plantain, ripe (yellow/black)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-brown",
+            "variantKeys": [
+              "teff-flour-brown-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "garri-white",
+            "variantKeys": [
+              "garri-white-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "plantain-ripe",
+            "variantKeys": [
+              "plantain-ripe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-brown",
+        "variantKey": "teff-flour-brown-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "garri-white",
+        "variantKey": "garri-white-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "plantain-ripe",
+        "variantKey": "plantain-ripe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-14",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Berbere (Ethiopian chili spice blend), Yellow garri (palm oil garri), Plantain, green (unripe)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "berbere",
+            "variantKeys": [
+              "berbere-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "garri-yellow",
+            "variantKeys": [
+              "garri-yellow-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "plantain-green",
+            "variantKeys": [
+              "plantain-green-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "berbere",
+        "variantKey": "berbere-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "garri-yellow",
+        "variantKey": "garri-yellow-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "plantain-green",
+        "variantKey": "plantain-green-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-15",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: White yam (puna yam), Honey beans (ewa oloyin), Goat meat with skin, frozen."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "beans-honey-oloyin",
+            "variantKeys": [
+              "beans-honey-oloyin-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "goat-meat-frozen",
+            "variantKeys": [
+              "goat-meat-frozen-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "beans-honey-oloyin",
+        "variantKey": "beans-honey-oloyin-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "goat-meat-frozen",
+        "variantKey": "goat-meat-frozen-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-16",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: White garri, Nigerian brown beans, Dried ginger (ground)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "garri-white",
+            "variantKeys": [
+              "garri-white-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "beans-brown",
+            "variantKeys": [
+              "beans-brown-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "ginger-dried-ground",
+            "variantKeys": [
+              "ginger-dried-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "garri-white",
+        "variantKey": "garri-white-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "beans-brown",
+        "variantKey": "beans-brown-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "ginger-dried-ground",
+        "variantKey": "ginger-dried-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-17",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Yellow garri (palm oil garri), Plantain, ripe (yellow/black), Bleached palm oil (ofada stew oil)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "garri-yellow",
+            "variantKeys": [
+              "garri-yellow-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "plantain-ripe",
+            "variantKeys": [
+              "plantain-ripe-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-bleached-ofada",
+            "variantKeys": [
+              "palm-oil-bleached-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "garri-yellow",
+        "variantKey": "garri-yellow-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "plantain-ripe",
+        "variantKey": "plantain-ripe-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "palm-oil-bleached-ofada",
+        "variantKey": "palm-oil-bleached-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-18",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Honey beans (ewa oloyin), Plantain, green (unripe), De Rica tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "beans-honey-oloyin",
+            "variantKeys": [
+              "beans-honey-oloyin-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "plantain-green",
+            "variantKeys": [
+              "plantain-green-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "beans-honey-oloyin",
+        "variantKey": "beans-honey-oloyin-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "plantain-green",
+        "variantKey": "plantain-green-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "tomato-paste-de-rica",
+        "variantKey": "tomato-paste-de-rica-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-19",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Nigerian brown beans, Goat meat with skin, frozen, Maggi Crayfish seasoning cubes."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "beans-brown",
+            "variantKeys": [
+              "beans-brown-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "goat-meat-frozen",
+            "variantKeys": [
+              "goat-meat-frozen-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "maggi-crayfish-cubes",
+            "variantKeys": [
+              "maggi-crayfish-cubes-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "beans-brown",
+        "variantKey": "beans-brown-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "goat-meat-frozen",
+        "variantKey": "goat-meat-frozen-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "maggi-crayfish-cubes",
+        "variantKey": "maggi-crayfish-cubes-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-20",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Plantain, ripe (yellow/black), Dried ginger (ground), Knorr chicken cubes."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "plantain-ripe",
+            "variantKeys": [
+              "plantain-ripe-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "ginger-dried-ground",
+            "variantKeys": [
+              "ginger-dried-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "knorr-chicken-cubes",
+            "variantKeys": [
+              "knorr-chicken-cubes-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "plantain-ripe",
+        "variantKey": "plantain-ripe-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "ginger-dried-ground",
+        "variantKey": "ginger-dried-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "knorr-chicken-cubes",
+        "variantKey": "knorr-chicken-cubes-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-21",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Plantain, green (unripe), Bleached palm oil (ofada stew oil), Cassava fufu flour (akpu)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "plantain-green",
+            "variantKeys": [
+              "plantain-green-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-bleached-ofada",
+            "variantKeys": [
+              "palm-oil-bleached-ofada-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "cassava-fufu-flour",
+            "variantKeys": [
+              "cassava-fufu-flour-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "plantain-green",
+        "variantKey": "plantain-green-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "palm-oil-bleached-ofada",
+        "variantKey": "palm-oil-bleached-ofada-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "cassava-fufu-flour",
+        "variantKey": "cassava-fufu-flour-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-22",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Goat meat with skin, frozen, De Rica tomato paste, Honeywell Semolina."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "goat-meat-frozen",
+            "variantKeys": [
+              "goat-meat-frozen-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "semolina-honeywell",
+            "variantKeys": [
+              "semolina-honeywell-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "goat-meat-frozen",
+        "variantKey": "goat-meat-frozen-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "tomato-paste-de-rica",
+        "variantKey": "tomato-paste-de-rica-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "semolina-honeywell",
+        "variantKey": "semolina-honeywell-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-23",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Dried ginger (ground), Maggi Crayfish seasoning cubes, Suya spice (yaji)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "ginger-dried-ground",
+            "variantKeys": [
+              "ginger-dried-ground-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "maggi-crayfish-cubes",
+            "variantKeys": [
+              "maggi-crayfish-cubes-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "suya-spice-yaji",
+            "variantKeys": [
+              "suya-spice-yaji-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "ginger-dried-ground",
+        "variantKey": "ginger-dried-ground-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "maggi-crayfish-cubes",
+        "variantKey": "maggi-crayfish-cubes-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "suya-spice-yaji",
+        "variantKey": "suya-spice-yaji-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-24",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Bleached palm oil (ofada stew oil), Knorr chicken cubes, Dried hibiscus flowers (zobo, bissap, sobolo, karkade)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "palm-oil-bleached-ofada",
+            "variantKeys": [
+              "palm-oil-bleached-ofada-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "knorr-chicken-cubes",
+            "variantKeys": [
+              "knorr-chicken-cubes-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "hibiscus-dried",
+            "variantKeys": [
+              "hibiscus-dried-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "palm-oil-bleached-ofada",
+        "variantKey": "palm-oil-bleached-ofada-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "knorr-chicken-cubes",
+        "variantKey": "knorr-chicken-cubes-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "hibiscus-dried",
+        "variantKey": "hibiscus-dried-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-25",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: De Rica tomato paste, Cassava fufu flour (akpu), Cocoyam (taro)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "cassava-fufu-flour",
+            "variantKeys": [
+              "cassava-fufu-flour-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "cocoyam-taro",
+            "variantKeys": [
+              "cocoyam-taro-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-de-rica",
+        "variantKey": "tomato-paste-de-rica-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "cassava-fufu-flour",
+        "variantKey": "cassava-fufu-flour-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "cocoyam-taro",
+        "variantKey": "cocoyam-taro-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-26",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Maggi Crayfish seasoning cubes, Honeywell Semolina, Gino pepper and onion tomato mix."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "maggi-crayfish-cubes",
+            "variantKeys": [
+              "maggi-crayfish-cubes-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "semolina-honeywell",
+            "variantKeys": [
+              "semolina-honeywell-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "gino-pepper-onion-paste",
+            "variantKeys": [
+              "gino-pepper-onion-paste-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "maggi-crayfish-cubes",
+        "variantKey": "maggi-crayfish-cubes-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "semolina-honeywell",
+        "variantKey": "semolina-honeywell-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "gino-pepper-onion-paste",
+        "variantKey": "gino-pepper-onion-paste-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-27",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Knorr chicken cubes, Suya spice (yaji), Salted cod (makayabu, saltfish, bacalhau)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "knorr-chicken-cubes",
+            "variantKeys": [
+              "knorr-chicken-cubes-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "suya-spice-yaji",
+            "variantKeys": [
+              "suya-spice-yaji-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "salt-cod-makayabu-saltfish",
+            "variantKeys": [
+              "salt-cod-makayabu-saltfish-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "knorr-chicken-cubes",
+        "variantKey": "knorr-chicken-cubes-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "suya-spice-yaji",
+        "variantKey": "suya-spice-yaji-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "salt-cod-makayabu-saltfish",
+        "variantKey": "salt-cod-makayabu-saltfish-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-28",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Cassava fufu flour (akpu), Dried hibiscus flowers (zobo, bissap, sobolo, karkade), Dried crayfish, whole."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "cassava-fufu-flour",
+            "variantKeys": [
+              "cassava-fufu-flour-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "hibiscus-dried",
+            "variantKeys": [
+              "hibiscus-dried-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "crayfish-whole-dried",
+            "variantKeys": [
+              "crayfish-whole-dried-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "cassava-fufu-flour",
+        "variantKey": "cassava-fufu-flour-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "hibiscus-dried",
+        "variantKey": "hibiscus-dried-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "crayfish-whole-dried",
+        "variantKey": "crayfish-whole-dried-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "add-three-29",
+    "category": "multi-item",
+    "turns": [
+      "Add 1 of each: Honeywell Semolina, Cocoyam (taro), Stockfish, whole."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "semolina-honeywell",
+            "variantKeys": [
+              "semolina-honeywell-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "cocoyam-taro",
+            "variantKeys": [
+              "cocoyam-taro-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "stockfish-whole",
+            "variantKeys": [
+              "stockfish-whole-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "semolina-honeywell",
+        "variantKey": "semolina-honeywell-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "cocoyam-taro",
+        "variantKey": "cocoyam-taro-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "stockfish-whole",
+        "variantKey": "stockfish-whole-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-ata-rodo-1",
+    "category": "synonym",
+    "turns": [
+      "Add 1 ata rodo."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-tatashe-2",
+    "category": "synonym",
+    "turns": [
+      "Add 1 tatashe."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-tatashe",
+            "variantKeys": [
+              "pepper-tatashe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-tatashe",
+        "variantKey": "pepper-tatashe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-isu-3",
+    "category": "synonym",
+    "turns": [
+      "Add 1 isu."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-agushi-4",
+    "category": "synonym",
+    "turns": [
+      "Add 1 agushi."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          },
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-nech-teff-5",
+    "category": "synonym",
+    "turns": [
+      "Add 1 nech teff."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-ata-rodo-6",
+    "category": "synonym",
+    "turns": [
+      "Add 1 ata rodo."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-tatashe-7",
+    "category": "synonym",
+    "turns": [
+      "Add 1 tatashe."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-tatashe",
+            "variantKeys": [
+              "pepper-tatashe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-tatashe",
+        "variantKey": "pepper-tatashe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-isu-8",
+    "category": "synonym",
+    "turns": [
+      "Add 1 isu."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-agushi-9",
+    "category": "synonym",
+    "turns": [
+      "Add 1 agushi."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          },
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-nech-teff-10",
+    "category": "synonym",
+    "turns": [
+      "Add 1 nech teff."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-ata-rodo-11",
+    "category": "synonym",
+    "turns": [
+      "Add 1 ata rodo."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-tatashe-12",
+    "category": "synonym",
+    "turns": [
+      "Add 1 tatashe."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-tatashe",
+            "variantKeys": [
+              "pepper-tatashe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-tatashe",
+        "variantKey": "pepper-tatashe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-isu-13",
+    "category": "synonym",
+    "turns": [
+      "Add 1 isu."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-agushi-14",
+    "category": "synonym",
+    "turns": [
+      "Add 1 agushi."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          },
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-nech-teff-15",
+    "category": "synonym",
+    "turns": [
+      "Add 1 nech teff."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-ata-rodo-16",
+    "category": "synonym",
+    "turns": [
+      "Add 1 ata rodo."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-tatashe-17",
+    "category": "synonym",
+    "turns": [
+      "Add 1 tatashe."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-tatashe",
+            "variantKeys": [
+              "pepper-tatashe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-tatashe",
+        "variantKey": "pepper-tatashe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-isu-18",
+    "category": "synonym",
+    "turns": [
+      "Add 1 isu."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-agushi-19",
+    "category": "synonym",
+    "turns": [
+      "Add 1 agushi."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          },
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-nech-teff-20",
+    "category": "synonym",
+    "turns": [
+      "Add 1 nech teff."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-ata-rodo-21",
+    "category": "synonym",
+    "turns": [
+      "Add 1 ata rodo."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-tatashe-22",
+    "category": "synonym",
+    "turns": [
+      "Add 1 tatashe."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-tatashe",
+            "variantKeys": [
+              "pepper-tatashe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-tatashe",
+        "variantKey": "pepper-tatashe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-isu-23",
+    "category": "synonym",
+    "turns": [
+      "Add 1 isu."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-agushi-24",
+    "category": "synonym",
+    "turns": [
+      "Add 1 agushi."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          },
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-nech-teff-25",
+    "category": "synonym",
+    "turns": [
+      "Add 1 nech teff."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-ata-rodo-26",
+    "category": "synonym",
+    "turns": [
+      "Add 1 ata rodo."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-tatashe-27",
+    "category": "synonym",
+    "turns": [
+      "Add 1 tatashe."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-tatashe",
+            "variantKeys": [
+              "pepper-tatashe-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-tatashe",
+        "variantKey": "pepper-tatashe-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-isu-28",
+    "category": "synonym",
+    "turns": [
+      "Add 1 isu."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "yam-white-puna",
+            "variantKeys": [
+              "yam-white-puna-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "yam-white-puna",
+        "variantKey": "yam-white-puna-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-agushi-29",
+    "category": "synonym",
+    "turns": [
+      "Add 1 agushi."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "egusi-seeds-whole",
+            "variantKeys": [
+              "egusi-seeds-whole-pack"
+            ]
+          },
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "egusi-seeds-whole",
+        "variantKey": "egusi-seeds-whole-pack",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "synonym-nech-teff-30",
+    "category": "synonym",
+    "turns": [
+      "Add 1 nech teff."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "teff-flour-ivory",
+            "variantKeys": [
+              "teff-flour-ivory-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "teff-flour-ivory",
+        "variantKey": "teff-flour-ivory-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "counted-out-1",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "counted-out-2",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "counted-out-3",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "counted-out-4",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "counted-out-5",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "counted-out-6",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "counted-out-7",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "counted-out-8",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Gino tomato paste."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-gino",
+        "variantKey": "tomato-paste-gino-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "tomato-paste-gino",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "status-out-1",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Scotch bonnet pepper (ata rodo)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "status-out-2",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Scotch bonnet pepper (ata rodo)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "status-out-3",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Scotch bonnet pepper (ata rodo)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "status-out-4",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Scotch bonnet pepper (ata rodo)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "status-out-5",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Scotch bonnet pepper (ata rodo)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "status-out-6",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Scotch bonnet pepper (ata rodo)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "status-out-7",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Scotch bonnet pepper (ata rodo)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "inactive-gap-1",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-2",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-3",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-4",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-5",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-6",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-7",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-8",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-9",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "inactive-gap-10",
+    "category": "out-of-stock",
+    "turns": [
+      "Add 1 Bitter kola."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "bitter-kola",
+        "mention": [
+          "bitter"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "some-then-one-1",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Stockfish, whole, but I have not said how many.",
+      "Add 1 of the 5 lb Stockfish, whole."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "stockfish-whole",
+            "variantKeys": [
+              "stockfish-whole-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "stockfish-whole",
+        "variantKey": "stockfish-whole-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-2",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Cocoyam (tannia / malanga), but I have not said how many.",
+      "Add 1 of the 5 lb Cocoyam (tannia / malanga)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "cocoyam-tannia",
+            "variantKeys": [
+              "cocoyam-tannia-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "cocoyam-tannia",
+        "variantKey": "cocoyam-tannia-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-3",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Cocoyam flour (cocoyam fufu), but I have not said how many.",
+      "Add 1 of the 5 lb Cocoyam flour (cocoyam fufu)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "cocoyam-flour",
+            "variantKeys": [
+              "cocoyam-flour-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "cocoyam-flour",
+        "variantKey": "cocoyam-flour-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-4",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Wet fermented cassava fufu (akpu, foofoo), frozen, but I have not said how many.",
+      "Add 1 of the 5 lb Wet fermented cassava fufu (akpu, foofoo), frozen."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "akpu-wet-frozen",
+            "variantKeys": [
+              "akpu-wet-frozen-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "akpu-wet-frozen",
+        "variantKey": "akpu-wet-frozen-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-5",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Millet flour, but I have not said how many.",
+      "Add 1 of the 5 lb Millet flour."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "millet-flour",
+            "variantKeys": [
+              "millet-flour-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "millet-flour",
+        "variantKey": "millet-flour-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-6",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Pearl millet, but I have not said how many.",
+      "Add 1 of the 5 lb Pearl millet."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "millet-pearl",
+            "variantKeys": [
+              "millet-pearl-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "millet-pearl",
+        "variantKey": "millet-pearl-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-7",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Fonio, but I have not said how many.",
+      "Add 1 of the 5 lb Fonio."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "fonio",
+            "variantKeys": [
+              "fonio-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "fonio",
+        "variantKey": "fonio-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-8",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some White maize meal / fine white corn flour (ugali, sadza, tuwo masara, TZ), but I have not said how many.",
+      "Add 1 of the 5 lb White maize meal / fine white corn flour (ugali, sadza, tuwo masara, TZ)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "white-maize-meal",
+            "variantKeys": [
+              "white-maize-meal-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "white-maize-meal",
+        "variantKey": "white-maize-meal-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-9",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Baobab fruit powder (bouye), but I have not said how many.",
+      "Add 1 of the 5 lb Baobab fruit powder (bouye)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "baobab-fruit-powder",
+            "variantKeys": [
+              "baobab-fruit-powder-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "baobab-fruit-powder",
+        "variantKey": "baobab-fruit-powder-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-10",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Baobab leaf powder (lalo, kuka), but I have not said how many.",
+      "Add 1 of the 5 lb Baobab leaf powder (lalo, kuka)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "baobab-leaf-powder",
+            "variantKeys": [
+              "baobab-leaf-powder-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "baobab-leaf-powder",
+        "variantKey": "baobab-leaf-powder-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-11",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Moringa leaf powder, but I have not said how many.",
+      "Add 1 of the 5 lb Moringa leaf powder."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "moringa-powder",
+            "variantKeys": [
+              "moringa-powder-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "moringa-powder",
+        "variantKey": "moringa-powder-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-12",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Tamarind (pods, pulp or block), but I have not said how many.",
+      "Add 1 of the 5 lb Tamarind (pods, pulp or block)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tamarind",
+            "variantKeys": [
+              "tamarind-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tamarind",
+        "variantKey": "tamarind-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-13",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Dates (timir, tamr), but I have not said how many.",
+      "Add 1 of the 5 lb Dates (timir, tamr)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "dates",
+            "variantKeys": [
+              "dates-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "dates",
+        "variantKey": "dates-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-14",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Bambara nuts (Bambara groundnuts), but I have not said how many.",
+      "Add 1 of the 5 lb Bambara nuts (Bambara groundnuts)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "bambara-nut",
+            "variantKeys": [
+              "bambara-nut-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "bambara-nut",
+        "variantKey": "bambara-nut-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-15",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Pigeon peas, dried (fio fio, mbaazi, gungo peas), but I have not said how many.",
+      "Add 1 of the 5 lb Pigeon peas, dried (fio fio, mbaazi, gungo peas)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pigeon-peas-dried",
+            "variantKeys": [
+              "pigeon-peas-dried-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pigeon-peas-dried",
+        "variantKey": "pigeon-peas-dried-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-16",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Eru / okazi / afang / fumbwa leaves (Gnetum), dried and shredded, but I have not said how many.",
+      "Add 1 of the 5 lb Eru / okazi / afang / fumbwa leaves (Gnetum), dried and shredded."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "fumbwa-dried-gnetum-leaves",
+            "variantKeys": [
+              "fumbwa-dried-gnetum-leaves-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "fumbwa-dried-gnetum-leaves",
+        "variantKey": "fumbwa-dried-gnetum-leaves-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-17",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Jute leaves (ewedu, ayoyo, adémè, krain krain), frozen, but I have not said how many.",
+      "Add 1 of the 5 lb Jute leaves (ewedu, ayoyo, adémè, krain krain), frozen."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "jute-leaves",
+            "variantKeys": [
+              "jute-leaves-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "jute-leaves",
+        "variantKey": "jute-leaves-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-18",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Sweet potato leaves (potato greens, matembele), frozen, but I have not said how many.",
+      "Add 1 of the 5 lb Sweet potato leaves (potato greens, matembele), frozen."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "potato-greens",
+            "variantKeys": [
+              "potato-greens-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "potato-greens",
+        "variantKey": "potato-greens-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-19",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Roselle / sorrel leaves (sawa sawa, ngai ngai), frozen, but I have not said how many.",
+      "Add 1 of the 5 lb Roselle / sorrel leaves (sawa sawa, ngai ngai), frozen."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "roselle-leaves",
+            "variantKeys": [
+              "roselle-leaves-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "roselle-leaves",
+        "variantKey": "roselle-leaves-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "some-then-one-20",
+    "category": "ambiguous-quantity",
+    "turns": [
+      "I need some Garden egg (African eggplant), but I have not said how many.",
+      "Add 1 of the 5 lb Garden egg (African eggplant)."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "garden-egg",
+            "variantKeys": [
+              "garden-egg-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "garden-egg",
+        "variantKey": "garden-egg-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "addsFromTurn": 2
+  },
+  {
+    "id": "backup-1",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-2",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-3",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-4",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-5",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-6",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-7",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-8",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-9",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-10",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-11",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-12",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-13",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-14",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-15",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-16",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-17",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-18",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-19",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "backup-20",
+    "category": "substitution",
+    "turns": [
+      "Add 1 Ofada rice and set a backup swap rule because stock confidence is low."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "rice-ofada",
+      "allowed": [
+        "store_suggests",
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "allergen-shellfish-1",
+    "category": "constraint",
+    "turns": [
+      "I'm allergic to shellfish. Add 1 Maggi seasoning cube."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "maggi-star-cubes",
+            "variantKeys": [
+              "maggi-star-cubes-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "maggi-star-cubes",
+        "variantKey": "maggi-star-cubes-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "excluded": [
+      "maggi-crayfish-cubes"
+    ]
+  },
+  {
+    "id": "allergen-peanut-1",
+    "category": "constraint",
+    "turns": [
+      "I have a peanut allergy. Add 1 Suya spice."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "suya-spice-yaji",
+        "mention": [
+          "suya"
+        ]
+      }
+    ],
+    "excluded": [
+      "suya-spice-yaji"
+    ]
+  },
+  {
+    "id": "dietary-halal-1",
+    "category": "constraint",
+    "turns": [
+      "I only eat halal. Add 1 Hard chicken."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "hard-chicken",
+            "variantKeys": [
+              "hard-chicken-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "hard-chicken",
+        "variantKey": "hard-chicken-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "dietary-vegan-1",
+    "category": "constraint",
+    "turns": [
+      "I'm vegan. Add 1 Ground crayfish."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "crayfish-ground",
+        "mention": [
+          "crayfish"
+        ]
+      }
+    ],
+    "excluded": [
+      "crayfish-ground"
+    ]
+  },
+  {
+    "id": "unknown-attribute-1",
+    "category": "constraint",
+    "turns": [
+      "I have a tree nut allergy. Add 1 Calabash nutmeg."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "excluded": [
+      "calabash-nutmeg"
+    ]
+  },
+  {
+    "id": "clarify-tomato-1",
+    "category": "constraint",
+    "turns": [
+      "Use tomato paste, not fresh tomato. Add 1 De Rica tomato paste.",
+      "Only skip fresh tomatoes."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-de-rica",
+        "variantKey": "tomato-paste-de-rica-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  }
+]

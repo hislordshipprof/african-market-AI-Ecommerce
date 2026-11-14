@@ -1,0 +1,85 @@
+/*
+ * Story surfaces follow the visitor's color scheme on their own, including on the
+ * platform admin host, which has no store theme. On a store host the --store-* values
+ * already hold the store's light or dark theme, so they win over these fallbacks.
+ */
+.story-surface {
+  color: var(--foreground);
+  /* WCAG 1.4.11: a field's edge needs 3:1 against the card. The line token is decorative. */
+  --input: color-mix(in oklab, var(--foreground) 48%, var(--card));
+}
+
+/* The stock ring is a half-transparent tint, under 3:1 on the card. */
+.story-surface :is(input, button, a, summary):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.story-surface [aria-invalid="true"]:focus-visible {
+  outline-color: var(--destructive);
+}
+
+.story-surface ::selection {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* The tall crop keeps the hands in frame on a phone. The wide crop's focus comes from the scene. */
+.story-surface__poster {
+  object-position: 85% 50%;
+}
+
+@media (min-width: 768px) {
+  .story-surface__poster {
+    object-position: var(--story-focus-wide);
+  }
+}
+
+.story-surface__scrim {
+  background:
+    /* Quiets the brightest cloth, above the form. */
+    linear-gradient(to bottom left, rgb(8 14 10 / 0.55), rgb(8 14 10 / 0) 34%),
+    linear-gradient(
+    to top right,
+    rgb(8 14 10 / 0.9),
+    rgb(8 14 10 / 0.68) 24%,
+    rgb(8 14 10 / 0) 54%
+  );
+}
+
+.story-surface__dusk {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* So overscroll and the browser's own scrollbars don't flash light around the surface. */
+  html:has(.story-surface),
+  body:has(.story-surface) {
+    color-scheme: dark;
+    background-color: var(--store-bg, #0F1712);
+  }
+
+  .story-surface {
+    color-scheme: dark;
+    --background: var(--store-bg, #0F1712);
+    --foreground: var(--store-ink, #EEF2EC);
+    --card: var(--store-surface, #16211A);
+    --card-foreground: var(--store-ink, #EEF2EC);
+    --primary: var(--store-primary, #6CC08F);
+    --primary-foreground: var(--store-on-primary, #0B0B0B);
+    --secondary: var(--store-soft, #1B2E23);
+    --secondary-foreground: var(--store-ink, #EEF2EC);
+    --muted: var(--store-raised, #1F2C24);
+    --muted-foreground: var(--store-muted, #A3B1A7);
+    --border: var(--store-line, #2A3A30);
+    --ring: var(--store-primary, #6CC08F);
+    --destructive: var(--store-deal, #F0707E);
+  }
+
+  /* Multiply keeps the photo's color and contrast. A flat black overlay turns it to mud. */
+  .story-surface__dusk {
+    display: block;
+    background: #94897F;
+    mix-blend-mode: multiply;
+  }
+}

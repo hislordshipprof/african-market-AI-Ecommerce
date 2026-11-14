@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Ship PR"
+  short_description: "Commit, push, open a PR, merge on green CI"
+policy:
+  allow_implicit_invocation: false

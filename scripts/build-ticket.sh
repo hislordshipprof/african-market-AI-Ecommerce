@@ -1,8 +1,122 @@
 #!/usr/bin/env bash
 # Stage A (build) and Fix rounds. See docs/agents/orchestration.md.
+# Round-cap helpers live above the orchestrator so tests can source this file.
+# ticket_review_count matches review-ticket.sh: review-<n>-*.json, excluding *.second.json.
+
+# ticket_review_count <logs-dir> <issue>: review logs for one ticket.
+# Same count as review-ticket.sh (PRIOR): review-<n>-*.json, excluding *.second.json.
+ticket_review_count() {
+  local dir="$1" n="$2" count
+  count=$(ls "$dir"/review-"$n"-*.json 2>/dev/null | grep -vc '\.second\.json$' || true)
+  case "$count" in
+    ''|*[!0-9]*) count=0 ;;
+  esac
+  printf '%s\n' "$count"
+}
+
+# ticket_resume_allowed <count>: no once 3 review rounds already exist. No override.
+ticket_resume_allowed() {
+  local count="$1"
+  if [ "$count" -ge 3 ]; then printf '%s\n' no; else printf '%s\n' yes; fi
+}
+
+# ticket_round_is_last <mode> <prior>: yes when this review must let local-ci finish.
+# --resume never auto-fixes. A review that already has a predecessor is the round that stops.
+ticket_round_is_last() {
+  local mode="$1" prior="$2"
+  if [ "$mode" = "--resume" ] || [ "$prior" -ge 1 ]; then
+    printf '%s\n' yes
+  else
+    printf '%s\n' no
+  fi
+}
+
+# ticket_round_after_review <mode> <prior> <count>: autofix, stop, or unrecorded.
+# Automatic fix only after the first recorded review of a non-resume run.
+ticket_round_after_review() {
+  local mode="$1" prior="$2" count="$3"
+  if [ "$count" -le "$prior" ]; then
+    printf '%s\n' unrecorded
+    return 0
+  fi
+  if [ "$mode" = "--resume" ] || [ "$count" -ge 2 ]; then
+    printf '%s\n' stop
+    return 0
+  fi
+  printf '%s\n' autofix
+}
+
+# Builder time. Fix rounds on #70 and #142 ran 8 and 5 hours because nothing stopped them. Two limits now apply:
+# one session is capped (BUILD_TIMEOUT_MIN, default 90), and all of a ticket's builder sessions together have a
+# budget (LANE_BUDGET_MIN, default 300), so --continue cannot restart the clock.
+
+# _log_stamp_epoch <log-file>: the start time in a log's name (…-YYYYmmdd-HHMMSS.json), as epoch seconds.
+_log_stamp_epoch() {
+  local s
+  s=$(basename "$1" | sed -nE 's/.*-([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2})\.json$/\1-\2-\3 \4:\5:\6/p')
+  [ -n "$s" ] && date -d "$s" +%s 2>/dev/null
+}
+
+# ticket_builder_minutes <logs-dir> <issue>: minutes of builder sessions so far (build, fix and continue logs,
+# ticket-<n>-*.json). A session runs from the time in its log's name to the log's last write.
+ticket_builder_minutes() {
+  local dir="$1" n="$2" f start end total=0
+  for f in "$dir"/ticket-"$n"-*.json; do
+    [ -f "$f" ] || continue
+    start=$(_log_stamp_epoch "$f") || continue
+    end=$(stat -c %Y "$f" 2>/dev/null) || continue
+    [ "$end" -gt "$start" ] && total=$(( total + end - start ))
+  done
+  echo $(( total / 60 ))
+}
+
+# ticket_session_cap <session-cap-min> <budget-min> <used-min>: minutes the next session may run; 0 = none left.
+ticket_session_cap() {
+  local cap="$1" left=$(( $2 - $3 ))
+  [ "$left" -lt "$cap" ] && cap="$left"
+  [ "$cap" -gt 0 ] || cap=0
+  echo "$cap"
+}
+
+# ticket_lane_age_min <logs-dir> <issue>: minutes since the lane started: its oldest plan log, or its oldest
+# builder log when it was never planned here. Measured from the start, never from the current fix round.
+ticket_lane_age_min() {
+  local dir="$1" n="$2" f t first=""
+  for f in "$dir"/plan-"$n"-*.json "$dir"/ticket-"$n"-*.json; do
+    [ -f "$f" ] || continue
+    t=$(_log_stamp_epoch "$f") || continue
+    if [ -z "$first" ] || [ "$t" -lt "$first" ]; then first="$t"; fi
+  done
+  [ -n "$first" ] || { echo 0; return 0; }
+  echo $(( ( $(date +%s) - first ) / 60 ))
+}
+
+# run_session <agent_run arguments...>: one builder session, stopped at its cap. Returns 124 when it was
+# stopped, 125 when the ticket had no builder time left to start it. Reads ROOT and N; needs run_capped and agent_run.
+run_session() {
+  local used cap
+  used=$(ticket_builder_minutes "$ROOT/.builder/logs" "$N")
+  cap=$(ticket_session_cap "${BUILD_TIMEOUT_MIN:-90}" "${LANE_BUDGET_MIN:-300}" "$used")
+  if [ "$cap" = 0 ]; then
+    echo "Ticket #$N has used $used of its ${LANE_BUDGET_MIN:-300} builder minutes. No further session. Diagnose the whole behaviour first; the owner can raise LANE_BUDGET_MIN for one run."
+    return 125
+  fi
+  echo "Builder session for #$N: capped at $cap min ($used of ${LANE_BUDGET_MIN:-300} builder minutes used; lane age $(ticket_lane_age_min "$ROOT/.builder/logs" "$N") min)."
+  local rc=0
+  WATCH_WHAT="builder session" run_capped "$cap" agent_run "$@" || rc=$?
+  # The engine writes its log only on exit; stamp the real end so a killed session is charged.
+  touch "$2"
+  [ "$rc" != 124 ] || echo "Builder session for #$N was stopped at its $cap-minute cap. No review or fix round follows. Read its log before any --continue."
+  return "$rc"
+}
+
+# Sourced by scripts/ticket-rounds.test.sh. Executing the file runs the orchestrator below.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
 # Usage:
 #   scripts/build-ticket.sh <issue>                      # build with /supermatt:implement
-#   scripts/build-ticket.sh <issue> --resume "<findings>"  # fix round in the same session
+#   scripts/build-ticket.sh <issue> --resume "<findings>"  # coordinator's round 3; refused at 3 review logs
 #   scripts/build-ticket.sh <issue> --continue            # resume a killed run
 #   NO_KEYS=1 scripts/build-ticket.sh <issue>             # build against fakes; real-key testing later, PR stays unmerged
 # Writes: .builder/logs/ticket-<n>-<time>.json, .builder/session-<n>.txt, .builder/report-<n>.md
@@ -15,9 +129,35 @@ FINDINGS="${3:-}"
 
 cd "$ROOT"
 mkdir -p .builder/logs
+# Every worktree shares this setting: .githooks/commit-msg strips AI co-author trailers from lane commits.
+git config core.hooksPath .githooks
+. "$ROOT/scripts/agent-cli.sh"
+. "$ROOT/scripts/review-watch.sh"
+
+# The round cap covers every mode. It used to cover --resume only, so a plain rerun or --continue could keep a
+# builder working on a ticket that had already used its 3 rounds.
+prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
+if [ "$(ticket_resume_allowed "$prior")" != yes ]; then
+  echo "Refusing to run #$N ($MODE): $prior review rounds already exist (review-$N-*.json, excluding .second.json). A ticket stops at 3 rounds. There is no override."
+  exit 1
+fi
+
+# Claude keeps the original file name; other engines get their own (their session ids differ).
 SESSION_FILE="$ROOT/.builder/session-$N.txt"
+[ "$AGENT_ENGINE" = "claude" ] || SESSION_FILE="$ROOT/.builder/session-$N.$AGENT_ENGINE.txt"
 REPORT="$ROOT/.builder/report-$N.md"
 LOG="$ROOT/.builder/logs/ticket-$N-$(date +%Y%m%d-%H%M%S).json"
+
+# True when the planner (plan-ticket.sh) has posted its brief: a comment whose heading starts with "Agent brief".
+# The builder's own fast-path brief is headed "Fast-path brief" and never counts. The comments are captured first
+# so that grep stopping early cannot SIGPIPE gh under pipefail.
+has_planner_brief() {
+  local bodies lines
+  bodies=$(gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body') || return 1
+  lines=$(grep -iE '^[#* ]*agent brief' <<<"$bodies" || true)
+  lines=$(grep -vi 'fast.path' <<<"$lines" || true)
+  [ -n "$lines" ]
+}
 
 if [ "$MODE" = "build" ]; then
   # Preflight 1: open and unblocked.
@@ -26,13 +166,18 @@ if [ "$MODE" = "build" ]; then
   blockers=$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[] | select(.state=="open") | .number] | join(",")')
   [ -z "$blockers" ] || { echo "Issue #$N is blocked by open issues: $blockers"; exit 1; }
 
-  # Preflight 2: planner brief exists (stage T).
-  if ! gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body' | grep -qi "agent brief"; then
-    echo "Issue #$N has no agent brief yet. Run scripts/plan-ticket.sh $N first."; exit 3
+  # Preflight 2: planner brief exists (stage T). FAST=1 skips it (the builder posts a 'Fast-path brief',
+  # which never counts as a planner brief), except for RISK (money/auth) tickets.
+  need=$(node "$ROOT/scripts/lane-env.mjs" keys "$N" "$ROOT/scripts/ticket-env.txt")
+  if ! has_planner_brief; then
+    if [ "${FAST:-0}" != "1" ]; then
+      echo "Issue #$N has no agent brief yet. Run scripts/plan-ticket.sh $N first."; exit 3
+    elif [ "${RISK:-}" = "1" ] || { [ -z "${RISK:-}" ] && printf '%s\n' "$need" | grep -qE 'STRIPE|BETTER_AUTH'; }; then
+      echo "Issue #$N is a RISK ticket (money/auth): no fast path. Run scripts/plan-ticket.sh $N first."; exit 3
+    fi
   fi
 
   # Preflight 3: required keys present in .env.local (values never printed).
-  need=$(awk -v n="$N" '$1==n {for (i=2;i<=NF;i++) print $i}' scripts/ticket-env.txt)
   missing=()
   for k in $need; do grep -Eq "^$k=.+" .env.local 2>/dev/null || missing+=("$k"); done
   if [ ${#missing[@]} -gt 0 ] && [ "${NO_KEYS:-}" != "1" ]; then
@@ -47,37 +192,217 @@ BRANCH="ticket-$N-$slug"
 WT="${WT:-$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N}"
 git fetch -q origin main
 [ -d "$WT" ] || git worktree add -q -B "$BRANCH" "$WT" origin/main
-cp .env.local "$WT/.env.local"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lane-env.sh"
+prepare_lane_env "$N" "$ROOT/.env.local" "$WT/.env.local" "$ROOT/scripts/ticket-env.txt"
 cd "$WT"
 
-RULES="Run headless: never ask the user. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Commit and push early so a killed run loses little. Keep $REPORT updated with: the commit SHA you checked, QA and code-review verdict lines, every finding code with how it ended, and the PR URL."
+# Database: each lane gets its own fresh database on the private local Postgres (scripts/local-pg.sh), so builds
+# use no Neon at all and run with CI's roles (row-level security enforced). Recreated every run, like CI's test_db.
+# LANE_DB=neon keeps the shared dev Neon branch from .env.local instead.
+if [ "${LANE_DB:-local}" != "neon" ]; then
+  [ -d node_modules ] || pnpm install --frozen-lockfile >/dev/null
+  # A missing worktree script used to start bash only for it to fail, then start bash again.
+  if [ -f "$WT/scripts/lane-db.sh" ]; then
+    bash "$WT/scripts/lane-db.sh" "t$N" "$WT/.env.local" 2>/dev/null || bash "$ROOT/scripts/lane-db.sh" "t$N" "$WT/.env.local"
+  else
+    bash "$ROOT/scripts/lane-db.sh" "t$N" "$WT/.env.local"
+  fi
+fi
+DB_RULE="This lane's database is a private local Postgres database (lane_t$N on localhost:5434, CI's roles, already migrated and seeded); .env.local points at it. Never point it at Neon. To reset it, run scripts/lane-db.sh t$N .env.local (or bash $ROOT/scripts/lane-db.sh if this branch lacks it)."
+
+# Risk: money and auth tickets (Stripe or Better Auth keys in ticket-env.txt, or RISK=1) always build at full
+# tier and also get the second independent review (owner decision 2026-11-03).
+need_keys=$(node "$ROOT/scripts/lane-env.mjs" keys "$N" "$ROOT/scripts/ticket-env.txt")
+if [ -z "${RISK:-}" ]; then
+  if printf '%s\n' "$need_keys" | grep -qE 'STRIPE|BETTER_AUTH'; then RISK=1; else RISK=0; fi
+fi
+export RISK
+
+# Tier: full (default) = most capable model at high effort. light = faster model at medium effort, only for
+# tests, docs, CSS and copy. Never light for money, auth, RLS/data isolation, migrations, order state or
+# external providers.
+TIER="${TIER:-full}"
+[ "$RISK" = "1" ] && TIER=full
+
+# Fast path (owner-approved 2026-11-05): small, low-risk tickets skip the separate plan and brief review, and
+# QA is proportionate. Never for RISK tickets: those need the planner and brief review first.
+FAST="${FAST:-0}"
+# A RISK ticket never runs fast. (With no planner brief the build preflight has already refused it.)
+[ "$RISK" = "1" ] && FAST=0
+# Inside the worktree, so a sandboxed engine can write it too (.builder/ is git-ignored).
+REPLAN="$WT/.builder/replan-$N"
+mkdir -p "$WT/.builder"; rm -f "$REPLAN"
+FAST_RULE=""
+[ "$FAST" = "1" ] && FAST_RULE="FAST PATH. This overrides the rules above where they differ. The coordinator judged this ticket small and low-risk, so there is no planner brief and no Brief review. (1) Before writing code, read the issue, check its claims against origin/main, and, unless the issue already has one, post one short issue comment whose first line is '## Fast-path brief' (never call it an agent brief): scope and exclusions, each acceptance criterion as a scenario, the edge cases, and the tests you will write. Where the rules above mention the agent brief, its 'Brief review' or its Review checklist, use this Fast-path brief. The independent reviewer reviews against it. (2) QA is proportionate, replacing the qa pass in /supermatt:implement and docs/agents/builder.md: prove the acceptance criteria with as few automated tests as do the job (docs/agents/builder.md, 'Which tests to write'); no separate qa pass, no mutation runs, no manual scenario walkthroughs. Only if the ticket changes something a user sees in the running app, check that one behaviour there (and the UI design pass still applies). Write the QA verdict line as 'QA: proportionate (fast path), <n> criteria covered by tests'. (3) If the work turns out to touch money, auth, RLS/data isolation, migrations, order state or an external provider: stop, post that on the issue, write the reason to $REPLAN, and end without committing or pushing. The coordinator replans it in full."
+LANE_PORT="${E2E_PORT:-3000}"
+# Cap local Playwright browsers per lane (several lanes share this machine).
+export E2E_WORKERS="${E2E_WORKERS:-4}"
+if [ "$TIER" = "light" ]; then
+  MODEL_FLAGS=(--model claude-sonnet-5-5 --effort medium)
+else
+  MODEL_FLAGS=(--effort high)
+fi
+REVIEW_RULE="Do NOT run the code-review step on your own work: no agent reviews its own work. When implement reaches its review step, stop there. After you push, an independent reviewer in a separate fresh session reviews the PR (and a second reviewer too for money, auth and external-provider tickets); its findings come back to you as a fix round. Still run the QA pass and every check in the Definition of done yourself."
+PORT_RULE="This lane's e2e port is $LANE_PORT: run Playwright with E2E_PORT=$LANE_PORT and never use another lane's port."
+
+RULES="Run headless: never ask the user. Never add a Co-Authored-By trailer for yourself or any AI tool, a Claude-Session link or a Generated-with line to a commit or a PR. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Handle every edge case in the agent brief and its 'Brief review' comment in code. Write the brief's Required tests and no others beyond what docs/agents/builder.md 'Which tests to write' allows. Meet the brief's Review checklist before you push. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). Run only the affected e2e specs and unit tests, plus pnpm typecheck and pnpm lint before each push. Never run scripts/ci-local.sh or the whole test suite yourself: after you push, the pipeline runs local-ci once (machine-wide queue, automatic flake retry) in parallel with the independent review, and sends any real failure back to you as a finding. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE ${DB_RULE:-} Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
+
+ROLE=build; [ "$TIER" = "light" ] && ROLE=light
+save_session() {
+  local sid; sid=$(agent_session_id "$LOG"); [ -n "$sid" ] && printf '%s' "$sid" > "$SESSION_FILE"; return 0
+}
+# A fix round on an engine with no saved session starts fresh, told to rebuild context from the PR.
+FRESH_CONTEXT="You are taking over issue #$N in this worktree (branch $BRANCH). Before anything else, read the issue and its comments, the open PR for this branch and its comments, and git log origin/main..HEAD, so you know what was built and decided."
+
+# Fix round in the builder's own session (it knows the code), on findings from someone else.
+run_fix() {
+  local findings="$1" sid
+  sid=$(cat "$SESSION_FILE" 2>/dev/null || true)
+  LOG="$ROOT/.builder/logs/ticket-$N-fix-$(date +%Y%m%d-%H%M%S).json"
+  local prompt="/supermatt:fix-findings $findings
+These findings come from an independent reviewer or from local-ci, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone.
+ANALYSE BEFORE YOU FIX (owner rule 2026-11-05: no blind fix-and-refix rounds). For every reproduced code finding (not a pure CI or infrastructure failure), before changing code:
+(1) Model the whole behaviour the finding lives in: the state machine or data flow, and every actor, event, retry and concurrent path that touches it, not only the reported sequence.
+(2) Research how it really works: the provider's official docs (cite the URLs), how established products handle the same case, and the repo's spec, ADRs and GLOSSARY.
+(3) Write the scenario matrix: the reported case plus every sibling case your model implies (failures, retries, duplicates, out-of-order events, concurrency, partial and full amounts), each with the expected outcome and the invariant it protects.
+(4) Fix the class of bug so every row holds. Add one regression test for the bug. Add more only for rows on money, auth, per-store isolation or data loss.
+Post the model, the sources and the matrix as one comment on issue #$N before you push, and put the matrix in $REPORT. A fix that only patches the reported sequence will be sent back.
+Fix test-first. In a fix round run only the unit, integration and e2e specs affected by these findings, plus typecheck and lint; never run the whole suite or scripts/ci-local.sh. Then commit and push to the same PR; the pipeline re-runs local-ci. Do not review your own fix; the independent reviewer re-reviews it. $RULES${FAST_RULE:+
+$FAST_RULE}"
+  [ -n "$sid" ] || prompt="$FRESH_CONTEXT
+$prompt"
+  run_session "$ROLE" "$LOG" "$prompt" "$sid" || status=$?
+  save_session
+}
 
 case "$MODE" in
   build)
     PROMPT="/supermatt:implement #$N
-Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build && pnpm start on http://localhost:3000 using .env.local.
+Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build && pnpm start on http://localhost:$LANE_PORT using .env.local.
+If this ticket touches UI, the design pass in docs/agents/builder.md is part of done: the report must include the impeccable critique score and screenshots at 390px and 1440px (light and dark), or the coordinator will reject the PR.
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}
-$RULES"
-    claude -p "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+$RULES${FAST_RULE:+
+$FAST_RULE}"
+    run_session "$ROLE" "$LOG" "$PROMPT" || status=$?
     ;;
   --resume)
     [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
-    SID=$(cat "$SESSION_FILE")
-    PROMPT="/supermatt:fix-findings $FINDINGS
-Fix test-first, re-run affected QA, review only the fix diff, commit, push to the same PR. $RULES"
-    claude -p --resume "$SID" "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    run_fix "$FINDINGS"
     ;;
   --continue)
-    SID=$(cat "$SESSION_FILE")
-    claude -p --resume "$SID" "Continue where you stopped. $RULES" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    SID=$(cat "$SESSION_FILE" 2>/dev/null || true)
+    if [ -n "$SID" ]; then run_session "$ROLE" "$LOG" "Continue where you stopped. $RULES${FAST_RULE:+ $FAST_RULE}" "$SID" || status=$?
+    else run_session "$ROLE" "$LOG" "$FRESH_CONTEXT Then continue the work to done. $RULES${FAST_RULE:+ $FAST_RULE}" || status=$?; fi
     ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac
 
 # Keep the session id for --resume / --continue.
-node -e 'const fs=require("fs");try{const t=fs.readFileSync(process.argv[1],"utf8");const j=JSON.parse(t.slice(t.indexOf("{")));if(j.session_id)fs.writeFileSync(process.argv[2],j.session_id)}catch(e){}' "$LOG" "$SESSION_FILE"
+save_session
+
+# Fast path stopped for a replan, or nothing was built: never fall into the review/CI loop (it would review an
+# empty branch, run local-ci on main and send a fix round that pushes the out-of-scope work).
+if [ "$FAST" = "1" ] && [ -z "${status:-}" ]; then
+  if [ -f "$REPLAN" ] || [ "$(git -C "$WT" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)" = "0" ]; then
+    echo "Fast path stopped: replan required for #$N. $(cat "$REPLAN" 2>/dev/null || echo 'No commits on the branch.')"
+    exit 4
+  fi
+fi
+
+# Independent review loop: a fresh session reviews the branch while local-ci runs on the same pushed HEAD
+# (in parallel: the builder never runs the full suite). One automatic fix follows the first blocking review.
+# After the ticket has 2 review logs, or after --resume's review, stop before run_fix. The count is the
+# ticket's review logs across runs, not this process's loop index. SKIP_REVIEW=1 skips the loop.
+CI_LOCAL="${CI_LOCAL:-$ROOT/scripts/ci-local.sh}"
+if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
+  cd "$ROOT"
+  while true; do
+    prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
+    if [ "$prior" -ge 3 ]; then
+      echo "Ticket #$N already has $prior review rounds (cap is 3). No further review or automatic fix. The coordinator decides."
+      break
+    fi
+    last=$(ticket_round_is_last "$MODE" "$prior")
+    round=$((prior + 1))
+    CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
+    # Own checkout, e2e port and database, so it never collides with the reviewer working in $WT on the lane's
+    # port and database. One runner checkout serves every lane: the machine-wide lock runs one suite at a time.
+    (cd "$WT" && E2E_PORT="$((LANE_PORT + 50))" CI_DB=ci CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" \
+      bash "$CI_LOCAL" > "$CI_LOG" 2>&1) &
+    ci_pid=$!
+    REVIEW_TICKET="${REVIEW_TICKET:-$ROOT/scripts/review-ticket.sh}"
+    verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
+    echo "Independent review $round: $verdict"
+    count=$(ticket_review_count "$ROOT/.builder/logs" "$N")
+    # A blocked review means this commit will not merge, so a run still queued for the machine-wide lock only
+    # makes every other lane wait longer: cancel it. A run that already holds the lock finishes, because its
+    # failures go into this fix round.
+    # The last round is never cancelled: the coordinator may accept its findings, and then needs the CI result.
+    if [ "$last" != yes ] && [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then
+      taskkill //F //T //PID "$(cat "/proc/$ci_pid/winpid" 2>/dev/null)" >/dev/null 2>&1 || kill "$ci_pid" 2>/dev/null || true
+      wait "$ci_pid" 2>/dev/null || true
+      gh api "repos/hislordshipprof/african-market-AI-Ecommerce/statuses/$(git -C "$WT" rev-parse HEAD)" -f state=error \
+        -f context=local-ci -f description="cancelled while queued: the review blocked this commit" >/dev/null 2>&1 || true
+      echo "cancelled while queued: the review blocked this commit" >> "$CI_LOG"
+      ci=skipped
+    elif wait "$ci_pid"; then ci=pass; else ci=fail; fi
+    echo "local-ci $round: $ci ($(tail -1 "$CI_LOG"))"
+    # A newer push stopped this run, so neither the review nor CI describes the branch now. The coordinator pushed
+    # it (builders are idle here) and decides what runs next. Grep, because the stop can come as a kill (exit 137).
+    if grep -q "local-ci SUPERSEDED" "$CI_LOG"; then
+      echo "A newer push superseded this run of #$N; the coordinator decides. See $CI_LOG"; break
+    fi
+    [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = pass ] && break
+    # The review passed and CI never reached the code (uncommitted or unpushed work, database or checkout setup).
+    # There is nothing for a builder to fix, so no fix round and no second review are spent on it.
+    if [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = fail ] && grep -q "local-ci SETUP" "$CI_LOG"; then
+      echo "Review passed for #$N but local-ci failed in setup, not in the code. No fix round. Fix the cause, then rerun scripts/ci-local.sh in the worktree. See $CI_LOG"
+      break
+    fi
+    action=$(ticket_round_after_review "$MODE" "$prior" "$count")
+    if [ "$action" != autofix ]; then
+      if [ "$action" = unrecorded ]; then
+        echo "Review round for #$N was not recorded (still $count review logs). No automatic fix. The coordinator must diagnose. See .builder/review-$N.md and $CI_LOG"
+      elif [ "$MODE" = "--resume" ]; then
+        echo "Review round $count for #$N (--resume): no automatic fix. The coordinator decides. See .builder/review-$N.md and $CI_LOG"
+      else
+        echo "Review round $count for #$N: no automatic fix. The coordinator must diagnose. See .builder/review-$N.md and $CI_LOG"
+      fi
+      break
+    fi
+    findings=""
+    [ "$verdict" = "VERDICT: PASS" ] || findings="$(cat "$ROOT/.builder/review-$N.md")"
+    if [ "$ci" = fail ]; then
+      findings="$findings
+
+## local-ci failure (blocking; full log: $CI_LOG)
+
+Each failed test was already retried, so these are not one-off load flakes. If the log says 'local-ci SETUP', the pipeline itself failed (unpushed or uncommitted work, database setup): push your work if that is the cause, otherwise note it in the report and change no code for it.
+\`\`\`
+$(tail -80 "$CI_LOG")
+\`\`\`"
+    fi
+    cd "$WT"
+    head_before=$(git -C "$WT" rev-parse HEAD)
+    run_fix "$findings"
+    cd "$ROOT"
+    [ -z "${status:-}" ] || break
+    # Nothing new to review or test: a second review of the same commit would return the same findings.
+    if [ "$(git -C "$WT" rev-parse HEAD)" = "$head_before" ]; then
+      echo "The fix round for #$N made no commit. No second review of the same commit. The coordinator decides. See $LOG"
+      break
+    fi
+    # A fast-path builder that stopped for a replan inside a fix round: do not re-review the same HEAD.
+    if [ "$FAST" = "1" ] && [ -f "$REPLAN" ]; then
+      echo "Fast path stopped: replan required for #$N. $(cat "$REPLAN")"; exit 4
+    fi
+  done
+fi
 
 echo "Run finished (exit ${status:-0}). Log: $LOG"
+echo "Lane #$N: age $(ticket_lane_age_min "$ROOT/.builder/logs" "$N") min since it started; $(ticket_builder_minutes "$ROOT/.builder/logs" "$N") of ${LANE_BUDGET_MIN:-300} builder minutes used."
+[ -f "$ROOT/.builder/review-$N.md" ] && head -1 "$ROOT/.builder/review-$N.md"
 [ -f "$REPORT" ] && head -40 "$REPORT" || echo "No report written; check the log."
 exit "${status:-0}"

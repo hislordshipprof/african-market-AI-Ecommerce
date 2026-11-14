@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "../components/storefront/storefront.css";
+@import "../components/storefront/flow/flow.css";
+@import "../components/storefront/motion.css";
+@import "../components/story-surface/story-surface.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -48,8 +52,12 @@
     --color-ink: var(--store-ink, #15201A);
     --color-muted: var(--store-muted, #55625A);
     --color-line: var(--store-line, #DCDFD6);
+    --color-line-strong: var(--store-line-strong, var(--store-line, #DCDFD6));
     --color-primary: var(--store-primary, #1F5A43);
     --color-primary-deep: var(--store-primary-deep, #123726);
+    --color-primary-text: var(--store-primary-text, var(--store-primary, #1F5A43));
+    --color-photo-well: var(--store-photo-well, #EBF3EC);
+    --color-on-photo-well: var(--store-on-photo-well, #15201A);
     --color-on-primary: var(--store-on-primary, #FFFFFF);
     --color-accent: var(--store-accent, #A8DDB5);
     --color-on-accent: var(--store-on-accent, #0F2A1B);
@@ -83,6 +91,23 @@
   html {
     @apply font-sans;
   }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@utility skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-raised) 25%,
+    var(--color-line) 50%,
+    var(--color-raised) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+  border-radius: var(--radius-sm);
 }
 
 @utility text-display {
@@ -190,42 +215,44 @@ body {
   --muted-foreground: var(--store-muted, #55625A);
   --card: var(--store-surface, #FFFFFF);
   --card-foreground: var(--store-ink, #15201A);
+  --popover: var(--store-surface, #FFFFFF);
+  --popover-foreground: var(--store-ink, #15201A);
   --border: var(--store-line, #DCDFD6);
-  --input: var(--store-line, #DCDFD6);
+  --input: var(--store-line-strong, var(--store-line, #DCDFD6));
   --ring: var(--store-primary, #1F5A43);
   --destructive: var(--store-deal, #B42335);
 }
 
 .dark {
-  --background: #0F2A1B;
-  --foreground: #F3F4EF;
-  --card: #15201A;
-  --card-foreground: #F3F4EF;
-  --popover: #15201A;
-  --popover-foreground: #F3F4EF;
-  --primary: #A8DDB5;
-  --primary-foreground: #0F2A1B;
-  --secondary: #1F5A43;
-  --secondary-foreground: #F3F4EF;
-  --muted: #1F5A43;
-  --muted-foreground: #A8DDB5;
-  --accent: #1F5A43;
-  --accent-foreground: #F3F4EF;
-  --destructive: #E04959;
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.15);
-  --ring: #A8DDB5;
-  --chart-1: #A8DDB5;
-  --chart-2: #1F5A43;
-  --chart-3: #E1EEE3;
-  --chart-4: #55625A;
-  --chart-5: #123726;
-  --sidebar: #15201A;
-  --sidebar-foreground: #F3F4EF;
-  --sidebar-primary: #A8DDB5;
-  --sidebar-primary-foreground: #0F2A1B;
-  --sidebar-accent: #1F5A43;
-  --sidebar-accent-foreground: #F3F4EF;
-  --sidebar-border: rgba(255, 255, 255, 0.1);
-  --sidebar-ring: #A8DDB5;
+  --background: #0F1712;
+  --foreground: #EEF2EC;
+  --card: #16211A;
+  --card-foreground: #EEF2EC;
+  --popover: #16211A;
+  --popover-foreground: #EEF2EC;
+  --primary: #6CC08F;
+  --primary-foreground: #1D3A2B;
+  --secondary: #1B2E23;
+  --secondary-foreground: #EEF2EC;
+  --muted: #1F2C24;
+  --muted-foreground: #A3B1A7;
+  --accent: #A8DDB5;
+  --accent-foreground: #0F2A1B;
+  --destructive: #F0707E;
+  --border: #2A3A30;
+  --input: #2A3A30;
+  --ring: #6CC08F;
+  --chart-1: #6CC08F;
+  --chart-2: #A8DDB5;
+  --chart-3: #1B2E23;
+  --chart-4: #A3B1A7;
+  --chart-5: #1D3A2B;
+  --sidebar: #16211A;
+  --sidebar-foreground: #EEF2EC;
+  --sidebar-primary: #6CC08F;
+  --sidebar-primary-foreground: #1D3A2B;
+  --sidebar-accent: #1B2E23;
+  --sidebar-accent-foreground: #EEF2EC;
+  --sidebar-border: #2A3A30;
+  --sidebar-ring: #6CC08F;
 }

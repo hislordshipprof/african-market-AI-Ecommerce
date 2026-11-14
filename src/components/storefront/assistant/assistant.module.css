@@ -1,0 +1,701 @@
+.launcher {
+  position: fixed;
+  z-index: 30;
+  right: 24px;
+  bottom: 24px;
+  min-height: 48px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: 600 15px/1 Figtree, "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 8px 18px rgb(21 32 26 / 16%);
+  cursor: pointer;
+}
+
+.slot:empty {
+  display: none;
+}
+
+.slot {
+  margin-block: 16px;
+}
+
+/* In-page entry on product and basket pages, so nothing floats over their controls. */
+.entry {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: 600 15px/1 Figtree, "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.entry:focus-visible,
+.launcher:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 3px;
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  box-sizing: border-box;
+  height: calc(100dvh - 96px);
+  max-height: calc(100dvh - 96px);
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  /* Usually only the log scrolls. On a very short screen the whole sheet can, so no control is out of reach. */
+  overflow: hidden auto;
+}
+
+.log:not(:empty) {
+  min-height: 96px;
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+.message,
+.cards,
+.summary,
+.notice,
+.composer,
+.starters,
+.copy {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bubble {
+  max-width: min(38rem, 100%);
+  min-width: 0;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-ink);
+  font: 400 16px/1.5 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.reply {
+  white-space: normal;
+}
+
+.reply > * + * {
+  margin-top: 8px;
+}
+
+.reply ul,
+.reply ol {
+  padding-left: 1.25em;
+}
+
+.reply ul {
+  list-style: disc;
+}
+
+.reply ol {
+  list-style: decimal;
+}
+
+.reply a {
+  color: var(--color-primary-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.user {
+  align-self: flex-end;
+  max-width: min(38rem, 100%);
+  padding: 10px 14px;
+  border-radius: 16px 16px 8px 16px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.cards,
+.addedRow {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cards > *,
+.addedRow > * {
+  flex: 0 0 220px;
+  scroll-snap-align: start;
+}
+
+.seeAll {
+  color: var(--color-primary-text);
+  font: 600 14px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+/* A sent photo. The wrapper hosts the scan line, which an <img> cannot. */
+.sentPhoto {
+  position: relative;
+  display: block;
+  /* A fixed width, not a percentage: the bubble takes its width from this photo. */
+  width: 220px;
+  max-width: 100%;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+/* A very tall or very wide photo is cropped, so it cannot take over the thread. */
+.sentPhoto img {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 64px;
+  max-height: 320px;
+  object-fit: cover;
+}
+
+.sentPhoto[data-scanning="on"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 12%);
+}
+
+.sentPhoto[data-scanning="on"]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 2px;
+  /* Drawn over the photo, not the bubble: a light line with a dark lift reads on any image. */
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 45%);
+  animation: scan 1.3s var(--ease-std) infinite alternate;
+}
+
+@keyframes scan {
+  from { top: 0; }
+  to { top: calc(100% - 2px); }
+}
+
+.fileChip,
+.interim,
+.note,
+.jump {
+  margin: 0;
+  color: var(--color-muted, var(--color-ink));
+  font: 400 13px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.interim {
+  opacity: 0.7;
+}
+
+/* On the store colour, a chip takes the bubble's own foreground (AA on every preset). */
+.user .fileChip {
+  color: inherit;
+}
+
+.jump {
+  align-self: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.card,
+.choiceRow {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.choiceRow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cardAdd {
+  align-self: center;
+}
+
+.photo,
+.placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  background: var(--sf-thumb-well, var(--color-raised));
+  overflow: hidden;
+}
+
+.placeholder {
+  display: grid;
+  place-items: center;
+  overflow-wrap: anywhere;
+  color: var(--color-on-photo-well);
+  font: 600 13px/1.2 Figtree, "Segoe UI", system-ui, sans-serif;
+  text-align: center;
+  padding: 4px;
+}
+
+.photo :global(.sf-product-image) {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+}
+
+.card h3,
+.summary h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font: 600 16px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.meta {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--color-muted);
+  font: 400 14px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.price {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.flag {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--color-deal);
+  font: 600 13px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.undo {
+  justify-self: start;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 0 14px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: 600 14px/1 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.summary {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--color-raised);
+}
+
+.summary li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary li span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.summary li span:last-child {
+  flex-shrink: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primary,
+.send,
+.chip,
+.ghost,
+.undo {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.primary,
+.send,
+.chip,
+.ghost {
+  min-height: 44px;
+  border-radius: 999px;
+  font: 600 14px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.primary,
+.send {
+  border: 0;
+  padding: 0 16px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.chip,
+.ghost {
+  border: 1px solid var(--color-line-strong);
+  padding: 0 14px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.primary:disabled,
+.send:disabled,
+.chip:disabled,
+.undo:disabled,
+.ghost:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 20px;
+  background: var(--color-surface);
+}
+
+/* No files: textarea and tools share one row. With files: textarea, tiles, tools. */
+.composerRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composerRow[data-files="on"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.composerRow[data-files="on"] .tools {
+  justify-self: end;
+}
+
+.tiles {
+  display: flex;
+  scroll-snap-type: x mandatory;
+  gap: 8px;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+/* A low, wide tile: on a small phone the tools below it have to stay on screen. */
+.tile {
+  scroll-snap-align: start;
+  flex: 0 0 min(264px, 100%);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 44px;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  font: 400 13px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.tileText {
+  min-width: 0;
+}
+
+.tileName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-ink);
+}
+
+.tileMessage {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
+.tileGlyph {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+
+/* The slot a photo's thumbnail will fill, so the tile keeps its size when it is ready. */
+.preparing {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--color-raised);
+}
+
+/* Preparing has no real progress signal, so the bar is indeterminate. */
+.preparing::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: preparing 1.3s var(--ease-std) infinite;
+}
+
+@keyframes preparing {
+  from { background-position: -100% 0; }
+  to { background-position: 200% 0; }
+}
+
+.tile img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.tileRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.addMenu button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-soft);
+  color: var(--color-ink);
+  text-align: start;
+  cursor: pointer;
+}
+
+.addWrap {
+  display: contents;
+}
+
+/* Floats above Add, so opening it adds no height to the composer. */
+.addMenu {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(100% + 8px);
+  inset-inline-end: 0;
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 18px rgb(21 32 26 / 16%);
+}
+
+.tools {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool,
+.send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.tool {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.tool[aria-pressed="true"][data-motion="on"] {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { transform: scale(1.06); }
+}
+
+.composer textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  max-height: 140px;
+  field-sizing: content;
+  overflow-wrap: anywhere;
+  resize: none;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-ink);
+  caret-color: var(--color-primary);
+  font: 400 16px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.composer textarea::placeholder {
+  color: var(--color-muted);
+  opacity: 1;
+}
+
+.composer textarea::selection {
+  background: var(--color-soft);
+  color: var(--color-ink);
+}
+
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notice {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--color-soft);
+  color: var(--color-ink);
+}
+
+.notice a {
+  color: var(--color-primary-text);
+  font-weight: 600;
+}
+
+.typing {
+  color: var(--color-muted);
+  font: 600 14px/1 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.typing[data-motion="on"]::after {
+  content: "";
+  display: inline-block;
+  width: 1.2em;
+  animation: dots 1s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+}
+
+.live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.skeleton {
+  height: 72px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--color-raised), var(--color-surface), var(--color-raised));
+  background-size: 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+
+@media (max-width: 767px) {
+  .thread {
+    height: calc(88dvh - 88px);
+    max-height: calc(88dvh - 88px);
+  }
+
+  .launcher {
+    right: 16px;
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing[data-motion="on"]::after,
+  .skeleton,
+  .tool[aria-pressed="true"] {
+    animation: none;
+  }
+
+  /* Nothing moves. "Preparing…" and the dimmed photo still show the state. */
+  .preparing::after {
+    animation: none;
+    background-position: 50% 0;
+  }
+
+  .sentPhoto[data-scanning="on"]::after {
+    animation: none;
+    display: none;
+  }
+}

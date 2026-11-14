@@ -1,4 +1,75 @@
 import { auth } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { parseInput } from "@/lib/security/parse-input";
 
-export const { GET, POST } = toNextJsHandler(auth);
+const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
+
+const CUSTOMER_ONLY_PATHS = [
+  "/magic-link/verify",
+  "/sign-in/magic-link",
+];
+
+const CALLBACK_PARAMS = ["callbackURL", "newUserCallbackURL", "errorCallbackURL"];
+
+const callbackValue = z.string().max(2000).refine(
+  (value) => value.startsWith("/") && !value.startsWith("//"),
+);
+
+function rejectCallback(param: string, value: unknown): NextResponse | null {
+  if (value === undefined || value === null) return null;
+  const parsed = parseInput(callbackValue, value);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: `${param} must be a relative path` },
+      { status: 400 },
+    );
+  }
+  return null;
+}
+
+function rejectIfBadCallback(req: NextRequest): NextResponse | null {
+  const url = new URL(req.url);
+  for (const param of CALLBACK_PARAMS) {
+    const rejected = rejectCallback(param, url.searchParams.get(param));
+    if (rejected) return rejected;
+  }
+  return null;
+}
+
+function rejectIfAdminHost(req: NextRequest): NextResponse | null {
+  if (!req.headers.get("x-store-slug")) {
+    const url = new URL(req.url);
+    const authPath = url.pathname.replace(/^\/api\/auth/, "");
+    if (CUSTOMER_ONLY_PATHS.some((p) => authPath.startsWith(p))) {
+      return NextResponse.json(
+        { error: "Customer auth is only available on store hosts" },
+        { status: 403 },
+      );
+    }
+  }
+  return null;
+}
+
+export async function GET(req: NextRequest) {
+  const bad = rejectIfBadCallback(req) ?? rejectIfAdminHost(req);
+  if (bad) return bad;
+  return rawGET(req);
+}
+
+export async function POST(req: NextRequest) {
+  const bad = rejectIfAdminHost(req);
+  if (bad) return bad;
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = await req.clone().json();
+  } catch {}
+  if (body) {
+    for (const param of CALLBACK_PARAMS) {
+      const rejected = rejectCallback(param, body[param]);
+      if (rejected) return rejected;
+    }
+  }
+  return rawPOST(req);
+}

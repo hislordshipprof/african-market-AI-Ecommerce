@@ -24,7 +24,7 @@ const taggedRawBans = [
 ];
 
 const eslintConfig = [
-  { ignores: [".claude/**"] },
+  { ignores: [".claude/**", "playwright-report/**"] },
   ...nextCoreWebVitals,
   ...nextTypescript,
   {

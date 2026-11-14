@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, platform, platformAdmin, authPrisma } from "./db";
+import { isRlsRejection } from "./listing/cross-store-write";
 import { runtimeDatabaseUrl } from "./env";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -12,8 +13,7 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
   let storeBId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -168,8 +168,7 @@ describe.skipIf(!hasDb)("Platform admin RLS (DB-backed)", () => {
   let testStoreId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const store = await rawPrisma.store.upsert({
@@ -265,8 +264,7 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
   let testUserId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -300,6 +298,16 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
         where: { storeId_userId: { storeId: storeAId, userId: testUserId } },
         update: {},
         create: { storeId: storeAId, userId: testUserId, role: "owner" },
+      }),
+    ]);
+
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeMembership.upsert({
+        where: { storeId_userId: { storeId: storeBId, userId: testUserId } },
+        update: {},
+        create: { storeId: storeBId, userId: testUserId, role: "staff" },
       }),
     ]);
 
@@ -404,6 +412,7 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
       where: { storeId: { in: [storeAId, storeBId] } },
     });
     expect(memberships.some((m) => m.storeId === storeAId)).toBe(true);
+    expect(memberships.some((m) => m.storeId === storeBId)).toBe(true);
   });
 
   it("platformAdmin can read invites across stores", async () => {
@@ -416,6 +425,103 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
   });
 });
 
+describe.skipIf(!hasDb)("Stripe Connect column RLS isolation", () => {
+  let rawPrisma: PrismaClient;
+  let storeAId: string;
+  let storeBId: string;
+
+  beforeAll(async () => {
+    rawPrisma = testPrismaClient();
+    await rawPrisma.$connect();
+
+    const storeA = await rawPrisma.store.upsert({
+      where: { slug: "rls-stripe-a" },
+      update: { stripeAccountId: "acct_store_a", stripeOnboardingStatus: "complete" },
+      create: {
+        slug: "rls-stripe-a",
+        name: "Stripe Store A",
+        themePreset: "palm-and-shea",
+        stripeAccountId: "acct_store_a",
+        stripeOnboardingStatus: "complete",
+      },
+    });
+    storeAId = storeA.id;
+
+    const storeB = await rawPrisma.store.upsert({
+      where: { slug: "rls-stripe-b" },
+      update: { stripeAccountId: "acct_store_b", stripeOnboardingStatus: "pending" },
+      create: {
+        slug: "rls-stripe-b",
+        name: "Stripe Store B",
+        themePreset: "lagoon-and-coral",
+        stripeAccountId: "acct_store_b",
+        stripeOnboardingStatus: "pending",
+      },
+    });
+    storeBId = storeB.id;
+  });
+
+  afterAll(async () => {
+    await rawPrisma.rlsTestFixture.deleteMany({
+      where: { storeId: { in: [storeAId, storeBId] } },
+    });
+    await rawPrisma.store.deleteMany({
+      where: { slug: { in: ["rls-stripe-a", "rls-stripe-b"] } },
+    });
+    await rawPrisma.$disconnect();
+  });
+
+  it("platform (non-admin) cannot update store stripe fields", async () => {
+    const result = await platform.store.updateMany({
+      where: { id: storeAId },
+      data: { stripeOnboardingStatus: "hacked" },
+    });
+    expect(result.count).toBe(0);
+
+    const store = await rawPrisma.store.findUnique({ where: { id: storeAId } });
+    expect(store!.stripeOnboardingStatus).toBe("complete");
+  });
+
+  it("app_user scoped to store B cannot update store A stripe fields", async () => {
+    const result = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeBId}, true)`,
+      rawPrisma.$executeRaw`UPDATE stores SET stripe_onboarding_status = 'hacked', store_delivery_enabled = true, store_delivery_fee_cents = 999, address_line1 = 'hacked', lat = 1, lng = 2 WHERE id = ${storeAId}`,
+    ]);
+    expect(result[2]).toBe(0);
+
+    const store = await rawPrisma.store.findUnique({ where: { id: storeAId } });
+    expect(store!.stripeOnboardingStatus).toBe("complete");
+    expect(store!.storeDeliveryEnabled).toBe(false);
+    expect(store!.storeDeliveryFeeCents).toBe(0);
+    expect(store!.addressLine1).toBeNull();
+  });
+
+  it("platformAdmin can update stripe fields on any store", async () => {
+    await platformAdmin.store.update({
+      where: { id: storeBId },
+      data: { stripeOnboardingStatus: "restricted" },
+    });
+
+    const store = await rawPrisma.store.findUnique({ where: { id: storeBId } });
+    expect(store!.stripeOnboardingStatus).toBe("restricted");
+
+    await rawPrisma.store.update({
+      where: { id: storeBId },
+      data: { stripeOnboardingStatus: "pending" },
+    });
+  });
+
+  it("platform.store can read all stores including stripe fields", async () => {
+    const store = await platform.store.findUnique({
+      where: { slug: "rls-stripe-a" },
+    });
+    expect(store).not.toBeNull();
+    expect(store!.stripeAccountId).toBe("acct_store_a");
+    expect(store!.stripeOnboardingStatus).toBe("complete");
+  });
+});
+
 const hasRuntime = hasDb && !!process.env.APP_RUNTIME_PASSWORD;
 
 describe.skipIf(!hasRuntime)(
@@ -425,8 +531,7 @@ describe.skipIf(!hasRuntime)(
 
     beforeAll(async () => {
       const runtimeUrl = runtimeDatabaseUrl(process.env);
-      const adapter = new PrismaPg(runtimeUrl);
-      runtimePrisma = new PrismaClient({ adapter });
+      runtimePrisma = testPrismaClient(runtimeUrl);
       await runtimePrisma.$connect();
     });
 
@@ -464,8 +569,7 @@ describe.skipIf(!hasRuntime)(
     });
 
     it("through storeScoped reads only own store rows", async () => {
-      const ownerAdapter = new PrismaPg(process.env.DATABASE_URL!);
-      const ownerPrisma = new PrismaClient({ adapter: ownerAdapter });
+      const ownerPrisma = testPrismaClient();
       await ownerPrisma.$connect();
 
       const store = await ownerPrisma.store.findFirst({
@@ -485,3 +589,537 @@ describe.skipIf(!hasRuntime)(
     });
   },
 );
+
+describe.skipIf(!hasRuntime)(
+  "FORCE RLS on store_memberships and store_invites via app_runtime",
+  () => {
+    let runtimePrisma: PrismaClient;
+    let ownerPrisma: PrismaClient;
+    let storeId: string;
+    let userId: string;
+
+    beforeAll(async () => {
+      const runtimeUrl = runtimeDatabaseUrl(process.env);
+      runtimePrisma = testPrismaClient(runtimeUrl);
+      await runtimePrisma.$connect();
+
+      ownerPrisma = testPrismaClient();
+      await ownerPrisma.$connect();
+
+      const store = await ownerPrisma.store.upsert({
+        where: { slug: "rls-force-runtime" },
+        update: {},
+        create: {
+          slug: "rls-force-runtime",
+          name: "FORCE RLS Runtime Test",
+          themePreset: "palm-and-shea",
+        },
+      });
+      storeId = store.id;
+
+      const user = await ownerPrisma.user.upsert({
+        where: { email: "rls-force-runtime@example.com" },
+        update: {},
+        create: {
+          id: "rls-force-runtime-user",
+          email: "rls-force-runtime@example.com",
+          name: "FORCE RLS User",
+          emailVerified: true,
+        },
+      });
+      userId = user.id;
+
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeMembership.upsert({
+          where: { storeId_userId: { storeId, userId } },
+          update: {},
+          create: { storeId, userId, role: "owner" },
+        }),
+      ]);
+
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeInvite.create({
+          data: {
+            storeId,
+            email: "force-rls-invite@example.com",
+            role: "staff",
+            tokenHash: `force_rls_${Date.now()}`,
+            expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+            invitedById: userId,
+          },
+        }),
+      ]);
+    });
+
+    afterAll(async () => {
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeInvite.deleteMany({ where: { storeId } }),
+      ]);
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeMembership.deleteMany({ where: { storeId } }),
+      ]);
+      await ownerPrisma.user.deleteMany({ where: { email: "rls-force-runtime@example.com" } });
+      await ownerPrisma.store.deleteMany({ where: { slug: "rls-force-runtime" } });
+      await ownerPrisma.$disconnect();
+      await runtimePrisma.$disconnect();
+    });
+
+    it("app_runtime without SET LOCAL ROLE reads 0 rows from store_memberships", async () => {
+      const rows =
+        await runtimePrisma.$queryRaw`SELECT * FROM store_memberships`;
+      expect(rows).toHaveLength(0);
+    });
+
+    it("app_runtime without SET LOCAL ROLE reads 0 rows from store_invites", async () => {
+      const rows =
+        await runtimePrisma.$queryRaw`SELECT * FROM store_invites`;
+      expect(rows).toHaveLength(0);
+    });
+  },
+);
+
+describe.skipIf(!hasDb)("notification logs: storeScoped(A) reads only A's rows and cannot write a row for B", () => {
+  const slugA = "notify-rls-a";
+  const slugB = "notify-rls-b";
+  let storeAId = "";
+  let storeBId = "";
+  let orderBId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const storeA = await raw.store.create({
+      data: { slug: slugA, name: "Notify RLS A", themePreset: "palm-and-shea" },
+    });
+    const storeB = await raw.store.create({
+      data: { slug: slugB, name: "Notify RLS B", themePreset: "palm-and-shea" },
+    });
+    storeAId = storeA.id;
+    storeBId = storeB.id;
+    const customer = await storeScoped(storeBId).customer.create({
+      data: { storeId: storeBId, name: "RLS Buyer", email: "notify-rls-b@example.com" },
+    });
+    const order = await storeScoped(storeBId).order.create({
+      data: {
+        storeId: storeBId,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 100,
+        bufferCents: 0,
+        totalCents: 100,
+        totalAuthorizedCents: 100,
+        number: 1,
+      },
+    });
+    orderBId = order.id;
+    await storeScoped(storeBId).notificationLog.create({
+      data: { storeId: storeBId, orderId: order.id, event: "placed", channel: "email", status: "pending" },
+    });
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      const scoped = storeScoped(id);
+      await scoped.notificationLog.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.$disconnect();
+  });
+
+  it("notification logs: storeScoped(A) reads only A's rows and cannot write a row for B", async () => {
+    expect(await storeScoped(storeAId).notificationLog.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeAId).notificationLog.create({
+        data: { storeId: storeBId, orderId: orderBId, event: "placed", channel: "sms", status: "pending" },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect(await storeScoped(storeBId).notificationLog.count({ where: { orderId: orderBId } })).toBe(1);
+  });
+});
+
+describe.skipIf(!hasDb)("delivery events and issue reports: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let orderAId = "";
+  let deliveryAId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    const storeA = await raw.store.create({
+      data: { slug: `delivery-rls-a-${stamp}`, name: "Delivery RLS A", themePreset: "palm-and-shea" },
+    });
+    const storeB = await raw.store.create({
+      data: { slug: `delivery-rls-b-${stamp}`, name: "Delivery RLS B", themePreset: "palm-and-shea" },
+    });
+    storeAId = storeA.id;
+    storeBId = storeB.id;
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "RLS Buyer", email: "delivery-rls-a@example.com" },
+    });
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        customerId: customer.id,
+        status: "OUT_FOR_DELIVERY",
+        fulfillment: "store-delivery",
+        subtotalCents: 100,
+        bufferCents: 0,
+        totalCents: 100,
+        totalAuthorizedCents: 100,
+        number: 1,
+      },
+    });
+    orderAId = order.id;
+    await storeScoped(storeAId).deliveryEvent.create({
+      data: { storeId: storeAId, orderId: order.id, type: "out_for_delivery", payload: {} },
+    });
+    const delivery = await storeScoped(storeAId).delivery.create({
+      data: { storeId: storeAId, orderId: order.id, provider: "doordash", externalId: `dd-${stamp}`, status: "requested", quoteFeeCents: 850 },
+    });
+    deliveryAId = delivery.id;
+    await storeScoped(storeAId).deliveryEvent.create({
+      data: { storeId: storeAId, orderId: order.id, deliveryId: delivery.id, externalEventId: `evt-${stamp}`, type: "courier_assigned", payload: {} },
+    });
+    await storeScoped(storeAId).issueReport.create({
+      data: { storeId: storeAId, orderId: order.id, type: "damaged", lines: [], amountCents: 100, state: "in_review" },
+    });
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      const scoped = storeScoped(id);
+      await scoped.deliveryEvent.deleteMany({});
+      await scoped.delivery.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.$disconnect();
+  });
+
+  it("delivery events: storeScoped(B) reads none of A's rows, cannot insert one for A, and deletes nothing", async () => {
+    expect(await storeScoped(storeBId).deliveryEvent.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).deliveryEvent.create({
+        data: { storeId: storeAId, orderId: orderAId, type: "delivered", payload: {} },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).deliveryEvent.deleteMany({ where: { orderId: orderAId } })).count).toBe(0);
+    expect(await storeScoped(storeAId).deliveryEvent.count({ where: { orderId: orderAId } })).toBe(2);
+  });
+
+  it("courier deliveries: storeScoped(B) reads none of A's, cannot insert or update one for A", async () => {
+    expect(await storeScoped(storeBId).delivery.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).delivery.create({
+        data: { storeId: storeAId, orderId: orderAId, provider: "doordash", externalId: "dd-cross-store", status: "requested", quoteFeeCents: 1 },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).delivery.updateMany({ where: { id: deliveryAId }, data: { status: "cancelled" } })).count).toBe(0);
+    const own = await storeScoped(storeAId).delivery.findMany({ where: { orderId: orderAId } });
+    expect(own.map((row) => row.status)).toEqual(["requested"]);
+  });
+
+  it("courier delivery events: storeScoped(B) reads none of A's, cannot insert or update one for A's delivery", async () => {
+    expect(await storeScoped(storeBId).deliveryEvent.findMany({ where: { deliveryId: deliveryAId } })).toEqual([]);
+    await expect(
+      storeScoped(storeBId).deliveryEvent.create({
+        data: { storeId: storeAId, orderId: orderAId, deliveryId: deliveryAId, externalEventId: "evt-cross-store", type: "picked_up", payload: {} },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).deliveryEvent.updateMany({ where: { deliveryId: deliveryAId }, data: { type: "cancelled" } })).count).toBe(0);
+    const own = await storeScoped(storeAId).deliveryEvent.findMany({ where: { deliveryId: deliveryAId } });
+    expect(own.map((row) => row.type)).toEqual(["courier_assigned"]);
+  });
+
+  it("issue reports: storeScoped(B) reads none of A's, cannot insert or update one for A", async () => {
+    expect(await storeScoped(storeBId).issueReport.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).issueReport.create({
+        data: { storeId: storeAId, orderId: orderAId, type: "wrong", lines: [], amountCents: 1, state: "in_review" },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).issueReport.updateMany({ where: { orderId: orderAId }, data: { state: "approved" } })).count).toBe(0);
+    const own = await storeScoped(storeAId).issueReport.findMany({ where: { orderId: orderAId } });
+    expect(own.map((row) => row.state)).toEqual(["in_review"]);
+  });
+});
+
+describe.skipIf(!hasDb)("support threads and messages: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let orderAId = "";
+  let threadAId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    storeAId = (await raw.store.create({
+      data: { slug: `support-rls-a-${stamp}`, name: "Support RLS A", themePreset: "palm-and-shea" },
+    })).id;
+    storeBId = (await raw.store.create({
+      data: { slug: `support-rls-b-${stamp}`, name: "Support RLS B", themePreset: "palm-and-shea" },
+    })).id;
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "RLS Buyer", email: "support-rls-a@example.com" },
+    });
+    orderAId = (await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        customerId: customer.id,
+        status: "ACCEPTED",
+        fulfillment: "pickup",
+        subtotalCents: 100,
+        bufferCents: 0,
+        totalCents: 100,
+        totalAuthorizedCents: 100,
+        number: 1,
+      },
+    })).id;
+    threadAId = (await storeScoped(storeAId).supportThread.create({
+      data: { storeId: storeAId, orderId: orderAId, lastCustomerAt: new Date() },
+    })).id;
+    await storeScoped(storeAId).supportMessage.create({
+      data: { storeId: storeAId, threadId: threadAId, sender: "customer", body: "Where is my order?" },
+    });
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      const scoped = storeScoped(id);
+      await scoped.supportMessage.deleteMany({});
+      await scoped.supportThread.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.$disconnect();
+  });
+
+  it("support threads: storeScoped(B) reads none of A's threads, cannot insert one for A, and updates nothing", async () => {
+    expect(await storeScoped(storeBId).supportThread.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).supportThread.create({ data: { storeId: storeAId, orderId: orderAId } }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).supportThread.updateMany({
+      where: { id: threadAId },
+      data: { state: "resolved" },
+    })).count).toBe(0);
+    expect((await storeScoped(storeAId).supportThread.findUnique({ where: { id: threadAId } }))?.state).toBe("open");
+  });
+
+  it("support messages: storeScoped(B) reads none of A's messages and cannot reply on A's thread", async () => {
+    expect(await storeScoped(storeBId).supportMessage.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).supportMessage.create({
+        data: { storeId: storeAId, threadId: threadAId, sender: "store", body: "hello" },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect(await storeScoped(storeAId).supportMessage.count({ where: { threadId: threadAId } })).toBe(1);
+  });
+});
+
+describe.skipIf(!hasDb)("owner reports and their items: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let reportAId = "";
+  let itemAId = "";
+  let listingAId = "";
+  let actorId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    storeAId = (await raw.store.create({
+      data: { slug: `report-rls-a-${stamp}`, name: "Report RLS A", themePreset: "palm-and-shea" },
+    })).id;
+    storeBId = (await raw.store.create({
+      data: { slug: `report-rls-b-${stamp}`, name: "Report RLS B", themePreset: "palm-and-shea" },
+    })).id;
+    actorId = `report-rls-${stamp}`;
+    await raw.user.create({ data: { id: actorId, email: `${actorId}@example.com`, name: "Reporter" } });
+    listingAId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Gari", price: 500, stockMode: "counted", qty: 3 },
+    })).id;
+    reportAId = (await storeScoped(storeAId).ownerReport.create({
+      data: { storeId: storeAId, actorId, type: "voice", rawTranscript: "20 gari", aiExtraction: { items: [] } },
+    })).id;
+    itemAId = (await storeScoped(storeAId).ownerReportItem.create({
+      data: {
+        storeId: storeAId, reportId: reportAId, extractedName: "gari", extractedQty: 20,
+        listingId: listingAId, matchConfidence: 1, kind: "restock", proposedDelta: 20, status: "pending",
+      },
+    })).id;
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      await storeScoped(id).ownerReport.deleteMany({});
+      await storeScoped(id).listing.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.user.deleteMany({ where: { id: actorId } });
+    await raw.$disconnect();
+  });
+
+  it("owner reports: storeScoped(B) reads none of A's, cannot insert one for A, and updates nothing", async () => {
+    expect(await storeScoped(storeBId).ownerReport.findUnique({ where: { id: reportAId } })).toBeNull();
+    await expect(
+      storeScoped(storeBId).ownerReport.create({
+        data: { storeId: storeAId, actorId, type: "voice", rawTranscript: "x", aiExtraction: {} },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).ownerReport.updateMany({
+      where: { id: reportAId },
+      data: { status: "rejected", decidedById: actorId, decidedAt: new Date() },
+    })).count).toBe(0);
+    expect((await storeScoped(storeAId).ownerReport.findUnique({ where: { id: reportAId } }))?.status).toBe("pending");
+  });
+
+  it("owner report items: storeScoped(B) reads none of A's, cannot add one to A's report, and updates nothing", async () => {
+    expect(await storeScoped(storeBId).ownerReportItem.findMany()).toEqual([]);
+    for (const storeId of [storeAId, storeBId]) {
+      await expect(
+        storeScoped(storeBId).ownerReportItem.create({
+          data: { storeId, reportId: reportAId, extractedName: "rice", extractedQty: 1, status: "unmatched" },
+        }),
+      ).rejects.toSatisfy(isRlsRejection);
+    }
+    expect((await storeScoped(storeBId).ownerReportItem.updateMany({
+      where: { id: itemAId },
+      data: { status: "confirmed" },
+    })).count).toBe(0);
+    expect((await storeScoped(storeAId).ownerReportItem.findUnique({ where: { id: itemAId } }))?.status).toBe("pending");
+  });
+});
+
+describe.skipIf(!hasDb)("orders, order lines and audit logs: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let customerAId = "";
+  let orderAId = "";
+  let lineAId = "";
+  let variantAId = "";
+  let auditAId = "";
+  let actorId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    storeAId = (await raw.store.create({
+      data: { slug: `order-rls-a-${stamp}`, name: "Order RLS A", themePreset: "palm-and-shea" },
+    })).id;
+    storeBId = (await raw.store.create({
+      data: { slug: `order-rls-b-${stamp}`, name: "Order RLS B", themePreset: "palm-and-shea" },
+    })).id;
+    actorId = `order-rls-${stamp}`;
+    await raw.user.create({ data: { id: actorId, email: `${actorId}@example.com`, name: "Owner" } });
+    const scopedA = storeScoped(storeAId);
+    const listing = await scopedA.listing.create({
+      data: { storeId: storeAId, customName: "Gari", price: 500, stockMode: "unlimited" },
+    });
+    variantAId = (await scopedA.listingVariant.create({
+      data: { listingId: listing.id, label: "1kg", price: 500, weightG: 1000 },
+    })).id;
+    customerAId = (await scopedA.customer.create({ data: { storeId: storeAId, name: "RLS Buyer" } })).id;
+    orderAId = (await scopedA.order.create({
+      data: {
+        storeId: storeAId, customerId: customerAId, status: "AUTHORIZED", fulfillment: "pickup",
+        subtotalCents: 500, bufferCents: 0, totalCents: 500, totalAuthorizedCents: 500, number: 1,
+      },
+    })).id;
+    lineAId = (await scopedA.orderLine.create({
+      data: { storeId: storeAId, orderId: orderAId, listingVariantId: variantAId, qtyOrdered: 1, unitPriceCents: 500 },
+    })).id;
+    auditAId = (await scopedA.auditLog.create({
+      data: {
+        storeId: storeAId, actorId, actorEmail: `${actorId}@example.com`,
+        action: "order_placed", entityType: "order", entityId: orderAId,
+      },
+    })).id;
+  });
+
+  afterAll(async () => {
+    const storeIds = [storeAId, storeBId].filter(Boolean);
+    await raw.$transaction([
+      raw.$executeRaw`SET LOCAL ROLE app_user`,
+      raw.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      raw.auditLog.deleteMany({ where: { storeId: { in: storeIds } } }),
+    ]);
+    for (const id of storeIds) {
+      await storeScoped(id).order.deleteMany({});
+      await storeScoped(id).customer.deleteMany({});
+      await storeScoped(id).listing.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: storeIds } } });
+    await raw.user.deleteMany({ where: { id: actorId } });
+    await raw.$disconnect();
+  });
+
+  it("orders: storeScoped(B) reads null, update throws P2025, updateMany and insert change nothing of A's", async () => {
+    const scopedB = storeScoped(storeBId);
+    expect(await scopedB.order.findUnique({ where: { id: orderAId } })).toBeNull();
+    await expect(scopedB.order.update({ where: { id: orderAId }, data: { status: "CANCELLED" } }))
+      .rejects.toMatchObject({ code: "P2025" });
+    expect((await scopedB.order.updateMany({ where: { id: orderAId }, data: { status: "CANCELLED" } })).count).toBe(0);
+    await expect(scopedB.order.create({
+      data: {
+        storeId: storeAId, customerId: customerAId, status: "AUTHORIZED", fulfillment: "pickup",
+        subtotalCents: 1, bufferCents: 0, totalCents: 1, totalAuthorizedCents: 1, number: 2,
+      },
+    })).rejects.toSatisfy(isRlsRejection);
+    const own = await storeScoped(storeAId).order.findMany();
+    expect(own.map((order) => [order.id, order.status])).toEqual([[orderAId, "AUTHORIZED"]]);
+  });
+
+  it("order lines: storeScoped(B) reads null, update throws P2025, updateMany and insert change nothing of A's", async () => {
+    const scopedB = storeScoped(storeBId);
+    expect(await scopedB.orderLine.findUnique({ where: { id: lineAId } })).toBeNull();
+    await expect(scopedB.orderLine.update({ where: { id: lineAId }, data: { qtyPicked: 1 } }))
+      .rejects.toMatchObject({ code: "P2025" });
+    expect((await scopedB.orderLine.updateMany({ where: { orderId: orderAId }, data: { qtyPicked: 1 } })).count).toBe(0);
+    await expect(scopedB.orderLine.create({
+      data: { storeId: storeAId, orderId: orderAId, listingVariantId: variantAId, qtyOrdered: 9, unitPriceCents: 1 },
+    })).rejects.toSatisfy(isRlsRejection);
+    const own = await storeScoped(storeAId).orderLine.findMany({ where: { orderId: orderAId } });
+    expect(own.map((line) => [line.id, line.qtyOrdered, line.qtyPicked])).toEqual([[lineAId, 1, 0]]);
+  });
+
+  it("audit logs: storeScoped(B) reads null and cannot insert for A; append-only, so even A updates and deletes 0 rows", async () => {
+    const scopedA = storeScoped(storeAId);
+    const scopedB = storeScoped(storeBId);
+    expect(await scopedB.auditLog.findUnique({ where: { id: auditAId } })).toBeNull();
+    await expect(scopedB.auditLog.create({
+      data: {
+        storeId: storeAId, actorId, actorEmail: `${actorId}@example.com`,
+        action: "forged", entityType: "order", entityId: orderAId,
+      },
+    })).rejects.toSatisfy(isRlsRejection);
+    for (const scoped of [scopedA, scopedB]) {
+      expect((await scoped.auditLog.updateMany({ where: { id: auditAId }, data: { action: "rewritten" } })).count).toBe(0);
+      expect((await scoped.auditLog.deleteMany({ where: { id: auditAId } })).count).toBe(0);
+    }
+    const own = await scopedA.auditLog.findMany({ where: { entityId: orderAId } });
+    expect(own.map((row) => [row.id, row.action])).toEqual([[auditAId, "order_placed"]]);
+  });
+});
