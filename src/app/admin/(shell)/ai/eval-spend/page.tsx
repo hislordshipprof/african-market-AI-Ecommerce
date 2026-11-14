@@ -164,6 +164,7 @@ function SpendSection({ spentMicros, capMicros, resting, days }: { spentMicros: 
         >
           <div className="h-full rounded-full bg-foreground" style={{ width: `${used}%` }} />
         </div>
+        <p className="mt-3 text-sm text-muted-foreground">The cap counts every day since the ledger started, not only the days listed below.</p>
       </div>
 
       <h3 className="mb-2 mt-6 text-sm font-semibold text-muted-foreground">By UTC day, last 30 days</h3>
@@ -189,7 +190,7 @@ function ChatsSection({ month, stores, hidden }: { month: string; stores: StoreC
   return (
     <section className="mt-10" aria-labelledby="chats-title" data-testid="chats">
       <SectionHeading id="chats-title" title={`Assistant chats in ${monthFormat.format(new Date(`${month}T00:00:00Z`))}`}>
-        Each store against its plan&apos;s monthly chats (UTC month). Stores at 80% or more are marked; their owners have been emailed.
+        Each store against its plan&apos;s monthly chats (UTC month). Stores at 80% or more are marked; that is when the owner gets an email.
       </SectionHeading>
       {stores.length === 0 ? (
         <p className="rounded-xl border border-border bg-card p-6 text-muted-foreground">No store has used the assistant this month.</p>
@@ -199,14 +200,16 @@ function ChatsSection({ month, stores, hidden }: { month: string; stores: StoreC
             <li key={store.storeId} className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 sm:px-5" data-testid={`chats-${store.storeId}`}>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-foreground">{store.storeName}</span>
-                <span className="block text-sm text-muted-foreground">{PLAN_NAMES[store.plan]} plan</span>
-              </span>
-              {store.nearCap && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-foreground" data-testid="near-cap">
-                  <TriangleAlert aria-hidden className="size-3.5" />
-                  {store.atCap ? "At cap" : "80% or more"}
+                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                  {PLAN_NAMES[store.plan]} plan
+                  {store.nearCap && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-foreground" data-testid="near-cap">
+                      <TriangleAlert aria-hidden className="size-3.5" />
+                      {store.atCap ? "At cap" : "80% or more"}
+                    </span>
+                  )}
                 </span>
-              )}
+              </span>
               <span className="text-right tabular-nums">
                 <span className="block font-medium text-foreground">
                   {store.chats.toLocaleString("en-US")} of {store.cap.toLocaleString("en-US")}
