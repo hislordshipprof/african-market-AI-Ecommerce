@@ -4,6 +4,7 @@ import { lockStoreRow, platform, storeScoped, storeScopedTransaction } from "../
 import { haversineMiles } from "../address/geo";
 import { normalizeUsPhone } from "../notifications/phone";
 import { smsSender } from "../notifications/sms";
+import { providerSinkMode } from "../email/send";
 import { smsStoreName } from "../notifications/messages";
 import { storePageUrl } from "../notifications/tracking-url";
 import { getStoreLocalTime, isValidTimezone } from "../order/store-hours";
@@ -116,7 +117,8 @@ export async function assignDriverRoute(
   const { route, count } = created;
   const url = storePageUrl(store, `/driver/${token}`, env);
   const sender = smsSender(env);
-  const previewBlocked = env.VERCEL_ENV === "preview" && phone.e164 !== env.TELNYX_TEST_TO;
+  // A preview texts only the test number, as customer SMS does; the in-memory sink sends nothing real.
+  const previewBlocked = env.VERCEL_ENV === "preview" && !providerSinkMode(env) && phone.e164 !== env.TELNYX_TEST_TO;
   let sent = false;
   if (url && sender && !previewBlocked) {
     const stops = count === 1 ? "1 delivery" : `${count} deliveries`;
@@ -206,7 +208,7 @@ export async function readDriverRoute(storeId: string, token: string, now: Date 
   const stops = orders.map((o) => {
     const street = [o.deliveryLine1, o.deliveryLine2].filter(Boolean).join(" ");
     const address = `${street}, ${o.deliveryCity ?? ""}, ${o.deliveryState ?? ""} ${o.deliveryZip ?? ""}`.trim();
-    return {
+    const stop: DriverStop = {
       orderId: o.id,
       number: o.number,
       customerName: firstName(o.customer.name),
@@ -216,16 +218,15 @@ export async function readDriverRoute(storeId: string, token: string, now: Date 
       frozen: o.lines.some((line) => line.listingVariant.listing.frozen),
       status: o.status,
       mapsUrl: `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`,
-      lat: o.deliveryLat,
-      lng: o.deliveryLng,
     };
+    return { stop, lat: o.deliveryLat, lng: o.deliveryLng };
   });
   return {
     storeName: store.name,
     driverName: route.driverName,
     slotLabel: routeSlotLabel(store.timezone, route.slot),
     expiresAt: route.expiresAt,
-    stops: nearestNext(store, stops).map(({ lat: _lat, lng: _lng, ...stop }) => stop),
+    stops: nearestNext(store, stops).map((placed) => placed.stop),
   };
 }
 
@@ -253,4 +254,46 @@ export async function driverMarkDelivered(
 ): Promise<StepResult> {
   if (!(await onRoute(storeId, token, orderId, now))) return { ok: false, error: "not_found" };
   return markDelivered(storeId, orderId, photo);
+}
+
+export interface DriverRouteSlot {
+  slot: string;
+  label: string;
+  /** Ready orders not on a live route: what Assign would send. */
+  waiting: number;
+  routes: Array<{ id: string; driverName: string; phoneLast4: string; orders: number; expiresAt: Date }>;
+}
+
+/** The owner's view: each slot with Ready store-delivery orders or a live route on it. */
+export async function driverRouteBoard(storeId: string, timezone: string, now: Date = new Date()): Promise<DriverRouteSlot[]> {
+  const scoped = storeScoped(storeId);
+  const [routes, orders] = await Promise.all([
+    scoped.driverRoute.findMany({
+      where: liveRouteWhere(now),
+      orderBy: { createdAt: "asc" },
+      select: { id: true, slot: true, driverName: true, driverPhone: true, expiresAt: true },
+    }),
+    scoped.order.findMany({
+      where: { fulfillment: "store-delivery", status: { in: ["READY", "OUT_FOR_DELIVERY"] }, pickupSlot: { not: null } },
+      select: { pickupSlot: true, status: true, driverRouteId: true },
+    }),
+  ]);
+  const live = new Set(routes.map((r) => r.id));
+  const slots = new Map<string, DriverRouteSlot>();
+  const slotFor = (slot: string) => {
+    let row = slots.get(slot);
+    if (!row) {
+      row = { slot, label: routeSlotLabel(timezone, slot), waiting: 0, routes: [] };
+      slots.set(slot, row);
+    }
+    return row;
+  };
+  for (const route of routes) {
+    const count = orders.filter((o) => o.driverRouteId === route.id).length;
+    slotFor(route.slot).routes.push({ id: route.id, driverName: route.driverName, phoneLast4: route.driverPhone.slice(-4), orders: count, expiresAt: route.expiresAt });
+  }
+  for (const order of orders) {
+    if (order.status === "READY" && (!order.driverRouteId || !live.has(order.driverRouteId))) slotFor(order.pickupSlot!).waiting += 1;
+  }
+  return [...slots.values()].sort((a, b) => a.slot.localeCompare(b.slot));
 }

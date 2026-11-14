@@ -172,3 +172,53 @@ export async function insertCourierPackingOrder(number: number, readyAt: Date): 
     });
   });
 }
+
+/**
+ * Ready store-delivery orders in one slot (#566), and optionally a live driver route holding them, opened by `token`.
+ * Returns the order ids nearest-first. Remove with deleteDriverRouteOrders.
+ */
+export async function insertDriverRouteOrders(input: { numbers: number[]; slot: string; token?: string; revoked?: boolean }): Promise<string[]> {
+  const { createHash } = await import("crypto");
+  return withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number: { in: input.numbers } } });
+    await tx.driverRoute.deleteMany({ where: { storeId, slot: input.slot } });
+    const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
+    const frozen = await tx.listing.findFirst({ where: { storeId, frozen: true, variants: { some: {} } }, include: { variants: { take: 1 } } });
+    const plain = await tx.listing.findFirstOrThrow({ where: { storeId, variants: { some: {} } }, include: { variants: { take: 1 } } });
+    const route = input.token
+      ? await tx.driverRoute.create({
+          data: {
+            storeId, slot: input.slot, driverName: "Kofi", driverPhone: "+17135552468",
+            tokenHash: createHash("sha256").update(input.token).digest("hex"),
+            expiresAt: new Date(Date.now() + 6 * 60 * 60_000), sentAt: new Date(), revokedAt: input.revoked ? new Date() : null,
+          },
+        })
+      : null;
+    const ids: string[] = [];
+    for (const [i, number] of input.numbers.entries()) {
+      const variant = (i === 0 && frozen ? frozen : plain).variants[0];
+      const order = await tx.order.create({
+        data: {
+          storeId, number, customerId: customer.id, status: "READY", fulfillment: "store-delivery", pickupSlot: input.slot,
+          subtotalCents: 2000, bufferCents: 200, deliveryFeeCents: 499, totalAuthorizedCents: 2699, totalCents: 2499, capturedAmountCents: 2499,
+          deliveryLine1: `${100 + i * 400} Main St`, deliveryCity: "Houston", deliveryState: "TX", deliveryZip: "77002",
+          // Nearest to the store first: each stop sits further north.
+          deliveryLat: 29.70 + i * 0.05, deliveryLng: -95.40,
+          notes: i === 1 ? "Gate code 4411" : null,
+          driverRouteId: route?.id ?? null,
+          paymentIntentId: `pi_e2e_route_${number}_${Date.now()}`,
+          lines: { create: { listingVariantId: variant.id, qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 2000, status: "picked" } },
+        },
+      });
+      ids.push(order.id);
+    }
+    return ids;
+  });
+}
+
+export async function deleteDriverRouteOrders(numbers: number[], slot: string): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number: { in: numbers } } });
+    await tx.driverRoute.deleteMany({ where: { storeId, slot } });
+  });
+}
