@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 
 vi.mock("next/cache", () => ({
@@ -77,6 +77,9 @@ describe.skipIf(!hasDb)("assistant checkout handoff tools (#247)", () => {
   }
 
   it("offers today's pickup slots from the server and saves the chosen one as the store's draft for this cart", async () => {
+    // Midday Chicago: after 23:00 the only slot left today is ASAP.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-14T18:05:00Z"), shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
     const run = runner();
     const options = await run("get_fulfillment_options", {});
     expect(options.ok).toBe(true);
