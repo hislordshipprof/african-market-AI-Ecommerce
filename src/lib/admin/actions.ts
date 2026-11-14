@@ -57,7 +57,7 @@ function formText(data: unknown, key: string): string | null {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "storeDeliveryFee", "storeDeliveryEnabled", "listed", ...SLOT_FIELD_NAMES]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "phone", "storeDeliveryFee", "storeDeliveryEnabled", "listed", ...SLOT_FIELD_NAMES]) {
     const v = formText(data, key);
     if (v != null) raw[key] = v;
   }
@@ -86,6 +86,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     city: string | null;
     state: string | null;
     zip: string | null;
+    phone: string | null;
     storeDeliveryEnabled: boolean;
     storeDeliveryFeeCents: number;
     pickupSlotSettings: SlotSchedule | null;
@@ -117,6 +118,13 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
   const city = formText(data, "city")?.trim() || null;
   const state = formText(data, "state")?.trim().toUpperCase() || null;
   const zip = formText(data, "zip")?.trim() || null;
+  const phoneRaw = formText(data, "phone")?.trim() || null;
+  const phoneDigits = phoneRaw?.replace(/\D/g, "") ?? "";
+  // Couriers take E.164 (Uber Direct needs a pickup phone to book, #527).
+  const phone = !phoneRaw ? null
+    : phoneDigits.length === 10 ? `+1${phoneDigits}`
+    : phoneDigits.length === 11 && phoneDigits.startsWith("1") ? `+${phoneDigits}`
+    : null;
   const storeDeliveryEnabled = formText(data, "storeDeliveryEnabled") === "on";
   const storeDeliveryFeeCents = Math.round(parseFloatOrDefault(formText(data, "storeDeliveryFee"), 0) * 100);
 
@@ -194,6 +202,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
 
   if (state && !/^[A-Z]{2}$/.test(state)) errors.state = "State must be a 2-letter code";
   if (zip && !/^\d{5}$/.test(zip)) errors.zip = "ZIP must be 5 digits";
+  if (phoneRaw && !phone) errors.phone = "Phone must be a 10-digit US number";
   if (!Number.isFinite(storeDeliveryFeeCents) || storeDeliveryFeeCents < 0 || storeDeliveryFeeCents > 10_000) {
     errors.storeDeliveryFee = "Delivery fee must be $0–$100";
   }
@@ -240,6 +249,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
       city,
       state,
       zip,
+      phone,
       storeDeliveryEnabled,
       storeDeliveryFeeCents,
       pickupSlotSettings: pickupSlots.schedule,
@@ -252,7 +262,7 @@ const STORE_FORM_FIELDS = [
   "slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours",
   "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes",
   "pickupEnabled", "timezone", "storeId",
-  "addressLine1", "addressLine2", "city", "state", "zip",
+  "addressLine1", "addressLine2", "city", "state", "zip", "phone",
   "storeDeliveryFee", "storeDeliveryEnabled", "listed",
   ...SLOT_FIELD_NAMES,
 ];
@@ -277,6 +287,7 @@ const storeFormSchema = z.strictObject({
   city: z.string().max(80).nullable(),
   state: z.string().max(8).nullable(),
   zip: z.string().max(12).nullable(),
+  phone: z.string().max(40).nullable(),
   storeDeliveryFee: z.string().max(20).nullable(),
   storeDeliveryEnabled: z.string().max(10).nullable(),
   listed: z.string().max(10).nullable(),
@@ -449,6 +460,7 @@ export async function createStore(
         city: values.city,
         state: values.state,
         zip: values.zip,
+        phone: values.phone,
         lat: coords.lat,
         lng: coords.lng,
         storeDeliveryEnabled: values.storeDeliveryEnabled,
@@ -581,6 +593,7 @@ export async function updateStore(
         city: values.city,
         state: values.state,
         zip: values.zip,
+        phone: values.phone,
         lat: coords.lat,
         lng: coords.lng,
         storeDeliveryEnabled: values.storeDeliveryEnabled,

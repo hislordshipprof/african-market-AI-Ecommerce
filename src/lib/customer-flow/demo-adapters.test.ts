@@ -15,6 +15,7 @@ const store: FlowStore = {
   storeDeliveryFeeCents: 399,
   autoRefundLimitCents: 500,
   insulatedPackaging: true,
+  courierOffered: false,
   closed: false,
   opensAt: "9 am",
   readyAt: "9:30 AM",

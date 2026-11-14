@@ -4,6 +4,8 @@ import { getStore } from "@/lib/get-store";
 import { getFlowCatalog } from "@/lib/storefront/service";
 import { describeQueue, storeAvailability } from "@/lib/order/store-queue";
 import { demoFlowsEnabled } from "./demo-gate";
+import { storeMayUse } from "@/lib/billing/plan";
+import { courierOffered } from "@/lib/checkout/service";
 import type { FlowStore } from "./contracts";
 
 export const getFlowContext = cache(async () => {
@@ -35,6 +37,7 @@ export const getFlowContext = cache(async () => {
     storeDeliveryFeeCents: store.storeDeliveryFeeCents,
     autoRefundLimitCents: store.autoRefundLimitCents,
     insulatedPackaging: store.slug === "mama-ngozi",
+    courierOffered: courierOffered(store) && (await storeMayUse(store.id, "courier-delivery")),
     closed: availability.kind === "queued",
     opensAt: queue?.opensAt ?? "",
     readyAt: queue?.readyAt ?? "",

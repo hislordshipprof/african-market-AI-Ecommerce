@@ -57,6 +57,7 @@ export interface CartLineView {
       customName: string | null;
       maxPerOrder: number | null;
       frozen: boolean;
+      perishable: boolean;
       masterProduct: { name: string; categoryId: string | null } | null;
     };
   };
@@ -594,6 +595,7 @@ export async function getCartWithLines(
           customName: line.variant.listing.customName,
           maxPerOrder: line.variant.listing.maxPerOrder,
           frozen: line.variant.listing.frozen,
+          perishable: line.variant.listing.perishable,
           masterProduct: line.variant.listing.masterProduct
             ? {
                 name: line.variant.listing.masterProduct.name,
