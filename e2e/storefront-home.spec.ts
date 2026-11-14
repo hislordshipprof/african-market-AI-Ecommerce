@@ -51,3 +51,30 @@ test.describe("Quick-add button", () => {
     });
   });
 });
+
+test.describe("Hero image on a phone (#563 LCP)", () => {
+  test.use({ viewport: { width: 412, height: 823 }, deviceScaleFactor: 1.75, isMobile: true });
+
+  test("the largest paint is the hero image, fetched eagerly at high priority", async ({ page }) => {
+    await page.goto(`${BASE}/`);
+    const hero = page.locator("[data-testid='hero-carousel'] .sf-hero-background img").first();
+    await expect(hero).toBeVisible({ timeout: 15000 });
+
+    const lcpIsHero = await page.evaluate(() => new Promise<boolean>(resolve => {
+      new PerformanceObserver(list => {
+        const last = list.getEntries().at(-1) as PerformanceEntry & { element?: Element | null };
+        resolve(!!last?.element?.closest(".sf-hero-background"));
+      }).observe({ type: "largest-contentful-paint", buffered: true });
+    }));
+    expect(lcpIsHero).toBe(true);
+
+    await expect(hero).not.toHaveAttribute("loading", "lazy");
+    await expect(hero).toHaveAttribute("fetchpriority", "high");
+    const preloadPriority = await hero.evaluate(img => {
+      const srcset = img.getAttribute("srcset");
+      const link = [...document.querySelectorAll("link[rel='preload'][as='image']")].find(l => l.getAttribute("imagesrcset") === srcset);
+      return link?.getAttribute("fetchpriority") ?? null;
+    });
+    expect(preloadPriority).toBe("high");
+  });
+});

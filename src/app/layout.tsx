@@ -9,7 +9,8 @@ import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+// Nothing renders in Geist (globals.css maps font-sans to Figtree), so it must not cost a preload (#563).
+const geist = Geist({subsets:['latin'],variable:'--font-sans',preload:false});
 
 const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
