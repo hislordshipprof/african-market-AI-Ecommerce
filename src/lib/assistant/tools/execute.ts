@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import {
   backupSwap,
   decideLineQty,
@@ -14,7 +14,8 @@ import {
   type CartWriteTx,
   type SwapRuleValue,
 } from "../../cart/service";
-import { storeScoped } from "../../db";
+import { storeScoped, storeScopedRawQuery } from "../../db";
+import { effectiveAttributesSql, needExcludesSql } from "../../catalog/attribute-sql";
 import { scrubKnownStrings } from "../card-scrub";
 import {
   changeConstraints,
@@ -456,20 +457,34 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
   if (!categoryId) {
     return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items: [], reason: "no_category" });
   }
-  const candidates = await scoped.listing.findMany({
-    where: { active: true, id: { not: listing.id }, masterProduct: { categoryId } },
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  // The saved needs filter in SQL before the cap, so excluded listings cannot crowd out allowed ones.
+  const ranked = await storeScopedRawQuery<{ id: string }>(ctx.storeId, Prisma.sql`
+    SELECT l.id FROM listings l
+    JOIN master_products mp ON l.master_product_id = mp.id
+    ${effectiveAttributesSql}
+    WHERE l.active AND l.id <> ${listing.id} AND mp.category_id = ${categoryId}
+      AND NOT ${needExcludesSql(shopperNeed(constraints))}
+    ORDER BY l.confidence DESC, l.price ASC, l.id ASC
+    LIMIT 5
+  `);
+  const ids = ranked.map((row) => row.id);
+  const byId = new Map((await scoped.listing.findMany({
+    where: { id: { in: ids } },
     include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
-    orderBy: [{ confidence: "desc" }, { price: "asc" }, { id: "asc" }],
-    take: 40,
+  })).map((row) => [row.id, row]));
+  const verdicts = hasConstraints(constraints) ? await listingVerdicts(ctx.storeId, ids, constraints) : null;
+  const items = ids.flatMap((id) => {
+    const candidate = byId.get(id);
+    if (!candidate || isExcluded(verdicts, id)) return [];
+    return [{
+      listingId: candidate.id,
+      name: listingName(candidate),
+      priceCents: candidate.variants[0]?.price ?? candidate.price,
+      mayBeUnavailable: mayBeUnavailable(candidate),
+      ...needsOf(verdicts, candidate.id),
+    }];
   });
-  const verdicts = await verdictsFor(ctx, candidates.map((candidate) => candidate.id));
-  const items = candidates.filter((candidate) => !isExcluded(verdicts, candidate.id)).slice(0, 5).map((candidate) => ({
-    listingId: candidate.id,
-    name: listingName(candidate),
-    priceCents: candidate.variants[0]?.price ?? candidate.price,
-    mayBeUnavailable: mayBeUnavailable(candidate),
-    ...needsOf(verdicts, candidate.id),
-  }));
   return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items });
 }
 

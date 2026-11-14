@@ -4,7 +4,7 @@ import { platformAdmin, storeScoped, storeScopedTransaction } from "../../db";
 import { listingAttributes } from "../../catalog/listing-attributes";
 import { constraintStatuses, listingVerdicts, overallStatus, parseConstraints, readConstraints, updateConstraints } from "../constraints";
 import { acceptanceForTurn, type ShownMessage } from "../shown";
-import { addToCart, offerChoices, searchCatalog, setShopperNeeds, setSwapRule, type AssistantContext } from "./execute";
+import { addToCart, offerChoices, searchCatalog, setShopperNeeds, setSwapRule, suggestSubstitutes, type AssistantContext } from "./execute";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
@@ -229,6 +229,28 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const again = await addToCart(turn3, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] });
     expect(again).toMatchObject({ ok: false, code: "cannot_confirm", needs: { "allergen:peanuts": "unknown", "allergen:sesame": "unknown", "claim:halal": "unknown" } });
     expect(await storeScoped(storeA).cartLine.findFirst({ where: { cartId: ctx.cartId } })).toMatchObject({ qty: 1 });
+  });
+
+  it("suggests allowed substitutes ranked below many excluded ones (#503 N1)", async () => {
+    const category = await platformAdmin.category.create({ data: { name: `Subs ${suffix}`, slug: `subs-${suffix}`, sortOrder: 999 } });
+    const known = { allergensStatus: "reviewed", dietaryStatus: "reviewed", ingredientsStatus: "reviewed", categoryId: category.id };
+    try {
+      const base = await sell(storeA, await master("Sub base", known));
+      const create = (name: string, allergens: string[], price: number) => Promise.all(Array.from({ length: name === "Sub peanut" ? 40 : 5 }, async (_, index) => {
+        const id = await master(`${name} ${index}`, { ...known, allergens });
+        return storeScoped(storeA).listing.create({ data: { storeId: storeA, masterProductId: id, price, stockMode: "unlimited", frozen: false, perishable: false } });
+      }));
+      await create("Sub peanut", ["peanuts"], 100);
+      const safe = await create("Sub safe", [], 500);
+      const ctx = await conversation(storeA);
+      await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+      const result = await suggestSubstitutes(ctx, { listing_id: base.listingId });
+      expect(items(result).map((item) => item.listingId).sort()).toEqual(safe.map((row) => row.id).sort());
+    } finally {
+      await storeScoped(storeA).listing.deleteMany({ where: { masterProduct: { categoryId: category.id } } });
+      await platformAdmin.masterProduct.deleteMany({ where: { categoryId: category.id } });
+      await platformAdmin.category.delete({ where: { id: category.id } });
+    }
   });
 
   it("never counts a reply that names the item without a yes as confirming it (#503 N5)", async () => {
