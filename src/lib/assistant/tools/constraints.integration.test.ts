@@ -107,6 +107,7 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
   it("removes saved needs the customer takes back, and the gate lifts with them (#503 N8)", async () => {
     const ctx = await conversation(storeA);
     await setShopperNeeds(ctx, { avoid_allergens: ["peanuts", "sesame"], require_claims: ["halal"], avoid_ingredients: [`yellow onion ${suffix}`, `fresh tomato ${suffix}`] });
+    expect(await addToCart(ctx, { items: [{ variant_id: listing.peanut.variantId, qty: 1 }] })).toMatchObject({ ok: false, code: "excluded" });
     const result = await setShopperNeeds(ctx, { remove: [" Peanuts", "halal", `yellow onion ${suffix}`, `fresh tomato ${suffix}`] });
     expect(result).toMatchObject({ ok: true, avoidAllergens: ["sesame"], requireClaims: [], avoidIngredients: [], preferences: [] });
     expect(await addToCart(ctx, { items: [{ variant_id: listing.peanut.variantId, qty: 1 }] })).toMatchObject({ ok: true, added: 1 });
@@ -237,9 +238,12 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(confirmed).toMatchObject({ ok: true, added: 1 });
     const saved = await readConstraints(storeA, ctx.conversationId);
     expect(saved.confirmed).toEqual([expect.objectContaining({ listingId: listing.unknown.listingId, messageId: yes.id, needs: ["allergen:peanuts"] })]);
+    // Saving the same need again does not raise the line the customer already confirmed.
+    expect(await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] })).not.toHaveProperty("failsNeeds");
 
     // A need added later was never confirmed for this item: it is asked about again.
-    await setShopperNeeds(ctx, { avoid_allergens: ["sesame"], require_claims: ["halal"], avoid_ingredients: [] });
+    expect(await setShopperNeeds(ctx, { avoid_allergens: ["sesame"], require_claims: ["halal"], avoid_ingredients: [] }))
+      .toMatchObject({ failsNeeds: [{ name: `Paste mystery ${suffix}`, code: "cannot_confirm" }] });
     const more: ShownMessage = { role: "user", id: `u3-${suffix}`, parts: [{ type: "text", text: `I also need halal and no sesame. Add another Paste mystery ${suffix}.` }] };
     const later = [...messages, { role: "assistant", id: `a2-${suffix}`, parts: [{ type: "text", text: "Added." }] } as ShownMessage, more];
     await storeScoped(storeA).aiConversation.update({ where: { id: ctx.conversationId }, data: { messages: later as never } });
@@ -317,6 +321,13 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const failingLine = (await addToCart(failing, { items: [{ variant_id: listing.shaky.variantId, qty: 1, backup_variant_id: listing.peanut.variantId }] }) as unknown as { lineId: string }).lineId;
     await setShopperNeeds(failing, { avoid_allergens: ["peanuts"] });
     expect(await setSwapRule(failing, { line_id: failingLine, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
+
+    // Another conversation cannot reach that line; a line with no named backup, or one that is not may-be-unavailable, refunds.
+    expect(await setSwapRule(failing, { line_id: lineId, rule: "exact_only" })).toMatchObject({ ok: false, code: "line_not_found" });
+    expect(await setSwapRule(failing, { line_id: failingLine, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
+    const plainLine = (await addToCart(kept, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] }) as unknown as { lineId: string }).lineId;
+    expect(await setSwapRule(kept, { line_id: plainLine, rule: "named_substitute", substitute_variant_id: listing.onion.variantId })).toMatchObject({ ok: true });
+    expect(await setSwapRule(kept, { line_id: plainLine, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
 
     // With no constraints, nothing changes.
     const free = await conversation(storeA);
