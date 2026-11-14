@@ -31,7 +31,8 @@
 .bar {
   border-bottom: 1px solid var(--d-line);
   background: var(--d-surface);
-  padding: 14px 20px;
+  /* Lines the wordmark up with the 1080px content column. */
+  padding: 14px max(20px, calc((100% - 1080px) / 2));
 }
 
 .wordmark {
