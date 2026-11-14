@@ -11,6 +11,9 @@ import { isRlsRejection } from "../listing/cross-store-write";
 import { setStripeProvider } from "../stripe";
 import { capturedPayments, fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
 import { scheduleCourierPacking } from "../inngest/notify";
+import { dispatchPackingOrder, type CourierEvent } from "../delivery/dispatch";
+import { DoorDashDriveProvider } from "../delivery/doordash";
+import { fakeDoorDash } from "../delivery/doordash-fake";
 import { markLinePicked, markLineShort, markReady } from "./service";
 import {
   BATCH_NOT_FOUND,
@@ -71,6 +74,9 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
           totalCents: subtotal,
           paymentIntentId,
           trackingToken: `tok_${RUN}_${n}_${"x".repeat(20)}`,
+          ...(opts.fulfillment === "courier"
+            ? { deliveryLine1: "1100 Wayne Ave", deliveryCity: "Silver Spring", deliveryState: "MD", deliveryZip: "20910" }
+            : {}),
           acceptedAt: new Date(),
           createdAt: new Date(Date.now() - opts.minutesAgo * 60_000),
         },
@@ -101,9 +107,15 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
   beforeAll(async () => {
     raw = testPrismaClient();
     setStripeProvider(fakeStripeProvider);
-    storeId = (await raw.store.create({ data: { slug: `b-${RUN}`, name: "Ada's Market", themePreset: "palm-and-shea" } })).id;
+    storeId = (await raw.store.create({
+      data: {
+        slug: `b-${RUN}`, name: "Ada's Market", themePreset: "palm-and-shea",
+        addressLine1: "8121 Georgia Ave", city: "Silver Spring", state: "MD", zip: "20910", phone: "+13015550100",
+      },
+    })).id;
     storeBId = (await raw.store.create({ data: { slug: `bb-${RUN}`, name: "Other", themePreset: "palm-and-shea" } })).id;
     await platformAdminTransaction(async (tx) => {
+      await tx.storeSubscription.create({ data: { storeId, plan: "pro", status: "active" } });
       categoryId = (await tx.category.create({ data: { name: `Soup ${RUN}`, slug: `soup-${RUN}`, sortOrder: 99 } })).id;
       for (const name of ["Egusi", "Ogbono"]) {
         masterIds.push((await tx.masterProduct.create({ data: { name: `${name} ${RUN}`, categoryId } })).id);
@@ -126,6 +138,8 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
     setStripeProvider(null);
     for (const id of [storeId, storeBId]) {
       const scoped = storeScoped(id);
+      await scoped.deliveryEvent.deleteMany({});
+      await scoped.delivery.deleteMany({});
       await scoped.substitutionRequest.deleteMany({});
       await scoped.notificationLog.deleteMany({});
       await scoped.stockEvent.deleteMany({});
@@ -138,6 +152,7 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
     }
     await platformAdminTransaction(async (tx) => {
       await tx.auditLog.deleteMany({ where: { storeId: { in: [storeId, storeBId] } } });
+      await tx.storeSubscription.deleteMany({ where: { storeId } });
       await tx.masterProduct.deleteMany({ where: { id: { in: masterIds } } });
       await tx.category.deleteMany({ where: { id: categoryId } });
     });
@@ -241,6 +256,33 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
     // A second tap books nothing new.
     expect(await startBatchPacking(storeId, started.batchId)).toEqual({ ok: true });
     expect(vi.mocked(scheduleCourierPacking)).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC6 with the DoorDash fake: the packing event books the courier for the ready time counted from start packing", async () => {
+    const MIN = 60_000;
+    const courier = await order([{ variantId: v.egusi, qty: 4, price: 1000 }], { minutesAgo: 9, fulfillment: "courier" });
+    const pickup = await order([{ variantId: v.egusi, qty: 1, price: 1000 }], { minutesAgo: 8 });
+    const started = await startBatch(storeId, [courier.id, pickup.id]);
+    if (!started.ok) throw new Error(started.error);
+    await startBatchPacking(storeId, started.batchId);
+    const startedAt = (await orderRow(courier.id)).pickingStartedAt!;
+
+    const keys = { DOORDASH_DEVELOPER_ID: "dev-564", DOORDASH_KEY_ID: "key-564", DOORDASH_SIGNING_SECRET: Buffer.from("signing-secret-564-bytes-0123456789").toString("base64url") };
+    const now = () => startedAt;
+    const fake = fakeDoorDash({ developerId: keys.DOORDASH_DEVELOPER_ID, keyId: keys.DOORDASH_KEY_ID, signingSecret: keys.DOORDASH_SIGNING_SECRET, now });
+    const events: CourierEvent[] = [];
+    const booked = await dispatchPackingOrder(storeId, courier.id, {
+      providers: [new DoorDashDriveProvider({ env: keys, fetch: fake.fetch, now })],
+      emit: async (event) => { events.push(event); },
+      now,
+    });
+
+    // 4 items at the default 90 s each is under the 10-minute floor.
+    const ready = new Date(startedAt.getTime() + 10 * MIN);
+    expect(booked).toMatchObject({ ok: true, provider: "doordash" });
+    expect(fake.calls[0].body).toMatchObject({ pickup_time: ready.toISOString() });
+    expect((await orderRow(courier.id)).readyEstimateAt).toEqual(ready);
+    expect((await readPickBatch(storeId, started.batchId))!.totes.find((t) => t.orderId === courier.id)?.readyEstimateAt).toEqual(ready);
   });
 
   it("AC3: units found fill the oldest order first; the short lands on the newest, which gets its own #13 prompt", async () => {
