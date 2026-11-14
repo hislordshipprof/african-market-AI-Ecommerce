@@ -44,6 +44,14 @@ import OrderPage from "@/app/order/[token]/page";
 const hasDb = !!process.env.DATABASE_URL;
 
 /** Every `description` prop in the page's element tree, without rendering client components. */
+/** All text in the page's element tree, joined, without rendering client components. */
+function textOf(node: unknown): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (!node || typeof node !== "object" || !("props" in node)) return "";
+  return textOf((node as { props: { children?: unknown } }).props.children);
+}
+
 function headingDescriptions(node: unknown): string[] {
   if (Array.isArray(node)) return node.flatMap(headingDescriptions);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
@@ -110,10 +118,12 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
     vi.unstubAllEnvs();
     for (const id of [storeA, storeB]) {
       await storeScoped(id).order.deleteMany({});
+      await storeScoped(id).storeCoupon.deleteMany({});
       await storeScoped(id).cart.deleteMany({});
       await storeScoped(id).customer.deleteMany({});
     }
     await raw.store.deleteMany({ where: { id: { in: [storeA, storeB] } } });
+    await raw.user.deleteMany({ where: { id: `trk-${suffix}` } });
     await raw.$disconnect();
   });
 
@@ -121,6 +131,18 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
     const order = await createOrder(storeA);
     const page = await render(slugA, order.trackingToken!);
     expect(headingDescriptions(page)).toContain(`Order #${order.number} · Track A`);
+  });
+
+  it("#557: the money summary shows the promo code and the discount, and only when there is one", async () => {
+    const plain = await createOrder(storeA);
+    expect(textOf(await render(slugA, plain.trackingToken!))).not.toContain("Promo");
+    const order = await createOrder(storeA);
+    const owner = await raw.user.create({ data: { id: `trk-${suffix}`, name: "Owner", email: `trk-${suffix}@example.com` } });
+    const coupon = await storeScoped(storeA).storeCoupon.create({
+      data: { storeId: storeA, code: "SAVE10", kind: "fixed", amountOffCents: 200, startsAt: new Date("2026-01-01T00:00:00Z"), createdById: owner.id },
+    });
+    await storeScoped(storeA).order.update({ where: { id: order.id }, data: { couponId: coupon.id, discountCents: 200 } });
+    expect(textOf(await render(slugA, order.trackingToken!))).toContain("Promo SAVE10: −$2.00");
   });
 
   it("the order id of an order that has a tracking token is a 404, with no session", async () => {

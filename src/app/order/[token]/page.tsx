@@ -90,6 +90,9 @@ export default async function OrderPage({
               ))}
             </ul>
             <p><strong>Subtotal:</strong> {money(realOrder.subtotalCents)}</p>
+            {realOrder.discountCents > 0 && (
+              <p><strong>{realOrder.coupon ? `Promo ${realOrder.coupon.code}` : "Promo discount"}:</strong> −{money(realOrder.discountCents)}</p>
+            )}
             {realOrder.serviceFeeCents > 0 && (
               <p><strong>Service fee:</strong> {money(realOrder.serviceFeeCents)}</p>
             )}
