@@ -142,11 +142,7 @@ describe("sweep configuration", () => {
       await handler({ step });
       expect(step.runs).toEqual(["find-orphaned", "find-pick-timeouts", "find-expired-substitutions", "release-orphan-holds"]);
     } finally {
-      vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
-      vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
-      vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
-      vi.mocked(dbModule.findPickTimeoutCandidates).mockRestore();
-      vi.mocked(dbModule.findOrphanHoldCarts).mockRestore();
+      vi.restoreAllMocks();
     }
   });
 });
@@ -307,12 +303,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
   });
 
   afterEach(() => {
-    vi.mocked(dbModule.findStuckTransitionalOrders).mockRestore();
-    vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
-    vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
-    vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
-    vi.mocked(dbModule.findPickTimeoutCandidates).mockRestore();
-    vi.mocked(dbModule.findOrphanHoldCarts).mockRestore();
+    vi.restoreAllMocks();
   });
 
   describe("dailyConfidence", () => {
