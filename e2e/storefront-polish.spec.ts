@@ -62,6 +62,20 @@ test.describe("Storefront layout on a phone (#529)", () => {
     await expect(bar).toContainText(/minimum/i);
     expect(overlap(await box(bar), await box(bottomNav(page)))).toBe(false);
   });
+
+  test("text fields are at least 16px, so a phone does not zoom on focus", async ({ page }) => {
+    await page.goto(`${BASE}/listings/mn_egusi`, { waitUntil: "networkidle" });
+    await page.getByTestId("product-detail").getByTestId("quick-add-btn").first().click();
+    await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden({ timeout: 20_000 });
+    await page.goto(`${BASE}/checkout`, { waitUntil: "networkidle" });
+    const fields = await page.evaluate(() =>
+      [...document.querySelectorAll("input:not([type=hidden]):not([type=radio]):not([type=checkbox]), select, textarea")]
+        .filter((el) => el.getBoundingClientRect().width > 0)
+        .map((el) => ({ field: el.id || el.getAttribute("placeholder") || el.tagName, size: parseFloat(getComputedStyle(el).fontSize) })),
+    );
+    expect(fields.length).toBeGreaterThan(3);
+    expect(fields.filter((f) => f.size < 16)).toEqual([]);
+  });
 });
 
 test("order tracking names each line's product and size, and the fulfillment in words (#529)", async ({ page }) => {

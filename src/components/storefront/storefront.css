@@ -1414,9 +1414,10 @@
     min-height: 44px;
     min-width: 60px;
   }
+  /* 16px keeps iOS from zooming the page when the search takes focus. */
   .sf-search-input {
     height: 44px;
-    font-size: 13px;
+    font-size: 16px;
   }
   .sf-search-key {
     display: none;
