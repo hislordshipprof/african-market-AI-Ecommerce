@@ -1655,8 +1655,8 @@ model StoreWhatsAppNumber {
   id             String   @id @default(cuid())
   storeId        String   @unique @map("store_id")
   wabaId         String   @map("waba_id")
-  /// Unique platform-wide: an inbound message to this number resolves to this store only.
-  phoneNumberId  String   @unique @map("phone_number_id")
+  /// Unique platform-wide among pending and registered rows (partial unique index in SQL), so an inbound message resolves to one store.
+  phoneNumberId  String   @map("phone_number_id")
   displayNumber  String?  @map("display_number")
   /// pending | registered | failed | disconnected
   status         String   @default("pending")

@@ -38,6 +38,8 @@ const PHONE_B = String(2_000_000_000 + base);
 const PHONE_C = String(3_000_000_000 + base);
 const WABA_A = String(4_000_000_000 + base);
 const WABA_B = String(5_000_000_000 + base);
+const PHONE_X = String(6_000_000_000 + base);
+const PHONE_Y = String(7_000_000_000 + base);
 
 let seq = 0;
 function text(body: string): InboundMessage {
@@ -98,6 +100,14 @@ describe.skipIf(!hasDb)("store WhatsApp number (lane database)", () => {
   });
 
   const actor = (storeId: string) => ({ storeId, actorId, actorEmail });
+
+  async function newStore(name: string): Promise<string> {
+    const id = crypto.randomUUID();
+    await asPlatformAdmin(async (tx) => {
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${id}, ${name}, ${`swn-${id}`}, 'active', now())`;
+    });
+    return id;
+  }
 
   it("links a number in fake mode: registered, coexistence on, token encrypted at rest and never in the view", async () => {
     const result = await linkStoreNumber(actor(storeA), {
@@ -215,5 +225,25 @@ describe.skipIf(!hasDb)("store WhatsApp number (lane database)", () => {
     expect("error" in result).toBe(true);
     expect(connect).not.toHaveBeenCalled();
     expect((await getStoreNumber(storeA))?.status).toBe("disconnected");
+  });
+
+  it("a disconnected or failed row does not hold its number: another store can then link it", async () => {
+    const [first, second] = [await newStore("Chidi Market"), await newStore("Dayo Market")];
+    const ids = (phoneNumberId: string) => ({ wabaId: WABA_A, phoneNumberId, displayNumber: "+14045550103", coexistence: true });
+
+    expect(await linkStoreNumber(actor(first), ids(PHONE_X))).toEqual({ ok: true });
+    await disconnectStoreNumber(actor(first));
+    expect(await linkStoreNumber(actor(second), ids(PHONE_X))).toEqual({ ok: true });
+    expect(await getStoreNumber(second)).toMatchObject({ phoneNumberId: PHONE_X, status: "registered" });
+    expect(await linkStoreNumber(actor(first), ids(PHONE_X))).toEqual({ error: ALREADY_LINKED_ERROR });
+
+    setWhatsAppProvider({
+      send: fakeWhatsAppProvider.send,
+      connectStoreNumber: () => Promise.reject(new WhatsAppApiError(100, 400)),
+    });
+    expect(await linkStoreNumber(actor(second), ids(PHONE_Y))).toEqual({ error: LINK_FAILED_ERROR });
+    setWhatsAppProvider(fakeWhatsAppProvider);
+    expect(await linkStoreNumber(actor(first), ids(PHONE_Y))).toEqual({ ok: true });
+    expect(await handleStoreInboundMessage(PHONE_Y, text("y"))).toEqual({ kind: "customer", storeId: first });
   });
 });
