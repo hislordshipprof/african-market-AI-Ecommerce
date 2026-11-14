@@ -41,6 +41,7 @@ import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, reject
 import { makeFakeStep } from "../inngest/fake-step";
 import { runConfirmRequestSteps } from "./alert-functions";
 import { FIXED_ERROR } from "./types";
+import { NOTHING_DRAFTED, NUMBER_REFUSED } from "./turn";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `t142-${Date.now()}`;
@@ -229,7 +230,7 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: egusiId } })).toBe(0);
 
     const names = ((fake.requests[0]?.body?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name).sort();
-    expect(names).toEqual(["find_listings", "propose_stock_change"]);
+    expect(names).toEqual(["find_listings", "inventory_report", "propose_stock_change"]);
     const choice = fake.requests[0]?.body?.tool_choice;
     expect(choice == null || choice === "auto" || (typeof choice === "object" && (choice as { type?: string }).type === "auto")).toBe(true);
 
@@ -545,4 +546,44 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       await storeScoped(storeAId).listing.updateMany({ where: { id: { in: [yellowId, ...others] } }, data: { active: false } });
     }
   }, 60_000);
+  it("inventory_report figures can be quoted; a number no tool returned is replaced by the fixed summary or refused", async () => {
+    const okraId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Okra", price: 500, stockMode: "counted", qty: 6, confidence: 1 },
+    })).id;
+    const day = 86_400_000;
+    await storeScoped(storeAId).stockEvent.createMany({
+      data: [
+        { storeId: storeAId, listingId: okraId, type: "sale", delta: -10, actorId: ownerAId, createdAt: new Date(Date.now() - 2 * day) },
+        { storeId: storeAId, listingId: okraId, type: "counter_sale", delta: -4, actorId: ownerAId, createdAt: new Date(Date.now() - day) },
+      ],
+    });
+    const ask = async (text: string) => {
+      const sent = await sendCopilotMessage({ messageId: crypto.randomUUID(), text });
+      expect(sent.ok).toBe(true);
+      return sent.ok ? sent : null;
+    };
+
+    script([
+      { kind: "tool", toolName: "inventory_report", toolInput: { query: "okra" } },
+      { kind: "text", text: "Okra sold 10 online and 4 at the counter this week, about 1 a day, so 6 days left." },
+    ]);
+    const quoted = await ask("how is okra selling?");
+    expect(quoted?.reply).toBe(`Okra sold 10 online and 4 at the counter this week, about 1 a day, so 6 days left.\n\n${NOTHING_DRAFTED}`);
+    expect(quoted?.proposals).toEqual([]);
+
+    script([
+      { kind: "tool", toolName: "inventory_report", toolInput: { query: "okra" } },
+      { kind: "text", text: "Okra sold 18 this week, est. out Thursday." },
+    ]);
+    const corrected = await ask("how is okra selling?");
+    expect(corrected?.reply).not.toContain("18");
+    expect(corrected?.reply).toMatch(
+      /^Okra: 10 sold online this week \(0 the week before\), 4 counter sales reported\. About 1 a day, 6 days left, est\. out [A-Z][a-z]+day\.\n\n/,
+    );
+
+    script([{ kind: "text", text: "Okra sells about 25 a week." }]);
+    const refused = await ask("how is okra selling?");
+    expect(refused?.reply).toBe(`${NUMBER_REFUSED}\n\n${NOTHING_DRAFTED}`);
+    expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: okraId } })).toBe(2);
+  });
 });
