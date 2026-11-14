@@ -310,6 +310,7 @@
   padding: 10px 42px;
   font-size: 14px;
   color: var(--color-ink);
+  text-overflow: ellipsis;
 }
 .sf-search-input::placeholder {
   color: var(--muted-foreground);
