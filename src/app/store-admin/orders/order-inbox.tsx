@@ -720,6 +720,12 @@ export function OrderInbox({
                     <span className="text-muted-foreground">Subtotal</span>
                     <span className="tabular-nums">{money(selectedOrder.subtotalCents)}</span>
                   </div>
+                  {selectedOrder.discountCents > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Promo discount (your store funds it)</span>
+                      <span className="tabular-nums" data-testid="order-discount">−{money(selectedOrder.discountCents)}</span>
+                    </div>
+                  )}
                   {selectedOrder.serviceFeeCents > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Service fee (platform)</span>
