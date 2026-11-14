@@ -168,6 +168,16 @@ A Copilot alert asking the owner to confirm a listing whose confidence fell belo
 **Linked WhatsApp number**:
 The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
 
+**Daily sample**:
+The AI conversations a platform admin reviews for one UTC day (#544): up to 5 random Shopper assistant chats and 5 random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. The same day always shows the same sample.
+
+**Auto-flag**:
+A reason the platform marks an AI chat for review without a person: the grounder removed an amount, a tool refused a made-up id, a constraint or Cannot confirm refusal, `forward_to_store`, or a turn over the cost threshold ($0.02).
+
+**Review label**:
+A platform admin's verdict on one AI chat: wrong item, wrong price, unsafe, tone or other, with an optional note. Stored in `ai_review_flags`, owned by the chat's store, and deleted with the chat or after 90 days.
+_Avoid_: Flag (on its own), rating
+
 ## Ordering and fulfillment
 
 **Order**:

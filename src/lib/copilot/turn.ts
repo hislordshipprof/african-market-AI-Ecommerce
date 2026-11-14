@@ -5,6 +5,7 @@ import {
   assistantProviderOptions,
   createAssistantModel,
 } from "../assistant/model";
+import { callCostMicros, tokenUsageOf } from "../assistant/cost";
 import { AssistantConfigError } from "../assistant/errors";
 import { claimCapAlert, assistantSpendState, utcDay } from "../assistant/spend";
 import { lockStoreRow, Prisma as DbPrisma, storeScoped, storeScopedRawQuery, storeScopedTransaction, txExecute, txQuery } from "../db";
@@ -346,6 +347,7 @@ export async function sendCopilotTurn(input: {
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = steps >= STEP_CAP || result.finishReason === "length" || book.overflow;
     const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped);
+    const usage = turnUsage(modelId, result.steps);
     const stored = await commitTurn({
       storeId: input.storeId,
       userId: input.userId,
@@ -358,6 +360,7 @@ export async function sendCopilotTurn(input: {
       existing: conversation.messages,
       drafts: book.drafts,
       choices: book.choices,
+      usage,
     });
     committed = true;
     return stored;
@@ -381,6 +384,30 @@ export async function sendCopilotTurn(input: {
   }
 }
 
+interface TurnUsage {
+  tokensIn: number;
+  tokensOut: number;
+  costMicros: number;
+}
+
+/** Tokens and cost of one turn's model steps. An unpriced model still saves the turn; the spend gate already failed closed. */
+function turnUsage(modelId: string, steps: unknown): TurnUsage {
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let cost = BigInt(0);
+  for (const step of Array.isArray(steps) ? steps : []) {
+    const usage = tokenUsageOf((step as { usage?: unknown } | null)?.usage);
+    try {
+      cost += callCostMicros(modelId, usage);
+    } catch {
+      // No price for this model.
+    }
+    tokensIn += Number(usage.inputTokens?.total ?? 0);
+    tokensOut += Number(usage.outputTokens?.total ?? 0);
+  }
+  return { tokensIn, tokensOut, costMicros: Number(cost) };
+}
+
 async function commitTurn(input: {
   storeId: string;
   userId: string;
@@ -393,6 +420,7 @@ async function commitTurn(input: {
   existing: StoredMessage[];
   drafts: Draft[];
   choices: PendingChoice[];
+  usage: TurnUsage;
 }): Promise<SendResult> {
   let proposals: Awaited<ReturnType<typeof insertProposalRows>> = [];
   let choices: ListingChoice[] = [];
@@ -425,13 +453,17 @@ async function commitTurn(input: {
         text: input.reply,
         messageId: input.messageId,
         ...(choices.length > 0 ? { choices } : {}),
+        costMicros: input.usage.costMicros,
       },
     ];
     await txExecute(tx, DbPrisma.sql`
       UPDATE copilot_conversations
       SET messages = ${JSON.stringify(nextMessages)}::jsonb,
           last_message_at = (clock_timestamp() AT TIME ZONE 'UTC'),
-          in_flight_until = NULL
+          in_flight_until = NULL,
+          tokens_in = tokens_in + ${input.usage.tokensIn},
+          tokens_out = tokens_out + ${input.usage.tokensOut},
+          cost_micros = cost_micros + ${input.usage.costMicros}
       WHERE id = ${input.conversationId}
     `);
     const receipt = await txExecute(tx, DbPrisma.sql`
