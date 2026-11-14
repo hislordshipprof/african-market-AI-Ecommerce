@@ -119,7 +119,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 2. Owner completes Stripe Connect Express onboarding (KYC, bank).
 3. Catalog: staff photograph shelves → AI matches to master catalog or drafts new listings (name, local names, category, size, image) → owner sets prices & reviews → publish. CSV import also supported.
 4. Settings: hours, prep time, delivery radius (default 8 mi), minimum order, free-delivery threshold, pickup on/off, own driver on/off, auto-refund limit.
-5. Courier registration: platform registers the store location with Uber Direct (location/org) and DoorDash Drive (business + store) automatically.
+5. Courier registration: platform registers the store location with Uber Direct (location/org) and DoorDash Drive (business + store) automatically. It runs as a job when the platform admin saves the store with a full address (#526). A failure is saved on the store, shown on the platform admin store page with a retry button, and retried daily with stores not yet registered; it never blocks onboarding.
 6. Test order → go live.
 
 ### 6.2 Catalog & inventory
