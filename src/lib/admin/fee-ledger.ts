@@ -1,3 +1,4 @@
+import { csvDollars, toCsv } from "@/lib/analytics/csv";
 import { captureSplit, courierFeeCents } from "@/lib/order/platform-fee";
 
 /**
@@ -211,4 +212,36 @@ export function buildFeeLedger(month: LedgerMonth, captures: CaptureFacts[], ref
     stores: [...stores.values()].sort((a, b) => a.storeName.localeCompare(b.storeName) || a.storeId.localeCompare(b.storeId)),
     total,
   };
+}
+
+/** Row labels the page and the CSV share. */
+export const ROW_LABELS: Record<LedgerRow["kind"], string> = { capture: "Order", refund: "Refund" };
+
+export function ordersLabel(orders: number): string {
+  return `${orders} ${orders === 1 ? "order" : "orders"}`;
+}
+
+/** The amount columns in screen order. */
+export const AMOUNT_COLUMNS: Array<[keyof LedgerAmounts, string]> = [
+  ["capturedCents", "Captured"],
+  ["serviceFeeCents", "Service fee"],
+  ["courierFeeCents", "Courier fee passed through"],
+  ["platformCardFeeCents", "Card fee share (platform)"],
+  ["applicationFeeCents", "Application fee"],
+  ["feeRefundedCents", "Fee refunded"],
+  ["platformNetCents", "Platform net"],
+];
+
+export const utcDate = (at: Date) => at.toISOString().slice(0, 10);
+
+/** The month as on screen: every row, each store's total, then the month's. */
+export function feeLedgerCsv(ledger: FeeLedger): string {
+  const amounts = (values: LedgerAmounts) => AMOUNT_COLUMNS.map(([key]) => csvDollars(values[key]));
+  const month = ledger.month.key;
+  return toCsv([
+    ["Month (UTC)", "Date (UTC)", "Store", "Order", "Row", ...AMOUNT_COLUMNS.map(([, label]) => label)],
+    ...ledger.rows.map((row) => [month, utcDate(row.at), row.storeName, `#${row.orderNumber}`, ROW_LABELS[row.kind], ...amounts(row)]),
+    ...ledger.stores.map((store) => [month, null, store.storeName, null, `Store total (${ordersLabel(store.orders)})`, ...amounts(store)]),
+    [month, null, "All stores", null, `Month total (${ordersLabel(ledger.total.orders)})`, ...amounts(ledger.total)],
+  ]);
 }
