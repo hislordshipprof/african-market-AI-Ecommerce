@@ -422,6 +422,19 @@
   background: var(--color-soft);
   color: var(--color-ink);
 }
+/* Phones: the four stages scroll in one row instead of orphaning the last. */
+@media (max-width: 767px) {
+  .stages {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+  .stages a {
+    flex-shrink: 0;
+  }
+}
 .anchor {
   scroll-margin-top: 168px;
 }

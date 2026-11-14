@@ -906,6 +906,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     signedIn = false, identityLocked = false,
   } = props;
+  const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
 
   return (
     <div className={styles.page}>
@@ -1191,8 +1192,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
         <aside id="review" className={`${styles.sticky} ${styles.anchor}`}>
           <FlowCard title="Your order">
             <p className={styles.muted}>
-              {settings.name} ·{" "}
-              {lines.reduce((sum, l) => sum + l.quantity, 0)} items{" "}
+              {settings.name} · {itemCount} {itemCount === 1 ? "item" : "items"}{" "}
               <Link className="sf-text-link" href="/cart">Edit basket</Link>
             </p>
             <ul className={styles.miniLines}>
