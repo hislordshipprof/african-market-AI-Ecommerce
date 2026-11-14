@@ -14,10 +14,27 @@ export const ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX = "That is more than is left to r
 type Actor = { id: string; email: string };
 type ReviewResult = { ok: true } | { ok: false; error: string };
 
-/** The in-review issues for the store's "Problems to review" list, oldest first. */
+/** Longer than any approval or auto-refund takes to reserve its refund request. */
+const STRANDED_AFTER_MS = 15 * 60 * 1000;
+
+/**
+ * In review, or approved or auto-refunded but stranded with no refund request: a crash between the
+ * claim and the reservation leaves that, and nothing else would ever refund it (#465).
+ */
+function reviewable(now = new Date()) {
+  return {
+    refundRequestId: null,
+    OR: [
+      { state: "in_review" },
+      { state: { in: ["approved", "auto_refunded"] }, updatedAt: { lt: new Date(now.getTime() - STRANDED_AFTER_MS) } },
+    ],
+  };
+}
+
+/** The issues for the store's "Problems to review" list, oldest first. */
 export async function issuesToReview(storeId: string) {
   const issues = await storeScoped(storeId).issueReport.findMany({
-    where: { state: "in_review" },
+    where: reviewable(),
     orderBy: { createdAt: "asc" },
     include: {
       order: {
@@ -74,7 +91,9 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
     include: { order: { select: { paymentIntentId: true } } },
   });
   if (!issue) return { ok: false, error: ISSUE_NOT_FOUND };
-  if (issue.state !== "in_review" || issue.refundRequestId) return { ok: false, error: ISSUE_ALREADY_HANDLED };
+  if (!(await storeScoped(storeId).issueReport.count({ where: { id: issueId, ...reviewable() } }))) {
+    return { ok: false, error: ISSUE_ALREADY_HANDLED };
+  }
   const paymentIntentId = issue.order.paymentIntentId;
   if (!paymentIntentId) return { ok: false, error: ISSUE_REFUND_NOT_STARTED };
   const amount = amountCents ?? issue.amountCents;
@@ -85,7 +104,7 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
   const claimed = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const won = await tx.issueReport.updateMany({
-      where: { id: issueId, state: "in_review", refundRequestId: null },
+      where: { id: issueId, ...reviewable() },
       data: { state: "approved", amountCents: amount },
     });
     if (won.count !== 1) return false;
@@ -97,7 +116,7 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
         action: "issue_approved",
         entityType: "order",
         entityId: issue.orderId,
-        before: { state: "in_review", amountCents: issue.amountCents },
+        before: { state: issue.state, amountCents: issue.amountCents },
         after: { issueReportId: issueId, amountCents: amount },
       },
     });
@@ -150,7 +169,7 @@ export async function declineIssue(storeId: string, issueId: string, actor: Acto
     await lockStoreRow(tx, storeId);
     const issue = await tx.issueReport.findUnique({ where: { id: issueId } });
     if (!issue) return { ok: false as const, error: ISSUE_NOT_FOUND };
-    if (issue.state !== "in_review" || issue.refundRequestId) return { ok: false as const, error: ISSUE_ALREADY_HANDLED };
+    if (!(await tx.issueReport.count({ where: { id: issueId, ...reviewable() } }))) return { ok: false as const, error: ISSUE_ALREADY_HANDLED };
     await tx.issueReport.update({ where: { id: issueId }, data: { state: "declined" } });
     await tx.auditLog.create({
       data: {
@@ -160,7 +179,7 @@ export async function declineIssue(storeId: string, issueId: string, actor: Acto
         action: "issue_declined",
         entityType: "order",
         entityId: issue.orderId,
-        before: { state: "in_review" },
+        before: { state: issue.state },
         after: { issueReportId: issueId, reason },
       },
     });
