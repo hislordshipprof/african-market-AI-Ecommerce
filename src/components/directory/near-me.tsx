@@ -6,7 +6,7 @@ import { NEARBY_MILES } from "@/lib/directory/distance";
 import { StoreCard, type CardStore } from "./store-card";
 import styles from "./directory.module.css";
 
-export type StateGroup = { code: string; name: string; stores: { slug: string; name: string; city: string | null; href: string }[] };
+export type StateGroup = { code: string; name: string; href: string; stores: { slug: string; name: string; city: string | null; href: string }[] };
 
 type Answer =
   | { kind: "stores"; label: string | null; nearby: boolean; stores: CardStore[] }
@@ -145,7 +145,7 @@ function StateList({ states }: { states: StateGroup[] }) {
       <ul className={styles.states}>
         {states.map((state) => (
           <li key={state.code} className={styles.state}>
-            <h3 className={styles.stateName}>{state.name}</h3>
+            <h3 className={styles.stateName}><a href={state.href}>{state.name}</a></h3>
             <ul className={styles.stateStores}>
               {state.stores.map((store) => (
                 <li key={store.slug}>

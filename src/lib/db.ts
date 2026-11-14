@@ -151,6 +151,7 @@ export function storeScoped(storeId: string) {
     supportMessage: wrapDelegate(storeId, prisma.supportMessage),
     storeSubscription: wrapDelegate(storeId, prisma.storeSubscription),
     assistantChatMonth: wrapDelegate(storeId, prisma.assistantChatMonth),
+    storeCoupon: wrapDelegate(storeId, prisma.storeCoupon),
   };
 }
 
@@ -344,7 +345,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "driverRoute" | "pickBatch" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "driverRoute" | "pickBatch" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "storeCoupon" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -397,6 +398,7 @@ export async function storeScopedTransaction<T>(
       ingredient: tx.ingredient,
       ingredientSynonym: tx.ingredientSynonym,
       platformSettings: tx.platformSettings,
+      storeCoupon: tx.storeCoupon,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -1243,6 +1245,13 @@ export async function findOrderAlertRows(opts: {
   };
 }
 
+/** Stores with a listing on this master product, active or not: the storefronts its edits reach. */
+export async function storesListingMasterProduct(tx: Pick<PrismaClient, "$queryRaw">, productId: string): Promise<string[]> {
+  const rows = await tx.$queryRaw<Array<{ store_id: string }>>`
+    SELECT DISTINCT store_id FROM listings WHERE master_product_id = ${productId}`;
+  return rows.map((row) => row.store_id);
+}
+
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
@@ -1291,6 +1300,15 @@ export async function claimImportRow(
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+/** A read as the platform admin, for queries Prisma's query API cannot express. */
+export async function platformAdminRawQuery<T>(sql: Prisma.Sql): Promise<T[]> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    return tx.$queryRaw<T[]>(sql);
+  });
 }
 
 export async function storeScopedRawQuery<T>(

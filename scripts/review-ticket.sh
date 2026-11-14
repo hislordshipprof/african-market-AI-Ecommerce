@@ -13,6 +13,8 @@ ROOT="$(git rev-parse --show-toplevel)"
 N="${1:?usage: scripts/review-ticket.sh <issue>}"
 . "$ROOT/scripts/agent-cli.sh"
 . "$ROOT/scripts/review-watch.sh"
+. "$ROOT/scripts/merge-gate.sh"
+. "$ROOT/scripts/review-delta.sh"
 WT="$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N"
 OUT="$ROOT/.builder/review-$N.md"
 LOG="$ROOT/.builder/logs/review-$N-$(date +%Y%m%d-%H%M%S).json"
@@ -20,6 +22,11 @@ LANE_PORT="${E2E_PORT:-3000}"
 [ -d "$WT" ] || { echo "No worktree for ticket $N at $WT"; exit 1; }
 mkdir -p "$ROOT/.builder/logs"
 SHA_FILE="$ROOT/.builder/review-$N.sha"
+# A re-review checks only what changed since the last reviewed commit (review-delta.sh): keep the earlier verdict file
+# and its sha before they are removed.
+PREV_REVIEW="$ROOT/.builder/review-$N.prev.md"; PREV_SHA=""
+rm -f "$PREV_REVIEW"
+if [ -s "$OUT" ] && [ -s "$SHA_FILE" ]; then PREV_SHA=$(review_sha "$SHA_FILE"); cp "$OUT" "$PREV_REVIEW"; fi
 rm -f "$OUT" "$SHA_FILE"
 REVIEWED_SHA=$(git -C "$WT" rev-parse HEAD)
 # A sandboxed Codex can only write inside the worktree, so it writes there and the file is moved after.
@@ -55,6 +62,16 @@ $ROUND_RULE
 Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT; stop any server you start.
 Run every reader and validator in the foreground and wait for it. Do not end your turn until $TARGET exists: a turn that ends first counts as no review.
 Write your result to $TARGET. The FIRST line must be exactly 'VERDICT: PASS' (no blocking findings) or 'VERDICT: BLOCKING'. Then list every finding with: severity (blocking = security, data isolation, money or data loss, a failed acceptance criterion, or broken build/CI; otherwise non-blocking), file:line, the concrete failure scenario, and how to reproduce it."
+
+# Round 1 is a full review. A later round reads only the delta, unless review_delta_prepare says full.
+DELTA_FILE="$WT/.builder/review-$N.delta.diff"; mkdir -p "$WT/.builder"; rm -f "$DELTA_FILE"
+if [ "$ROUND" -ge 2 ]; then
+  review_delta_prepare "$PREV_SHA" "$DELTA_FILE"
+else
+  DELTA_MODE=full; DELTA_REASON="round 1"
+fi
+echo "Review mode: $DELTA_MODE ($DELTA_REASON)" >&2
+[ "$DELTA_MODE" = full ] || PROMPT="$PROMPT$(review_delta_prompt "$N" "$PREV_SHA" "$PREV_REVIEW" "$DELTA_FILE")"
 
 # The watchdog stops a reviewer that wrote its verdict but never exited, or ran too long (review-watch.sh).
 watch_run "$TARGET" agent_run review "$LOG" "$PROMPT" || true

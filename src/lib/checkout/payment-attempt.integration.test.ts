@@ -28,7 +28,6 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("CI", "true");
     resetFakeCheckoutPayments();
-    await authPrisma.user.deleteMany({ where: { id: { startsWith: "user-t248-attempt-" } } });
     await authPrisma.user.create({ data: { id: userId, name: "Ada", email: `${userId}@example.test` } });
     const store = await platformAdmin.store.create({
       data: {
@@ -54,7 +53,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
   afterAll(async () => {
     vi.unstubAllEnvs();
     const stores = await platformAdmin.store.findMany({
-      where: { slug: { startsWith: "t248-attempt-" } },
+      where: { slug: { startsWith: run } },
       select: { id: true },
     });
     for (const store of stores) {
@@ -68,7 +67,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       await scoped.listing.deleteMany({ where: { storeId: store.id } });
       await platformAdmin.store.delete({ where: { id: store.id } });
     }
-    await authPrisma.user.deleteMany({ where: { id: { startsWith: "user-t248-attempt-" } } });
+    await authPrisma.user.deleteMany({ where: { id: userId } });
     resetFakeCheckoutPayments();
   });
 
@@ -660,5 +659,24 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
     expect((await findOrphanHoldCarts({ storeIds: [other.id] })).map((c) => c.cartId)).not.toContain(held.cartId);
     await markOrphanHoldChecked(other.id, held.cartId, held.paymentIntentId);
     expect((await cartRow(held.cartId))?.orphanCheckedAt).toBeNull();
+  });
+
+  it("another store can neither read, change, delete nor forge this store's release row", async () => {
+    const held = await heldCart(61 * 60_000, 61 * 60_000);
+    await sweep();
+    expect((await releaseRow(held.paymentIntentId))?.storeId).toBe(storeId);
+    const other = await platformAdmin.store.create({ data: { slug: `${run}-release-other`, name: "Other market" } });
+    const where = { paymentIntentId: held.paymentIntentId };
+    await storeScopedTransaction(other.id, async (tx) => {
+      expect(await tx.paymentIntentRelease.findUnique({ where })).toBeNull();
+      expect(await tx.paymentIntentRelease.findMany({ where: { storeId } })).toEqual([]);
+      expect((await tx.paymentIntentRelease.updateMany({ where, data: { storeId: other.id } })).count).toBe(0);
+      expect((await tx.paymentIntentRelease.deleteMany({ where })).count).toBe(0);
+    });
+    await expect(storeScopedTransaction(other.id, (tx) =>
+      tx.paymentIntentRelease.create({ data: { paymentIntentId: `pi_forged_${run}`, storeId } }),
+    )).rejects.toThrow(/row-level security/);
+    expect((await releaseRow(held.paymentIntentId))?.storeId).toBe(storeId);
+    expect(await releaseRow(`pi_forged_${run}`)).toBeNull();
   });
 });
