@@ -17,13 +17,27 @@ vi.mock("next/cache", () => ({
   revalidatePath: () => {},
 }));
 
+// Storage boundary: R2 has no access keys on lanes, so uploads land in this map.
+const { stored } = vi.hoisted(() => ({ stored: new Map<string, { body: Buffer; contentType: string }>() }));
+vi.mock("../r2", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../r2")>();
+  return {
+    ...actual,
+    uploadToR2: async (key: string, body: Buffer | Uint8Array, contentType: string) => {
+      stored.set(key, { body: Buffer.from(body), contentType });
+      return actual.catalogImageUrl(key);
+    },
+  };
+});
+
 vi.mock("next/navigation", () => ({
   redirect: (path: string) => {
     throw new Error(`REDIRECT:${path}`);
   },
 }));
 
-import { listMasterCatalog, saveMasterProduct } from "./master-catalog";
+import sharp from "sharp";
+import { getMasterProductEditor, listMasterCatalog, saveMasterProduct, uploadMasterProductImage } from "./master-catalog";
 import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { matchToMasterProducts } from "../listing/csv-import";
@@ -138,6 +152,7 @@ describe("master catalog (real sessions, lane DB)", () => {
 
   beforeEach(() => {
     revalidated.length = 0;
+    stored.clear();
     headerState.set("cookie", adminCookies);
   });
 
@@ -207,6 +222,16 @@ describe("master catalog (real sessions, lane DB)", () => {
     asPlatformAdmin((tx) => tx.auditLog.findMany({ where: { entityId: id, action: "catalog.product_edit" }, orderBy: { createdAt: "asc" } }));
 
   describe("editor", () => {
+    it("loads the product with the category list and how many stores list it", async () => {
+      const editor = await getMasterProductEditor(products["Egusi ground"]);
+      expect(editor?.product).toMatchObject({ id: products["Egusi ground"], name: `${RUN} Egusi ground`, categoryId: categoryA, status: "active" });
+      expect(editor?.categories.map((c) => c.id)).toEqual(expect.arrayContaining([categoryA, categoryB]));
+      expect(editor?.storeCount).toBe(1);
+      expect(await getMasterProductEditor("no-such-product")).toBeNull();
+      headerState.set("cookie", ownerCookies);
+      await expect(getMasterProductEditor(products["Egusi ground"])).rejects.toThrow("REDIRECT:/admin/sign-in");
+    });
+
     it("saves every field and writes one audit row with the before and after values", async () => {
       const id = products["Palm oil"];
       const saved = await saveMasterProduct({}, editorForm(id, {
@@ -305,6 +330,84 @@ describe("master catalog (real sessions, lane DB)", () => {
       const audit = (await editAudits(id)).at(-1);
       expect(audit?.before).toEqual({ status: "active" });
       expect(audit?.after).toEqual({ status: "archived" });
+    });
+  });
+
+  describe("image upload", () => {
+    const r2 = { R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "key", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "bucket", R2_PUBLIC_URL: "" };
+    beforeEach(() => {
+      for (const [name, value] of Object.entries(r2)) vi.stubEnv(name, value);
+    });
+    afterAll(() => vi.unstubAllEnvs());
+
+    function imageForm(productId: string, bytes: Uint8Array, name: string, type: string): FormData {
+      const form = new FormData();
+      form.set("productId", productId);
+      form.set("image", new File([bytes], name, { type }));
+      return form;
+    }
+    const imageAudits = (id: string) =>
+      asPlatformAdmin((tx) => tx.auditLog.findMany({ where: { entityId: id, action: "catalog.product_image" } }));
+    const png = () => sharp({ create: { width: 1600, height: 1200, channels: 3, background: "#c33" } }).png().toBuffer();
+
+    it("re-encodes a photo to WebP under the catalog key, points the product at it and audits it", async () => {
+      const id = products["Egusi ground"];
+      const result = await uploadMasterProductImage({}, imageForm(id, await png(), "egusi.png", "image/png"));
+      expect(result).toEqual({ ok: true, message: "Photo updated" });
+
+      expect(stored.size).toBe(1);
+      const [[key, object]] = [...stored.entries()];
+      expect(key).toMatch(new RegExp(`^catalog/${id}-[0-9a-f]{16}\\.webp$`));
+      expect(object.contentType).toBe("image/webp");
+      const meta = await sharp(object.body).metadata();
+      expect(meta.format).toBe("webp");
+      expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBe(960);
+
+      expect((await readProduct(id)).imageUrl).toBe(`/api/catalog-image/${key}`);
+      const audits = await imageAudits(id);
+      expect(audits).toHaveLength(1);
+      expect(audits[0].before).toEqual({ imageUrl: "/images/products/egusi.webp" });
+      expect(audits[0].after).toEqual({ imageUrl: `/api/catalog-image/${key}` });
+      expect(revalidated).toEqual([`storefront:${storeB}`]);
+    });
+
+    it("refuses an SVG and a file whose bytes are not a photo, whatever type the browser claimed", async () => {
+      const id = products["Garri white"];
+      const svg = new TextEncoder().encode('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+      const svgResult = await uploadMasterProductImage({}, imageForm(id, svg, "garri.png", "image/png"));
+      expect(svgResult.ok).toBeFalsy();
+      expect(svgResult.message).toMatch(/SVG/);
+
+      const text = new TextEncoder().encode("not a photo at all");
+      const textResult = await uploadMasterProductImage({}, imageForm(id, text, "garri.jpg", "image/jpeg"));
+      expect(textResult.ok).toBeFalsy();
+      expect(textResult.message).toMatch(/JPEG, PNG or WebP/);
+
+      // Right magic bytes, broken body: sharp must fail it rather than store it.
+      const truncated = (await png()).subarray(0, 64);
+      expect((await uploadMasterProductImage({}, imageForm(id, truncated, "garri.png", "image/png"))).ok).toBeFalsy();
+
+      expect(stored.size).toBe(0);
+      expect((await readProduct(id)).imageUrl).toBeNull();
+      expect(await imageAudits(id)).toHaveLength(0);
+    });
+
+    it("says photo storage is not set up when R2 has no keys, and stores nothing", async () => {
+      vi.stubEnv("R2_SECRET_ACCESS_KEY", "");
+      const id = products["Garri white"];
+      const result = await uploadMasterProductImage({}, imageForm(id, await png(), "garri.png", "image/png"));
+      expect(result).toEqual({ ok: false, message: "Photo storage is not set up." });
+      expect(stored.size).toBe(0);
+    });
+
+    it("is refused to a store owner and to a guest, with nothing stored", async () => {
+      const id = products["Garri white"];
+      headerState.set("cookie", ownerCookies);
+      await expect(uploadMasterProductImage({}, imageForm(id, await png(), "x.png", "image/png"))).rejects.toThrow("REDIRECT:/admin/sign-in");
+      headerState.delete("cookie");
+      await expect(uploadMasterProductImage({}, imageForm(id, await png(), "x.png", "image/png"))).rejects.toThrow("REDIRECT:/admin/sign-in");
+      expect(stored.size).toBe(0);
+      expect((await readProduct(id)).imageUrl).toBeNull();
     });
   });
 });

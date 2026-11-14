@@ -1,10 +1,13 @@
 "use server";
 
+import { uploadCatalogPhoto } from "../catalog-image";
+import { PHOTO_UPLOAD_MAX_BYTES } from "../listing/csv-file-cap";
 import { Prisma, lockMasterProductRow, platformAdminTransaction } from "../db";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { listingRelevanceJoin, listingRelevanceWhere } from "../storefront/search-relevance";
 import { requirePlatformAdmin } from "./session";
+import { z } from "zod";
 import {
   CATALOG_PAGE_SIZE,
   catalogFiltersSchema,
@@ -98,6 +101,57 @@ export async function listMasterCatalog(input: unknown): Promise<CatalogPage> {
   };
 }
 
+export type MasterProductEditor = {
+  product: {
+    id: string;
+    name: string;
+    categoryId: string | null;
+    subcategory: string | null;
+    description: string | null;
+    unit: string | null;
+    weightG: number | null;
+    frozen: boolean;
+    perishable: boolean;
+    storage: string | null;
+    status: MasterStatus;
+    imageUrl: string | null;
+    ingredientsStatus: string;
+    allergensStatus: string;
+    dietaryStatus: string;
+    updatedAt: Date;
+  };
+  categories: Array<{ id: string; name: string }>;
+  storeCount: number;
+};
+
+/** The editor's data, or null for an unknown product. */
+export async function getMasterProductEditor(productId: string): Promise<MasterProductEditor | null> {
+  await requirePlatformAdmin();
+  const id = parseInput(z.string().min(1).max(200), productId);
+  if (!id.ok) return null;
+  return platformAdminTransaction(async (tx) => {
+    const product = await tx.masterProduct.findUnique({
+      where: { id: id.data },
+      select: {
+        id: true, name: true, categoryId: true, subcategory: true, description: true, unit: true, weightG: true,
+        frozen: true, perishable: true, storage: true, status: true, imageUrl: true,
+        ingredientsStatus: true, allergensStatus: true, dietaryStatus: true, updatedAt: true,
+      },
+    });
+    if (!product) return null;
+    const categories = await tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+    const storeCount = (await storesListing(tx, product.id)).length;
+    return { product: { ...product, status: product.status as MasterStatus }, categories, storeCount };
+  });
+}
+
+/** Categories for the list filter. */
+export async function listCatalogCategories(): Promise<Array<{ id: string; name: string }>> {
+  await requirePlatformAdmin();
+  return platformAdminTransaction((tx) =>
+    tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }));
+}
+
 export type SaveState = { ok?: boolean; message?: string; fieldErrors?: Partial<Record<MasterProductField, string>> };
 
 const EDITED_FIELDS = [
@@ -158,6 +212,54 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
       },
     });
     return { ok: true, message: "Saved", storeIds: await storesListing(tx, productId) };
+  });
+
+  const { storeIds, ...state } = result;
+  for (const storeId of storeIds ?? []) revalidateStorefront(storeId);
+  return state;
+}
+
+export type ImageState = { ok?: boolean; message?: string };
+
+const PHOTO_MESSAGES = {
+  svg: "SVG images are not accepted. Upload a JPEG, PNG or WebP photo.",
+  not_photo: "Upload a JPEG, PNG or WebP photo.",
+  storage: "Photo storage is not set up.",
+  upload: "The photo could not be saved. Try again.",
+} as const;
+
+/** Replaces the product's photo. The old object stays in R2 until a prune removes unreferenced keys. */
+export async function uploadMasterProductImage(_prev: ImageState, form: FormData): Promise<ImageState> {
+  const session = await requirePlatformAdmin();
+  const id = parseInput(z.string().min(1).max(200), form.get("productId"));
+  if (!id.ok) return { ok: false, message: "Product not found" };
+  const image = form.get("image");
+  if (!(image instanceof File) || image.size === 0) return { ok: false, message: "Choose a photo to upload." };
+  if (image.size > PHOTO_UPLOAD_MAX_BYTES) return { ok: false, message: "The photo is over 2 MB. Choose a smaller one." };
+
+  const exists = await platformAdminTransaction((tx) => tx.masterProduct.findUnique({ where: { id: id.data }, select: { id: true } }));
+  if (!exists) return { ok: false, message: "Product not found" };
+
+  const uploaded = await uploadCatalogPhoto(id.data, new Uint8Array(await image.arrayBuffer()));
+  if (!uploaded.ok) return { ok: false, message: PHOTO_MESSAGES[uploaded.reason] };
+
+  const result = await platformAdminTransaction(async (tx): Promise<ImageState & { storeIds?: string[] }> => {
+    await lockMasterProductRow(tx, id.data);
+    const product = await tx.masterProduct.findUnique({ where: { id: id.data }, select: { imageUrl: true } });
+    if (!product) return { ok: false, message: "Product not found" };
+    await tx.masterProduct.update({ where: { id: id.data }, data: { imageUrl: uploaded.url } });
+    await tx.auditLog.create({
+      data: {
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "catalog.product_image",
+        entityType: "master_product",
+        entityId: id.data,
+        before: { imageUrl: product.imageUrl },
+        after: { imageUrl: uploaded.url },
+      },
+    });
+    return { ok: true, message: "Photo updated", storeIds: await storesListing(tx, id.data) };
   });
 
   const { storeIds, ...state } = result;
