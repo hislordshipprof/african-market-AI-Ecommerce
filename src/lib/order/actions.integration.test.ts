@@ -58,6 +58,7 @@ import {
   markOutForDeliveryAction,
   markReadyAction,
 } from "./actions";
+import { issuesToReview } from "./issue-review";
 import { acceptOrder, markLinePicked, markLineShort } from "./service";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import sharp from "sharp";
@@ -455,6 +456,25 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     vi.unstubAllEnvs();
     expect(own.status).toBe(200);
     expect(own.headers.get("Cache-Control")).toBe("private, no-store");
+  }, 30_000);
+
+  it("an issue stranded approved or auto-refunded with no refund request returns to review and can be approved", async () => {
+    const stale = await issueToReview(606, 8000, 6000);
+    const fresh = await issueToReview(607, 8000, 6000);
+    const longAgo = new Date(Date.now() - 20 * 60 * 1000);
+    // A crash between the claim and the refund reservation leaves exactly this row.
+    await storeScoped(storeAId).issueReport.update({ where: { id: stale.issueId }, data: { state: "auto_refunded", updatedAt: longAgo } });
+    await storeScoped(storeAId).issueReport.update({ where: { id: fresh.issueId }, data: { state: "approved" } });
+    const listed = (await issuesToReview(storeAId)).map((issue) => issue.id);
+    expect(listed).toContain(stale.issueId);
+    expect(listed).not.toContain(fresh.issueId);
+
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(fresh.issueId)).toEqual({ ok: false, error: "This problem was already handled" });
+    expect(await approveIssueAction(stale.issueId)).toMatchObject({ ok: true });
+    const after = await reviewed(stale.orderId);
+    expect(after.requests.map((row) => row.amountCents)).toEqual([6000]);
+    expect(after.issue).toMatchObject({ state: "approved", refundRequestId: after.requests[0]!.id });
   }, 30_000);
 
   it("a partial amount above the remaining capture is refused with an allow-listed message", async () => {
