@@ -231,6 +231,24 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(await storeScoped(storeA).cartLine.findFirst({ where: { cartId: ctx.cartId } })).toMatchObject({ qty: 1 });
   });
 
+  it("never counts a reply that names the item without a yes as confirming it (#503 N5)", async () => {
+    const name = `Paste mystery ${suffix}`;
+    const first: ShownMessage = { role: "user", id: `n5u1-${suffix}`, parts: [{ type: "text", text: `I have a peanut allergy. Add 1 ${name}` }] };
+    const ctx = await conversation(storeA, [first]);
+    await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    const turn1 = { ...ctx, turnMessageId: first.id!, acceptance: acceptanceForTurn([first], first.id!, first.parts[0].text!) };
+    expect(await addToCart(turn1, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] })).toMatchObject({ code: "cannot_confirm" });
+
+    const reply: ShownMessage = { role: "assistant", id: `n5a1-${suffix}`, parts: [{ type: "text", text: `I can't confirm ${name} is peanut-free. Add it anyway?` }] };
+    const no: ShownMessage = { role: "user", id: `n5u2-${suffix}`, parts: [{ type: "text", text: `Don't add the ${name}.` }] };
+    const messages = [first, reply, no];
+    await storeScoped(storeA).aiConversation.update({ where: { id: ctx.conversationId }, data: { messages: messages as never } });
+    const turn2 = { ...ctx, turnMessageId: no.id!, acceptance: acceptanceForTurn(messages, no.id!, no.parts[0].text!) };
+    expect(await addToCart(turn2, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] })).toMatchObject({ ok: false, code: "cannot_confirm" });
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: ctx.cartId } })).toBe(0);
+    expect((await readConstraints(storeA, ctx.conversationId)).confirmed).toEqual([]);
+  });
+
   it("never leaves a constrained shopper's may-be-unavailable line to the store's unchecked swap", async () => {
     const lineOf = async (ctx: AssistantContext) => storeScoped(storeA).cartLine.findFirstOrThrow({ where: { cartId: ctx.cartId } });
     for (const backup of [listing.peanut.variantId, listing.unknown.variantId, undefined]) {

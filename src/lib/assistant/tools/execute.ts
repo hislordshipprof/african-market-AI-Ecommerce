@@ -323,8 +323,8 @@ function refusal(verdict: ListingVerdict, constraints: ShopperConstraints): Refu
 
 /**
  * The saved constraints at the point of action. Excluded is refused. Unknown is refused and remembered,
- * until the customer's next message confirms that one item: by naming it, or by a yes when it was the
- * only item asked about. A confirmation is recorded and holds for the conversation.
+ * until the customer's next message confirms that one item with a yes: naming it, or alone when it was
+ * the only item asked about. A confirmation is recorded and holds for the conversation.
  */
 async function gateListings(ctx: AssistantContext, listingIds: string[]): Promise<Map<string, Refusal>> {
   const refused = new Map<string, Refusal>();
@@ -339,15 +339,15 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
   if (unknown.length === 0) return refused;
   const confirming = new Set<string>();
   const prior = ctx.acceptance ? await priorUserMessage(ctx) : null;
-  if (prior && ctx.acceptance) {
+  // Only a reply that leads with a yes confirms: naming the item alone may be a no ("don't add the X").
+  if (prior && ctx.acceptance?.led) {
     const askedBefore = Object.entries(constraints.asked).filter(([, messageId]) => messageId === prior.id).map(([id]) => id);
     const listings = await storeScoped(ctx.storeId).listing.findMany({
       where: { id: { in: unknown.filter((id) => askedBefore.includes(id)) } },
       include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
     });
     for (const listing of listings) {
-      const named = textNamesProduct(ctx.acceptance.customerText, namesForListing(listing));
-      if (named || (ctx.acceptance.led && askedBefore.length === 1)) confirming.add(listing.id);
+      if (askedBefore.length === 1 || textNamesProduct(ctx.acceptance.customerText, namesForListing(listing))) confirming.add(listing.id);
     }
   }
   for (const id of unknown) {
