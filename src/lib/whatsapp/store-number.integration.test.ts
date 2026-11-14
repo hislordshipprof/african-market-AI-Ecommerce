@@ -140,14 +140,23 @@ describe.skipIf(!hasDb)("store WhatsApp number (lane database)", () => {
     })).toEqual({ ok: true });
   });
 
-  it("store B's session never reads store A's row (RLS)", async () => {
-    let seen: unknown[] = [];
-    await authPrisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.store_id', ${storeB}, true)`;
-      seen = await tx.$queryRaw<Array<{ store_id: string }>>`SELECT store_id FROM store_whatsapp_numbers`;
-    });
+  it("store B's session never reads, inserts, updates or deletes store A's row (RLS)", async () => {
+    const asStoreB = <T,>(fn: (tx: typeof authPrisma) => Promise<T>) =>
+      authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.store_id', ${storeB}, true)`;
+        return fn(tx as unknown as typeof authPrisma);
+      });
+    const seen = await asStoreB((tx) => tx.$queryRaw<Array<{ store_id: string }>>`SELECT store_id FROM store_whatsapp_numbers`);
     expect(seen).toEqual([{ store_id: storeB }]);
+
+    await expect(asStoreB((tx) => tx.$executeRaw`
+      INSERT INTO store_whatsapp_numbers (id, store_id, waba_id, phone_number_id, status)
+      VALUES (${crypto.randomUUID()}, ${storeA}, ${WABA_B}, ${PHONE_C}, 'pending')`)).rejects.toThrow(/42501|row-level security/i);
+    expect(await asStoreB((tx) => tx.$executeRaw`
+      UPDATE store_whatsapp_numbers SET status = 'disconnected' WHERE store_id = ${storeA}`)).toBe(0);
+    expect(await asStoreB((tx) => tx.$executeRaw`DELETE FROM store_whatsapp_numbers WHERE store_id = ${storeA}`)).toBe(0);
+    expect((await getStoreNumber(storeA))?.status).toBe("registered");
   });
 
   it("refuses the platform number and malformed ids before any write", async () => {
