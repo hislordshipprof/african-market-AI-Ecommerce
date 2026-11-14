@@ -22,8 +22,8 @@ import {
 function ConfidenceBadge({ confidence }: { confidence: string | null }) {
   const color =
     confidence === "medium"
-      ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-      : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300";
+      ? "bg-[#E1EEE3] text-[#1F5A43] dark:bg-[#21412E] dark:text-[#6CC08F]"
+      : "bg-[#B42335]/10 text-[#B42335] dark:bg-[#F28793]/15 dark:text-[#F28793]";
   return (
     <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${color}`}>
       {confidence ?? "unknown"}
@@ -129,7 +129,7 @@ function EditModal({
       >
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">Edit product</DialogTitle>
-          <DialogDescription className="dark:text-[#a0a8a3]">
+          <DialogDescription className="dark:text-[#A3B1A7]">
             Changes are saved to the master catalog and recorded in the audit log.
           </DialogDescription>
         </DialogHeader>
@@ -138,54 +138,54 @@ function EditModal({
         )}
         <div className="space-y-3">
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#a0a8a3]">Name</span>
+            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#333] dark:bg-[#111] dark:text-white"
+              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#a0a8a3]">Description</span>
+            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Description</span>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#333] dark:bg-[#111] dark:text-white"
+              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
             />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#a0a8a3]">Unit</span>
+              <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Unit</span>
               <input
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
-                className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#333] dark:bg-[#111] dark:text-white"
+                className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#a0a8a3]">Storage</span>
+              <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Storage</span>
               <input
                 value={storage}
                 onChange={(e) => setStorage(e.target.value)}
-                className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#333] dark:bg-[#111] dark:text-white"
+                className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
               />
             </label>
           </div>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#a0a8a3]">Origin countries</span>
+            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Origin countries</span>
             <input
               value={originCountries}
               onChange={(e) => setOriginCountries(e.target.value)}
-              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#333] dark:bg-[#111] dark:text-white"
+              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
             />
           </label>
         </div>
-        <DialogFooter className="border-[#e2e4e9] bg-transparent dark:border-[#333]">
+        <DialogFooter className="border-[#DCDFD6] bg-transparent dark:border-[#35463B]">
           <Button
             type="button"
             variant="ghost"
-            className="dark:text-white dark:hover:bg-[#222]"
+            className="dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
             onClick={() => {
               if (open && !isPending) onClose();
             }}
@@ -279,13 +279,13 @@ export function ReviewTable({
 
   if (products.length === 0 && total === 0) {
     return (
-      <div className="rounded-xl border border-[#e2e4e9] bg-white p-12 text-center dark:border-[#333] dark:bg-[#1a1a1a]">
+      <div className="rounded-xl border border-[#DCDFD6] bg-white p-12 text-center dark:border-[#35463B] dark:bg-[#1E2C23]">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950">
           <svg aria-hidden="true" className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
           </svg>
         </div>
-        <p className="text-sm font-medium text-[#55625A] dark:text-[#a0a8a3]">
+        <p className="text-sm font-medium text-[#55625A] dark:text-[#A3B1A7]">
           No products to review. All caught up!
         </p>
       </div>
@@ -295,12 +295,12 @@ export function ReviewTable({
   if (products.length === 0) {
     const lastPage = Math.max(1, totalPages);
     return (
-      <div className="rounded-xl border border-[#e2e4e9] bg-white p-12 text-center dark:border-[#333] dark:bg-[#1a1a1a]">
-        <p className="text-sm font-medium text-[#15201A] dark:text-white">No items on this page.</p>
-        <p className="mt-1 text-sm text-[#55625A] dark:text-[#a0a8a3]">
+      <div className="rounded-xl border border-[#DCDFD6] bg-white p-12 text-center dark:border-[#35463B] dark:bg-[#1E2C23]">
+        <p className="text-sm font-medium text-[#15201A] dark:text-[#EEF2EC]">No items on this page.</p>
+        <p className="mt-1 text-sm text-[#55625A] dark:text-[#A3B1A7]">
           {total} {total === 1 ? "product remains" : "products remain"} on other pages.
         </p>
-        <Button type="button" variant="outline" className="mt-4 dark:border-[#444] dark:bg-transparent dark:text-white dark:hover:bg-[#222]" onClick={() => goToPage(lastPage)}>
+        <Button type="button" variant="outline" className="mt-4 dark:border-[#71907D] dark:bg-transparent dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]" onClick={() => goToPage(lastPage)}>
           Back to page {lastPage}
         </Button>
       </div>
@@ -333,21 +333,21 @@ export function ReviewTable({
         {products.map((p) => (
           <div
             key={p.id}
-            className="rounded-xl border border-[#e2e4e9] bg-white p-4 dark:border-[#333] dark:bg-[#1a1a1a]"
+            className="rounded-xl border border-[#DCDFD6] bg-white p-4 dark:border-[#35463B] dark:bg-[#1E2C23]"
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold text-[#15201A] dark:text-white">{p.name}</h3>
-                <p className="mt-0.5 text-xs text-[#55625A] dark:text-[#a0a8a3]">
+                <h3 className="text-sm font-semibold text-[#15201A] dark:text-[#EEF2EC]">{p.name}</h3>
+                <p className="mt-0.5 text-xs text-[#55625A] dark:text-[#A3B1A7]">
                   {p.categoryName ?? "Uncategorized"}{p.subcategory ? ` / ${p.subcategory}` : ""}
                 </p>
               </div>
               <ConfidenceBadge confidence={p.confidence} />
             </div>
             {p.description && (
-              <p className="mb-2 text-xs text-[#55625A] line-clamp-2 dark:text-[#a0a8a3]">{p.description}</p>
+              <p className="mb-2 text-xs text-[#55625A] line-clamp-2 dark:text-[#A3B1A7]">{p.description}</p>
             )}
-            <div className="mb-3 flex flex-wrap gap-2 text-xs text-[#55625A] dark:text-[#a0a8a3]">
+            <div className="mb-3 flex flex-wrap gap-2 text-xs text-[#55625A] dark:text-[#A3B1A7]">
               {p.originCountries && <span>{p.originCountries}</span>}
               {p.unit && <span>{p.unit}</span>}
               {p.synonymCount > 0 && <span>{p.synonymCount} synonyms</span>}
@@ -365,7 +365,7 @@ export function ReviewTable({
                 type="button"
                 onClick={() => openProduct(p)}
                 disabled={isPending}
-                className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] dark:border-[#333] dark:text-white dark:hover:bg-[#222]"
+                className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] dark:border-[#35463B] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
               >
                 Edit
               </button>
@@ -381,7 +381,7 @@ export function ReviewTable({
                 type="button"
                 onClick={() => handleProposeAttributes(p.id)}
                 disabled={isPending}
-                className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] disabled:opacity-50 dark:border-[#333] dark:text-white dark:hover:bg-[#222]"
+                className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] disabled:opacity-50 dark:border-[#35463B] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
               >
                 Read attributes
               </button>
@@ -391,28 +391,28 @@ export function ReviewTable({
       </div>
 
       {/* Desktop table */}
-      <div className="hidden overflow-hidden rounded-xl border border-[#e2e4e9] bg-white md:block dark:border-[#333] dark:bg-[#1a1a1a]">
+      <div className="hidden overflow-hidden rounded-xl border border-[#DCDFD6] bg-white md:block dark:border-[#35463B] dark:bg-[#1E2C23]">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-[#e2e4e9] bg-[#f8f9fa] dark:border-[#333] dark:bg-[#111]">
+          <thead className="border-b border-[#DCDFD6] bg-[#F3F4EF] dark:border-[#35463B] dark:bg-[#0D1410]">
             <tr>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#a0a8a3]">Product</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#a0a8a3]">Category</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#a0a8a3]">Confidence</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#a0a8a3]">Origin</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#a0a8a3]">Synonyms</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#a0a8a3]">Actions</th>
+              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Product</th>
+              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Category</th>
+              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Confidence</th>
+              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Origin</th>
+              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Synonyms</th>
+              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {products.map((p) => (
-              <tr key={p.id} className="border-b border-[#e2e4e9] last:border-0 dark:border-[#333]">
+              <tr key={p.id} className="border-b border-[#DCDFD6] last:border-0 dark:border-[#35463B]">
                 <td className="px-4 py-3">
-                  <p className="font-medium text-[#15201A] dark:text-white">{p.name}</p>
+                  <p className="font-medium text-[#15201A] dark:text-[#EEF2EC]">{p.name}</p>
                   {p.description && (
-                    <p className="mt-0.5 text-xs text-[#55625A] line-clamp-1 dark:text-[#a0a8a3]">{p.description}</p>
+                    <p className="mt-0.5 text-xs text-[#55625A] line-clamp-1 dark:text-[#A3B1A7]">{p.description}</p>
                   )}
                 </td>
-                <td className="px-4 py-3 text-[#55625A] dark:text-[#a0a8a3]">
+                <td className="px-4 py-3 text-[#55625A] dark:text-[#A3B1A7]">
                   {p.categoryName ?? "—"}
                   {p.subcategory && (
                     <span className="block text-xs opacity-70">{p.subcategory}</span>
@@ -421,10 +421,10 @@ export function ReviewTable({
                 <td className="px-4 py-3">
                   <ConfidenceBadge confidence={p.confidence} />
                 </td>
-                <td className="max-w-[140px] truncate px-4 py-3 text-xs text-[#55625A] dark:text-[#a0a8a3]">
+                <td className="max-w-[140px] truncate px-4 py-3 text-xs text-[#55625A] dark:text-[#A3B1A7]">
                   {p.originCountries ?? "—"}
                 </td>
-                <td className="px-4 py-3 text-[#55625A] dark:text-[#a0a8a3]">
+                <td className="px-4 py-3 text-[#55625A] dark:text-[#A3B1A7]">
                   {p.synonymCount}
                 </td>
                 <td className="px-4 py-3">
@@ -441,7 +441,7 @@ export function ReviewTable({
                       type="button"
                       onClick={() => openProduct(p)}
                       disabled={isPending}
-                      className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] dark:border-[#444] dark:text-white dark:hover:bg-[#222]"
+                      className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] dark:border-[#71907D] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
                     >
                       Edit
                     </button>
@@ -457,7 +457,7 @@ export function ReviewTable({
                       type="button"
                       onClick={() => handleProposeAttributes(p.id)}
                       disabled={isPending}
-                      className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] disabled:opacity-50 dark:border-[#444] dark:text-white dark:hover:bg-[#222]"
+                      className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] disabled:opacity-50 dark:border-[#71907D] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
                     >
                       Read attributes
                     </button>
@@ -472,7 +472,7 @@ export function ReviewTable({
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between">
-          <p className="text-xs text-[#55625A] dark:text-[#a0a8a3]">
+          <p className="text-xs text-[#55625A] dark:text-[#A3B1A7]">
             Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
           </p>
           <div className="flex items-center gap-1">
@@ -480,7 +480,7 @@ export function ReviewTable({
               type="button"
               onClick={() => goToPage(page - 1)}
               disabled={page <= 1}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#55625A] hover:bg-[#f0f0f0] disabled:opacity-40 dark:text-[#a0a8a3] dark:hover:bg-[#222]"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#55625A] hover:bg-[#E7E9E2] disabled:opacity-40 dark:text-[#A3B1A7] dark:hover:bg-[#2B3F33]"
             >
               Prev
             </button>
@@ -503,7 +503,7 @@ export function ReviewTable({
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
                     pageNum === page
                       ? "bg-[#1F5A43] text-white"
-                      : "text-[#55625A] hover:bg-[#f0f0f0] dark:text-[#a0a8a3] dark:hover:bg-[#222]"
+                      : "text-[#55625A] hover:bg-[#E7E9E2] dark:text-[#A3B1A7] dark:hover:bg-[#2B3F33]"
                   }`}
                 >
                   {pageNum}
@@ -514,7 +514,7 @@ export function ReviewTable({
               type="button"
               onClick={() => goToPage(page + 1)}
               disabled={page >= totalPages}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#55625A] hover:bg-[#f0f0f0] disabled:opacity-40 dark:text-[#a0a8a3] dark:hover:bg-[#222]"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#55625A] hover:bg-[#E7E9E2] disabled:opacity-40 dark:text-[#A3B1A7] dark:hover:bg-[#2B3F33]"
             >
               Next
             </button>
