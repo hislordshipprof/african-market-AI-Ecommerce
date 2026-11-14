@@ -915,6 +915,20 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
   });
 }
 
+const KEEPS_BACKUP = "This item may be unavailable and its named substitute meets the customer's needs, so it keeps that substitute.";
+
+/** Under saved needs a refund is right only when no backup passes them (ADR-0018): a passing named substitute is kept. */
+async function keepsPassingBackup(ctx: AssistantContext, lineId: string): Promise<boolean> {
+  const line = await storeScoped(ctx.storeId).cartLine.findUnique({
+    where: { id: lineId },
+    include: { variant: { include: { listing: true } }, substituteVariant: { select: { listingId: true } } },
+  });
+  if (!line || line.cartId !== ctx.cartId || !mayBeUnavailable(line.variant.listing)) return false;
+  const substitute = line.swapRule === "named_substitute" ? line.substituteVariant?.listingId : undefined;
+  if (!substitute) return false;
+  return !(await gateListings({ ...ctx, acceptance: undefined, turnMessageId: undefined }, [substitute])).has(substitute);
+}
+
 export async function setSwapRule(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(setSwapRuleInput, input);
   const constrained = hasConstraints(await readConstraints(ctx.storeId, ctx.conversationId));
@@ -926,6 +940,9 @@ export async function setSwapRule(ctx: AssistantContext, input: unknown): Promis
     });
     const why = substitute ? (await gateListings(ctx, [substitute.listingId])).get(substitute.listingId) : undefined;
     if (why) return recordRead(ctx, "set_swap_rule", parsed, why);
+  }
+  if (constrained && parsed.rule === "exact_only" && await keepsPassingBackup(ctx, parsed.line_id)) {
+    return recordRead(ctx, "set_swap_rule", parsed, { ...fail("backup_required"), message: KEEPS_BACKUP });
   }
   return recordWrite(ctx, "set_swap_rule", parsed, async (tx) => {
     const line = await tx.cartLine.findUnique({

@@ -247,12 +247,18 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(await addToCart(kept, { items: [{ variant_id: listing.shaky.variantId, qty: 1, backup_variant_id: listing.plain.variantId }] }))
       .toMatchObject({ ok: true, swapRule: "named_substitute", substituteVariantId: listing.plain.variantId });
 
-    // The store's swap is refused with the reason; a refund is allowed on this line.
+    // The store's swap is refused with the reason; with a backup that passes, a refund is refused too (#503 N4).
     const lineId = (await lineOf(kept)).id;
     const store = await setSwapRule(kept, { line_id: lineId, rule: "store_suggests" });
     expect(store).toMatchObject({ ok: false, code: "unchecked_swap" });
-    expect(await lineOf(kept)).toMatchObject({ swapRule: "named_substitute" });
-    expect(await setSwapRule(kept, { line_id: lineId, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
+    expect(await setSwapRule(kept, { line_id: lineId, rule: "exact_only" })).toMatchObject({ ok: false, code: "backup_required" });
+    expect(await lineOf(kept)).toMatchObject({ swapRule: "named_substitute", substituteVariantId: listing.plain.variantId });
+
+    // A refund is allowed on a line whose named backup fails the needs.
+    const failing = await conversation(storeA);
+    const failingLine = (await addToCart(failing, { items: [{ variant_id: listing.shaky.variantId, qty: 1, backup_variant_id: listing.peanut.variantId }] }) as unknown as { lineId: string }).lineId;
+    await setShopperNeeds(failing, { avoid_allergens: ["peanuts"] });
+    expect(await setSwapRule(failing, { line_id: failingLine, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
 
     // With no constraints, nothing changes.
     const free = await conversation(storeA);
