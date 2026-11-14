@@ -25,6 +25,10 @@ eq "a human co-author named Claude is kept" "$(printf 'Subject\n\nCo-authored-by
 got=$(printf 'Let Claude and Cursor review the brief\n\nThe claude profile is no longer used.\n' | bash "$F")
 eq "a message that only mentions the tools is untouched" "$(printf 'Let Claude and Cursor review the brief\n\nThe claude profile is no longer used.')" "$got"
 
+# #413 N5: only a line that starts with it is the Generated-with line.
+got=$(printf 'Stop the hook dropping lines generated with Claude Code\n\nbody\n' | bash "$F")
+eq "a subject that mentions the Generated-with line is kept" "$(printf 'Stop the hook dropping lines generated with Claude Code\n\nbody')" "$got"
+
 printf 'S\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n' | bash "$F" --check && { echo "FAIL --check missed a trailer"; fail=1; } || echo "ok   --check reports a trailer"
 printf 'S\n\nbody\n' | bash "$F" --check && echo "ok   --check passes a clean message" || { echo "FAIL --check on a clean message"; fail=1; }
 

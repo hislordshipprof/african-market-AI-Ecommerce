@@ -9,7 +9,7 @@
 # Tests: bash scripts/strip-ai-coauthors.test.sh
 set -euo pipefail
 # Only the address identifies the tool: the name changes with every model, and a person can be named Claude.
-AI='^[[:space:]]*(co-authored-by:.*(noreply@anthropic\.com|cursoragent@cursor\.com)|claude-session:|.*generated with \[?claude code)'
+AI='^[[:space:]]*(co-authored-by:.*(noreply@anthropic\.com|cursoragent@cursor\.com)|claude-session:|(🤖 )?generated with \[?claude code)'
 if [ "${1:-}" = "--check" ]; then
   ! grep -qiE "$AI"
 else
