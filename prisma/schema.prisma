@@ -7,62 +7,62 @@ datasource db {
 }
 
 model Store {
-  id                     String   @id @default(cuid())
-  slug                   String   @unique
-  name                   String
-  customDomain           String?  @unique @map("custom_domain")
-  logoUrl                String?  @map("logo_url")
-  brandColor             String?  @map("brand_color")
-  themePreset            String   @default("palm-and-shea") @map("theme_preset")
-  status                 String   @default("active")
-  hours                  Json?
-  timezone               String   @default("America/New_York")
-  prepTimeMinutes        Int      @default(30) @map("prep_time_minutes")
-  deliveryRadiusMi       Decimal  @default(8) @map("delivery_radius_mi")
-  storeDeliveryEnabled   Boolean  @default(false) @map("store_delivery_enabled")
-  storeDeliveryFeeCents  Int      @default(0) @map("store_delivery_fee_cents")
+  id                        String   @id @default(cuid())
+  slug                      String   @unique
+  name                      String
+  customDomain              String?  @unique @map("custom_domain")
+  logoUrl                   String?  @map("logo_url")
+  brandColor                String?  @map("brand_color")
+  themePreset               String   @default("palm-and-shea") @map("theme_preset")
+  status                    String   @default("active")
+  hours                     Json?
+  timezone                  String   @default("America/New_York")
+  prepTimeMinutes           Int      @default(30) @map("prep_time_minutes")
+  deliveryRadiusMi          Decimal  @default(8) @map("delivery_radius_mi")
+  storeDeliveryEnabled      Boolean  @default(false) @map("store_delivery_enabled")
+  storeDeliveryFeeCents     Int      @default(0) @map("store_delivery_fee_cents")
   /// Scheduled slot settings per fulfillment (#565); shape in src/lib/order/slot-schedule.ts.
-  pickupSlotSettings        Json? @map("pickup_slot_settings")
-  storeDeliverySlotSettings Json? @map("store_delivery_slot_settings")
-  addressLine1           String?  @map("address_line1")
-  addressLine2           String?  @map("address_line2")
-  city                   String?
-  state                  String?
-  zip                    String?
+  pickupSlotSettings        Json?    @map("pickup_slot_settings")
+  storeDeliverySlotSettings Json?    @map("store_delivery_slot_settings")
+  addressLine1              String?  @map("address_line1")
+  addressLine2              String?  @map("address_line2")
+  city                      String?
+  state                     String?
+  zip                       String?
   /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
-  phone                  String?
-  lat                    Float?
-  lng                    Float?
-  minimumOrderCents      Int      @default(3500) @map("minimum_order_cents")
-  pickupEnabled          Boolean  @default(false) @map("pickup_enabled")
-  autoAcceptOrders       Boolean  @default(false) @map("auto_accept_orders")
-  autoRefundLimitCents   Int      @default(2500) @map("auto_refund_limit_cents")
-  supportSlaMinutes      Int      @default(30) @map("support_sla_minutes")
-  digestHour             Int      @default(20) @map("digest_hour")
+  phone                     String?
+  lat                       Float?
+  lng                       Float?
+  minimumOrderCents         Int      @default(3500) @map("minimum_order_cents")
+  pickupEnabled             Boolean  @default(false) @map("pickup_enabled")
+  autoAcceptOrders          Boolean  @default(false) @map("auto_accept_orders")
+  autoRefundLimitCents      Int      @default(2500) @map("auto_refund_limit_cents")
+  supportSlaMinutes         Int      @default(30) @map("support_sla_minutes")
+  digestHour                Int      @default(20) @map("digest_hour")
   /// Reorder suggestions (#551): days from order to shelf, and days the order should last after that.
-  reorderLeadDays        Int      @default(7) @map("reorder_lead_days")
-  reorderCoverDays       Int      @default(14) @map("reorder_cover_days")
-  stripeAccountId        String?  @unique @map("stripe_account_id")
-  stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
+  reorderLeadDays           Int      @default(7) @map("reorder_lead_days")
+  reorderCoverDays          Int      @default(14) @map("reorder_cover_days")
+  stripeAccountId           String?  @unique @map("stripe_account_id")
+  stripeOnboardingStatus    String   @default("not_started") @map("stripe_onboarding_status")
   /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
-  doordashStoreId        String?  @unique @map("doordash_store_id")
+  doordashStoreId           String?  @unique @map("doordash_store_id")
   /// Uber Direct organization id, set once the platform registers the store (#139).
-  uberLocationId         String?  @unique @map("uber_location_id")
+  uberLocationId            String?  @unique @map("uber_location_id")
   /// Why the last Uber Direct registration failed; set means the store needs a retry (#139).
-  uberRegistrationError  String?  @map("uber_registration_error")
+  uberRegistrationError     String?  @map("uber_registration_error")
   /// Why the last DoorDash Drive registration failed; set means the store needs a retry (#526).
-  doordashRegistrationError String? @map("doordash_registration_error")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  doordashRegistrationError String?  @map("doordash_registration_error")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
 
-  ownerName     String? @map("owner_name")
-  ownerStory    String? @map("owner_story")
-  ownerPhotoUrl String? @map("owner_photo_url")
+  ownerName     String?  @map("owner_name")
+  ownerStory    String?  @map("owner_story")
+  ownerPhotoUrl String?  @map("owner_photo_url")
   neighborhood  String?
-  deliveryInfo  String? @map("delivery_info")
+  deliveryInfo  String?  @map("delivery_info")
   /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on; a platform admin can override (#450).
-  listed        Boolean @default(false)
-  listingBlurb  String? @map("listing_blurb") @db.VarChar(160)
+  listed        Boolean  @default(false)
+  listingBlurb  String?  @map("listing_blurb") @db.VarChar(160)
   /// Up to 3 directory cuisine tags (src/lib/directory/cuisine.ts, #450).
   cuisineTags   String[] @default([]) @map("cuisine_tags")
 
@@ -79,6 +79,7 @@ model Store {
   carts                 Cart[]
   customers             Customer[]
   orders                Order[]
+  coupons               StoreCoupon[]
   deliveries            Delivery[]
   refundRequests        RefundRequest[]
   issueReports          IssueReport[]
@@ -90,6 +91,7 @@ model Store {
   guestBrowserCarts     GuestBrowserCart[]
   paymentIntentReleases PaymentIntentRelease[]
   copilotConversations  CopilotConversation[]
+  aiReviewFlags         AiReviewFlag[]
   copilotClientMessages CopilotClientMessage[]
   stockProposals        StockProposal[]
   copilotAlerts         CopilotAlert[]
@@ -108,6 +110,8 @@ model Store {
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  driverRoutes          DriverRoute[]
+  pickBatches           PickBatch[]
 
   @@map("stores")
 }
@@ -154,12 +158,14 @@ model User {
   pushSubscriptions       PushSubscription[]
   supportMessages         SupportMessage[]
   copilotConversations    CopilotConversation[]
+  aiReviewFlags           AiReviewFlag[]
   stockProposalDecisions  StockProposal[]          @relation("StockProposalDecision")
   copilotAlertResolutions CopilotAlert[]           @relation("CopilotAlertResolution")
   ownerReports            OwnerReport[]            @relation("OwnerReportActor")
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
   listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
   listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  storeCouponsCreated     StoreCoupon[]
   reorderLists            ReorderList[]            @relation("ReorderListSaver")
 
   @@map("users")
@@ -624,7 +630,9 @@ model CopilotConversation {
   user      User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   proposals StockProposal[]
   receipts  CopilotClientMessage[]
+  flags     AiReviewFlag[]
 
+  @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, userId, lastMessageAt])
   @@map("copilot_conversations")
@@ -796,10 +804,10 @@ model ReorderList {
 
 /// One line of a reorder list. A null quantity is a status listing marked "reorder (no count)".
 model ReorderListItem {
-  id        String  @id @default(cuid())
-  listId    String  @map("list_id")
-  storeId   String  @map("store_id")
-  listingId String  @map("listing_id")
+  id        String @id @default(cuid())
+  listId    String @map("list_id")
+  storeId   String @map("store_id")
+  listingId String @map("listing_id")
   name      String
   quantity  Int?
   position  Int
@@ -915,31 +923,31 @@ model StoreCollectionListing {
 }
 
 model Cart {
-  id                  String    @id @default(cuid())
-  storeId             String    @map("store_id")
-  userId              String?   @map("user_id")
-  customerId          String?   @map("customer_id")
-  paymentIntentId     String?   @unique @map("payment_intent_id")
-  paymentAttemptToken String?   @map("payment_attempt_token")
-  purchaseEpoch       Int       @default(0) @map("purchase_epoch")
-  deliveryLine1       String?   @map("delivery_line1")
-  deliveryLine2       String?   @map("delivery_line2")
-  deliveryCity        String?   @map("delivery_city")
-  deliveryState       String?   @map("delivery_state")
-  deliveryZip         String?   @map("delivery_zip")
-  deliveryLat         Float?    @map("delivery_lat")
-  deliveryLng         Float?    @map("delivery_lng")
-  leaveAtDoor         Boolean   @default(false) @map("leave_at_door")
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  userId                String?   @map("user_id")
+  customerId            String?   @map("customer_id")
+  paymentIntentId       String?   @unique @map("payment_intent_id")
+  paymentAttemptToken   String?   @map("payment_attempt_token")
+  purchaseEpoch         Int       @default(0) @map("purchase_epoch")
+  deliveryLine1         String?   @map("delivery_line1")
+  deliveryLine2         String?   @map("delivery_line2")
+  deliveryCity          String?   @map("delivery_city")
+  deliveryState         String?   @map("delivery_state")
+  deliveryZip           String?   @map("delivery_zip")
+  deliveryLat           Float?    @map("delivery_lat")
+  deliveryLng           Float?    @map("delivery_lng")
+  leaveAtDoor           Boolean   @default(false) @map("leave_at_door")
   /// The cheapest courier quote last shown at checkout (#527), for the basket and address in courierQuoteKey.
   courierFeeCents       Int?      @map("courier_fee_cents")
   courierProvider       String?   @map("courier_provider")
   courierQuoteKey       String?   @map("courier_quote_key")
   courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
-  source              String    @default("manual")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  source                String    @default("manual")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
   /// Last time the orphan-hold sweep found this cart's intent not held; cleared when the shopper reopens payment.
-  orphanCheckedAt     DateTime? @map("orphan_checked_at")
+  orphanCheckedAt       DateTime? @map("orphan_checked_at")
 
   store                 Store                  @relation(fields: [storeId], references: [id])
   user                  User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -1047,18 +1055,45 @@ model AiConversation {
   createdAt     DateTime  @default(now()) @map("created_at")
   lastMessageAt DateTime  @default(now()) @map("last_message_at")
 
-  store    Store      @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  cart     Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  customer Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  store    Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart     Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  customer Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
   actions  AiAction[]
+  flags    AiReviewFlag[]
 
   @@unique([storeId, cartId])
+  @@unique([id, storeId])
   @@index([cartId])
   @@index([storeId])
   @@index([storeId, createdAt])
   @@index([createdAt])
   @@index([customerId])
   @@map("ai_conversations")
+}
+
+/// Platform admin review label on one shopper or copilot conversation (#544). Store-owned with RLS.
+/// Deleted with its conversation, and after 90 days by the assistant retention job.
+model AiReviewFlag {
+  id                    String   @id @default(cuid())
+  storeId               String   @map("store_id")
+  aiConversationId      String?  @map("ai_conversation_id")
+  copilotConversationId String?  @map("copilot_conversation_id")
+  label                 String
+  note                  String   @default("")
+  createdById           String   @map("created_by_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  store               Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  aiConversation      AiConversation?      @relation(fields: [aiConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  copilotConversation CopilotConversation? @relation(fields: [copilotConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  createdBy           User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([aiConversationId])
+  @@index([copilotConversationId])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("ai_review_flags")
 }
 
 model AiAction {
@@ -1233,6 +1268,14 @@ model Order {
   deliveredAt             DateTime? @map("delivered_at")
   deliveryProofKey        String?   @map("delivery_proof_key")
   deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
+  /// The store coupon used (#556). The SQL foreign key is (coupon_id, store_id), so it is always this store's.
+  couponId                String?   @map("coupon_id")
+  /// Goods discount from the coupon, in cents; #557 writes it.
+  discountCents           Int       @default(0) @map("discount_cents")
+  /// The store's own driver route this order is on (#566).
+  driverRouteId           String?   @map("driver_route_id")
+  /// The open pick batch this order is in (#564); cleared when staff leave the batch.
+  pickBatchId             String?   @map("pick_batch_id")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1246,9 +1289,15 @@ model Order {
   deliveries           Delivery[]
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
+  coupon               StoreCoupon?          @relation(fields: [couponId, storeId], references: [id, storeId], onDelete: Restrict)
+  driverRoute          DriverRoute?          @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
+  pickBatch            PickBatch?            @relation(fields: [pickBatchId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
+  @@index([storeId, couponId])
+  @@index([storeId, driverRouteId])
+  @@index([storeId, pickBatchId])
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, fulfillment, pickupSlot])
@@ -1339,22 +1388,22 @@ model NotificationLog {
 /// One store-delivery step: out_for_delivery or delivered.
 /// One courier booking for an order (DoorDash Drive or Uber Direct). Fees are the provider's quote, no markup (ADR-0006).
 model Delivery {
-  id             String   @id @default(cuid())
-  storeId        String   @map("store_id")
-  orderId        String   @map("order_id")
+  id             String    @id @default(cuid())
+  storeId        String    @map("store_id")
+  orderId        String    @map("order_id")
   provider       String
-  externalId     String   @map("external_id")
+  externalId     String    @map("external_id")
   status         String
-  quoteFeeCents  Int      @map("quote_fee_cents")
-  actualFeeCents Int?     @map("actual_fee_cents")
-  trackingUrl    String?  @map("tracking_url")
-  courierJson    Json?    @map("courier_json")
-  proofUrl       String?  @map("proof_url")
+  quoteFeeCents  Int       @map("quote_fee_cents")
+  actualFeeCents Int?      @map("actual_fee_cents")
+  trackingUrl    String?   @map("tracking_url")
+  courierJson    Json?     @map("courier_json")
+  proofUrl       String?   @map("proof_url")
   pin            String?
   /// The ready time sent to the provider (#562); null books the courier as soon as possible.
   pickupReadyAt  DateTime? @map("pickup_ready_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   store  Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
   order  Order           @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
@@ -1385,6 +1434,30 @@ model DeliveryEvent {
   @@index([storeId])
   @@index([storeId, orderId])
   @@map("delivery_events")
+}
+
+/// A store's own driver for one slot (#566). Only the link token's hash is kept; the link dies at expiresAt or revokedAt.
+model DriverRoute {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  /// The slot start, a UTC ISO instant as on Order.pickupSlot.
+  slot        String
+  driverName  String    @map("driver_name")
+  /// E.164.
+  driverPhone String    @map("driver_phone")
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  /// Set once the SMS is accepted. A route never sent does not hold its orders.
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, slot])
+  @@map("driver_routes")
 }
 
 /// Platform-wide settings, one row with id "platform". Readable by every app user; platform admins write.
@@ -1683,4 +1756,50 @@ model AssistantChatMonth {
 
   @@id([storeId, month])
   @@map("assistant_chat_months")
+}
+
+/// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.
+model StoreCoupon {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  code            String
+  /// "percent" or "fixed".
+  kind            String
+  percentOff      Int?      @map("percent_off")
+  amountOffCents  Int?      @map("amount_off_cents")
+  minGoodsCents   Int       @default(0) @map("min_goods_cents")
+  startsAt        DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt          DateTime? @map("ends_at") @db.Timestamptz(6)
+  /// Null is no limit.
+  totalUses       Int?      @map("total_uses")
+  usesPerCustomer Int?      @map("uses_per_customer")
+  firstOrderOnly  Boolean   @default(false) @map("first_order_only")
+  active          Boolean   @default(true)
+  createdById     String    @map("created_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  store     Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  orders    Order[]
+
+  @@unique([storeId, code])
+  @@unique([id, storeId])
+  @@index([createdById])
+  @@map("store_coupons")
+}
+
+/// Staff picking 2-4 Accepted orders together (#564). Orders point at it while it is open; closedAt is set when staff leave.
+model PickBatch {
+  id        String    @id @default(cuid())
+  storeId   String    @map("store_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+  closedAt  DateTime? @map("closed_at")
+
+  store  Store   @relation(fields: [storeId], references: [id])
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, closedAt])
+  @@map("pick_batches")
 }

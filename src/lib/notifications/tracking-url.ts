@@ -14,12 +14,20 @@ export function orderTrackingUrl(
   env: Record<string, string | undefined>,
   subpath: "" | "/substitutions" = "",
 ): string | null {
-  if (!token || !isSlugRoutable(store.slug)) return null;
+  if (!token) return null;
+  return storePageUrl(store, `/order/${encodeURIComponent(token)}${subpath}`, env);
+}
+
+/** A page on the store's own host, by the same rules as the tracking link. */
+export function storePageUrl(
+  store: { slug: string },
+  path: string,
+  env: Record<string, string | undefined>,
+): string | null {
+  if (!isSlugRoutable(store.slug)) return null;
   const root = env.PLATFORM_ROOT_DOMAIN?.trim();
-  if (root) {
-    return `https://${store.slug}.${root}/order/${encodeURIComponent(token)}${subpath}`;
-  }
+  if (root) return `https://${store.slug}.${root}${path}`;
   if (!allowStoreOverride(env)) return null;
   const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
-  return `${base}/order/${encodeURIComponent(token)}${subpath}?store=${encodeURIComponent(store.slug)}`;
+  return `${base}${path}?store=${encodeURIComponent(store.slug)}`;
 }

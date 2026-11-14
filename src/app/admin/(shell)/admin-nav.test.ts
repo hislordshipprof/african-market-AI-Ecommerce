@@ -6,6 +6,9 @@ describe("currentNavHref", () => {
     expect(currentNavHref("/admin/stores/abc123")).toBe("/admin/stores");
     expect(currentNavHref("/admin/storesX")).toBe("/admin");
     expect(currentNavHref("/admin/orders/checked")).toBe("/admin/orders");
+    expect(currentNavHref("/admin/catalog/products/abc123")).toBe("/admin/catalog/products");
+    expect(currentNavHref("/admin/catalog/review")).toBe("/admin/catalog/review");
+    expect(currentNavHref("/admin/ai/conversations/shopper/abc123")).toBe("/admin/ai/conversations");
   });
 
   it("marks Search orders on the search page and on an order opened from it, not Refunds", () => {

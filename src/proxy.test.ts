@@ -388,4 +388,21 @@ describe("proxy on the platform root domain (store directory)", () => {
     expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
     expect(res.headers.get("x-middleware-request-x-platform-root")).toBeNull();
   });
+
+  for (const path of ["/stores/texas", "/stores/texas/houston", "/sitemap.xml", "/robots.txt"]) {
+    it(`serves ${path} on the root domain`, () => {
+      const res = proxy(makeRequest(`http://example.com${path}`));
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+    });
+
+    it(`answers ${path} with not found on a store host`, () => {
+      const res = proxy(makeRequest(`http://mama-ngozi.example.com${path}`));
+      expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/_directory-not-here");
+    });
+  }
+
+  it("leaves a store's own /stores-like paths alone", () => {
+    const res = proxy(makeRequest("http://mama-ngozi.example.com/storesx"));
+    expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+  });
 });

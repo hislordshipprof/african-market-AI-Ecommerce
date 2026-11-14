@@ -130,6 +130,7 @@ export function storeScoped(storeId: string) {
     substitutionRequest: wrapDelegate(storeId, prisma.substitutionRequest),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
+    aiReviewFlag: wrapDelegate(storeId, prisma.aiReviewFlag),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
     ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
@@ -141,6 +142,8 @@ export function storeScoped(storeId: string) {
     ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
     reorderList: wrapDelegate(storeId, prisma.reorderList),
     reorderListItem: wrapDelegate(storeId, prisma.reorderListItem),
+    driverRoute: wrapDelegate(storeId, prisma.driverRoute),
+    pickBatch: wrapDelegate(storeId, prisma.pickBatch),
     listingDraft: wrapDelegate(storeId, prisma.listingDraft),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     delivery: wrapDelegate(storeId, prisma.delivery),
@@ -150,6 +153,7 @@ export function storeScoped(storeId: string) {
     supportMessage: wrapDelegate(storeId, prisma.supportMessage),
     storeSubscription: wrapDelegate(storeId, prisma.storeSubscription),
     assistantChatMonth: wrapDelegate(storeId, prisma.assistantChatMonth),
+    storeCoupon: wrapDelegate(storeId, prisma.storeCoupon),
   };
 }
 
@@ -298,7 +302,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "aiReviewFlag" | "copilotConversation" | "stockProposal" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -324,6 +328,9 @@ export async function platformAdminTransaction<T>(
       attributeProposal: tx.attributeProposal,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
+      aiReviewFlag: tx.aiReviewFlag,
+      copilotConversation: tx.copilotConversation,
+      stockProposal: tx.stockProposal,
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
       storeSubscription: tx.storeSubscription,
@@ -340,7 +347,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "driverRoute" | "pickBatch" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "storeCoupon" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -378,6 +385,8 @@ export async function storeScopedTransaction<T>(
       ownerReportItem: tx.ownerReportItem,
       reorderList: tx.reorderList,
       reorderListItem: tx.reorderListItem,
+      driverRoute: tx.driverRoute,
+      pickBatch: tx.pickBatch,
       listingDraft: tx.listingDraft,
       notificationLog: tx.notificationLog,
       delivery: tx.delivery,
@@ -391,6 +400,7 @@ export async function storeScopedTransaction<T>(
       ingredient: tx.ingredient,
       ingredientSynonym: tx.ingredientSynonym,
       platformSettings: tx.platformSettings,
+      storeCoupon: tx.storeCoupon,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -1291,6 +1301,13 @@ export async function findOrderSearchRows(filters: OrderSearchFilters, limit: nu
   }>>(orderSearchSql(filters, limit)));
 }
 
+/** Stores with a listing on this master product, active or not: the storefronts its edits reach. */
+export async function storesListingMasterProduct(tx: Pick<PrismaClient, "$queryRaw">, productId: string): Promise<string[]> {
+  const rows = await tx.$queryRaw<Array<{ store_id: string }>>`
+    SELECT DISTINCT store_id FROM listings WHERE master_product_id = ${productId}`;
+  return rows.map((row) => row.store_id);
+}
+
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
@@ -1339,6 +1356,15 @@ export async function claimImportRow(
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+/** A read as the platform admin, for queries Prisma's query API cannot express. */
+export async function platformAdminRawQuery<T>(sql: Prisma.Sql): Promise<T[]> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    return tx.$queryRaw<T[]>(sql);
+  });
 }
 
 export async function storeScopedRawQuery<T>(
@@ -1580,6 +1606,34 @@ export function deleteExpiredAssistantConversations(
         DELETE FROM ai_conversations
         WHERE id IN (SELECT id FROM doomed)
           AND (in_flight_until IS NULL OR in_flight_until <= ${now})
+        RETURNING id
+      )
+      SELECT count(*)::int AS deleted FROM removed
+    `,
+  );
+}
+
+/**
+ * Deletes one batch of AI review flags (#544) older than the naive timestamp. Shopper flags already went with
+ * their conversation; this removes copilot flags, whose conversations have no retention job.
+ */
+export function deleteExpiredReviewFlags(
+  cutoff: string,
+  batchSize: number,
+  batchKey: string,
+): Promise<number> {
+  return deleteExpiredBatch(batchKey, (tx) =>
+    tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH doomed AS (
+        SELECT id FROM ai_review_flags
+        WHERE created_at < ${cutoff}
+        ORDER BY created_at, id
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      ),
+      removed AS (
+        DELETE FROM ai_review_flags
+        WHERE id IN (SELECT id FROM doomed)
         RETURNING id
       )
       SELECT count(*)::int AS deleted FROM removed
