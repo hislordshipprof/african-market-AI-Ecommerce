@@ -20,10 +20,12 @@ describe.skipIf(!hasKeys || !process.env.DATABASE_URL || process.env.COURIER_REG
     });
 
     it("registers a new store as an Uber Direct organization and saves its id", async () => {
+      // Uber refuses a second organization with the same name under our account (409 already-exists).
+      const stamp = Date.now().toString(36);
       storeId = (await raw.store.create({
         data: {
-          slug: `courier-sandbox-${Date.now().toString(36)}`,
-          name: "Sandbox Probe Market",
+          slug: `courier-sandbox-${stamp}`,
+          name: `Sandbox Probe Market ${stamp}`,
           addressLine1: "8121 Georgia Ave",
           city: "Silver Spring",
           state: "MD",
