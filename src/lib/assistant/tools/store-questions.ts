@@ -12,7 +12,7 @@ import {
   postCustomerMessageForOrder,
 } from "../../support/thread";
 import { mayBeUnavailable } from "./availability";
-import { recordRead, type AssistantContext, type ToolResult } from "./execute";
+import { listingName, recordRead, type AssistantContext, type ToolResult } from "./execute";
 import {
   checkDeliveryAreaInput,
   forwardToStoreInput,
@@ -130,7 +130,7 @@ function lineSummary(order: OwnOrder) {
   return order.lines.map((line) => {
     const listing = line.listingVariant.listing;
     return {
-      name: listing.customName || listing.masterProduct?.name || "Unnamed",
+      name: listingName(listing),
       packLabel: line.listingVariant.label,
       qty: line.qtyOrdered,
       // The same variant ids reorder the line ("my usual"); only this store's own orders reach here.

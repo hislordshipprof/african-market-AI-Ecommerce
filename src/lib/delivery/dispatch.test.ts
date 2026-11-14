@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { storeScoped } from "../db";
+import { platformAdminTransaction, storeScoped } from "../db";
 import { makeFakeStep } from "../inngest/fake-step";
 import { DoorDashDriveProvider } from "./doordash";
 import { fakeDoorDash } from "./doordash-fake";
@@ -11,6 +11,7 @@ import {
   COURIER_FAILOVER_TRIGGERED,
   courierFailoverFailed,
   courierRequest,
+  dispatchReadyOrder,
   runCourierFailover,
   selectAndDispatch,
   type CourierEvent,
@@ -542,5 +543,110 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const alternate = await storeScoped(storeId).delivery.findFirstOrThrow({ where: { orderId, provider: "doordash" } });
     expect(doordash.created.size).toBe(1);
     expect(events.filter((e) => e.name === COURIER_DELIVERY_CREATED).map((e) => e.data)).toEqual([{ storeId, deliveryId: alternate.id }]);
+  });
+});
+
+describe.skipIf(!hasDb)("courier order flow (#136)", () => {
+  let raw: PrismaClient;
+  const storeIds: string[] = [];
+  const events: CourierEvent[] = [];
+  const emit = async (event: CourierEvent) => {
+    events.push(event);
+  };
+  const keys = {
+    DOORDASH_DEVELOPER_ID: "0f3c2a9e-1111-4c1b-9a77-2f1d6c0e5a10",
+    DOORDASH_KEY_ID: "7b1d4e22-2222-4f0a-8c55-91e0c3b7d4aa",
+    DOORDASH_SIGNING_SECRET: Buffer.from("test-signing-secret-bytes-0123456789").toString("base64url"),
+  };
+  const doordashFake = () => {
+    const fake = fakeDoorDash({ developerId: keys.DOORDASH_DEVELOPER_ID, keyId: keys.DOORDASH_KEY_ID, signingSecret: keys.DOORDASH_SIGNING_SECRET, now: () => new Date(), quoteFeeCents: 899 });
+    return { fake, provider: new DoorDashDriveProvider({ env: keys, fetch: fake.fetch }) };
+  };
+
+  async function readyOrder(opts: { plan?: "pro" | "starter"; totalCents?: number; frozen?: boolean; status?: string } = {}) {
+    raw ??= testPrismaClient();
+    const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const store = await raw.store.create({
+      data: { slug: `flow-${stamp}`, name: "Flow Market", themePreset: "palm-and-shea", addressLine1: "8121 Georgia Ave", city: "Silver Spring", state: "MD", zip: "20910" },
+    });
+    storeIds.push(store.id);
+    await platformAdminTransaction((tx) => tx.storeSubscription.create({ data: { storeId: store.id, plan: opts.plan ?? "pro", status: "active" } }));
+    const scoped = storeScoped(store.id);
+    const customer = await scoped.customer.create({ data: { storeId: store.id, name: "Flow Buyer", email: `flow-${stamp}@example.com`, phone: "+13015550199" } });
+    const listing = await scoped.listing.create({ data: { storeId: store.id, customName: "Goat meat", price: 6000, stockMode: "counted", qty: 5, frozen: opts.frozen ?? false } });
+    const variant = await scoped.listingVariant.create({ data: { listingId: listing.id, label: "2 lb", price: 6000, weightG: 900 } });
+    const totalCents = opts.totalCents ?? 6000;
+    const order = await scoped.order.create({
+      data: {
+        storeId: store.id, customerId: customer.id, status: opts.status ?? "READY", fulfillment: "courier", number: 9,
+        subtotalCents: 6000, bufferCents: 0, totalCents, totalAuthorizedCents: totalCents,
+        deliveryLine1: "1100 Wayne Ave", deliveryCity: "Silver Spring", deliveryState: "MD", deliveryZip: "20910",
+        lines: { create: [{ listingVariantId: variant.id, qtyOrdered: 1, unitPriceCents: 6000, status: "picked" }] },
+      },
+    });
+    return { storeId: store.id, orderId: order.id };
+  }
+
+  afterAll(async () => {
+    for (const id of storeIds) {
+      const scoped = storeScoped(id);
+      await scoped.deliveryEvent.deleteMany({});
+      await scoped.delivery.deleteMany({});
+      await scoped.orderLine.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.listing.deleteMany({});
+      await scoped.customer.deleteMany({});
+    }
+    await platformAdminTransaction((tx) => tx.storeSubscription.deleteMany({ where: { storeId: { in: storeIds } } }));
+    if (raw) {
+      await raw.store.deleteMany({ where: { id: { in: storeIds } } });
+      await raw.$disconnect();
+    }
+  });
+
+  it("AC4/AC5: a Ready courier order gets a fresh quote, a booked delivery with photo proof and no PIN, and moves to COURIER_REQUESTED", async () => {
+    const { storeId, orderId } = await readyOrder();
+    const { fake, provider } = doordashFake();
+
+    const result = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit });
+
+    expect(result).toMatchObject({ ok: true, provider: "doordash", quoteFeeCents: 899 });
+    expect(fake.calls.map((c) => c.path)).toEqual(["/drive/v2/quotes", expect.stringMatching(/\/accept$/)]);
+    expect(fake.calls[0].body).toMatchObject({ dropoff_options: { proof_of_delivery: "photo_required" } });
+    expect(await storeScoped(storeId).delivery.findMany({ where: { orderId } })).toMatchObject([{ provider: "doordash", status: "requested", pin: null }]);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).status).toBe("COURIER_REQUESTED");
+  });
+
+  it("AC6/AC7: a frozen order, or one above $150, gets a PIN at delivery creation; $150 exactly does not", async () => {
+    const cases = [{ frozen: true }, { totalCents: 15_001 }, { totalCents: 15_000 }];
+    const pins = [];
+    for (const opts of cases) {
+      const { storeId, orderId } = await readyOrder(opts);
+      await dispatchReadyOrder(storeId, orderId, { providers: [doordashFake().provider], emit });
+      pins.push((await storeScoped(storeId).delivery.findFirstOrThrow({ where: { orderId } })).pin);
+    }
+    expect(pins).toEqual([expect.stringMatching(/^\d{4}$/), expect.stringMatching(/^\d{4}$/), null]);
+  });
+
+  it("a retried dispatch books no second courier, only re-sends the timer event", async () => {
+    const { storeId, orderId } = await readyOrder();
+    const { fake, provider } = doordashFake();
+    await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit });
+    events.length = 0;
+
+    const again = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit });
+
+    expect(again).toMatchObject({ ok: true, existing: true });
+    expect(fake.calls.filter((c) => c.path === "/drive/v2/quotes")).toHaveLength(1);
+    expect(events.map((e) => e.name)).toEqual([COURIER_DELIVERY_CREATED]);
+  });
+
+  it("plan gate: a Starter store's Ready courier order is never quoted", async () => {
+    const { storeId, orderId } = await readyOrder({ plan: "starter" });
+    const { fake, provider } = doordashFake();
+
+    expect(await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit })).toEqual({ ok: false, reason: "plan" });
+    expect(fake.calls).toEqual([]);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).status).toBe("READY");
   });
 });

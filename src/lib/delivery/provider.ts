@@ -6,7 +6,7 @@
 export type DeliveryProviderName = "doordash" | "uber";
 
 /** Platform delivery event types a courier webhook maps to (delivery_events.type). */
-export type CourierEventType = "courier_assigned" | "picked_up" | "delivered" | "cancelled";
+export type CourierEventType = "courier_assigned" | "picked_up" | "delivered" | "cancelled" | "returned";
 
 export interface DeliveryAddress {
   line1: string;
@@ -39,6 +39,8 @@ export interface DeliveryRequest {
   };
   orderValueCents: number;
   tipCents: number;
+  /** A PIN the customer gives the courier at drop-off; null asks for a photo (spec §11.3). */
+  dropoffPin?: string | null;
 }
 
 export interface DeliveryQuote {
@@ -54,6 +56,8 @@ export interface DeliveryQuote {
 export interface CreatedDelivery {
   externalId: string;
   trackingUrl: string | null;
+  /** The drop-off PIN the provider will check, when the request asked for one. */
+  pin?: string | null;
 }
 
 export interface DeliveryWebhookEvent {
@@ -67,6 +71,8 @@ export interface DeliveryWebhookEvent {
   trackingUrl: string | null;
   actualFeeCents: number | null;
   courier: { name: string | null; vehicle: string | null; dropoffEta: Date | null } | null;
+  /** The drop-off photo URL and the PIN the courier entered, when the provider sends them. */
+  proof: { photoUrl: string | null; pinEntered: string | null };
   payload: Record<string, unknown>;
 }
 

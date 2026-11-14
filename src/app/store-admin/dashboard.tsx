@@ -11,7 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
-import { AlertCircle, Gem, Info, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare, MessagesSquare } from "lucide-react";
+import { AlertCircle, Camera, ChartColumn, Gem, Info, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare, MessagesSquare } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -278,6 +278,41 @@ export function StoreAdminDashboard({
             </Card>
           </Link>
 
+          {role !== "owner" && !plan.readOnly && (
+            <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <Camera className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Shelf photos</CardTitle>
+                      <CardDescription>Photograph shelves to draft new listings</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && plan.analyticsAllowed && (
+            <Link href={`/store-admin/analytics?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <ChartColumn className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Analytics</CardTitle>
+                      <CardDescription>Sales, best sellers and repeat shoppers</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
           {role === "owner" && !plan.analyticsAllowed && (
             <PlanLocked
               title="Analytics dashboard"

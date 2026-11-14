@@ -20,6 +20,17 @@ const E164 = /^\+[1-9]\d{6,14}$/;
 
 type Json = Record<string, unknown>;
 
+/** PIN metadata is required with proof_of_delivery "pin_code", must be omitted otherwise, and rules out contactless. */
+function pinErrors(body: Json | null) {
+  const pinCode = (body?.dropoff_options as Json | undefined)?.proof_of_delivery === "pin_code";
+  const metadata = body?.dropoff_pin_code_verification_metadata as Json | undefined;
+  return [
+    pinCode !== (metadata !== undefined) && { field: "dropoff_pin_code_verification_metadata", error: "invalid" },
+    pinCode && typeof metadata?.pin_code_value !== "string" && { field: "pin_code_value", error: "required" },
+    pinCode && body?.contactless_dropoff === true && { field: "contactless_dropoff", error: "invalid" },
+  ];
+}
+
 export function fakeDoorDash(opts: FakeDoorDashOptions) {
   const quotes = new Map<string, { body: Json; at: Date; accepted: boolean }>();
   const cancelled = new Set<string>();
@@ -83,6 +94,7 @@ export function fakeDoorDash(opts: FakeDoorDashOptions) {
         typeof body?.dropoff_address !== "string" && { field: "dropoff_address", error: "required" },
         typeof body?.dropoff_phone_number === "string" && !E164.test(body.dropoff_phone_number) && { field: "dropoff_phone_number", error: "invalid" },
         !Number.isInteger(body?.order_value) && { field: "order_value", error: "invalid" },
+        ...pinErrors(body),
       ].filter(Boolean);
       if (fieldErrors.length) return reply(400, { code: "validation_error", message: "Validation Failed", field_errors: fieldErrors });
       if (quotes.has(id)) return reply(409, { code: "duplicate_delivery_id", message: "duplicate" });

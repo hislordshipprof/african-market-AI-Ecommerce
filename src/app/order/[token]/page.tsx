@@ -10,6 +10,10 @@ import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications
 import { OrderMessages } from "@/components/storefront/flow/order-messages";
 import { readCustomerMessages } from "@/lib/support/thread";
 import { issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
+import { courierBrand } from "@/lib/delivery/dispatch";
+import type { DeliveryProviderName } from "@/lib/delivery/provider";
+
+type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
 
 const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
@@ -34,6 +38,11 @@ export default async function OrderPage({
 
   if (realOrder) {
     const proofToken = deliveryProofTokenFor(realOrder, token);
+    const courier = realOrder.fulfillment === "courier" ? realOrder.deliveries[0] : undefined;
+    const courierInfo = courier?.courierJson as CourierJson | undefined;
+    const eta = courierInfo?.dropoffEta
+      ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: context.store.timezone }).format(new Date(courierInfo.dropoffEta))
+      : null;
     // Only the tracking token opens the thread: an order id opens the page but never the messages.
     const messages = realOrder.trackingToken === token
       ? await readCustomerMessages(context.store.id, token).catch(() => null)
@@ -86,6 +95,28 @@ export default async function OrderPage({
             )}
             <p><strong>Authorization hold:</strong> {money(realOrder.totalAuthorizedCents)}</p>
           </FlowCard>
+          {courier && (
+            <FlowCard title="Your courier">
+              <p><strong>{courierBrand(courier.provider as DeliveryProviderName)}</strong></p>
+              {courier.status === "returned" ? (
+                <p>The courier couldn&rsquo;t complete the drop-off and is taking your order back to the store. The store will contact you.</p>
+              ) : courierInfo?.name ? (
+                <p>
+                  {courierInfo.name}
+                  {courierInfo.vehicle && ` · ${courierInfo.vehicle}`}
+                  {eta && courier.status !== "delivered" && ` · arriving about ${eta}`}
+                </p>
+              ) : (
+                <p>We&rsquo;re matching your order with a courier.</p>
+              )}
+              {courier.pin && realOrder.trackingToken === token && courier.status !== "delivered" && courier.status !== "returned" && (
+                <p>Give your courier this PIN at the door: <strong style={{ letterSpacing: "0.2em" }}>{courier.pin}</strong></p>
+              )}
+              {courier.trackingUrl && courier.status !== "delivered" && (
+                <a className="sf-text-link" href={courier.trackingUrl} target="_blank" rel="noopener noreferrer">Track your courier</a>
+              )}
+            </FlowCard>
+          )}
           {proofToken && (
             <FlowCard title="Delivery photo">
               {/* Private route, not the image optimizer: the photo must never be cached publicly. */}

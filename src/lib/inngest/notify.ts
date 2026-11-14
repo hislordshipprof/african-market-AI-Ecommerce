@@ -57,6 +57,14 @@ export async function sendOrderNotification(
   });
 }
 
+/** A courier order reached Ready: the dispatch function books its courier (#136). */
+export function scheduleCourierDispatch(storeId: string, orderId: string): void {
+  scheduleAfterResponse(
+    () => sendLogged(orderId, { id: `courier-order-ready-${orderId}`, name: "courier/order.ready", data: { storeId, orderId } }),
+    "inngest_send_failed",
+  );
+}
+
 export function scheduleOrderNotification(storeId: string, orderId: string, event: OrderNotifyEvent, round?: string): void {
   scheduleAfterResponse(
     () => sendOrderNotification(storeId, orderId, event, round),

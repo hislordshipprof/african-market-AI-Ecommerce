@@ -18,8 +18,8 @@ export const searchCatalogInput = z.object({
 });
 
 export const setShopperNeedsInput = z.object({
-  avoid_allergens: z.array(z.enum(ALLERGENS)).max(9).default([]),
-  require_claims: z.array(z.enum(DIETARY_CLAIMS)).max(6).default([]),
+  avoid_allergens: z.array(z.enum(ALLERGENS)).max(ALLERGENS.length).default([]),
+  require_claims: z.array(z.enum(DIETARY_CLAIMS)).max(DIETARY_CLAIMS.length).default([]),
   avoid_ingredients: z.array(z.string().trim().min(1).max(60)).max(10).default([]).describe(
     "Ingredients the customer rules out, in their words, such as yellow onion.",
   ),

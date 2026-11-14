@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   DeliveryProviderError,
   type CourierEventType,
@@ -91,15 +91,28 @@ const EVENT_TYPES: Record<string, CourierEventType> = {
   DASHER_PICKED_UP: "picked_up",
   DASHER_DROPPED_OFF: "delivered",
   DELIVERY_CANCELLED: "cancelled",
+  DELIVERY_RETURNED: "returned",
 };
+
+/** The webhook's Authorization header is missing or is not the value set in the Developer Portal. */
+export class DoorDashWebhookAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DoorDashWebhookAuthError";
+  }
+}
+
+const digest = (value: string) => createHash("sha256").update(value).digest();
 
 export class DoorDashDriveProvider implements DeliveryProvider {
   readonly name = "doordash" as const;
   private readonly request: DoorDashRequest;
   private readonly now: () => Date;
+  private readonly env: Record<string, string | undefined>;
 
   constructor(opts: DoorDashOptions = {}) {
     this.request = createDoorDashClient(opts);
+    this.env = opts.env ?? process.env;
     this.now = opts.now ?? (() => new Date());
   }
 
@@ -119,7 +132,12 @@ export class DoorDashDriveProvider implements DeliveryProvider {
       dropoff_contact_given_name: req.dropoff.givenName,
       dropoff_contact_family_name: req.dropoff.familyName,
       dropoff_instructions: req.dropoff.instructions,
-      contactless_dropoff: req.dropoff.contactless,
+      // A PIN drop-off cannot be contactless. pin_code_type is only documented for returns ("merchant_provided_number").
+      contactless_dropoff: req.dropoffPin ? false : req.dropoff.contactless,
+      dropoff_options: { proof_of_delivery: req.dropoffPin ? "pin_code" : "photo_required" },
+      dropoff_pin_code_verification_metadata: req.dropoffPin
+        ? { pin_code_type: "merchant_provided_number", pin_code_value: req.dropoffPin }
+        : undefined,
       order_value: req.orderValueCents,
       tip: req.tipCents,
     });
@@ -142,6 +160,7 @@ export class DoorDashDriveProvider implements DeliveryProvider {
     return {
       externalId: String(res.external_delivery_id ?? quoteId),
       trackingUrl: typeof res.tracking_url === "string" ? res.tracking_url : null,
+      pin: req.dropoffPin ?? null,
     };
   }
 
@@ -151,10 +170,17 @@ export class DoorDashDriveProvider implements DeliveryProvider {
   }
 
   /**
-   * Parses one webhook body. DoorDash authenticates webhooks with the Authorization header set in the
-   * Developer Portal (https://developer.doordash.com/en-US/docs/drive/how_to/webhooks); the webhook route (#136) checks it.
+   * Checks and parses one webhook. DoorDash signs no webhook body: it sends the Authorization header value set in the
+   * Developer Portal (Basic Auth option), https://developer.doordash.com/en-US/docs/drive/how_to/webhooks.
+   * DOORDASH_WEBHOOK_AUTHORIZATION holds that exact value.
    */
-  handleWebhook(raw: string): DeliveryWebhookEvent {
+  handleWebhook(raw: string, headers: Headers): DeliveryWebhookEvent {
+    const expected = this.env.DOORDASH_WEBHOOK_AUTHORIZATION;
+    if (!expected) throw new Error("DoorDash webhooks are not configured: missing DOORDASH_WEBHOOK_AUTHORIZATION");
+    const given = headers.get("authorization");
+    if (!given) throw new DoorDashWebhookAuthError("Missing Authorization header");
+    if (!timingSafeEqual(digest(given), digest(expected))) throw new DoorDashWebhookAuthError("Authorization header does not match");
+
     const body = JSON.parse(raw) as Json;
     const eventName = body.event_name;
     const externalDeliveryId = body.external_delivery_id;
@@ -180,6 +206,8 @@ export class DoorDashDriveProvider implements DeliveryProvider {
             dropoffEta: optionalDate(body.dropoff_time_estimated),
           }
         : null,
+      // DoorDash reports no entered PIN: a pin_code delivery cannot be dropped off without it.
+      proof: { photoUrl: typeof body.dropoff_verification_image_url === "string" ? body.dropoff_verification_image_url : null, pinEntered: null },
       payload: body,
     };
   }

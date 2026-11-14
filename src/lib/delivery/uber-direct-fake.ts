@@ -162,7 +162,9 @@ export function fakeUberDirect(opts: FakeUberDirectOptions) {
       }
       const id = `del_${randomUUID().replace(/-/g, "").slice(0, 22)}`;
       deliveries.set(id, { status: "pending", quoteId });
-      return reply(200, delivery(id, "pending", quoteId));
+      const pincode = ((body!.dropoff_verification as Json | undefined)?.pincode as Json | undefined)?.enabled === true;
+      const created = delivery(id, "pending", quoteId);
+      return reply(200, pincode ? { ...created, dropoff: { verification_requirements: { pincode: { enabled: true, value: "6066" } } } } : created);
     }
     if (method === "POST" && (m = rest.match(/^\/deliveries\/([^/]+)\/cancel$/))) {
       const found = deliveries.get(m[1]);

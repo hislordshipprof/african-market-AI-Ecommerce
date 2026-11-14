@@ -100,6 +100,9 @@ One row per ingredient, under one lower-case English name, with its local names 
 **Attribute proposal**:
 Product attributes Claude read from a master product's label photo and description, waiting for a platform admin to approve or reject. Nothing on the product changes until approved.
 
+**Listing draft**:
+One product Claude read from a store's shelf photo, matched to the master catalog (one match, several for the owner to pick, none, or already listed). It becomes a listing only when the owner sets or checks its price and taps Publish. The shelf photo stays private and is never a product image.
+
 **Stock proposal**:
 A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
 
@@ -243,7 +246,10 @@ The customer asked the store to leave the order without a handoff. Frozen items 
 A store-delivery order the store's driver has left with. The step between Ready and Delivered.
 
 **Delivery proof**:
-The photo the store's driver takes when a store-delivery order is delivered. Required to mark it Delivered. Private: stored in its own private bucket, and only the order's tracking link opens it. The order id does not.
+The photo the store's driver takes when a store-delivery order is delivered. Required to mark it Delivered. Private: stored in its own private bucket, and only the order's tracking link opens it. The order id does not. A courier's drop-off photo is copied into the same bucket.
+
+**Drop-off PIN**:
+A 4-digit code the courier must get from the customer at the door. Required for an order with a frozen item or a total above $150; other courier orders get a Delivery proof photo instead.
 
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.

@@ -7,7 +7,7 @@ import { reserveOrderStock } from "../order/stock-ledger";
 import { makeFakeStep } from "../inngest/fake-step";
 import { PushTestSender, setPushSenderForTests } from "../push/sender";
 import { copilotOrderStockAlerts } from "./alert-functions";
-import { createOrderStockAlerts, pushCopilotAlerts } from "./alerts";
+import { createOrderStockAlerts, listOpenAlerts, pushCopilotAlerts } from "./alerts";
 
 type Handler = (ctx: { event: { data: Record<string, unknown> }; step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
 const orderAlertsHandler = (copilotOrderStockAlerts as unknown as { fn: Handler }).fn;
@@ -217,6 +217,37 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
     await alert("Plantain");
     await pushCopilotAlerts(storeId, VAPID_ENV, start + 5 * 60_000);
     expect(sender.sent).toHaveLength(2);
+    expect(await storeScoped(storeId).copilotAlert.count({ where: { pushedAt: null } })).toBe(0);
+  });
+
+  it("an order on a listing estimated out within 3 days raises one running_out_soon alert a store week, pushed under the cap", async () => {
+    const { storeId, ownerId } = await storeWithDevices("soon");
+    const sender = new PushTestSender();
+    setPushSenderForTests(sender);
+    vi.stubEnv("VAPID_PUBLIC_KEY", VAPID_ENV.VAPID_PUBLIC_KEY);
+    vi.stubEnv("VAPID_PRIVATE_KEY", VAPID_ENV.VAPID_PRIVATE_KEY);
+    const fastId = await counted(storeId, "Palm oil 1L", 12);
+    const slowId = await counted(storeId, "Gari", 12);
+    // 28 units in 14 days is 2 a day.
+    await storeScoped(storeId).stockEvent.createMany({
+      data: [
+        { storeId, listingId: fastId, type: "sale", delta: -20, actorId: ownerId, createdAt: new Date(Date.now() - 2 * 86_400_000) },
+        { storeId, listingId: fastId, type: "counter_sale", delta: -8, actorId: ownerId, createdAt: new Date(Date.now() - 86_400_000) },
+        { storeId, listingId: slowId, type: "sale", delta: -2, actorId: ownerId, createdAt: new Date(Date.now() - 86_400_000) },
+      ],
+    });
+
+    const first = await placeOrder([{ listingId: fastId, qty: 6 }, { listingId: slowId, qty: 1 }], storeId);
+    await orderAlertsHandler({ event: { data: { storeId, orderId: first } }, step: makeFakeStep() });
+    const second = await placeOrder([{ listingId: fastId, qty: 1 }], storeId);
+    await orderAlertsHandler({ event: { data: { storeId, orderId: second } }, step: makeFakeStep() });
+
+    const soon = await storeScoped(storeId).copilotAlert.findMany({ where: { kind: "running_out_soon" } });
+    expect(soon.map((a) => a.listingId)).toEqual([fastId]);
+    expect(soon[0]!.dedupeKey).toMatch(new RegExp(`^running_out_soon:${fastId}:\\d{4}-\\d{2}-\\d{2}$`));
+    expect((await listOpenAlerts(storeId)).find((a) => a.kind === "running_out_soon")?.text)
+      .toBe("Palm oil 1L may run out within 3 days; you have 5 left");
+    expect(sender.sent.filter((push) => push.endpoint.endsWith(ownerId))).toHaveLength(2);
     expect(await storeScoped(storeId).copilotAlert.count({ where: { pushedAt: null } })).toBe(0);
   });
 

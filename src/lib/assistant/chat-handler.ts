@@ -15,7 +15,7 @@ import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
 import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
 import { lockConversationRow, storeScoped, storeScopedTransaction, takeRollingFileTurn } from "../db";
-import { findStore } from "../get-store";
+import { findStoreForHeaders } from "../get-store";
 import { auth } from "../auth";
 import {
   attachmentDescriptors,
@@ -82,8 +82,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     if (!parsed.ok) return jsonError(parsed.status, parsed.code, parsed.message);
     if (!requireSameOrigin(request)) return jsonError(403, "forbidden_origin", "This request was not sent from the store.");
 
-    const slug = request.headers.get("x-store-slug");
-    const store = slug ? await findStore(slug) : null;
+    const store = await findStoreForHeaders(request.headers);
     if (!store) return jsonError(404, "store_not_found", "Store not found.");
     if (store.status === "suspended") return jsonError(403, "store_suspended", "This store is not taking orders.");
 

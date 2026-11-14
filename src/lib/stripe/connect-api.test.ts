@@ -31,7 +31,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { auth } from "@/lib/auth";
-import { getStore } from "@/lib/get-store";
+import { getStore, revalidateStore } from "@/lib/get-store";
 import { storeScoped, platformAdmin } from "@/lib/db";
 
 function makeStore(overrides = {}) {
@@ -41,6 +41,7 @@ function makeStore(overrides = {}) {
     name: "Test Store",
     stripeAccountId: null,
     stripeOnboardingStatus: "not_started",
+    customDomain: "shop.test-store.com",
     ...overrides,
   };
 }
@@ -142,6 +143,9 @@ describe("POST /api/stripe/connect", () => {
           stripeOnboardingStatus: "pending",
         }),
       }),
+    );
+    expect(revalidateStore).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "store_123", customDomain: "shop.test-store.com" }),
     );
   });
 
