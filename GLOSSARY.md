@@ -100,6 +100,9 @@ One row per ingredient, under one lower-case English name, with its local names 
 **Attribute proposal**:
 Product attributes Claude read from a master product's label photo and description, waiting for a platform admin to approve or reject. Nothing on the product changes until approved.
 
+**Listing draft**:
+One product Claude read from a store's shelf photo, matched to the master catalog (one match, several for the owner to pick, none, or already listed). It becomes a listing only when the owner sets or checks its price and taps Publish. The shelf photo stays private and is never a product image.
+
 **Stock proposal**:
 A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
 

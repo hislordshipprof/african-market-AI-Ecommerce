@@ -31,18 +31,18 @@ fi
 
 status() { gh api "repos/$REPO/statuses/$SHA" -f state="$1" -f context=local-ci -f description="$2" >/dev/null || true; }
 
-# How much to run (scripts/ci-scope.sh). CI_SCOPE forces a tier. CI_REBASE_OF=<sha> is set by merge-ticket.sh:
-# that commit already passed, and this one is it replayed on a newer main, so only the tests it reaches rerun.
+# How much to run (scripts/ci-scope.sh). CI_SCOPE forces a tier. CI_MERGED_FROM=<sha> is set by merge-ticket.sh:
+# that commit already passed, and this one is it with a newer main merged in, so only the tests it reaches rerun.
 . "$SCRIPTS/review-watch.sh"
 . "$SCRIPTS/ci-scope.sh"
 CHANGED=$(changed_paths "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
 # The paths handed to a test runner: a deleted file has nothing to run, and a runner fails on a path it can't find.
 PRESENT=$(changed_paths --diff-filter=d "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
 SCOPE="${CI_SCOPE:-$(printf '%s\n' "$CHANGED" | ci_scope)}"
-if [ -z "${CI_SCOPE:-}" ] && [ -n "${CI_REBASE_OF:-}" ] && [ "$SCOPE" = full ] \
-  && [ "$(gh api "repos/$REPO/commits/$CI_REBASE_OF/status" --jq '[.statuses[] | select(.context == "local-ci")][0].state // "missing"')" = success ] \
-  && rebase_is_safe "$CI_REBASE_OF" "$SHA"; then
-  SCOPE=rebase
+if [ -z "${CI_SCOPE:-}" ] && [ -n "${CI_MERGED_FROM:-}" ] && [ "$SCOPE" = full ] \
+  && [ "$(gh api "repos/$REPO/commits/$CI_MERGED_FROM/status" --jq '[.statuses[] | select(.context == "local-ci")][0].state // "missing"')" = success ] \
+  && merge_is_safe "$CI_MERGED_FROM" "$SHA"; then
+  SCOPE=merge
 fi
 # A deleted test can be one another test depends on, and the tests tier would have nothing to run for it.
 if [ "$SCOPE" = tests ] && [ "$CHANGED" != "$PRESENT" ]; then SCOPE=full; fi
@@ -236,14 +236,14 @@ if [ "$SCOPE" = tests ]; then
   echo "local-ci PASSED on $SHA (tests scope)"
   exit 0
 fi
-if [ "$SCOPE" = rebase ]; then
+if [ "$SCOPE" = merge ]; then
   SOURCES=$(printf '%s\n' "$PRESENT" | grep -E '^src/.*\.tsx?$' || true)
   if [ -n "$SOURCES" ]; then
     # shellcheck disable=SC2086
     run_unit pnpm exec vitest related --run --retry=1 --passWithNoTests $SOURCES
   fi
-  status success "clean rebase of a passing commit: typecheck, lint and related tests passed"
-  echo "local-ci PASSED on $SHA (rebase scope)"
+  status success "main merged cleanly into a passing commit: typecheck, lint and related tests passed"
+  echo "local-ci PASSED on $SHA (merge scope)"
   exit 0
 fi
 run_unit pnpm test --retry=1

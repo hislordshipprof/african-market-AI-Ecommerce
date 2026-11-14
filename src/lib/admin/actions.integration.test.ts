@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { generateTOTP } from "../../../e2e/totp";
 
 vi.hoisted(() => {
@@ -23,10 +23,11 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { updateStore } from "./actions";
+import { retryCourierRegistrationAction, updateStore } from "./actions";
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
-import { authPrisma, storeScopedTransaction } from "../db";
+import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
+import { inngest } from "../inngest/client";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-hrs`;
@@ -105,6 +106,12 @@ describe("store hours schema", () => {
     });
   }, 60_000);
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    setAddressProvider(null);
+  });
+
   afterAll(async () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -129,8 +136,10 @@ describe("store hours schema", () => {
     expect(await readHours(storeId)).toEqual(storedShape);
   });
 
-  it("platform admin turns on store delivery with a confirmed store address", async () => {
+  it("platform admin turns on store delivery with a confirmed store address, which queues courier registration (#526)", async () => {
     setAddressProvider(fakeAddressBackend());
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
     const data = storeForm(storeId, storedShape);
     data.set("addressLine1", "4600 Silver Hill Rd");
     data.set("city", "Washington");
@@ -145,6 +154,8 @@ describe("store hours schema", () => {
     expect(store?.storeDeliveryFeeCents).toBe(500);
     expect(store?.lat).toBeCloseTo(38.845, 2);
     expect(store?.lng).toBeCloseTo(-76.928, 2);
+    expect(send).toHaveBeenCalledWith({ name: "courier/registration.requested", data: { storeId } });
+    send.mockClear();
 
     const bad = storeForm(storeId, storedShape);
     bad.set("addressLine1", "999 Imaginary Road");
@@ -158,7 +169,7 @@ describe("store hours schema", () => {
     const still = await authPrisma.store.findUnique({ where: { id: storeId } });
     expect(still?.addressLine1).toBe("4600 Silver Hill Rd");
     expect(still?.lat).toBeCloseTo(38.845, 2);
-    setAddressProvider(null);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("turning on store delivery geocodes again when the saved address has no coordinates", async () => {
@@ -188,5 +199,28 @@ describe("store hours schema", () => {
     expect(enabled?.storeDeliveryEnabled).toBe(true);
     expect(enabled?.lat).toBeCloseTo(38.996, 2);
     setAddressProvider(null);
+  });
+
+  it("platform admin retries courier registration: the job is queued and the retry is audited (#526)", async () => {
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
+    const data = new FormData();
+    data.set("storeId", storeId);
+
+    await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=queued`);
+
+    expect(send).toHaveBeenCalledWith({ name: "courier/registration.requested", data: { storeId } });
+    const audit = await platformAdmin.auditLog.findFirst({ where: { entityId: storeId, action: "store.courier_registration_retry" } });
+    expect(audit?.actorId).toBe(userId);
+  });
+
+  it("a courier registration retry whose job could not be queued tells the admin so (#526)", async () => {
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    vi.spyOn(inngest, "send").mockRejectedValue(new Error("inngest down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const data = new FormData();
+    data.set("storeId", storeId);
+
+    await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=failed`);
   });
 });

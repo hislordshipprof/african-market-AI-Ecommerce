@@ -21,26 +21,41 @@ export function isSlugRoutable(slug: string): boolean {
   return true;
 }
 
+export type HostResolution =
+  | { kind: "slug"; slug: string }
+  | { kind: "custom-domain"; hostname: string }
+  | { kind: "none" };
+
+export function resolveHost(
+  host: string,
+  rootDomain?: string,
+): HostResolution {
+  const hostname = host.split(":")[0].toLowerCase();
+
+  if (hostname.endsWith(".vercel.app")) return { kind: "none" };
+  if (hostname === "localhost") return { kind: "none" };
+
+  if (rootDomain) {
+    const root = rootDomain.toLowerCase();
+    if (hostname === root || hostname === `www.${root}`) return { kind: "none" };
+    if (hostname.endsWith(`.${root}`)) {
+      const sub = hostname.slice(0, -(root.length + 1)) || null;
+      if (!sub || !isSlugRoutable(sub)) return { kind: "none" };
+      return { kind: "slug", slug: sub };
+    }
+    return { kind: "custom-domain", hostname };
+  }
+
+  const firstLabel = hostname.split(".")[0];
+  if (!firstLabel || !isSlugRoutable(firstLabel)) return { kind: "none" };
+  return { kind: "slug", slug: firstLabel };
+}
+
 export function slugFromHost(
   host: string,
   rootDomain?: string,
 ): string | null {
-  const hostname = host.split(":")[0].toLowerCase();
-
-  if (hostname.endsWith(".vercel.app")) return null;
-
-  if (rootDomain) {
-    const root = rootDomain.toLowerCase();
-    if (hostname === root || hostname === `www.${root}`) return null;
-    if (hostname.endsWith(`.${root}`)) {
-      const sub = hostname.slice(0, -(root.length + 1)) || null;
-      if (!sub || !isSlugRoutable(sub)) return null;
-      return sub;
-    }
-  }
-
-  const firstLabel = hostname.split(".")[0];
-  if (!firstLabel || !isSlugRoutable(firstLabel)) return null;
-
-  return firstLabel;
+  const result = resolveHost(host, rootDomain);
+  if (result.kind === "slug") return result.slug;
+  return null;
 }

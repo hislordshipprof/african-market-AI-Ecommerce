@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
-import { slugFromHost, isSlugRoutable } from "@/lib/slug";
+import { resolveHost, isSlugRoutable } from "@/lib/slug";
 import { needsNoScriptCsp, newCspNonce, NO_SCRIPT_CSP, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
 const COOKIE_NAME = "store_override";
@@ -18,6 +18,7 @@ export function allowStoreOverride(
 export function proxy(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.delete("x-store-slug");
+  headers.delete("x-custom-domain");
 
   const host = request.headers.get("host");
   const overrideAllowed = allowStoreOverride(process.env);
@@ -49,7 +50,12 @@ export function proxy(request: NextRequest) {
   }
 
   if (!slug && host) {
-    slug = slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN);
+    const resolution = resolveHost(host, process.env.PLATFORM_ROOT_DOMAIN);
+    if (resolution.kind === "slug") {
+      slug = resolution.slug;
+    } else if (resolution.kind === "custom-domain") {
+      headers.set("x-custom-domain", resolution.hostname);
+    }
   }
 
   if (slug) {
