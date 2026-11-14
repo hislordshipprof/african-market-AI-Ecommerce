@@ -11,7 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
-import { AlertCircle, ChartColumn, Gem, Info, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare, MessagesSquare } from "lucide-react";
+import { AlertCircle, ChartColumn, Gem, Info, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare, MessagesSquare, TicketPercent } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -156,6 +156,26 @@ export function StoreAdminDashboard({
                       <CardTitle className="text-base">Team</CardTitle>
                       <CardDescription>
                         Manage staff and invitations
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && (
+            <Link href={`/store-admin/promotions?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <TicketPercent className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Promotions</CardTitle>
+                      <CardDescription>
+                        Coupon codes for your shoppers
                       </CardDescription>
                     </div>
                   </div>
