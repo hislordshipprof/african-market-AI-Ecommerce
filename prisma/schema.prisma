@@ -10,6 +10,7 @@ model Store {
   id                   String   @id @default(cuid())
   slug                 String   @unique
   name                 String
+  customDomain         String?  @unique @map("custom_domain")
   logoUrl              String?  @map("logo_url")
   brandColor           String?  @map("brand_color")
   themePreset          String   @default("palm-and-shea") @map("theme_preset")
