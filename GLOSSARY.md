@@ -153,6 +153,9 @@ A stock alert the Store copilot raises for the store owner: sold out, running lo
 **Confirm-request**:
 A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
 
+**Linked WhatsApp number**:
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
 ## Ordering and fulfillment
 
 **Order**:
