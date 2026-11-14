@@ -150,7 +150,7 @@ function StateList({ states }: { states: StateGroup[] }) {
               {state.stores.map((store) => (
                 <li key={store.slug}>
                   <a href={store.href} className={styles.stateStore}>{store.name}</a>
-                  {store.city ? <span className={styles.place}> {store.city}</span> : null}
+                  {store.city ? <span className={styles.place}>{store.city}</span> : null}
                 </li>
               ))}
             </ul>

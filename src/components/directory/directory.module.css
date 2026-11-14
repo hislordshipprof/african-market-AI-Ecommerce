@@ -389,6 +389,11 @@
   font-size: 15px;
 }
 
+.stateStores > li {
+  display: flex;
+  flex-direction: column;
+}
+
 .stateStore {
   color: var(--d-primary);
   font-weight: 600;
