@@ -8,13 +8,11 @@ const mockHandler = vi.fn((_req: Request) =>
   }),
 );
 
+const mockRegisteredCustomDomain = vi.fn();
 vi.mock("@/lib/auth", () => ({
   auth: { handler: mockHandler },
-}));
-
-const mockFindStoreByDomain = vi.fn();
-vi.mock("@/lib/get-store", () => ({
-  findStoreByDomain: (domain: string) => mockFindStoreByDomain(domain),
+  registeredCustomDomain: (headers: Headers) => mockRegisteredCustomDomain(headers),
+  onCustomDomain: (url: string) => url,
 }));
 
 vi.mock("better-auth/next-js", () => ({
@@ -28,6 +26,7 @@ const { GET, POST } = await import("./[...all]/route");
 
 beforeEach(() => {
   mockHandler.mockClear();
+  mockRegisteredCustomDomain.mockReset().mockResolvedValue(null);
 });
 
 describe("E5: callbackURL validation", () => {
@@ -157,7 +156,7 @@ describe("E7: customer endpoints 403 on non-store hosts", () => {
   });
 
   it("POST /sign-in/magic-link passes through on a store's custom domain", async () => {
-    mockFindStoreByDomain.mockResolvedValueOnce({ id: "s1" });
+    mockRegisteredCustomDomain.mockResolvedValueOnce("shop.mamasmarket.com");
     const req = new NextRequest("https://shop.mamasmarket.com/api/auth/sign-in/magic-link", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-custom-domain": "shop.mamasmarket.com" },
@@ -165,11 +164,10 @@ describe("E7: customer endpoints 403 on non-store hosts", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(200);
-    expect(mockFindStoreByDomain).toHaveBeenCalledWith("shop.mamasmarket.com");
   });
 
   it("POST /sign-in/magic-link returns 403 on a custom domain no store owns", async () => {
-    mockFindStoreByDomain.mockResolvedValueOnce(null);
+    mockRegisteredCustomDomain.mockResolvedValueOnce(null);
     const req = new NextRequest("https://nobody.example.com/api/auth/sign-in/magic-link", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-custom-domain": "nobody.example.com" },
