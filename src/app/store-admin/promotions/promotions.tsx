@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -65,7 +65,13 @@ function CouponForm({ coupon, zoneName, nowLocal, onDone }: { coupon: CouponRow 
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [kind, setKind] = useState<"percent" | "fixed">(coupon?.kind ?? "percent");
-  const [error, setError] = useState<string | null>(null);
+  // `shown` changes on every failed save, so a repeated message is focused and announced again.
+  const [error, setError] = useState<{ text: string; shown: number } | null>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
   const valueLocked = (coupon?.usesSoFar ?? 0) > 0;
   const prefix = coupon ? `edit-${coupon.id}` : "new";
 
@@ -80,7 +86,7 @@ function CouponForm({ coupon, zoneName, nowLocal, onDone }: { coupon: CouponRow 
     startTransition(async () => {
       const result = coupon ? await updateCouponAction(coupon.id, data) : await createCouponAction(data);
       if (!result.ok) {
-        setError(result.error);
+        setError({ text: result.error, shown: Date.now() });
         return;
       }
       setError(null);
@@ -105,6 +111,7 @@ function CouponForm({ coupon, zoneName, nowLocal, onDone }: { coupon: CouponRow 
           placeholder="WELCOME10"
           autoCapitalize="characters"
           autoComplete="off"
+          autoFocus
           spellCheck={false}
           className="h-11 font-mono uppercase"
           aria-describedby={`${prefix}-code-hint`}
@@ -112,9 +119,9 @@ function CouponForm({ coupon, zoneName, nowLocal, onDone }: { coupon: CouponRow 
         <p id={`${prefix}-code-hint`} className="text-xs text-muted-foreground">3 to 20 letters, numbers or dashes. Shoppers can type it in any case.</p>
       </div>
 
-      <fieldset className="flex flex-col gap-2" disabled={valueLocked}>
+      <fieldset className="flex flex-col gap-4" disabled={valueLocked} aria-describedby={valueLocked ? `${prefix}-locked` : undefined}>
         <legend className="mb-2 text-sm font-medium text-foreground">Discount on goods</legend>
-        <div className="flex gap-2" role="radiogroup">
+        <div className="flex gap-2">
           {(["percent", "fixed"] as const).map((k) => (
             <label
               key={k}
@@ -137,7 +144,7 @@ function CouponForm({ coupon, zoneName, nowLocal, onDone }: { coupon: CouponRow 
           </div>
         )}
         {valueLocked && (
-          <p className="text-xs text-muted-foreground">This code has been used, so its type and value are fixed. Deactivate it and create a new one to change them.</p>
+          <p id={`${prefix}-locked`} className="text-xs text-muted-foreground">This code has been used, so its type and value are fixed. Deactivate it and create a new one to change them.</p>
         )}
       </fieldset>
 
@@ -169,7 +176,7 @@ function CouponForm({ coupon, zoneName, nowLocal, onDone }: { coupon: CouponRow 
       </div>
 
       {error && (
-        <p role="alert" className="text-sm text-destructive">{error}</p>
+        <p ref={errorRef} tabIndex={-1} role="alert" className="text-sm text-destructive outline-none" key={error.shown}>{error.text}</p>
       )}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -205,10 +212,12 @@ export function Promotions({ storeName, storeSlug, zoneName, nowLocal, coupons }
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-          <Link href={`/store-admin?store=${storeParam}`} aria-label="Back to store admin">
-            <Button variant="ghost" size="icon" className="size-11" tabIndex={-1}>
-              <ArrowLeft className="size-4" />
-            </Button>
+          <Link
+            href={`/store-admin?store=${storeParam}`}
+            aria-label="Back to store admin"
+            className="inline-flex size-11 items-center justify-center rounded-lg text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <ArrowLeft className="size-4" aria-hidden />
           </Link>
           <div>
             <h1 className="text-base font-semibold text-foreground">Promotions</h1>
@@ -223,12 +232,12 @@ export function Promotions({ storeName, storeSlug, zoneName, nowLocal, coupons }
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <CardTitle className="text-base">Coupon codes</CardTitle>
+                  <CardTitle className="text-base"><h2>Coupon codes</h2></CardTitle>
                   <CardDescription>Your store pays for every discount. Codes take money off goods only, never fees or tips.</CardDescription>
                 </div>
                 {editing !== "new" && (
                   <Button className="h-11" onClick={() => setEditing("new")}>
-                    <Plus className="size-4" data-icon="inline-start" />
+                    <Plus className="size-4" data-icon="inline-start" aria-hidden />
                     New code
                   </Button>
                 )}
@@ -252,7 +261,7 @@ export function Promotions({ storeName, storeSlug, zoneName, nowLocal, coupons }
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="flex min-w-0 flex-col gap-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-base font-semibold tracking-wide text-foreground">{c.code}</span>
+                            <h3 className="font-mono text-base font-semibold tracking-wide text-foreground" translate="no">{c.code}</h3>
                             <Badge variant={c.state === "live" ? "secondary" : "outline"}>{STATE_LABEL[c.state]}</Badge>
                           </div>
                           <p className="text-sm text-foreground">{valueLabel(c)}</p>
@@ -261,23 +270,27 @@ export function Promotions({ storeName, storeSlug, zoneName, nowLocal, coupons }
                             {c.startsLabel} – {c.endsLabel ?? "no end date"}
                           </p>
                         </div>
-                        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-right text-sm sm:min-w-48">
-                          <dt className="text-[13px] text-muted-foreground">Uses</dt>
-                          <dt className="text-[13px] text-muted-foreground">Discount given</dt>
-                          <dd className="font-medium tabular-nums text-foreground">
-                            {c.usesSoFar}{c.totalUses !== null ? ` of ${c.totalUses}` : ""}
-                          </dd>
-                          <dd className="font-medium tabular-nums text-foreground">{money(c.discountGivenCents)}</dd>
+                        <dl className="grid grid-cols-2 gap-x-6 text-right text-sm sm:min-w-48">
+                          <div>
+                            <dt className="text-[13px] text-muted-foreground">Uses</dt>
+                            <dd className="font-medium tabular-nums text-foreground">
+                              {c.usesSoFar}{c.totalUses !== null ? ` of ${c.totalUses}` : ""}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[13px] text-muted-foreground">Discount given</dt>
+                            <dd className="font-medium tabular-nums text-foreground">{money(c.discountGivenCents)}</dd>
+                          </div>
                         </dl>
                       </div>
                       {editing === c.id ? (
                         <CouponForm coupon={c} zoneName={zoneName} nowLocal={nowLocal} onDone={() => setEditing(null)} />
                       ) : (
                         <div className="flex gap-2">
-                          <Button variant="outline" className="h-11" onClick={() => setEditing(c.id)} disabled={isPending}>
+                          <Button variant="outline" className="h-11" aria-label={`Edit ${c.code}`} onClick={() => setEditing(c.id)} disabled={isPending}>
                             Edit
                           </Button>
-                          <Button variant="ghost" className="h-11" onClick={() => toggleActive(c)} disabled={isPending}>
+                          <Button variant="ghost" className="h-11" aria-label={`${c.active ? "Deactivate" : "Activate"} ${c.code}`} onClick={() => toggleActive(c)} disabled={isPending}>
                             {c.active ? "Deactivate" : "Activate"}
                           </Button>
                         </div>

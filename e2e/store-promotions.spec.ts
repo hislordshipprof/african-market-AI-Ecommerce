@@ -60,6 +60,8 @@ async function shoot(page: Page, name: string) {
     await page.emulateMedia({ colorScheme: scheme });
     for (const [label, size] of [["1280px", { width: 1280, height: 900 }], ["390px", { width: 390, height: 844 }]] as const) {
       await page.setViewportSize(size);
+      // Colours ease between themes; shoot once they settle.
+      await page.waitForTimeout(600);
       await page.screenshot({ path: `${SHOTS}/${name}-${scheme}-${label}.png`, fullPage: true });
     }
   }

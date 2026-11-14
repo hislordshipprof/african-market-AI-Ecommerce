@@ -1106,9 +1106,11 @@ model Order {
   deliveries     Delivery[]
   supportThreads SupportThread[]
   substitutionRequests SubstitutionRequest[]
+  coupon         StoreCoupon? @relation(fields: [couponId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
+  @@index([storeId, couponId])
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, sourceCartId, createdAt])
@@ -1524,6 +1526,7 @@ model StoreCoupon {
 
   store     Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
   createdBy User  @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  orders    Order[]
 
   @@unique([storeId, code])
   @@unique([id, storeId])

@@ -68,4 +68,4 @@ ALTER TABLE "orders"
     ADD CONSTRAINT "orders_coupon_id_store_id_fkey"
     FOREIGN KEY ("coupon_id", "store_id") REFERENCES "store_coupons"("id", "store_id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
-CREATE INDEX "orders_store_id_coupon_id_idx" ON "orders"("store_id", "coupon_id") WHERE "coupon_id" IS NOT NULL;
+CREATE INDEX "orders_store_id_coupon_id_idx" ON "orders"("store_id", "coupon_id");
