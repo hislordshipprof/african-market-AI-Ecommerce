@@ -6,6 +6,7 @@ import { callCostMicros } from "../cost";
 import { createChatHandler } from "../chat-handler";
 import { assistantModelId, createAssistantModel } from "../model";
 import { storeScoped } from "../../db";
+import { itemHandles } from "../handles";
 import { usdMentions } from "./money";
 import { adjustTicketSpend, tryReserveTicket } from "./report";
 import { bindingFromFixture, scoreCase, type CatalogBinding, type ObservedTool, type TextBlock } from "./score";
@@ -569,7 +570,12 @@ async function scoreAttempt(args: {
   const quantityChecks = args.evalCase.qty?.length ?? 0;
   const quantityHits = (args.evalCase.qty ?? []).filter((rule) => cart.some((line) => line.key === rule.listingKey && line.variantKey === rule.variantKey && line.qty >= rule.min && line.qty <= rule.max)).length;
   const tools = toolsFromMessages(args.messages);
-  mergeStreamTools(tools, args.exchanges);
+  // Streamed calls name item handles; saved calls keep ids, so compare them as ids.
+  const handles = itemHandles(args.storeId, conversation.id);
+  mergeStreamTools(tools, await Promise.all(args.exchanges.map(async (exchange) => ({
+    ...exchange,
+    toolUses: await Promise.all(exchange.toolUses.map(async (use) => ({ ...use, input: await handles.toIds(use.input) }))),
+  }))));
   const toolInputErrors = tools.filter((tool) => failedToolInput(tool.output)).length;
   const savedTexts = textsFromMessages(args.messages);
   const observedTexts = textsFromExchanges(args.exchanges, tools);

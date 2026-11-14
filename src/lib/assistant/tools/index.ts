@@ -61,12 +61,12 @@ export function assistantTools(
       execute: (input, options) => setShopperNeeds({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     show_products: tool({
-      description: "Show product cards for listing ids in this store.",
+      description: "Show product cards for listing handles from this chat.",
       inputSchema: showProductsInput,
       execute: (input, options) => showProducts({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     check_availability: tool({
-      description: "Check live stock and price for listing ids in this store.",
+      description: "Check live stock and price for listing handles from this chat.",
       inputSchema: checkAvailabilityInput,
       execute: (input, options) => checkAvailability({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
