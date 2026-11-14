@@ -26,7 +26,7 @@ import {
 import { OrderFlow, statusLabel } from "./order-flow";
 import { FlowToast } from "./feedback";
 import { RealAccountBook } from "./account-book";
-import { savePhoneAction } from "@/lib/customer-account/actions";
+import { saveNameAction, savePhoneAction } from "@/lib/customer-account/actions";
 import type { AccountBookSnapshot } from "@/lib/customer-account/checkout-profile";
 import { ACCOUNT_ORDER_LIMIT, type AccountOrderRow } from "@/lib/customer-account/order-history-view";
 import "./account.css";
@@ -149,9 +149,13 @@ export function AccountFlow(props: Props) {
                     if (customer) {
                       setBusy(true);
                       setError("");
-                      void savePhoneAction(profile.phone).then((result) => {
+                      const renamed = profile.name.trim() !== (realProfile?.name ?? "").trim();
+                      void (async () => {
+                        const named = renamed ? await saveNameAction(profile.name) : null;
+                        return named && !named.ok ? named : savePhoneAction(profile.phone);
+                      })().then((result) => {
                         if (result.ok) {
-                          setSaved("Phone saved.");
+                          setSaved(renamed ? "Details saved." : "Phone saved.");
                           // Back restores the router's cached page: without this it brings back the
                           // old phone, and pressing Save on that overwrites the new one.
                           router.refresh();
@@ -171,7 +175,6 @@ export function AccountFlow(props: Props) {
                       required
                       autoComplete="name"
                       value={profile.name}
-                      readOnly={!!customer}
                       onChange={(e) =>
                         setProfile({ ...profile, name: e.target.value })
                       }

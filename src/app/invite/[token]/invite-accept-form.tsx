@@ -60,6 +60,17 @@ export function InviteAcceptForm({
           signUpResult.error.message?.includes("already") ||
           signUpResult.error.code === "USER_ALREADY_EXISTS"
         ) {
+          // A magic-link shopper has no password yet; the invite adds one (never replaces one).
+          const added = await fetch("/api/invite/password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, password }),
+          });
+          if (!added.ok) {
+            const data = (await added.json().catch(() => ({}))) as { error?: string };
+            setError(data.error ?? "Sign-in failed");
+            return;
+          }
           const signInResult = await authClient.signIn.email({
             email,
             password,

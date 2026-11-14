@@ -56,6 +56,10 @@ _Avoid_: Wallet, payment profile
 The public site listing stores by state and location, linking each to its storefront.
 _Avoid_: Marketplace, combined app
 
+**Directory listing**:
+A store's entry in the Store directory: the owner's "Listed in the directory" switch (off by default; a platform admin can override it), a blurb of at most 160 characters, and up to 3 cuisine tags from a fixed list. The street address is never part of it.
+_Avoid_: Profile, store page
+
 ## Catalog
 
 **Master product**:

@@ -28,6 +28,7 @@ import { CARD_NOT_FOUND, CARDS_UNAVAILABLE, SAVED_CARD_PURPOSE, SAVED_CARD_TERMS
 import { ensureStripeCustomer } from "./stripe-customer";
 import { CheckoutProviderError, fakeCheckoutPayments, fakeDetachCalls, getCheckoutPayments, type NormalizedCard } from "../stripe/checkout-payments";
 import { getStripeClient } from "../stripe/provider";
+import { verifyUrlFromEmail } from "../test-magic-link";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const BASE = "http://localhost:3000/api/auth";
@@ -81,7 +82,7 @@ async function customerCookie(email: string, name: string): Promise<{ id: string
   const sent = await authPost("/sign-in/magic-link", { email, callbackURL: "/account" });
   expect(sent.status).toBe(200);
   const message = getTestSentEmails().find((item) => item.to === email);
-  const href = message?.html.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+  const href = verifyUrlFromEmail(message?.html);
   expect(href).toBeTruthy();
   const jar = new CookieJar();
   const verify = await authGet(href!);
