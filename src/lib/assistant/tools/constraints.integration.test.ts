@@ -279,6 +279,33 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(rule(plain)).toMatchObject({ swapRule: "exact_only", substituteVariantId: null });
     expect(rule(onion)).toMatchObject({ swapRule: "named_substitute", substituteVariantId: listing.plain.variantId });
   });
+
+  it("names lines already in the cart whose own product fails a new need, and removes none (#503 N2)", async () => {
+    const ctx = await conversation(storeA);
+    const lineId = async (variantId: string) => {
+      const added = await addToCart(ctx, { items: [{ variant_id: variantId, qty: 1 }] });
+      return (added as unknown as { lineId: string }).lineId;
+    };
+    const peanut = await lineId(listing.peanut.variantId);
+    const unknown = await lineId(listing.unknown.variantId);
+    await lineId(listing.plain.variantId);
+
+    const result = await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    expect(result).toMatchObject({
+      ok: true,
+      failsNeeds: [
+        { lineId: peanut, name: `Paste groundnut ${suffix}`, code: "excluded", needs: { "allergen:peanuts": "excluded" } },
+        { lineId: unknown, name: `Paste mystery ${suffix}`, code: "cannot_confirm", needs: { "allergen:peanuts": "unknown" } },
+      ],
+    });
+    expect((result as unknown as { failsNeeds: unknown[] }).failsNeeds).toHaveLength(2);
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: ctx.cartId } })).toBe(3);
+
+    // With nothing in the cart failing, the result carries no failsNeeds.
+    const clean = await conversation(storeA);
+    await addToCart(clean, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] });
+    expect(await setShopperNeeds(clean, { avoid_allergens: ["peanuts"] })).not.toHaveProperty("failsNeeds");
+  });
 });
 
 describe("constraint keys (#485)", () => {

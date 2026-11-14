@@ -159,6 +159,10 @@ function factsOf(listing: StockFacts): StockFacts {
   };
 }
 
+function listingName(listing: { customName: string | null; masterProduct?: { name: string } | null }): string {
+  return listing.customName || listing.masterProduct?.name || "Unnamed";
+}
+
 const MATCH_RANK = { name: 0, synonym: 1, cannot_confirm: 2, near: 3 } as const;
 
 type CatalogItem = {
@@ -234,6 +238,7 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     avoidIngredients: parsed.avoid_ingredients,
     remove: parsed.remove,
   });
+  const { refund, failsNeeds } = hasConstraints(saved) ? await reviewCartLines(ctx, saved) : { refund: [], failsNeeds: [] };
   const output = {
     ok: true as const,
     avoidAllergens: saved.avoidAllergens,
@@ -242,8 +247,8 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     preferences: saved.preferences,
     ...(ask.length > 0 ? { ask } : {}),
     ...(cannotCheck.length > 0 ? { cannotCheck } : {}),
+    ...(failsNeeds.length > 0 ? { failsNeeds } : {}),
   };
-  const refund = hasConstraints(saved) ? await uncheckedSwapLines(ctx) : [];
   if (refund.length === 0) return recordRead(ctx, "set_shopper_needs", parsed, output);
   // Lines already in the cart follow the needs too: the store's swap and a substitute that fails them become a refund.
   return recordWrite(ctx, "set_shopper_needs", parsed, async (tx) => {
@@ -255,21 +260,34 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
   });
 }
 
-/** This cart's lines whose swap the saved needs do not check: the store's own swap, or a named substitute the gate refuses. */
-async function uncheckedSwapLines(ctx: AssistantContext): Promise<Array<{ lineId: string; name: string }>> {
+/**
+ * This cart's lines under the saved needs. failsNeeds: a line whose own product is excluded, or unknown and
+ * not confirmed, for the assistant to raise; nothing is removed. refund: a swap the needs do not check, the
+ * store's own swap or a named substitute the gate refuses.
+ */
+async function reviewCartLines(ctx: AssistantContext, constraints: ShopperConstraints) {
   const lines = await storeScoped(ctx.storeId).cartLine.findMany({
-    where: { cartId: ctx.cartId, swapRule: { in: ["store_suggests", "named_substitute"] } },
+    where: { cartId: ctx.cartId },
     include: {
       variant: { include: { listing: { include: { masterProduct: true } } } },
       substituteVariant: { select: { listingId: true } },
     },
     orderBy: { createdAt: "asc" },
   });
-  const substitutes = lines.flatMap((line) => (line.swapRule === "named_substitute" && line.substituteVariant ? [line.substituteVariant.listingId] : []));
+  const verdicts = await listingVerdicts(ctx.storeId, lines.map((line) => line.variant.listingId), constraints);
+  const failsNeeds = lines.flatMap((line) => {
+    const verdict = verdicts.get(line.variant.listingId);
+    if (!verdict || verdict.status === "ok" || (verdict.status === "unknown" && confirmedFor(constraints, verdict))) return [];
+    const { code, message, needs } = refusal(verdict, constraints);
+    return [{ lineId: line.id, name: listingName(line.variant.listing), code, message, needs }];
+  });
+  const swaps = lines.filter((line) => line.swapRule === "store_suggests" || line.swapRule === "named_substitute");
+  const substitutes = swaps.flatMap((line) => (line.swapRule === "named_substitute" && line.substituteVariant ? [line.substituteVariant.listingId] : []));
   const refused = await gateListings({ ...ctx, acceptance: undefined, turnMessageId: undefined }, [...new Set(substitutes)]);
-  return lines
+  const refund = swaps
     .filter((line) => line.swapRule === "store_suggests" || !line.substituteVariant || refused.has(line.substituteVariant.listingId))
-    .map((line) => ({ lineId: line.id, name: line.variant.listing.customName || line.variant.listing.masterProduct?.name || "Unnamed" }));
+    .map((line) => ({ lineId: line.id, name: listingName(line.variant.listing) }));
+  return { refund, failsNeeds };
 }
 
 /** Saved constraints checked for listings a tool is about to return; null when there are none. */
@@ -290,6 +308,12 @@ function isExcluded(verdicts: Map<string, ListingVerdict> | null, listingId: str
   return !!verdicts && status !== "ok" && status !== "unknown";
 }
 
+/** A confirmation covers only the constraints that were unknown when the customer gave it. */
+function confirmedFor(constraints: ShopperConstraints, verdict: ListingVerdict): boolean {
+  return constraints.confirmed.some((row) =>
+    row.listingId === verdict.listingId && unknownNeeds(verdict).every((name) => row.needs.includes(name)));
+}
+
 type Refusal = ToolFailure & { listingId: string; needs: Record<NeedKey, ConstraintStatus> };
 
 function refusal(verdict: ListingVerdict, constraints: ShopperConstraints): Refusal {
@@ -307,13 +331,10 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
   const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
   if (!hasConstraints(constraints) || listingIds.length === 0) return refused;
   const verdicts = await listingVerdicts(ctx.storeId, listingIds, constraints);
-  // A confirmation covers only the constraints that were unknown when the customer gave it.
-  const confirmedBefore = (verdict: ListingVerdict) => constraints.confirmed.some((row) =>
-    row.listingId === verdict.listingId && unknownNeeds(verdict).every((name) => row.needs.includes(name)));
   const unknown: string[] = [];
   for (const verdict of verdicts.values()) {
     if (verdict.status === "excluded") refused.set(verdict.listingId, refusal(verdict, constraints));
-    else if (verdict.status === "unknown" && !confirmedBefore(verdict)) unknown.push(verdict.listingId);
+    else if (verdict.status === "unknown" && !confirmedFor(constraints, verdict)) unknown.push(verdict.listingId);
   }
   if (unknown.length === 0) return refused;
   const confirming = new Set<string>();
@@ -375,7 +396,7 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
     });
     cards.push({
       listingId: listing.id,
-      name: listing.customName || listing.masterProduct?.name || "Unnamed",
+      name: listingName(listing),
       imageUrl: photo ?? null,
       variants: listing.variants.map((variant) => ({
         variantId: variant.id,
@@ -444,7 +465,7 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
   const verdicts = await verdictsFor(ctx, candidates.map((candidate) => candidate.id));
   const items = candidates.filter((candidate) => !isExcluded(verdicts, candidate.id)).slice(0, 5).map((candidate) => ({
     listingId: candidate.id,
-    name: candidate.customName || candidate.masterProduct?.name || "Unnamed",
+    name: listingName(candidate),
     priceCents: candidate.variants[0]?.price ?? candidate.price,
     mayBeUnavailable: mayBeUnavailable(candidate),
     ...needsOf(verdicts, candidate.id),
@@ -521,7 +542,7 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
     chosen.push({
       listingId: listing.id,
       variantId: variant.id,
-      name: listing.customName || listing.masterProduct?.name || "Unnamed",
+      name: listingName(listing),
       packLabel: variant.label,
       priceCents: variant.price,
       imageUrl: photo ?? null,
@@ -972,7 +993,7 @@ export async function getCartSummary(ctx: AssistantContext, input: unknown): Pro
   if (!cart) return recordRead(ctx, "get_cart_summary", parsed, fail("line_not_found"));
   const lines = cart.lines.map((line) => {
     const listing = line.variant.listing;
-    const name = listing.customName || listing.masterProduct?.name || "Unnamed";
+    const name = listingName(listing);
     const substituteListing = line.substituteVariant?.listing;
     const substituteName = substituteListing
       ? substituteListing.customName || substituteListing.masterProduct?.name
