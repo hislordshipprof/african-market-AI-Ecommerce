@@ -118,7 +118,7 @@ type MoneyRow = {
 /** What the platform kept at capture: card fee plus courier fee, capped at captured (applicationFeeForCapture). */
 const APPLICATION_FEE = Prisma.sql`LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents ELSE 0 END, o.captured_amount_cents)`;
 
-async function salesRows(storeId: string, range: AnalyticsRange, timeZone: string): Promise<MoneyRow[]> {
+export async function salesRows(storeId: string, range: AnalyticsRange, timeZone: string): Promise<MoneyRow[]> {
   return storeScopedRawQuery<MoneyRow>(storeId, Prisma.sql`
     WITH b AS (${bounds(range, timeZone)}),
     r AS (
@@ -190,7 +190,7 @@ export function salesView(rows: MoneyRow[], range: AnalyticsRange): SalesView {
 
 const LISTING_NAME = Prisma.sql`COALESCE(li.custom_name, mp.name, 'Unnamed item')`;
 
-async function productsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<ProductsView> {
+export async function productsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<ProductsView> {
   const [sellers, shortOrSwapped, missedSearches] = await Promise.all([
     storeScopedRawQuery<ProductRow>(storeId, Prisma.sql`
       WITH b AS (${bounds(range, timeZone)}),
@@ -255,7 +255,7 @@ const ASSISTANT_CART = (cartId: Prisma.Sql, storeId: string) => Prisma.sql`EXIST
   JOIN ai_actions aa ON aa.conversation_id = ac.id AND aa.store_id = ac.store_id
   WHERE ac.store_id = ${storeId} AND ac.cart_id = ${cartId} AND aa.tool = 'add_to_cart' AND aa.ok)`;
 
-async function customersView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<CustomersView> {
+export async function customersView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<CustomersView> {
   const [row] = await storeScopedRawQuery<Omit<CustomersView, "returningShoppers" | "repeatRatePct" | "browsingOrders">>(storeId, Prisma.sql`
     WITH b AS (${bounds(range, timeZone)}),
     o AS (
@@ -295,7 +295,7 @@ export const CANCEL_REASON_LABELS: Record<string, string> = {
   unknown: "No reason recorded",
 };
 
-async function operationsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<OperationsView> {
+export async function operationsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<OperationsView> {
   const [[ready], [swaps], cancellations, [courier]] = await Promise.all([
     storeScopedRawQuery<{ readyOrders: number; median: number | null; average: number | null }>(storeId, Prisma.sql`
       WITH b AS (${bounds(range, timeZone)})

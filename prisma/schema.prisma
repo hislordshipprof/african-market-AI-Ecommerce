@@ -79,6 +79,7 @@ model Store {
   stockProposals StockProposal[]
   copilotAlerts  CopilotAlert[]
   copilotDigests CopilotDigest[]
+  copilotWeeklyReports CopilotWeeklyReport[]
   ownerReports OwnerReport[]
   ownerReportItems OwnerReportItem[]
   notificationLogs NotificationLog[]
@@ -665,6 +666,27 @@ model CopilotDigest {
 
   @@unique([storeId, localDate])
   @@map("copilot_digests")
+}
+
+/// One weekly report per store per ISO week (#550). The figures are fixed when the row is made, so a retry
+/// sends the same email under the same Resend idempotency keys. `claimedAt` holds the send; a failed send clears it.
+model CopilotWeeklyReport {
+  id        String    @id @default(cuid())
+  storeId   String    @map("store_id")
+  /// ISO week of the store week reported, e.g. 2026-W46.
+  isoWeek   String    @map("iso_week")
+  /// Monday of that week, YYYY-MM-DD in the store's zone.
+  weekStart String    @map("week_start")
+  figures   Json
+  claimedAt DateTime? @map("claimed_at")
+  sentAt    DateTime? @map("sent_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, isoWeek])
+  @@index([storeId, weekStart])
+  @@map("copilot_weekly_reports")
 }
 
 /// A voice or photo stock report from a store member (#21). Nothing is written to stock until the owner confirms.
