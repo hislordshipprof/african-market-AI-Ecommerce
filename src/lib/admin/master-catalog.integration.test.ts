@@ -343,7 +343,7 @@ describe("master catalog (real sessions, lane DB)", () => {
     function imageForm(productId: string, bytes: Uint8Array, name: string, type: string): FormData {
       const form = new FormData();
       form.set("productId", productId);
-      form.set("image", new File([bytes], name, { type }));
+      form.set("image", new File([Buffer.from(bytes)], name, { type }));
       return form;
     }
     const imageAudits = (id: string) =>

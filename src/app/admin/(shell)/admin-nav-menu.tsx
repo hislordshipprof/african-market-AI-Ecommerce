@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardCheck, House, LogOut, Menu, MessagesSquare, PackageSearch, Store, Undo2, X } from "lucide-react";
+import { ClipboardCheck, House, LogOut, Menu, MessagesSquare, Package, PackageSearch, Store, Undo2, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { ADMIN_NAV, currentNavHref, type AdminNavHref } from "./admin-nav";
 import { signOutAdmin } from "./sign-out";
@@ -11,6 +11,7 @@ import { signOutAdmin } from "./sign-out";
 const ICONS: Record<AdminNavHref, typeof House> = {
   "/admin": House,
   "/admin/stores": Store,
+  "/admin/catalog/products": Package,
   "/admin/catalog/review": ClipboardCheck,
   "/admin/orders": Undo2,
   "/admin/orders/check": PackageSearch,

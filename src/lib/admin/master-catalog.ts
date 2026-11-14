@@ -2,7 +2,7 @@
 
 import { uploadCatalogPhoto } from "../catalog-image";
 import { PHOTO_UPLOAD_MAX_BYTES } from "../listing/csv-file-cap";
-import { Prisma, lockMasterProductRow, platformAdminTransaction } from "../db";
+import { Prisma, lockMasterProductRow, platformAdminRawQuery, platformAdminTransaction, storesListingMasterProduct } from "../db";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { listingRelevanceJoin, listingRelevanceWhere } from "../storefront/search-relevance";
@@ -71,17 +71,17 @@ export async function listMasterCatalog(input: unknown): Promise<CatalogPage> {
     image_url: string | null;
     attributes_reviewed: boolean;
   };
-  const { rows, total } = await platformAdminTransaction(async (tx) => {
-    const found = await tx.$queryRaw<Row[]>`
+  const [rows, counted] = await Promise.all([
+    platformAdminRawQuery<Row>(Prisma.sql`
       SELECT mp.id, mp.name, mp.status, c.name AS category_name, mp.subcategory, mp.unit, mp.weight_g, mp.image_url,
         ${allReviewed} AS attributes_reviewed
       ${from}
       ${order}
       LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
-    `;
-    const counted = await tx.$queryRaw<Array<{ total: number }>>`SELECT COUNT(*)::int AS total ${from}`;
-    return { rows: found, total: counted[0]?.total ?? 0 };
-  });
+    `),
+    platformAdminRawQuery<{ total: number }>(Prisma.sql`SELECT COUNT(*)::int AS total ${from}`),
+  ]);
+  const total = counted[0]?.total ?? 0;
 
   return {
     products: rows.map((row) => ({
@@ -140,7 +140,7 @@ export async function getMasterProductEditor(productId: string): Promise<MasterP
     });
     if (!product) return null;
     const categories = await tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
-    const storeCount = (await storesListing(tx, product.id)).length;
+    const storeCount = (await storesListingMasterProduct(tx, product.id)).length;
     return { product: { ...product, status: product.status as MasterStatus }, categories, storeCount };
   });
 }
@@ -157,13 +157,6 @@ export type SaveState = { ok?: boolean; message?: string; fieldErrors?: Partial<
 const EDITED_FIELDS = [
   "name", "categoryId", "subcategory", "description", "unit", "weightG", "frozen", "perishable", "storage", "status",
 ] as const satisfies readonly MasterProductField[];
-
-/** Stores whose storefront shows this product, read inside the caller's transaction. */
-async function storesListing(tx: Pick<Prisma.TransactionClient, "$queryRaw">, productId: string): Promise<string[]> {
-  const rows = await tx.$queryRaw<Array<{ store_id: string }>>`
-    SELECT DISTINCT store_id FROM listings WHERE master_product_id = ${productId}`;
-  return rows.map((row) => row.store_id);
-}
 
 /** Saves the editor form. Archive is the status "archived"; a master product is never deleted. */
 export async function saveMasterProduct(_prev: SaveState, form: FormData): Promise<SaveState> {
@@ -211,7 +204,7 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
         after: after as Prisma.InputJsonObject,
       },
     });
-    return { ok: true, message: "Saved", storeIds: await storesListing(tx, productId) };
+    return { ok: true, message: "Saved", storeIds: await storesListingMasterProduct(tx, productId) };
   });
 
   const { storeIds, ...state } = result;
@@ -259,7 +252,7 @@ export async function uploadMasterProductImage(_prev: ImageState, form: FormData
         after: { imageUrl: uploaded.url },
       },
     });
-    return { ok: true, message: "Photo updated", storeIds: await storesListing(tx, id.data) };
+    return { ok: true, message: "Photo updated", storeIds: await storesListingMasterProduct(tx, id.data) };
   });
 
   const { storeIds, ...state } = result;

@@ -169,6 +169,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ## 7. Platform admin console
 - Tenants: create, suspend, plan/billing, settings override.
 - Master catalog: products, synonyms (by language), images, recipes, category tree; merge duplicates proposed by AI.
+  - Built (#540): the product list (`/admin/catalog/products`: catalog search, filters, paging) and editor (fields, status, photo upload to WebP). A product is archived, never deleted; every save is audited and refreshes the storefronts that list it.
 - Orders & disputes across tenants; manual refund; courier incident log.
 - Courier config: provider priorities, failover timeout, per-metro settings.
 - AI oversight: conversation sampling, flagged answers, eval dashboard.
