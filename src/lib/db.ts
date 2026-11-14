@@ -78,6 +78,8 @@ export const platform = {
   productSynonym: wrapPlatformDelegate(prisma.productSynonym),
   recipe: wrapPlatformDelegate(prisma.recipe),
   platformSettings: wrapPlatformDelegate(prisma.platformSettings),
+  gazetteerZip: wrapPlatformDelegate(prisma.gazetteerZip),
+  gazetteerPlace: wrapPlatformDelegate(prisma.gazetteerPlace),
 };
 
 function wrapDelegate<D extends object>(storeId: string, delegate: D): D {

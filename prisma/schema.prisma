@@ -282,9 +282,11 @@ model AddressGeocode {
 
 /// US Census Gazetteer ZCTA centroid, seeded once by migration for the directory's near-me search (#452).
 model GazetteerZip {
-  zip String @id
-  lat Float
-  lng Float
+  zip     String @id
+  lat     Float
+  lng     Float
+  /// A point within this many miles of the centroid is taken to be in the ZIP (for "is this point in the US").
+  reachMi Float  @map("reach_mi")
 
   @@index([lat])
   @@map("gazetteer_zips")

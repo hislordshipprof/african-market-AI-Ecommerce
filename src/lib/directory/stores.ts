@@ -4,7 +4,7 @@ import { platform } from "@/lib/db";
 
 // The only Store columns the public directory may read. `stores_read` is open to every
 // role, so whole rows would leak Stripe, fee, limit and address columns (#449).
-const DIRECTORY_STORE_FIELDS = {
+export const DIRECTORY_STORE_FIELDS = {
   name: true,
   slug: true,
   logoUrl: true,

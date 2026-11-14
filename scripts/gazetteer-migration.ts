@@ -32,7 +32,10 @@ if (!zctaPath || !placePath) throw new Error("usage: gazetteer-migration.ts <zct
 
 // Territories (PR, VI, Guam, the Marianas, American Samoa) are outside the platform's states (ADR-0001).
 const TERRITORY_ZIP = /^(00[6-9]|969|96799)/;
-const zips = rows(zctaPath).filter((r) => !TERRITORY_ZIP.test(r.GEOID!)).map((r) => `(${text(r.GEOID!)},${coord(r.INTPTLAT!)},${coord(r.INTPTLONG!)})`);
+// How far from its centroid a ZIP still counts: 1.5 × the radius of a circle of its area, plus 3 miles.
+const reach = (r: Record<string, string>) =>
+  (Math.sqrt((Number(r.ALAND_SQMI) + Number(r.AWATER_SQMI)) / Math.PI) * 1.5 + 3).toFixed(1);
+const zips = rows(zctaPath).filter((r) => !TERRITORY_ZIP.test(r.GEOID!)).map((r) => `(${text(r.GEOID!)},${coord(r.INTPTLAT!)},${coord(r.INTPTLONG!)},${reach(r)})`);
 
 // One row per state and name: an incorporated place beats a CDP, then the larger land area wins.
 const places = new Map<string, { state: string; key: string; name: string; lat: string; lng: string; rank: [number, number] }>();
@@ -59,6 +62,7 @@ CREATE TABLE "gazetteer_zips" (
     "zip" TEXT NOT NULL,
     "lat" DOUBLE PRECISION NOT NULL,
     "lng" DOUBLE PRECISION NOT NULL,
+    "reach_mi" DOUBLE PRECISION NOT NULL,
     CONSTRAINT "gazetteer_zips_pkey" PRIMARY KEY ("zip")
 );
 
@@ -74,7 +78,7 @@ CREATE TABLE "gazetteer_places" (
 CREATE INDEX "gazetteer_places_name_key_idx" ON "gazetteer_places"("name_key");
 CREATE INDEX "gazetteer_zips_lat_idx" ON "gazetteer_zips"("lat");
 
-${inserts("gazetteer_zips", `"zip","lat","lng"`, zips)}
+${inserts("gazetteer_zips", `"zip","lat","lng","reach_mi"`, zips)}
 
 ${inserts("gazetteer_places", `"state","name_key","name","lat","lng"`, placeValues)}
 
