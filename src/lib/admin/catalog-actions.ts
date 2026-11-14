@@ -10,8 +10,23 @@ import { assistantSpendState } from "../assistant/spend";
 import { extractProductAttributes } from "../catalog/attribute-extract";
 import { attributeGroup, type AttributeGroupName } from "../catalog/attributes";
 import { resolveIngredients } from "../catalog/ingredients";
+import { STALE_PRODUCT_MESSAGE } from "./master-catalog-form";
 
 const productIdSchema = z.string().min(1).max(200);
+
+// The review queue's tabs. Archived is not one, so nothing here can move a product out of it.
+const queueStatusSchema = z.enum(["needs_review", "active", "rejected"]);
+
+type Tx = Parameters<Parameters<typeof platformAdminTransaction>[0]>[0];
+
+/** Locks the product and re-reads it; refuses unless it is still in a status the admin's page showed. */
+async function lockProductInStatus(tx: Tx, productId: string, statuses: readonly string[]) {
+  await lockMasterProductRow(tx, productId);
+  const product = await tx.masterProduct.findUnique({ where: { id: productId } });
+  if (!product) return { error: "Product not found" } as const;
+  if (!statuses.includes(product.status)) return { error: STALE_PRODUCT_MESSAGE } as const;
+  return { product } as const;
+}
 
 export type ReviewProduct = {
   id: string;
@@ -111,11 +126,14 @@ async function downloadCatalogImage(
 
 export async function approveProduct(
   productId: string,
+  expectedStatus: string,
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
   const id = parseInput(productIdSchema, productId);
   if (!id.ok) return { error: "Product not found" };
   productId = id.data;
+  const from = parseInput(queueStatusSchema, expectedStatus);
+  if (!from.ok) return { error: STALE_PRODUCT_MESSAGE };
 
   // Optimistic read, outside the transaction, only so the image download (network I/O)
   // never happens while the row lock is held. The locked re-read below is authoritative.
@@ -131,9 +149,9 @@ export async function approveProduct(
   }
 
   return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
-    await lockMasterProductRow(tx, productId);
-    const product = await tx.masterProduct.findUnique({ where: { id: productId } });
-    if (!product) return { error: "Product not found" };
+    const locked = await lockProductInStatus(tx, productId, [from.data, "active"]);
+    if ("error" in locked) return locked;
+    const { product } = locked;
     if (product.status === "active") return { success: true };
 
     const imageUrl = product.imageUrl ?? downloadedUrl;
@@ -158,16 +176,19 @@ export async function approveProduct(
 
 export async function rejectProduct(
   productId: string,
+  expectedStatus: string,
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
   const id = parseInput(productIdSchema, productId);
   if (!id.ok) return { error: "Product not found" };
   productId = id.data;
+  const from = parseInput(queueStatusSchema, expectedStatus);
+  if (!from.ok) return { error: STALE_PRODUCT_MESSAGE };
 
   return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
-    await lockMasterProductRow(tx, productId);
-    const product = await tx.masterProduct.findUnique({ where: { id: productId } });
-    if (!product) return { error: "Product not found" };
+    const locked = await lockProductInStatus(tx, productId, [from.data, "rejected"]);
+    if ("error" in locked) return locked;
+    const { product } = locked;
     if (product.status === "rejected") return { success: true };
 
     await tx.masterProduct.update({
@@ -191,6 +212,7 @@ export async function rejectProduct(
 
 export async function updateReviewProduct(
   productId: string,
+  expectedStatus: string,
   data: {
     name?: string;
     description?: string;
@@ -213,6 +235,8 @@ export async function updateReviewProduct(
   if (!parsed.ok) return { error: "Product not found" };
   productId = parsed.data.productId;
   data = parsed.data.data;
+  const from = parseInput(queueStatusSchema, expectedStatus);
+  if (!from.ok) return { error: STALE_PRODUCT_MESSAGE };
 
   const updateData: {
     name?: string;
@@ -232,9 +256,9 @@ export async function updateReviewProduct(
   if (data.originCountries !== undefined) updateData.originCountries = data.originCountries || null;
 
   return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
-    await lockMasterProductRow(tx, productId);
-    const product = await tx.masterProduct.findUnique({ where: { id: productId } });
-    if (!product) return { error: "Product not found" };
+    const locked = await lockProductInStatus(tx, productId, [from.data]);
+    if ("error" in locked) return locked;
+    const { product } = locked;
     if (Object.keys(updateData).length === 0) return { success: true };
 
     await tx.masterProduct.update({

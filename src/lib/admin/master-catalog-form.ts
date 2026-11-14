@@ -11,6 +11,9 @@ export const MASTER_STATUS_LABELS: Record<MasterStatus, string> = {
   archived: "Archived",
 };
 
+/** Every master product action refuses with this when the row moved on since the admin loaded it. */
+export const STALE_PRODUCT_MESSAGE = "Someone else changed this product after you opened it. Reload the page to see their changes, then make yours again.";
+
 export const STORAGE_OPTIONS = ["ambient", "chilled", "frozen"] as const;
 
 export const CATALOG_PAGE_SIZE = 25;

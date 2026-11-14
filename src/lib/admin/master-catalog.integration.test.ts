@@ -38,6 +38,7 @@ vi.mock("next/navigation", () => ({
 
 import sharp from "sharp";
 import { getMasterProductEditor, listMasterCatalog, saveMasterProduct, uploadMasterProductImage } from "./master-catalog";
+import { approveProduct, rejectProduct, updateReviewProduct } from "./catalog-actions";
 import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { matchToMasterProducts } from "../listing/csv-import";
@@ -367,9 +368,9 @@ describe("master catalog (real sessions, lane DB)", () => {
       };
     }
 
-    async function makeProduct(key: string): Promise<string> {
+    async function makeProduct(key: string, status = "active"): Promise<string> {
       const id = await asPlatformAdmin(async (tx) =>
-        (await tx.masterProduct.create({ data: { name: `${RUN} ${key}`, categoryId: categoryB, status: "active" } })).id);
+        (await tx.masterProduct.create({ data: { name: `${RUN} ${key}`, categoryId: categoryB, status } })).id);
       products[key] = id;
       return id;
     }
@@ -403,6 +404,46 @@ describe("master catalog (real sessions, lane DB)", () => {
 
       expect(await readProduct(id)).toMatchObject({ status: "archived", unit: null });
       expect((await matchToMasterProducts([`${RUN} Locust beans`])).get(`${RUN} Locust beans`)).toEqual([]);
+    });
+
+    const reviewAudits = (id: string) =>
+      asPlatformAdmin((tx) => tx.auditLog.findMany({ where: { entityId: id, action: { in: ["catalog.approve", "catalog.reject", "catalog.edit"] } } }));
+
+    /** The admin opened Catalog review on the product, then another admin archived it in the editor. */
+    async function archivedBehindTheQueue(key: string, queueStatus: string): Promise<string> {
+      const id = await makeProduct(key, queueStatus);
+      expect(await saveMasterProduct({}, (await openEditor(id))({ status: "archived" }))).toMatchObject({ ok: true });
+      return id;
+    }
+
+    it("keeps a product archived when a review queue opened before the archive approves it", async () => {
+      const id = await archivedBehindTheQueue("Bitter leaf", "needs_review");
+
+      expect((await approveProduct(id, "needs_review")).error).toMatch(/changed .* after you opened it.*reload/i);
+      expect((await approveProduct(id, "archived")).error).toMatch(/changed .* after you opened it.*reload/i);
+
+      expect(await readProduct(id)).toMatchObject({ status: "archived" });
+      expect(await reviewAudits(id)).toEqual([]);
+      expect((await matchToMasterProducts([`${RUN} Bitter leaf`])).get(`${RUN} Bitter leaf`)).toEqual([]);
+    });
+
+    it("keeps a product archived when a review queue opened before the archive rejects it", async () => {
+      const id = await archivedBehindTheQueue("Uziza", "active");
+
+      expect((await rejectProduct(id, "active")).error).toMatch(/changed .* after you opened it.*reload/i);
+      expect((await rejectProduct(id, "archived")).error).toMatch(/changed .* after you opened it.*reload/i);
+
+      expect(await readProduct(id)).toMatchObject({ status: "archived" });
+      expect(await reviewAudits(id)).toEqual([]);
+    });
+
+    it("refuses the review dialog's edit to a product archived after the queue opened", async () => {
+      const id = await archivedBehindTheQueue("Ugu", "rejected");
+
+      expect((await updateReviewProduct(id, "rejected", { name: `${RUN} Fluted pumpkin` })).error).toMatch(/changed .* after you opened it.*reload/i);
+
+      expect(await readProduct(id)).toMatchObject({ status: "archived", name: `${RUN} Ugu` });
+      expect(await reviewAudits(id)).toEqual([]);
     });
 
     it("lets one editor save twice in a row with the version its last save returned", async () => {

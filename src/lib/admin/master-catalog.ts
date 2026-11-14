@@ -14,6 +14,7 @@ import {
   catalogFiltersSchema,
   masterProductFormSchema,
   readMasterProductForm,
+  STALE_PRODUCT_MESSAGE,
   type MasterProductField,
   type MasterStatus,
 } from "./master-catalog-form";
@@ -167,8 +168,6 @@ const EDITED_FIELDS = [
   "name", "categoryId", "subcategory", "description", "unit", "weightG", "frozen", "perishable", "storage", "status",
 ] as const satisfies readonly MasterProductField[];
 
-const STALE_MESSAGE = "Someone else changed this product after you opened it. Reload the page to see their changes, then make yours again.";
-
 // Hashes only the editor's fields, so a photo upload or attribute review does not make an open editor stale.
 function detailsVersion(product: Record<(typeof EDITED_FIELDS)[number], unknown>): string {
   return createHash("sha256").update(JSON.stringify(EDITED_FIELDS.map((field) => product[field]))).digest("base64url");
@@ -183,7 +182,7 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
     for (const issue of parsed.error.issues) {
       const field = issue.path[0] as MasterProductField | "productId" | "version";
       if (field === "productId") return { ok: false, message: "Product not found" };
-      if (field === "version") return { ok: false, message: STALE_MESSAGE };
+      if (field === "version") return { ok: false, message: STALE_PRODUCT_MESSAGE };
       fieldErrors[field] ??= issue.message;
     }
     return { ok: false, message: "Check the highlighted fields", fieldErrors };
@@ -195,7 +194,7 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
     const product = await tx.masterProduct.findUnique({ where: { id: productId } });
     if (!product) return { ok: false, message: "Product not found" };
     // The form holds every field as it was loaded; saving it over a newer row would undo the other admin's change.
-    if (detailsVersion(product) !== version) return { ok: false, message: STALE_MESSAGE };
+    if (detailsVersion(product) !== version) return { ok: false, message: STALE_PRODUCT_MESSAGE };
     if (next.categoryId && next.categoryId !== product.categoryId) {
       const category = await tx.category.findUnique({ where: { id: next.categoryId }, select: { id: true } });
       if (!category) return { ok: false, message: "Check the highlighted fields", fieldErrors: { categoryId: "Choose a category from the list" } };
