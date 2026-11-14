@@ -338,10 +338,14 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
     expect(await markReady(storeId, b.id)).toEqual({ ok: true, capturedAmountCents: 1000 });
     expect(capturedPayments.get(b.paymentIntentId)).toBe(1000);
     expect(capturedPayments.has(a.paymentIntentId)).toBe(false);
+    const readyNotes = (orderId: string) => storeScoped(storeId).notificationLog.count({ where: { orderId, event: "ready" } });
+    expect(await readyNotes(b.id)).toBeGreaterThan(0);
+    expect(await readyNotes(a.id)).toBe(0);
 
     await pickBatchLine(storeId, started.batchId, v.ugu, 1);
     expect(await markReady(storeId, a.id)).toEqual({ ok: true, capturedAmountCents: 2400 });
     expect(capturedPayments.get(a.paymentIntentId)).toBe(2400);
+    expect(await readyNotes(a.id)).toBeGreaterThan(0);
     expect((await orderRow(b.id)).status).toBe("AWAITING_PICKUP");
   });
 
