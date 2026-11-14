@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { UNSET_MAX_PER_ORDER } from "../../cart/limits";
+import { SWAP_RULES, UNSET_MAX_PER_ORDER } from "../../cart/limits";
 import { ALLERGENS, DIETARY_CLAIMS } from "../../catalog/attributes";
 import { scrubKnownStrings } from "../card-scrub";
 import { exactAssistantKeys } from "../contract";
@@ -59,7 +59,7 @@ export const removeFromCartInput = z.object({
 
 export const setSwapRuleInput = z.object({
   line_id: z.string().min(1),
-  rule: z.enum(["exact_only", "store_suggests", "named_substitute"]),
+  rule: z.enum(SWAP_RULES),
   substitute_variant_id: z.string().min(1).optional(),
 }).refine(
   (value) => value.rule !== "named_substitute" || !!value.substitute_variant_id,
