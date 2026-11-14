@@ -1,7 +1,7 @@
 import { storeScoped } from "../../db";
 import { computeQuote } from "../../checkout/quote";
 import { readServiceFeeSettings } from "../../order/service-fee-settings";
-import { pickupSlotsToday } from "../../order/pickup-slots";
+import { pickupSlotsFor } from "../../order/slot-schedule";
 import { readConversationDraft, readPickupStore, writeCheckoutDraft } from "../checkout-draft";
 import { mayBeUnavailable } from "./availability";
 import { listingName, recordRead, type AssistantContext, type ToolResult } from "./execute";
@@ -13,7 +13,7 @@ export const CHECKOUT_PATH = "/checkout";
 const MESSAGES: Record<string, string> = {
   store_not_found: "This store is not available.",
   pickup_unavailable: "This store does not offer pickup right now. Delivery, if the store offers it, is chosen on the checkout page.",
-  slot_not_offered: "That pickup time is not offered. Call get_fulfillment_options for today's times.",
+  slot_not_offered: "That pickup time is not offered. Call get_fulfillment_options for the offered times.",
   cart_empty: "The cart is empty.",
 };
 
@@ -25,13 +25,13 @@ export async function getFulfillmentOptions(ctx: AssistantContext, input: unknow
   const parsed = parseToolInput(getFulfillmentOptionsInput, input);
   const store = await readPickupStore(ctx.storeId);
   if (!store) return recordRead(ctx, "get_fulfillment_options", parsed, fail("store_not_found"));
-  const slots = pickupSlotsToday(store, new Date());
+  const slots = pickupSlotsFor(store, new Date(), new Map());
   return recordRead(ctx, "get_fulfillment_options", parsed, {
     ok: true,
     pickup: {
       offered: store.pickupEnabled,
       slots: slots.map((slot) => ({ slotId: slot.id, label: slot.label })),
-      ...(store.pickupEnabled && slots.length === 0 ? { message: "No pickup times are left today." } : {}),
+      ...(store.pickupEnabled && slots.length === 0 ? { message: "No pickup times are open." } : {}),
       ...(!store.pickupEnabled ? { message: MESSAGES.pickup_unavailable } : {}),
     },
     delivery: "Delivery and its address are chosen on the checkout page.",
@@ -43,7 +43,7 @@ export async function setFulfillment(ctx: AssistantContext, input: unknown): Pro
   const store = await readPickupStore(ctx.storeId);
   if (!store) return recordRead(ctx, "set_fulfillment", parsed, fail("store_not_found"));
   if (!store.pickupEnabled) return recordRead(ctx, "set_fulfillment", parsed, fail("pickup_unavailable"));
-  const slot = pickupSlotsToday(store, new Date()).find((offered) => offered.id === parsed.slot_id);
+  const slot = pickupSlotsFor(store, new Date(), new Map()).find((offered) => offered.id === parsed.slot_id);
   if (!slot) return recordRead(ctx, "set_fulfillment", parsed, fail("slot_not_offered"));
   await writeCheckoutDraft(ctx.storeId, ctx.conversationId, { fulfillment: "pickup", slot: slot.id });
   return recordRead(ctx, "set_fulfillment", parsed, {
@@ -89,7 +89,7 @@ export async function prepareCheckout(ctx: AssistantContext, input: unknown): Pr
     "pickup",
     serviceFee,
   );
-  const slot = draft ? pickupSlotsToday(store, new Date()).find((offered) => offered.id === draft.slot) : undefined;
+  const slot = draft ? pickupSlotsFor(store, new Date(), new Map()).find((offered) => offered.id === draft.slot) : undefined;
   // Contact is entered on the checkout page, so its problem is not the card's.
   const problems = [...new Set(quote.problems.filter((problem) => problem.code !== "invalid-contact").map((problem) => problem.message))];
   for (const line of cartLines) {

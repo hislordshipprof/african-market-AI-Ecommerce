@@ -1,5 +1,6 @@
 import { platform, storeScoped } from "../db";
-import { pickupSlotsToday, type PickupSlot } from "../order/pickup-slots";
+import type { PickupSlot } from "../order/pickup-slots";
+import { pickupSlotsFor } from "../order/slot-schedule";
 
 /**
  * The assistant's checkout draft (#247): the pickup slot chosen in chat. The
@@ -21,14 +22,14 @@ export function parseCheckoutDraft(value: unknown): CheckoutDraft | null {
 export async function readPickupStore(storeId: string) {
   return platform.store.findUnique({
     where: { id: storeId },
-    select: { hours: true, timezone: true, prepTimeMinutes: true, pickupEnabled: true, minimumOrderCents: true },
+    select: { hours: true, timezone: true, prepTimeMinutes: true, pickupEnabled: true, minimumOrderCents: true, pickupSlotSettings: true },
   });
 }
 
-/** Today's slots for the store; empty when the store is missing. */
+/** The store's pickup slots (capacity is checked at checkout); empty when the store is missing. */
 export async function offeredPickupSlots(storeId: string, now: Date): Promise<PickupSlot[]> {
   const store = await readPickupStore(storeId);
-  return store ? pickupSlotsToday(store, now) : [];
+  return store ? pickupSlotsFor(store, now, new Map()) : [];
 }
 
 export async function writeCheckoutDraft(storeId: string, conversationId: string, draft: CheckoutDraft): Promise<void> {
