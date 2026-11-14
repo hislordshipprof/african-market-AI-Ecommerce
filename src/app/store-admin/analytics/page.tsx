@@ -104,27 +104,25 @@ function SplitBar({ label, parts }: { label: string; parts: Array<{ name: string
   );
 }
 
+/** Net to store per day. Net includes tips and store delivery fees, so it is drawn alone, not inside goods. */
 function DayChart({ days }: { days: SalesDay[] }) {
-  const max = Math.max(1, ...days.map((d) => Math.max(d.goodsCents, d.netCents)));
-  const dense = days.length > 31;
+  const max = Math.max(1, ...days.map((d) => d.netCents));
   return (
     <figure>
-      <div className="flex h-40 items-end gap-px sm:gap-0.5" aria-hidden>
+      <div className="flex h-40 items-end gap-px border-b border-border sm:gap-0.5" aria-hidden>
         {days.map((d) => (
-          <div key={d.day} className="relative h-full flex-1" title={`${fmtDay(d.day)}: goods ${money(d.goodsCents)}, net ${money(d.netCents)}, ${d.orders} orders`}>
-            <div className="absolute inset-x-0 bottom-0 rounded-t-sm bg-primary/25" style={{ height: `${(d.goodsCents / max) * 100}%` }} />
-            <div className="absolute inset-x-[22%] bottom-0 rounded-t-sm bg-primary" style={{ height: `${(Math.max(0, d.netCents) / max) * 100}%` }} />
-          </div>
+          <div
+            key={d.day}
+            className="flex-1 rounded-t-sm bg-primary"
+            style={{ height: `${(Math.max(0, d.netCents) / max) * 100}%` }}
+            title={`${fmtDay(d.day)}: net ${money(d.netCents)}, ${d.orders} orders`}
+          />
         ))}
       </div>
-      <div className="mt-1 flex justify-between text-xs tabular-nums text-muted-foreground" aria-hidden>
+      <figcaption className="mt-1 flex justify-between text-xs tabular-nums text-muted-foreground">
         <span>{fmtDay(days[0].day)}</span>
-        {!dense && days.length > 2 && <span>{fmtDay(days[Math.floor(days.length / 2)].day)}</span>}
+        <span>Net to store by day · peak {money(max)}</span>
         <span>{fmtDay(days[days.length - 1].day)}</span>
-      </div>
-      <figcaption className="mt-2 flex flex-wrap gap-x-4 text-sm text-foreground">
-        <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-primary/25" aria-hidden />Goods revenue</span>
-        <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-primary" aria-hidden />Net to store</span>
       </figcaption>
     </figure>
   );
