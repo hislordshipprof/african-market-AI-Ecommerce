@@ -110,6 +110,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     vi.unstubAllEnvs();
     await platform.recipe.deleteMany({ where: { key: { startsWith: "kelewele " } } });
     await platform.recipe.deleteMany({ where: { key: { startsWith: "egusi stew " } } });
+    await platform.recipe.deleteMany({ where: { key: { startsWith: `plantain ${suffix}` } } });
     await platform.recipe.deleteMany({ where: { key: { startsWith: "ዶሮ ወጥ " } } });
     for (const id of [storeA, storeB].filter(Boolean)) {
       await storeScoped(id).cart.deleteMany({});
@@ -151,6 +152,26 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     // Store B sells scotch bonnet; store A does not, so it is not carried here.
     expect(result.notCarried).toContain("scotch bonnet pepper");
     expect(result.notCarried).toContain("onion");
+  });
+
+  it("finds a seeded dish the shopper named with what they want in it, with no lookup", async () => {
+    const fake = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
+    const deps = { lookupModel: createAssistantModel({ fetch: fake.fetch }) };
+    const jollof = await getRecipe(ctxA, { dish: "Jollof with tomato paste, not fresh tomato", servings: 6 }, deps);
+    const breakfast = await getRecipe(ctxA, { dish: "Ethiopian breakfast with teff and berbere", servings: 2 }, deps);
+    expect(fake.requests).toHaveLength(0);
+    expect(jollof).toMatchObject({ ok: true, lookedUp: false, recipe: "Jollof rice" });
+    expect(breakfast).toMatchObject({ ok: true, lookedUp: false, recipe: "Chechebsa (kita firfir)" });
+  });
+
+  it("a dish whose full name the base answers is not cut down to the part before with", async () => {
+    const plain = `plantain ${suffix}`;
+    await saveLookedUpRecipe(plain, { name: plain, ingredients: ["ripe plantain"], sourceUrl: "https://recipes.example/plantain" });
+    await saveLookedUpRecipe(`${plain} with beans`, { name: `${plain} with beans`, ingredients: ["beans"], sourceUrl: "https://recipes.example/beans" });
+    const fake = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
+    const result = await getRecipe(ctxA, { dish: `${plain} with beans`, servings: 2 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
+    expect(fake.requests).toHaveLength(0);
+    expect(result).toMatchObject({ ok: true, source: "https://recipes.example/beans" });
   });
 
   it("asks for servings when they are unclear, without searching or looking up", async () => {

@@ -37,10 +37,18 @@ export interface LookupResult {
   costMicros: bigint;
 }
 
-/** Order when a name matches several rows: exact key, then curated, then the oldest. */
+/**
+ * Order when a name matches several rows: exact key, then curated, then the oldest.
+ * A name no row answers is tried again up to its first " with ": "jollof with tomato paste" is still jollof (#607).
+ */
 export async function findRecipe(dish: string): Promise<RecipeRow | null> {
   const key = dishKey(dish);
   if (!key) return null;
+  const head = key.split(" with ")[0] ?? "";
+  return (await recipeByKey(key)) ?? (head && head !== key ? await recipeByKey(head) : null);
+}
+
+async function recipeByKey(key: string): Promise<RecipeRow | null> {
   const rows = await platform.recipe.findMany({
     where: { OR: [{ key }, { aliases: { has: key } }] },
     include: { ingredients: { orderBy: { position: "asc" } } },
