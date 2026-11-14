@@ -5,6 +5,8 @@ import { ArrowLeft, Check, CircleAlert, Copy, Eye, EyeOff } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { authClient } from "@/lib/auth-client";
 
 export const AUTH_INPUT = "h-12 text-base md:text-base";
 export const AUTH_CODE_INPUT = "h-12 text-center text-lg tracking-[0.3em] md:text-lg";
@@ -27,6 +29,11 @@ export const NETWORK_ERROR = "Couldn't reach the server. Check your connection a
 // The name authenticator apps show for this account: the issuer in src/lib/auth.ts.
 export const AUTHENTICATOR_ENTRY = "African Markets Platform";
 
+export const CREDENTIALS_ERRORS: Record<string, string> = {
+  INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",
+  INVALID_EMAIL: "Enter a valid email address.",
+};
+
 export const TOTP_ERRORS: Record<string, string> = {
   INVALID_CODE: "That code didn't match. Codes change every 30 seconds, so enter the newest one.",
   INVALID_TWO_FACTOR_COOKIE: "This sign-in timed out. Go back and sign in again.",
@@ -42,6 +49,24 @@ const subscribeToNothing = () => () => {};
  */
 export function useHydrated(): boolean {
   return useSyncExternalStore(subscribeToNothing, () => true, () => false);
+}
+
+/** The disabled submit's label until hydration, so an early press has visible feedback. */
+export const NOT_READY_LABEL = "Loading...";
+
+/**
+ * Forms use noValidate so every problem shows as the inline error, not the browser bubble.
+ * Returns the message for the first empty field, after focusing it.
+ */
+export function missingField(fields: [id: string, message: string][]): string | null {
+  for (const [id, message] of fields) {
+    const field = document.getElementById(id);
+    if (field instanceof HTMLInputElement && !field.value.trim()) {
+      field.focus();
+      return message;
+    }
+  }
+  return null;
 }
 
 /** Says what to do next, in place of the server's raw wording. */
@@ -159,5 +184,139 @@ export function CopyRow({
         {state === "failed" && `Couldn't copy the ${label.toLowerCase()}. Select it and copy by hand.`}
       </p>
     </div>
+  );
+}
+
+const BACKUP_ERRORS: Record<string, string> = {
+  ...TOTP_ERRORS,
+  INVALID_BACKUP_CODE: "That backup code didn't match, or it was used before. Each code works once.",
+};
+
+/**
+ * The second sign-in step: the authenticator code, or one of the backup codes saved at setup
+ * for a lost or reset phone. Either one gives a verified session.
+ */
+export function SecondStepForm({
+  idPrefix,
+  describedBy,
+  onVerified,
+}: {
+  idPrefix: string;
+  describedBy: string;
+  onVerified: () => void;
+}) {
+  const [mode, setMode] = useState<"totp" | "backup">("totp");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const fieldId = `${idPrefix}-${mode}`;
+  const errorId = `${idPrefix}-second-step-error`;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (mode === "totp" ? code.length !== 6 : !code.trim()) {
+      setError(mode === "totp" ? `${AUTH_CODE_HINT}.` : "Enter one of your backup codes.");
+      focusField(fieldId);
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      const result =
+        mode === "totp"
+          ? await authClient.twoFactor.verifyTotp({ code })
+          : await authClient.twoFactor.verifyBackupCode({ code: code.trim() });
+      if (result.error) {
+        setError(authErrorMessage(result.error, BACKUP_ERRORS, "Invalid code"));
+        setLoading(false);
+        focusField(fieldId);
+      } else {
+        onVerified();
+      }
+    } catch {
+      setError(NETWORK_ERROR);
+      setLoading(false);
+      focusField(fieldId);
+    }
+  }
+
+  function switchMode() {
+    setMode((current) => (current === "totp" ? "backup" : "totp"));
+    setCode("");
+    setError("");
+  }
+
+  return (
+    <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+      {error && <AuthError id={errorId}>{error}</AuthError>}
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={fieldId}>{mode === "totp" ? "Verification code" : "Backup code"}</Label>
+        {mode === "totp" ? (
+          <Input
+            ref={(input) => input?.focus()}
+            id={fieldId}
+            type="text"
+            required
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            title={AUTH_CODE_HINT}
+            value={code}
+            onChange={(e) => setCode(totpDigits(e.target.value))}
+            className={AUTH_CODE_INPUT}
+            autoComplete="one-time-code"
+            placeholder="000000"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${describedBy} ${errorId}` : describedBy}
+          />
+        ) : (
+          <Input
+            ref={(input) => input?.focus()}
+            id={fieldId}
+            type="text"
+            required
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className={cn(AUTH_INPUT, "font-mono tracking-wider")}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            placeholder="xxxxx-xxxxx"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+          />
+        )}
+      </div>
+      <Button type="submit" disabled={loading} className={AUTH_SUBMIT}>
+        {loading ? "Verifying..." : "Verify"}
+      </Button>
+      <button
+        type="button"
+        onClick={switchMode}
+        className="mx-auto h-11 cursor-pointer rounded-full px-3 text-sm font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      >
+        {mode === "totp" ? "Lost your phone? Use a backup code" : "Use your authenticator app instead"}
+      </button>
+    </form>
+  );
+}
+
+/** Shown once, right after setup: the only time the backup codes can be read. */
+export function BackupCodesNotice({ codes }: { codes: string[] }) {
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="backup-codes-heading">
+      <h2 id="backup-codes-heading" className="text-base font-medium">
+        Save your backup codes
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        If you lose your phone, each code signs you in once in place of the 6-digit code. Store them
+        in your password manager. You won&apos;t see them again.
+      </p>
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg bg-muted p-3 font-mono text-sm">
+        {codes.map((code) => (
+          <li key={code}>{code}</li>
+        ))}
+      </ul>
+      <CopyRow label="Backup codes" display={`${codes.length} codes`} value={codes.join("\n")} />
+    </section>
   );
 }

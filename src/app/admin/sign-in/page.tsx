@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
@@ -11,20 +12,20 @@ import { Label } from "@/components/ui/label";
 import {
   AUTHENTICATOR_ENTRY,
   AUTH_BACK,
-  AUTH_CODE_HINT,
-  AUTH_CODE_INPUT,
   AUTH_INPUT,
   AUTH_SUBMIT,
   AuthError,
   BackArrow,
   NETWORK_ERROR,
   PasswordInput,
-  TOTP_ERRORS,
   authErrorMessage,
   fieldValue,
   focusField,
-  totpDigits,
+  NOT_READY_LABEL,
+  SecondStepForm,
+  missingField,
   useHydrated,
+  CREDENTIALS_ERRORS,
 } from "../auth-form-parts";
 
 type Step = "credentials" | "totp";
@@ -33,11 +34,6 @@ const ERROR_ID = "admin-sign-in-error";
 const DESCRIPTION_ID = "admin-sign-in-description";
 const EMAIL_ID = "admin-email";
 const PASSWORD_ID = "admin-password";
-const TOTP_ID = "admin-totp";
-const CREDENTIALS_ERRORS = {
-  INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",
-};
-
 // Mouse and trackpad only: on a phone this would open the keyboard over the page.
 const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
   if (input && document.activeElement === document.body && window.matchMedia("(pointer: fine)").matches) {
@@ -45,20 +41,21 @@ const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
   }
 };
 
-// The submit button that had focus is gone after the step changes.
-const focusOnMount = (input: HTMLInputElement | null) => input?.focus();
-
 export default function AdminSignIn() {
   const router = useRouter();
   const hydrated = useHydrated();
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
-  const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleCredentials(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const missing = missingField([[EMAIL_ID, "Enter your email."], [PASSWORD_ID, "Enter your password."]]);
+    if (missing) {
+      setError(missing);
+      return;
+    }
     const submittedEmail = fieldValue(e.currentTarget, EMAIL_ID);
     const password = fieldValue(e.currentTarget, PASSWORD_ID);
     setEmail(submittedEmail);
@@ -88,33 +85,8 @@ export default function AdminSignIn() {
     }
   }
 
-  async function handleTotp(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const result = await authClient.twoFactor.verifyTotp({
-        code: totpCode,
-      });
-
-      if (result.error) {
-        setError(authErrorMessage(result.error, TOTP_ERRORS, "Invalid code"));
-        setLoading(false);
-        focusField(TOTP_ID);
-      } else {
-        router.push("/admin/stores");
-      }
-    } catch {
-      setError(NETWORK_ERROR);
-      setLoading(false);
-      focusField(TOTP_ID);
-    }
-  }
-
   function backToCredentials() {
     setStep("credentials");
-    setTotpCode("");
     setError("");
   }
 
@@ -136,13 +108,13 @@ export default function AdminSignIn() {
           <CardDescription id={DESCRIPTION_ID} className="text-base [overflow-wrap:anywhere]">
             {step === "credentials"
               ? "Sign in to manage stores and the catalog."
-              : `Last step: enter the 6-digit code for ${AUTHENTICATOR_ENTRY} from your authenticator app to finish signing in as ${email}.`}
+              : `Last step: enter the 6-digit code for ${AUTHENTICATOR_ENTRY} from your authenticator app, or a backup code, to finish signing in as ${email}.`}
           </CardDescription>
         </CardHeader>
 
         <CardContent className="px-6 sm:px-8">
           {step === "credentials" && (
-            <form onSubmit={handleCredentials} className="flex flex-col gap-4">
+            <form onSubmit={handleCredentials} noValidate className="flex flex-col gap-4">
               {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={EMAIL_ID}>Email</Label>
@@ -159,7 +131,15 @@ export default function AdminSignIn() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label htmlFor={PASSWORD_ID}>Password</Label>
+                <div className="flex items-baseline justify-between gap-3">
+                  <Label htmlFor={PASSWORD_ID}>Password</Label>
+                  <Link
+                    href="/admin/reset-password"
+                    className="text-sm font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <PasswordInput
                   id={PASSWORD_ID}
                   required
@@ -169,38 +149,17 @@ export default function AdminSignIn() {
               </div>
 
               <Button type="submit" disabled={loading || !hydrated} className={AUTH_SUBMIT}>
-                {loading ? "Signing in..." : "Sign in"}
+                {!hydrated ? NOT_READY_LABEL : loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
           )}
 
           {step === "totp" && (
-            <form onSubmit={handleTotp} className="flex flex-col gap-4">
-              {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
-              <div className="flex flex-col gap-2">
-                <Label htmlFor={TOTP_ID}>Verification code</Label>
-                <Input
-                  ref={focusOnMount}
-                  id={TOTP_ID}
-                  type="text"
-                  required
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  title={AUTH_CODE_HINT}
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(totpDigits(e.target.value))}
-                  className={AUTH_CODE_INPUT}
-                  autoComplete="one-time-code"
-                  placeholder="000000"
-                  aria-invalid={error ? true : undefined}
-                  aria-describedby={error ? `${DESCRIPTION_ID} ${ERROR_ID}` : DESCRIPTION_ID}
-                />
-              </div>
-
-              <Button type="submit" disabled={loading} className={AUTH_SUBMIT}>
-                {loading ? "Verifying..." : "Verify"}
-              </Button>
-            </form>
+            <SecondStepForm
+              idPrefix="admin"
+              describedBy={DESCRIPTION_ID}
+              onVerified={() => router.push("/admin/stores")}
+            />
           )}
         </CardContent>
       </StoryCard>
