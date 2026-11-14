@@ -3,9 +3,9 @@
 #   1. the independent review (.builder/review-<n>.md, written by review-ticket.sh) is a clean VERDICT: PASS
 #      and is of that commit (.builder/review-<n>.sha). See scripts/merge-gate.sh.
 #   2. local-ci (or the hosted "ci" check) is green on that commit.
-# Then: squash-merge directly when the PR is up to date with main or behind without overlap; rebase and rerun a
-# scoped local-ci when it rebases cleanly; otherwise scripts/ship-ticket.sh repairs the branch, which then needs
-# a new review before this script will merge it.
+# Then: squash-merge directly when the PR is up to date with main or behind without overlap; merge main in, push
+# normally and rerun a scoped local-ci when that merge is clean; otherwise scripts/ship-ticket.sh repairs the
+# branch, which then needs a new review before this script will merge it. Nothing here force-pushes.
 # Usage: scripts/merge-ticket.sh <issue>
 #   Or scripts/merge-ticket.sh --pr <pr-number>, for a PR whose branch is not named ticket-<n>-. Its review files and
 #   worktree are then keyed by the PR number, as with scripts/review-ticket.sh <pr-number>.
@@ -81,7 +81,8 @@ if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = 
   # DEPLOY=1 ends the subject with "[deploy]", the only thing that builds production (scripts/vercel-ignore.sh).
   SQUASH_SUBJECT="$(gh api "repos/$REPO/pulls/$PR" --jq .title) (#$PR)"
   [ "${DEPLOY:-}" = 1 ] && SQUASH_SUBJECT+=" [deploy]"
-  SQUASH_BODY=$(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[] | "* " + .commit.message + "\n"' \
+  # Merge commits (main merged into the branch) are left out: they describe main, not this PR.
+  SQUASH_BODY=$(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[] | select((.parents | length) < 2) | "* " + .commit.message + "\n"' \
     | bash "$ROOT/scripts/strip-ai-coauthors.sh")
   # Pinned to the commit the checks above read: a later push fails the merge instead of landing untested.
   gh pr merge "$PR" -R "$REPO" --squash --delete-branch --match-head-commit "$HEAD_SHA" \
@@ -94,32 +95,39 @@ if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = 
   echo "Merged PR #$PR (fast path: $([ "$CMP" = "0" ] && echo "up to date with main" || echo "behind main by $CMP commit(s), no overlapping files"), all checks green)."
   start_main_run_if_due
 else
-  # Behind with green CI and no conflict: rebase here and rerun only what the rebase can affect. An agent is
-  # for real repairs: a ship round cost #301 over an hour on 2026-11-05.
+  # Behind with green CI and no conflict: merge main in here and rerun only what the merge can affect. An agent
+  # is for real repairs: a ship round cost #301 over an hour on 2026-11-05. Merge, never rebase: a rebase needs
+  # a force-push (owner decision 2026-11-14-03, #533).
   WT="$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N"
-  if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ] && [ "${MERGE_REBASED:-0}" = 0 ] && [ -d "$WT" ] \
+  if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ] && [ "${MERGED_MAIN:-0}" = 0 ] && [ -d "$WT" ] \
     && [ -z "$(git -C "$WT" status --porcelain --untracked-files=no -- . ':!screenshots')" ] \
     && [ "$(git -C "$WT" rev-parse HEAD)" = "$HEAD_SHA" ]; then
     git -C "$WT" checkout -q -- screenshots 2>/dev/null || true
     git -C "$WT" fetch -q origin main
-    if git -C "$WT" rebase -q origin/main; then
-      # The lease names the commit that passed. A bare lease would accept whatever the fetch above just saw.
-      git -C "$WT" push -q --force-with-lease="refs/heads/$HEAD_REF:$HEAD_SHA" origin "HEAD:refs/heads/$HEAD_REF" \
-        || { echo "PR #$PR moved while rebasing; not overwriting it. Rerun the merge."; exit 1; }
-      # The script made this commit itself: the reviewed commit replayed on main with no conflict. The review
-      # carries over to it, and the file records where it came from. Any other new head needs a new review.
-      printf '%s rebased-from %s\n' "$(git -C "$WT" rev-parse HEAD)" "$HEAD_SHA" > "$REVIEW_SHA_FILE"
-      echo "PR #$PR rebased cleanly onto main; rerunning local-ci for what the rebase can affect."
-      CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
-      if (cd "$WT" && CI_REBASE_OF="$HEAD_SHA" E2E_PORT="${E2E_PORT:-3600}" CI_DB=ci \
-        CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" bash "$ROOT/scripts/ci-local.sh" > "$CI_LOG" 2>&1); then
-        MERGE_REBASED=1 exec bash "$0" $SELF_ARGS
+    MAIN_SHA=$(git -C "$WT" rev-parse origin/main)
+    if git -C "$WT" merge -q --no-edit "$MAIN_SHA" >/dev/null; then
+      NEW_SHA=$(git -C "$WT" rev-parse HEAD)
+      # A plain push: it is refused if the PR moved past the reviewed commit, and nothing is overwritten.
+      git -C "$WT" push -q origin "HEAD:refs/heads/$HEAD_REF" \
+        || { echo "PR #$PR moved while merging main in; not overwriting it. Rerun the merge."; exit 1; }
+      # The review carries over only when the PR's own change is byte-for-byte what was reviewed (merge-gate.sh).
+      if ! (cd "$WT" && merge_carries_review "$HEAD_SHA" "$NEW_SHA" "$MAIN_SHA"); then
+        echo "Merged main into PR #$PR and pushed $NEW_SHA, but its change against main differs from the reviewed $HEAD_SHA (main may already hold part of it). Not merged."
+        echo "Next: scripts/review-ticket.sh $N, then $([ "${DEPLOY:-}" = 1 ] && echo "DEPLOY=1 ")scripts/merge-ticket.sh $SELF_ARGS."
+        exit 5
       fi
-      echo "local-ci failed after the rebase. Log: $CI_LOG"
+      printf '%s merged-from %s\n' "$NEW_SHA" "$HEAD_SHA" > "$REVIEW_SHA_FILE"
+      echo "Merged main into PR #$PR cleanly; rerunning local-ci for what the merge can affect."
+      CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
+      if (cd "$WT" && CI_MERGED_FROM="$HEAD_SHA" E2E_PORT="${E2E_PORT:-3600}" CI_DB=ci \
+        CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" bash "$ROOT/scripts/ci-local.sh" > "$CI_LOG" 2>&1); then
+        MERGED_MAIN=1 exec bash "$0" $SELF_ARGS
+      fi
+      echo "local-ci failed after merging main in. Log: $CI_LOG"
       exit 1
     fi
-    git -C "$WT" rebase --abort 2>/dev/null || true
-    echo "The rebase has conflicts."
+    git -C "$WT" merge --abort 2>/dev/null || true
+    echo "Merging main in has conflicts."
   fi
   echo "PR #$PR is $CMP commit(s) behind main or has $PENDING_OR_FAILED non-green check(s); using ship-ticket.sh to repair the branch."
   SHIP_PR="$PR" bash "$(dirname "$0")/ship-ticket.sh" "$N" || true
