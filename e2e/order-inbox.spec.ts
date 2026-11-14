@@ -151,6 +151,7 @@ test.describe("Order inbox", () => {
       await page.goto(ORDERS_URL);
       await page.locator("button", { hasText: `#${number}` }).click();
       await expect(page.getByTestId("order-discount")).toHaveText("−$2.00");
+      await expect(page.getByText("Promo discount E2ESAVE (your store funds it)")).toBeVisible();
     } finally {
       await deleteInboxOrder(number);
     }

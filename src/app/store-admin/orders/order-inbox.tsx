@@ -722,7 +722,7 @@ export function OrderInbox({
                   </div>
                   {selectedOrder.discountCents > 0 && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Promo discount (your store funds it)</span>
+                      <span className="text-muted-foreground">Promo discount{selectedOrder.coupon ? ` ${selectedOrder.coupon.code}` : ""} (your store funds it)</span>
                       <span className="tabular-nums" data-testid="order-discount">−{money(selectedOrder.discountCents)}</span>
                     </div>
                   )}

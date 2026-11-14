@@ -301,6 +301,7 @@ const NAMED_VARIANT = {
 
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  coupon: { select: { code: true } },
   // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
   deliveries: {
     where: { status: { not: "cancelled" } },
