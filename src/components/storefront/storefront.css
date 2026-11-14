@@ -1002,6 +1002,17 @@
   color: var(--muted-foreground);
   padding-block: 24px;
 }
+/* Crumbs stay on one line; a long current page name truncates (it is the heading below). */
+.sf-breadcrumb > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.sf-breadcrumb > :last-child {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sf-page-title {
   font-family: var(--font-display);
   font-size: clamp(30px, 4vw, 44px);
@@ -1693,9 +1704,10 @@
   .sf-stats dd {
     font-size: 13px;
   }
+  /* Bottom nav: 12px offset + 73px bar. The add bar sits 11px above it. */
   .sf-add-bar {
     position: fixed;
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    bottom: calc(96px + env(safe-area-inset-bottom));
     left: 12px;
     right: 12px;
     z-index: 30;
@@ -1711,6 +1723,10 @@
   }
   .sf-detail-page {
     padding-bottom: 80px;
+  }
+  /* The footer scrolls clear of the nav and the 74px add bar. */
+  .sf-storefront:has(.sf-add-bar) {
+    padding-bottom: calc(180px + env(safe-area-inset-bottom));
   }
   .sf-collection-hero {
     height: 260px;
