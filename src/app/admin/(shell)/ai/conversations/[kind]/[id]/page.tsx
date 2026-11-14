@@ -52,7 +52,8 @@ export default async function AiConversationPage({ params }: { params: Promise<{
         <Meta term="Cost" value={dollars(transcript.costMicros)} />
       </dl>
       <p className="mt-3 text-sm text-muted-foreground">
-        Your view of this chat is recorded in the audit log. Files people sent are not stored; only their name, type and size are.
+        Your view of this chat is recorded in the audit log.
+        {kind === "shopper" && " Files shoppers sent are not stored; only their name, type and size are."}
       </p>
 
       <section aria-labelledby="labels-title" className="mt-8 rounded-xl border border-border bg-card p-4 sm:p-5">
@@ -105,7 +106,7 @@ function Meta({ term, value }: { term: string; value: string }) {
   return (
     <div className="min-w-0">
       <dt className="text-muted-foreground">{term}</dt>
-      <dd className="truncate font-medium text-foreground" title={value}>{value}</dd>
+      <dd className="break-words font-medium text-foreground">{value}</dd>
     </div>
   );
 }

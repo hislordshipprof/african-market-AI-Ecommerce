@@ -68,7 +68,9 @@ export function LabelForm({ kind, conversationId }: { kind: "shopper" | "copilot
         </div>
       </fieldset>
       <label className="grid gap-1 text-sm font-medium text-foreground">
-        Note <span className="font-normal text-muted-foreground">(optional, up to 1000 characters)</span>
+        <span>
+          Note <span className="font-normal text-muted-foreground">(optional, up to 1000 characters)</span>
+        </span>
         <textarea
           name="note"
           value={note}

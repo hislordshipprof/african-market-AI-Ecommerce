@@ -35,7 +35,7 @@ export default async function AiConversationsPage({ searchParams }: { searchPara
         Up to 5 random shopper chats and 5 random copilot chats per store for each UTC day, plus every chat that was flagged.
       </p>
 
-      <form method="get" className="mt-6 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+      <form method="get" className="mt-6 grid gap-3 rounded-xl border border-border bg-card p-4 sm:flex sm:flex-wrap sm:items-end">
         <label className="grid gap-1 text-sm font-medium text-foreground">
           Day (UTC)
           <input
@@ -45,7 +45,7 @@ export default async function AiConversationsPage({ searchParams }: { searchPara
             className={`min-h-11 rounded-md border border-input bg-background px-3 text-base text-foreground ${FOCUS}`}
           />
         </label>
-        <label className="grid min-w-0 flex-1 gap-1 text-sm font-medium text-foreground sm:max-w-xs">
+        <label className="grid min-w-0 gap-1 text-sm font-medium text-foreground sm:w-72">
           Store
           <select
             name="store"
@@ -58,7 +58,7 @@ export default async function AiConversationsPage({ searchParams }: { searchPara
             ))}
           </select>
         </label>
-        <button type="submit" className={`min-h-11 rounded-full border border-input px-5 text-sm font-medium text-foreground hover:bg-muted ${FOCUS}`}>
+        <button type="submit" className={`min-h-11 w-fit rounded-full border border-input px-5 text-sm font-medium text-foreground hover:bg-muted ${FOCUS}`}>
           Show
         </button>
       </form>
