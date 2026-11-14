@@ -8,3 +8,9 @@ export function storefrontUrl(slug: string, rootDomain: string, requestHost: str
   const local = root === "localhost";
   return `${local ? "http" : "https"}://${slug}.${root}${local && port ? `:${port}` : ""}/`;
 }
+
+/** The directory's own origin, for sitemap and canonical URLs. Pages cached for every request cannot read the host. */
+export function directoryOrigin(env: Record<string, string | undefined> = process.env): string {
+  const root = (env.PLATFORM_ROOT_DOMAIN ?? "").toLowerCase();
+  return root === "localhost" ? `http://localhost${env.PORT ? `:${env.PORT}` : ""}` : `https://${root}`;
+}
