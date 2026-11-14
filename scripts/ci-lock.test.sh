@@ -93,4 +93,35 @@ o=$(ci_slot_try "$S" 1 "$$" one) && [ "$o" = 1 ] && [ -d "$S" ] && ! ci_slot_try
   && ok "one slot is today's single lock" || bad "one slot is not today's single lock"
 ci_lock_release "$S" one
 
+# How many slots a run may use. A bad CI_SLOTS fails at once instead of queueing forever, and a hand run without
+# its own checkout and database (CI_RUNNER, CI_DB) uses only slot 1, so two hand runs never share them.
+[ "$(ci_slot_count 2 /x/r ci)" = 2 ] && ok "a pipeline run may use every slot" || bad "a pipeline run lost its slots"
+for v in 0 abc -1 ""; do
+  ci_slot_count "$v" /x/r ci >/dev/null 2>&1 && bad "CI_SLOTS='$v' was accepted" || ok "CI_SLOTS='$v' is refused"
+done
+[ "$(ci_slot_count 2 "" ci)" = 1 ] && [ "$(ci_slot_count 2 /x/r "")" = 1 ] \
+  && ok "a hand run without its own checkout or database uses only slot 1" || bad "a hand run could take slot 2"
+
+# Slot k's checkout, database and e2e port.
+[ "$(CI_RUNNER=/x/r CI_DB=ci E2E_PORT=3150; ci_slot_env 1; echo "$CI_RUNNER $CI_DB $E2E_PORT")" = "/x/r ci 3150" ] \
+  && ok "slot 1 keeps the caller's checkout, database and port" || bad "slot 1 changed the caller's settings"
+[ "$(CI_RUNNER=/x/r CI_DB=ci E2E_PORT=3150; ci_slot_env 2; echo "$CI_RUNNER $CI_DB $E2E_PORT")" = "/x/r-2 ci_2 4150" ] \
+  && ok "slot 2 gets its own checkout, database and port" || bad "slot 2 shares the caller's settings"
+
+# Every e2e server's extra smoke servers prefer base+299..base+302 (e2e/spawned-server.ts, 4 workers). No slot-2
+# port may land in another server's range, nor its own range on another server. Bases: lane servers, then the
+# local-ci callers' defaults (build-ticket.sh lane+50, ci-main.sh, merge-ticket.sh).
+lanes="3000 3100 3200"; callers="3050 3150 3250 3400 3600"
+slot2=$(for p in $callers; do (E2E_PORT=$p; ci_slot_env 2; echo "$E2E_PORT"); done)
+clash=""
+for p in $slot2; do
+  for b in $lanes $callers $slot2; do
+    [ "$b" != "$p" ] || continue
+    if { [ "$p" -ge $((b + 299)) ] && [ "$p" -le $((b + 302)) ]; } || { [ "$b" -ge $((p + 299)) ] && [ "$b" -le $((p + 302)) ]; }; then
+      clash="$clash $p~$b"
+    fi
+  done
+done
+[ -z "$clash" ] && ok "no slot-2 port meets another server's smoke ports" || bad "slot-2 port clashes:$clash"
+
 exit "$fail"

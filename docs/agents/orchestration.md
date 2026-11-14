@@ -127,4 +127,4 @@ A ticket also has a builder budget: 300 minutes across all of its build, fix and
 
 ## The local-ci queue
 
-One suite runs at a time (`scripts/ci-lock.sh`, tests in `scripts/ci-lock.test.sh`). A waiting run takes the lock over only when its owner has exited. A run still alive after 6 hours is stopped first. A full run on main that reaches the front of the queue after a newer one was queued skips itself.
+Up to `CI_SLOTS` suites (default 2) run at once, each holding its own slot's lock (`scripts/ci-lock.sh`, tests in `scripts/ci-lock.test.sh`). Slot 1 keeps the caller's checkout, database and port; slot k runs in `ci-runner-k` on `<CI_DB>_k` at port + (k-1)*1000. A hand run without `CI_RUNNER` and `CI_DB` uses only slot 1. With every slot held, a run waits. A waiting run takes over a slot's lock only when that slot's owner has exited. A run still alive after 6 hours is stopped first. A full run on main that reaches the front of the queue after a newer one was queued skips itself.

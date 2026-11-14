@@ -10,6 +10,7 @@
 # scripts/build-ticket.sh runs this itself after each builder push, in parallel with the independent review;
 # builders do not run it. CI_DB=<name> runs on a fresh private database, and CI_RUNNER=<dir> runs in a separate
 # checkout of HEAD, so the reviewer working in the ticket worktree at the same time is never disturbed.
+# A run without both of them (a hand run) uses only local-ci slot 1, so it never runs beside another hand run.
 set -euo pipefail
 # The whole script sits in one { } block, so bash parses all of it before running any of it. A run then cannot
 # break when this file changes underneath it (a git pull on main, or an edit) while a lane's suite is running.
@@ -75,7 +76,7 @@ STEP_TIMEOUT="${CI_STEP_TIMEOUT:-40m}"
 . "$SCRIPTS/ci-lock.sh"
 LOCK="$(cd "$(git rev-parse --git-common-dir)" && pwd)/ci-local.lock"
 LOCK_TOKEN="$$-$RANDOM-$(date +%s)"
-CI_SLOTS="${CI_SLOTS:-2}"
+CI_SLOTS=$(ci_slot_count "${CI_SLOTS:-2}" "${CI_RUNNER:-}" "${CI_DB:-}") || exit 1
 status pending "queued for a local-ci slot"
 waited=0
 while ! SLOT=$(ci_slot_try "$LOCK" "$CI_SLOTS" "$$" "$LOCK_TOKEN"); do
@@ -87,15 +88,10 @@ while ! SLOT=$(ci_slot_try "$LOCK" "$CI_SLOTS" "$$" "$LOCK_TOKEN"); do
   ci_slot_takeover "$LOCK" "$CI_SLOTS"
   sleep "${CI_LOCK_POLL_SEC:-10}"
 done
-LOCK=$(_ci_slot_lock "$LOCK" "$SLOT")
+LOCK=$(ci_slot_lock "$LOCK" "$SLOT")
 # build-ticket.sh greps for "lock acquired": a run that has not printed it is still queued and is safe to cancel.
 echo "== local-ci: lock acquired (slot $SLOT)"
-# Slot 1 keeps the caller's checkout, database and port; slot k gets its own, so two runs never share one.
-if [ "$SLOT" != 1 ]; then
-  [ -z "${CI_RUNNER:-}" ] || CI_RUNNER="$CI_RUNNER-$SLOT"
-  [ -z "${CI_DB:-}" ] || CI_DB="${CI_DB}_$SLOT"
-  export E2E_PORT=$(( ${E2E_PORT:-3000} + (SLOT - 1) * 1000 ))
-fi
+ci_slot_env "$SLOT"
 FAILED_AT=""
 TEST_OUT=""
 cleanup() {

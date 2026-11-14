@@ -66,14 +66,30 @@ ci_lock_takeover() {
   return 0
 }
 
-# _ci_slot_lock <lock> <k>: slot k's lock path.
-_ci_slot_lock() { if [ "$2" = 1 ]; then echo "$1"; else echo "$1-$2"; fi; }
+# ci_slot_lock <lock> <k>: slot k's lock path.
+ci_slot_lock() { if [ "$2" = 1 ]; then echo "$1"; else echo "$1-$2"; fi; }
+
+# ci_slot_count <CI_SLOTS> <CI_RUNNER> <CI_DB>: how many slots this run may use. A run without its own checkout
+# and database (a hand run) gets only slot 1, so two hand runs still wait for each other.
+ci_slot_count() {
+  [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "local-ci SETUP: CI_SLOTS must be a whole number from 1, got '$1'" >&2; return 1; }
+  if [ -n "$2" ] && [ -n "$3" ]; then echo "$1"; else echo 1; fi
+}
+
+# ci_slot_env <k>: slot 1 keeps the caller's CI_RUNNER, CI_DB and E2E_PORT; slot k gets <CI_RUNNER>-k, <CI_DB>_k
+# and E2E_PORT + (k-1)*1000, so two runs never share a checkout, a database or a port.
+ci_slot_env() {
+  [ "$1" != 1 ] || return 0
+  [ -z "${CI_RUNNER:-}" ] || CI_RUNNER="$CI_RUNNER-$1"
+  [ -z "${CI_DB:-}" ] || CI_DB="${CI_DB}_$1"
+  export E2E_PORT=$(( ${E2E_PORT:-3000} + ($1 - 1) * 1000 ))
+}
 
 # ci_slot_try <lock> <slots> <pid> <token>: take the first free slot and print its number.
 ci_slot_try() {
   local k
   for ((k = 1; k <= $2; k++)); do
-    if ci_lock_try "$(_ci_slot_lock "$1" "$k")" "$3" "$4"; then echo "$k"; return 0; fi
+    if ci_lock_try "$(ci_slot_lock "$1" "$k")" "$3" "$4"; then echo "$k"; return 0; fi
   done
   return 1
 }
@@ -81,5 +97,5 @@ ci_slot_try() {
 # ci_slot_takeover <lock> <slots>: free every stale slot; each slot is looked at on its own.
 ci_slot_takeover() {
   local k
-  for ((k = 1; k <= $2; k++)); do ci_lock_takeover "$(_ci_slot_lock "$1" "$k")" || true; done
+  for ((k = 1; k <= $2; k++)); do ci_lock_takeover "$(ci_slot_lock "$1" "$k")" || true; done
 }
