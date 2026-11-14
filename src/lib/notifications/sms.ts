@@ -1,3 +1,4 @@
+import { providerSinkMode } from "../email/send";
 import { ProviderSendError } from "./provider-error";
 
 export interface SmsMessage {
@@ -18,7 +19,6 @@ const E164 = /^\+[1-9]\d{1,14}$/;
 const KEY = /^[A-Za-z0-9_-]{1,255}$/;
 const sent: SmsMessage[] = [];
 const smsKeys = new Map<string, { id: string; body: string }>();
-const optedOut = new Set<string>();
 
 export function getTestSentSms(): readonly SmsMessage[] {
   return sent;
@@ -27,11 +27,6 @@ export function getTestSentSms(): readonly SmsMessage[] {
 export function clearTestSentSms(): void {
   sent.length = 0;
   smsKeys.clear();
-}
-
-/** Test double only. Telnyx 40300 is a profile-wide STOP. */
-export function markSmsOptedOutForTests(e164: string): void {
-  optedOut.add(e164);
 }
 
 function smsBody(message: SmsMessage): string {
@@ -44,7 +39,6 @@ export class SmsTestSender implements SmsSender {
     if (!message.text.trim()) throw new ProviderSendError(400, "empty_text");
     if (!message.from.trim()) throw new ProviderSendError(400, "missing_from");
     if (!KEY.test(options.idempotencyKey)) throw new ProviderSendError(400, "10015");
-    if (optedOut.has(message.to)) throw new ProviderSendError(403, "40300");
     const body = smsBody(message);
     const prior = smsKeys.get(options.idempotencyKey);
     if (prior) {
@@ -107,9 +101,7 @@ export class TelnyxSender implements SmsSender {
 export function createSmsSender(
   env: Record<string, string | undefined> = process.env,
 ): SmsSender | null {
-  if (env.NEXT_PHASE === "phase-production-build" || env.NODE_ENV === "test" || env.CI === "true") {
-    return new SmsTestSender();
-  }
+  if (providerSinkMode(env)) return new SmsTestSender();
   if (!env.TELNYX_API_KEY || !env.TELNYX_FROM_NUMBER) return null;
   return new TelnyxSender(env.TELNYX_API_KEY, env.TELNYX_FROM_NUMBER);
 }

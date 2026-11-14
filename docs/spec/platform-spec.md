@@ -395,11 +395,13 @@ Built in #134: staff in the order inbox mark a store-delivery order Out for deli
 | Delivered (store delivery) | Email + SMS | — |
 | Completed | Email + SMS | Push |
 | Cancelled | Email + SMS | — |
-| Item short | — | Live update on pick screen |
-| Issue reported (in review only, #431) | — | Push "Problem to review" + Problems to review on the orders page |
+| Item short | Email + SMS with a link to choose a swap or refund (#13) | Live update on pick screen |
+| Issue reported (in review only, #431) | Email (later ticket) | Push "Problem to review" + Problems to review on the orders page |
 | Daily summary | — | AI copilot digest |
 
-Customer email and SMS go out for placed, accepted, ready, out for delivery, delivered, completed, cancelled and refund issued (once per order, when it first becomes Partly refunded or Refunded, including from a Stripe-dashboard refund, #428). Delivered and completed are the same final step (a store-delivery order ends at delivered, a pickup order at completed), so neither supersedes the other. Each message carries the store's name and an unguessable tracking link. Item short and channel preferences are separate tickets; the owner's daily digest email is #433 (§8.2).
+Customer email and SMS go out for placed, accepted, ready, out for delivery, delivered, completed, cancelled and refund issued (once per order, when it first becomes Partly refunded or Refunded, including from a Stripe-dashboard refund, #428). Delivered and completed are the same final step (a store-delivery order ends at delivered, a pickup order at completed), so neither supersedes the other. Each message carries the store's name and an unguessable tracking link. Item short sends the `substitution` prompt (§5.3, #13). The owner's daily digest email is #433 (§8.2). A notification not yet handed to the provider expires after 2 hours; one already `sending` replays its idempotency key for up to 24 hours, so a lost result is recorded as sent, not expired (#403). The 15-minute sweep re-sends open notifications in one batch, with a new event id each round.
+
+Later tickets: customers choose a preferred channel; the customer email when an issue report is reviewed.
 
 Channels: Resend (email), Telnyx (SMS), Web Push (ADR-0017).
 

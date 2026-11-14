@@ -830,7 +830,10 @@ export async function markOrphanHoldChecked(storeId: string, cartId: string, pay
 }
 
 const NOTIFICATION_RESEND_MS = 5 * 60_000;
-const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
+/** A notification not yet sent to the provider is stale after 2 hours. */
+export const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
+/** A `sending` row replays its key until the providers' 24-hour idempotency window closes. */
+export const NOTIFICATION_REPLAY_MS = 24 * 60 * 60_000;
 
 /** Substitution prompts past their 10 minutes whose order still waits: the timer's backstop (#13). */
 export async function findExpiredSubstitutionRequests(limit: number): Promise<Array<{ id: string; storeId: string }>> {
@@ -876,13 +879,14 @@ export async function expireStaleOrderNotifications(opts?: {
 }): Promise<number> {
   if (opts?.storeIds && opts.storeIds.length === 0) return 0;
   const cutoff = new Date(Date.now() - NOTIFICATION_EXPIRE_MS);
+  const replayCutoff = new Date(Date.now() - NOTIFICATION_REPLAY_MS);
   const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
     const count = await tx.$executeRaw`
       UPDATE notification_logs
       SET status = 'failed', reason = 'expired', updated_at = CURRENT_TIMESTAMP
-      WHERE status IN ('pending', 'sending')
-        AND created_at <= ${cutoff}
+      WHERE ((status = 'pending' AND created_at <= ${cutoff})
+          OR (status = 'sending' AND created_at <= ${replayCutoff}))
         ${inStores}
     `;
     return typeof count === "number" ? count : 0;
