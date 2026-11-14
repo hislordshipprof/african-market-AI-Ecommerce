@@ -79,6 +79,27 @@ describe.skipIf(!hasDb)("near me", () => {
     }
   });
 
+  it("says the store delivers to you only within its own delivery radius, the boundary included", async () => {
+    // Northern Nevada, over 100 miles from ORIGIN's stores. The store's radius is 8 miles.
+    const home = { lat: 41.0, lng: -117.5 };
+    const from = (miles: number) => ({ lat: home.lat + miles / MI_PER_DEG_LAT, lng: home.lng });
+    const delivering = { listed: true, storeDeliveryEnabled: true, deliveryRadiusMi: 8 };
+    await raw.store.createMany({
+      data: [
+        { slug: slug("r-in"), name: "Radius In", ...from(7.99), ...delivering },
+        { slug: slug("r-out"), name: "Radius Out", ...from(8.01), ...delivering },
+        { slug: slug("r-off"), name: "Own Delivery Off", ...from(1), listed: true, deliveryRadiusMi: 8 },
+      ],
+    });
+    const mine = new Map((await nearestStores(home)).stores.map((s) => [s.slug, s]));
+    expect(mine.get(slug("r-in"))?.deliversToYou).toBe(true);
+    expect(mine.get(slug("r-out"))?.deliversToYou).toBe(false);
+    expect(mine.get(slug("r-off"))?.deliversToYou).toBe(false);
+    // The answer carries the verdict, never the radius or the store's point.
+    expect(mine.get(slug("r-in"))).not.toHaveProperty("deliveryRadiusMi");
+    expect(mine.get(slug("r-in"))).not.toHaveProperty("lat");
+  });
+
   it("tells a US point from one abroad", async () => {
     expect(await isUsPoint({ lat: 29.76, lng: -95.37 })).toBe(true);
     expect(await isUsPoint({ lat: 61.2, lng: -149.9 })).toBe(true);
