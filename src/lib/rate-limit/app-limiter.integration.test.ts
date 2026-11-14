@@ -77,21 +77,26 @@ describe.skipIf(!hasDb || process.env.TZ_CHILD === "1")("app rate limit cleanup 
   it("a window refreshed while cleanup waits is kept", async () => {
     const key = `fresh-${Date.now()}-${Math.random()}`;
     const now = BigInt(Date.now());
-    // Another process's takeRateLimit runs cleanup with cutoff now-24h and would delete a row
-    // parked at window_start 1 before this test locks it. Park the row just inside that cutoff
-    // (so only this test's explicit cutoff reaches it) and use a cutoff one ms above it, so the
-    // only row cleanup can match is this one and an unordered LIMIT 100 cannot skip it.
+    // Park the row just inside the 24h cutoff that ordinary takeRateLimit cleanups use, so only this
+    // test's explicit cutoff reaches it. Other rows (here 101 slightly older windows, like the ones
+    // other test files leave behind) must not push it out of the bounded cleanup, so the call below
+    // is given a limit above every row that can match.
     const windowStart = now - BigInt(24 * 60 * 60 * 1000) + BigInt(5 * 60 * 1000);
     const cutoff = windowStart + BigInt(1);
+    const crowdPrefix = `crowd-${key}-`;
+    const crowdWindow = now - BigInt(24 * 60 * 60 * 1000) + BigInt(2 * 60 * 1000);
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
     try {
+      await authPrisma.appRateLimit.createMany({
+        data: Array.from({ length: 101 }, (_, i) => ({ key: `${crowdPrefix}${i}`, windowStart: crowdWindow, count: 1 })),
+      });
       await authPrisma.appRateLimit.create({ data: { key, windowStart, count: 4 } });
       await client.query("BEGIN");
       await client.query("SELECT key FROM app_rate_limits WHERE key = $1 FOR UPDATE", [key]);
       await client.query("UPDATE app_rate_limits SET window_start = $2, count = 1 WHERE key = $1", [key, now.toString()]);
       const pid = Number((await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid);
-      const cleanup = appRateLimitCleanup(cutoff, 100);
+      const cleanup = appRateLimitCleanup(cutoff, 2_000_000_000);
       await waitForLockWaiters(pid, 1, { label: "cleanup waits on the refreshed window", timeoutMs: 10_000 });
       await client.query("COMMIT");
       await cleanup;
@@ -103,6 +108,7 @@ describe.skipIf(!hasDb || process.env.TZ_CHILD === "1")("app rate limit cleanup 
       await client.query("ROLLBACK").catch(() => undefined);
       await client.end().catch(() => undefined);
       await authPrisma.appRateLimit.delete({ where: { key } }).catch(() => undefined);
+      await authPrisma.appRateLimit.deleteMany({ where: { key: { startsWith: crowdPrefix } } }).catch(() => undefined);
     }
   }, 30_000);
 });
