@@ -78,7 +78,7 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }
     dark: {
       bg: "#131211",
       surface: "#22201E",
-      raised: "#312E2B",
+      raised: "#33302D",
       ink: "#F1ECE5",
       muted: "#B3A69A",
       line: "#3D3A36",
