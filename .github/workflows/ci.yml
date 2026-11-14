@@ -51,9 +51,6 @@ jobs:
       E2E_FAKE_ADDRESS: "1"
       ASSISTANT_CHAT_ENABLED: "1"
       E2E_FAKE_ASSISTANT: "1"
-      E2E_FAKE_WHATSAPP: "1"
-      WHATSAPP_TOKEN_KEY: UUrElRC1IEZJcNaLP3KA6sfvvCCJe1DYUhZpyHe1I3M=
-      WHATSAPP_APP_SECRET: e2e-whatsapp-app-secret
       ANTHROPIC_API_KEY: e2e-fake-anthropic-key
       NEXT_PUBLIC_DEMO_FLOWS: "1"
       STOREFRONT_REVALIDATION_SECRET: e2e-storefront-revalidate
