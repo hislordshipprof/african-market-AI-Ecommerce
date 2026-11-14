@@ -48,6 +48,7 @@ import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } 
 import { setStripeProvider } from "../stripe";
 import { cancelledPayments, fakeStripeProvider, refundRequests, setAuthorizedAmount } from "../stripe/fake";
 import { issuePhotoKey } from "../r2";
+import { systemAuditData } from "../system-actor";
 import { GET as getIssuePhoto } from "../../app/api/issue-photo/[issueId]/route";
 import {
   approveIssueAction,
@@ -198,6 +199,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   afterAll(async () => {
@@ -456,6 +458,35 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     vi.unstubAllEnvs();
     expect(own.status).toBe(200);
     expect(own.headers.get("Cache-Control")).toBe("private, no-store");
+  }, 30_000);
+
+  it("an approval Stripe refuses tells staff it failed and marks the issue refund_failed, not Refund sent", async () => {
+    const { orderId, issueId } = await issueToReview(608, 8000, 6000);
+    vi.spyOn(fakeStripeProvider, "refundPayment").mockRejectedValue(
+      Object.assign(new Error("charge is disputed"), { type: "StripeInvalidRequestError", statusCode: 400, code: "charge_disputed" }),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId)).toEqual({
+      ok: false,
+      error: "The refund did not go through. The platform has been alerted; do not refund the customer yourself.",
+    });
+    const after = await reviewed(orderId);
+    expect(after.issue.state).toBe("refund_failed");
+    expect(after.order.status).toBe("COMPLETED");
+    expect(after.audits.map((row) => row.action).sort()).toEqual(["issue_approved", "issue_refund_failed"]);
+  }, 30_000);
+
+  it("an approval whose refund cannot start puts the issue back in review with the attempt on record", async () => {
+    const { orderId, issueId, pi } = await issueToReview(609, 8000, 6000);
+    await storeScoped(storeAId).auditLog.create({ data: systemAuditData(storeAId, orderId, "refund_resolved_manually") });
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId)).toEqual({ ok: false, error: "The refund could not be started. Try again." });
+    const after = await reviewed(orderId);
+    expect(after.issue).toMatchObject({ state: "in_review", amountCents: 6000, refundRequestId: null });
+    expect(after.requests).toHaveLength(0);
+    expect(refundRequests.some((call) => call.paymentIntentId === pi)).toBe(false);
+    expect(after.audits.map((row) => row.action).sort()).toEqual(["issue_approval_not_started", "issue_approved"]);
   }, 30_000);
 
   it("an issue stranded approved or auto-refunded with no refund request returns to review and can be approved", async () => {
