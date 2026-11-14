@@ -39,6 +39,10 @@
   padding: 24px;
   min-width: 0;
 }
+/* Inside a card a rail stops at the card edge instead of bleeding to the viewport. */
+.flow-card .sf-rail-scroll {
+  width: 100%;
+}
 .flow-card > h2 {
   font: 700 22px/1.2 var(--font-display);
   letter-spacing: -0.35px;

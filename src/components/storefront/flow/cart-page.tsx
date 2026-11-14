@@ -371,10 +371,11 @@ export function CartPage({
         </div>
       )}
       {!!lines.length && (
-        <div className={styles.mobileAction}>
+        <div className={styles.mobileAction} data-blocked={minimum.message ? "" : undefined}>
           <div>
             <small>Subtotal</small>
             <strong>{money(subtotal)}</strong>
+            {minimum.message && <small>{minimum.message}</small>}
           </div>
           {!minimum.met || invalid || !settings.takingOrders ? (
             <Button disabled>Checkout</Button>

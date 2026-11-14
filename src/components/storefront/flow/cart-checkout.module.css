@@ -143,9 +143,24 @@
 }
 .progress {
   width: 100%;
-  height: 7px;
-  accent-color: var(--color-primary);
-  margin-top: 18px;
+  height: 8px;
+  margin-top: 16px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-raised);
+}
+.progress::-webkit-progress-bar {
+  background: var(--color-raised);
+}
+.progress::-webkit-progress-value {
+  background: var(--color-primary);
+  border-radius: 999px;
+}
+.progress::-moz-progress-bar {
+  background: var(--color-primary);
+  border-radius: 999px;
 }
 .related {
   display: grid;
@@ -423,6 +438,10 @@
     --cart-bar-bottom: calc(96px + env(safe-area-inset-bottom));
     --cart-bar-height: 74px;
     padding-bottom: calc(var(--cart-bar-bottom) + var(--cart-bar-height) + 12px);
+  }
+  /* The bar names why Checkout is off, on up to two more lines. */
+  .page:has(.mobileAction[data-blocked]) {
+    --cart-bar-height: 112px;
   }
   .mobileAction {
     position: fixed;
