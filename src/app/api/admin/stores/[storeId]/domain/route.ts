@@ -1,78 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { z } from "zod";
+import { platformAdminApiDenial } from "@/lib/admin/session";
 import {
   addDomainToStore,
   getDomainStatus,
   removeDomainFromStore,
+  type DomainResult,
 } from "@/lib/domain-service";
+import { parseInput } from "@/lib/security/parse-input";
+import { requireSameOrigin } from "@/lib/security/same-origin";
 
 export const dynamic = "force-dynamic";
 
-const MAX_DOMAIN_LENGTH = 253;
+type Ctx = { params: Promise<{ storeId: string }> };
 
-async function requireAdmin(): Promise<NextResponse | null> {
-  try {
-    const reqHeaders = await headers();
-    const session = await auth.api.getSession({
-      headers: reqHeaders,
-      query: { disableCookieCache: true },
-    });
-    if (!session || session.user.role !== "platform_admin") {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-    if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
-      return NextResponse.json(
-        { error: "Two-factor authentication required" },
-        { status: 403 },
-      );
-    }
-    return null;
-  } catch {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
+const storeIdSchema = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+
+const bodySchema = z.strictObject({
+  domain: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(253)
+    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/),
+});
+
+function badRequest(error: string) {
+  return NextResponse.json({ error }, { status: 400 });
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ storeId: string }> },
-) {
-  const denied = await requireAdmin();
-  if (denied) return denied;
+async function storeIdFrom(ctx: Ctx): Promise<string | null> {
+  const parsed = parseInput(storeIdSchema, (await ctx.params).storeId);
+  return parsed.ok ? parsed.data : null;
+}
 
-  const { storeId } = await params;
-
-  let body: { domain?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const { domain } = body;
-  if (!domain || typeof domain !== "string") {
-    return NextResponse.json(
-      { error: "Missing or invalid domain" },
-      { status: 400 },
-    );
-  }
-
-  const domainLower = domain.toLowerCase().trim();
-  if (
-    domainLower.length > MAX_DOMAIN_LENGTH ||
-    !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domainLower)
-  ) {
-    return NextResponse.json(
-      { error: "Invalid domain format" },
-      { status: 400 },
-    );
-  }
-
-  const result = await addDomainToStore(storeId, domainLower);
+function toResponse(result: DomainResult) {
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
-
   return NextResponse.json({
     domain: result.domain,
     verified: result.verified,
@@ -80,40 +45,51 @@ export async function POST(
   });
 }
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ storeId: string }> },
-) {
-  const denied = await requireAdmin();
+export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = await platformAdminApiDenial();
   if (denied) return denied;
-
-  const { storeId } = await params;
-
-  const result = await getDomainStatus(storeId);
-  if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.status });
+  if (!requireSameOrigin(req)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  return NextResponse.json({
-    domain: result.domain,
-    verified: result.verified,
-    cname: result.cname,
-  });
+  const storeId = await storeIdFrom(ctx);
+  if (!storeId) return badRequest("Invalid store id");
+
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return badRequest("Invalid JSON");
+  }
+  const body = parseInput(bodySchema, raw);
+  if (!body.ok) return badRequest("Invalid domain format");
+
+  return toResponse(await addDomainToStore(storeId, body.data.domain));
 }
 
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ storeId: string }> },
-) {
-  const denied = await requireAdmin();
+export async function GET(_req: NextRequest, ctx: Ctx) {
+  const denied = await platformAdminApiDenial();
   if (denied) return denied;
 
-  const { storeId } = await params;
+  const storeId = await storeIdFrom(ctx);
+  if (!storeId) return badRequest("Invalid store id");
+
+  return toResponse(await getDomainStatus(storeId));
+}
+
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const denied = await platformAdminApiDenial();
+  if (denied) return denied;
+  if (!requireSameOrigin(req)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const storeId = await storeIdFrom(ctx);
+  if (!storeId) return badRequest("Invalid store id");
 
   const result = await removeDomainFromStore(storeId);
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
-
   return NextResponse.json({ removed: true });
 }
