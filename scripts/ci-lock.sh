@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# The machine-wide local-ci lock, sourced by ci-local.sh. One suite runs at a time; every other run waits.
-# The lock is a directory holding the owner's pid, its start time, and a token only the owner knows.
+# The machine-wide local-ci slots, sourced by ci-local.sh. Up to CI_SLOTS suites (default 2) run at once, each
+# holding the lock of its own slot; with every slot held, a run waits. Slot 1's lock is <lock>, slot k's is <lock>-k.
+# Each lock is a directory holding the owner's pid, its start time, and a token only the owner knows.
 # The earlier version let two runs hold the lock at once, three ways:
 # - two waiters could both judge a lock stale, and the slower one then renamed away the lock the faster one had
 #   just taken;
 # - a lock older than 3 hours was taken from an owner that was still running;
 # - every exit path removed whatever lock was there, including one that now belonged to another run.
-# Two runs at once share the ci-runner checkout and drop each other's database.
+# Two runs in one slot share its ci-runner checkout and drop each other's database.
 # Tests: bash scripts/ci-lock.test.sh
 
 # ci_lock_try <lock> <pid> <token>: take the lock if it is free.
@@ -63,4 +64,22 @@ ci_lock_takeover() {
   fi
   rmdir "$mutex" 2>/dev/null
   return 0
+}
+
+# _ci_slot_lock <lock> <k>: slot k's lock path.
+_ci_slot_lock() { if [ "$2" = 1 ]; then echo "$1"; else echo "$1-$2"; fi; }
+
+# ci_slot_try <lock> <slots> <pid> <token>: take the first free slot and print its number.
+ci_slot_try() {
+  local k
+  for ((k = 1; k <= $2; k++)); do
+    if ci_lock_try "$(_ci_slot_lock "$1" "$k")" "$3" "$4"; then echo "$k"; return 0; fi
+  done
+  return 1
+}
+
+# ci_slot_takeover <lock> <slots>: free every stale slot; each slot is looked at on its own.
+ci_slot_takeover() {
+  local k
+  for ((k = 1; k <= $2; k++)); do ci_lock_takeover "$(_ci_slot_lock "$1" "$k")" || true; done
 }

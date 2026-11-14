@@ -29,7 +29,7 @@ REVIEW_FILE="$ROOT/.builder/review-$N.md"
 REVIEW_SHA_FILE="$ROOT/.builder/review-$N.sha"
 
 # Hosted CI is off, so a full run on main happens here, every CI_MAIN_EVERY merges. It runs detached and queues
-# for the machine-wide lock, so it never holds up this merge. A failure opens a bug issue.
+# for a local-ci slot, so it never holds up this merge. A failure opens a bug issue.
 start_main_run_if_due() {
   local root last due
   root="$(git rev-parse --show-toplevel)"

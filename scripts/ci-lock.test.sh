@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for the machine-wide local-ci lock (scripts/ci-lock.sh). Run: bash scripts/ci-lock.test.sh
+# Tests for the machine-wide local-ci slots (scripts/ci-lock.sh). Run: bash scripts/ci-lock.test.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/ci-lock.sh"
@@ -64,5 +64,33 @@ mkdir "$L.takeover"
 ci_lock_try "$L" "$dead" gone
 ci_lock_takeover "$L" && bad "two takeovers ran at once" || ok "a second takeover waits for the first"
 [ -d "$L" ] && ok "the waiting takeover removed nothing" || bad "the waiting takeover removed the lock"
+
+# Slots (CI_SLOTS): each run takes the first free slot. Slot 1 is today's lock path; slot k is <lock>-k.
+S="$T/slots.lock"
+a=$(ci_slot_try "$S" 2 "$$" a) && [ "$a" = 1 ] && [ "$(cat "$S/token" 2>/dev/null)" = a ] \
+  && ok "the first run takes slot 1, today's lock" || bad "the first run did not take slot 1"
+b=$(ci_slot_try "$S" 2 "$$" b) && [ "$b" = 2 ] && [ "$(cat "$S-2/token" 2>/dev/null)" = b ] \
+  && ok "a second run takes slot 2 while slot 1 is held" || bad "a second run did not take slot 2"
+ci_slot_try "$S" 2 "$$" c >/dev/null && bad "a third run took a slot" || ok "a third run waits while both slots are held"
+[ "$(cat "$S/token")" = a ] && [ "$(cat "$S-2/token")" = b ] && ok "a waiting run changes no slot" || bad "a waiting run changed a slot"
+
+# One slot's run ends: its release frees only its own slot, and the next run takes that slot.
+ci_lock_release "$S" b; ci_lock_release "$S-2" a
+[ -d "$S" ] && [ -d "$S-2" ] && ok "a run cannot release another slot's lock" || bad "a run released another slot's lock"
+ci_lock_release "$S" a
+[ "$(cat "$S-2/token")" = b ] && c=$(ci_slot_try "$S" 2 "$$" c) && [ "$c" = 1 ] \
+  && ok "a freed slot goes to the next run, the other slot untouched" || bad "a freed slot was not reused cleanly"
+
+# Slot 2's owner died: the takeover over every slot frees slot 2 and leaves slot 1's live owner alone.
+rm -rf "$S-2"; ci_lock_try "$S-2" "$dead" gone
+ci_slot_takeover "$S" 2
+[ ! -d "$S-2" ] && [ "$(cat "$S/token" 2>/dev/null)" = c ] \
+  && ok "a stale slot is taken over without touching the other" || bad "a stale slot takeover was wrong"
+ci_lock_release "$S" c
+
+# CI_SLOTS=1: one lock at today's path, and a second run waits.
+o=$(ci_slot_try "$S" 1 "$$" one) && [ "$o" = 1 ] && [ -d "$S" ] && ! ci_slot_try "$S" 1 "$$" two >/dev/null && [ ! -d "$S-2" ] \
+  && ok "one slot is today's single lock" || bad "one slot is not today's single lock"
+ci_lock_release "$S" one
 
 exit "$fail"

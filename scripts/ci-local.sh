@@ -66,27 +66,36 @@ export E2E_WORKERS="${E2E_WORKERS:-4}"
 export VITEST_MAX_WORKERS="${VITEST_MAX_WORKERS:-4}"
 STEP_TIMEOUT="${CI_STEP_TIMEOUT:-40m}"
 
-# One full suite at a time on this machine. Parallel full suites from several lanes starved the CPU, and the
-# resulting timeouts (Vitest onTaskUpdate, silent next build crashes) cost far more than waiting in line.
-# The lock lives in the shared git dir, so every worktree sees it (scripts/ci-lock.sh). A lock is taken over
-# only when its owner is gone or it never got a pid; a run hung for 6 hours is stopped first, then replaced.
+# At most CI_SLOTS full suites (default 2) at a time on this machine. Unbounded parallel suites from several lanes
+# starved the CPU, and the resulting timeouts (Vitest onTaskUpdate, silent next build crashes) cost far more than
+# waiting in line; one at a time left reviewed PRs waiting hours (owner, 2026-11-13).
+# Each slot has its own lock in the shared git dir, so every worktree sees it (scripts/ci-lock.sh). A lock is taken
+# over only when its owner is gone or it never got a pid; a run hung for 6 hours is stopped first, then replaced.
 # The path is absolute because this script changes directory (CI_RUNNER) before it releases the lock.
 . "$SCRIPTS/ci-lock.sh"
 LOCK="$(cd "$(git rev-parse --git-common-dir)" && pwd)/ci-local.lock"
 LOCK_TOKEN="$$-$RANDOM-$(date +%s)"
-status pending "queued for the machine-wide local-ci lock"
+CI_SLOTS="${CI_SLOTS:-2}"
+status pending "queued for a local-ci slot"
 waited=0
-while ! ci_lock_try "$LOCK" "$$" "$LOCK_TOKEN"; do
+while ! SLOT=$(ci_slot_try "$LOCK" "$CI_SLOTS" "$$" "$LOCK_TOKEN"); do
   waited=$((waited + 1))
   if [ $((waited % 6)) = 0 ] && superseded; then
     echo "local-ci SUPERSEDED while queued: $BRANCH has a newer commit than $SHA"
     status error "superseded by a newer push"; exit "$CI_SUPERSEDED"
   fi
-  ci_lock_takeover "$LOCK" || true
+  ci_slot_takeover "$LOCK" "$CI_SLOTS"
   sleep "${CI_LOCK_POLL_SEC:-10}"
 done
-# build-ticket.sh greps for this line: a run that has not printed it is still queued and is safe to cancel.
-echo "== local-ci: lock acquired"
+LOCK=$(_ci_slot_lock "$LOCK" "$SLOT")
+# build-ticket.sh greps for "lock acquired": a run that has not printed it is still queued and is safe to cancel.
+echo "== local-ci: lock acquired (slot $SLOT)"
+# Slot 1 keeps the caller's checkout, database and port; slot k gets its own, so two runs never share one.
+if [ "$SLOT" != 1 ]; then
+  [ -z "${CI_RUNNER:-}" ] || CI_RUNNER="$CI_RUNNER-$SLOT"
+  [ -z "${CI_DB:-}" ] || CI_DB="${CI_DB}_$SLOT"
+  export E2E_PORT=$(( ${E2E_PORT:-3000} + (SLOT - 1) * 1000 ))
+fi
 FAILED_AT=""
 TEST_OUT=""
 cleanup() {
@@ -137,7 +146,7 @@ if [ -n "${CI_RUNNER:-}" ]; then
   echo "== local-ci: running in $CI_RUNNER at $SHA"
 fi
 
-# Fresh private database (one is enough: the lock allows one run at a time). Process env wins over .env.local
+# Fresh private database (one per slot: each slot runs one suite at a time). Process env wins over .env.local
 # in every loader here (test-setup.ts, playwright.config.ts, dotenv-cli without -o, prisma.config.ts).
 if [ -n "${CI_DB:-}" ]; then
   PGBIN="${PGBIN:-/c/Program Files/PostgreSQL/18/bin}"; PGP="${LANE_PG_PORT:-5434}"
@@ -163,7 +172,7 @@ status pending "scope $SCOPE: running (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORK
 # every other lane waited for the lock. Vitest and Playwright retry a failed test in place (--retry/--retries);
 # a whole e2e run that still fails gets one rerun of just its failed tests (--last-failed), in case the web
 # server itself fell over. Only the build (silent next build crashes under load) reruns whole.
-# Every step has a timeout, so one hung run cannot hold the machine-wide lock for every lane.
+# Every step has a timeout, so one hung run cannot hold a local-ci slot for long.
 fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $1 on $SHA ($2)"; exit 1; }
 step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
 # run_unit <vitest command...>: every tier's unit tests.
