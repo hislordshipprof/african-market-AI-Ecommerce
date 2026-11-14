@@ -132,7 +132,8 @@ test.describe("store subscriptions (#494)", () => {
     await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
     await page.getByLabel("Verification code").fill(generateTOTP(process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP"));
     await page.click("button[type='submit']");
-    await page.waitForURL("**/admin/stores", { timeout: 15000 });
+    await page.waitForURL("**/admin", { timeout: 15000 });
+    await page.goto("/admin/stores");
 
     await expect(page.getByRole("alert").filter({ hasText: "Subscription payment failed" })).toBeVisible();
     await shoot(page, "494-admin-stores");

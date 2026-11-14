@@ -184,6 +184,48 @@ describe("computeQuote", () => {
     expect(q.holdCents).toBe(4900);
   });
 
+  it("courier adds the quoted fee, unmarked, to total and hold", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 4000, qty: 1, maxPerOrder: null }],
+      validContact,
+      "courier", NO_SERVICE_FEE, null,
+      { ok: true, feeCents: 899, provider: "Uber Direct", leaveAtDoor: false },
+    );
+    expect(q.problems).toEqual([]);
+    expect(q.courierFeeCents).toBe(899);
+    expect(q.courierProvider).toBe("Uber Direct");
+    expect(q.deliveryFeeCents).toBe(0);
+    expect(q.totalCents).toBe(4899);
+    expect(q.holdCents).toBe(5299);
+  });
+
+  it("courier shows why it is unavailable and adds no fee", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 4000, qty: 1, maxPerOrder: null }],
+      validContact,
+      "courier", NO_SERVICE_FEE, null,
+      { ok: false, problem: { code: "ineligible", message: "This order is over the 50 lb courier limit." } },
+    );
+    expect(q.problems).toEqual([{ code: "ineligible", message: "This order is over the 50 lb courier limit." }]);
+    expect(q.courierFeeCents).toBe(0);
+    expect(q.totalCents).toBe(4000);
+  });
+
+  it("courier refuses leave at door with frozen or perishable items", () => {
+    for (const line of [{ frozen: true }, { perishable: true }]) {
+      const q = computeQuote(
+        0,
+        [{ price: 4000, qty: 1, maxPerOrder: null, ...line }],
+        validContact,
+        "courier", NO_SERVICE_FEE, null,
+        { ok: true, feeCents: 899, provider: "DoorDash Drive", leaveAtDoor: true },
+      );
+      expect(q.problems).toEqual([expect.objectContaining({ code: "ineligible" })]);
+    }
+  });
+
   it("returns a valid expiration ~15 minutes out", () => {
     const before = Date.now();
     const q = computeQuote(0, baseLines(), validContact, "pickup", NO_SERVICE_FEE);

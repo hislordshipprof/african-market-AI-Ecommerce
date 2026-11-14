@@ -29,6 +29,8 @@ model Store {
   city                   String?
   state                  String?
   zip                    String?
+  /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
+  phone                  String?
   lat                    Float?
   lng                    Float?
   minimumOrderCents      Int      @default(3500) @map("minimum_order_cents")
@@ -58,9 +60,11 @@ model Store {
   ownerPhotoUrl String? @map("owner_photo_url")
   neighborhood  String?
   deliveryInfo  String? @map("delivery_info")
-  /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on.
+  /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on; a platform admin can override (#450).
   listed        Boolean @default(false)
   listingBlurb  String? @map("listing_blurb") @db.VarChar(160)
+  /// Up to 3 directory cuisine tags (src/lib/directory/cuisine.ts, #450).
+  cuisineTags   String[] @default([]) @map("cuisine_tags")
 
   rlsFixtures           RlsTestFixture[]
   auditLogs             AuditLog[]
@@ -902,6 +906,11 @@ model Cart {
   deliveryLat         Float?    @map("delivery_lat")
   deliveryLng         Float?    @map("delivery_lng")
   leaveAtDoor         Boolean   @default(false) @map("leave_at_door")
+  /// The cheapest courier quote last shown at checkout (#527), for the basket and address in courierQuoteKey.
+  courierFeeCents       Int?      @map("courier_fee_cents")
+  courierProvider       String?   @map("courier_provider")
+  courierQuoteKey       String?   @map("courier_quote_key")
+  courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
   source              String    @default("manual")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")

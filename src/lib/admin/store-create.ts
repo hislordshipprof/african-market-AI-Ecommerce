@@ -23,6 +23,7 @@ export type NewStoreValues = {
   city: string | null;
   state: string | null;
   zip: string | null;
+  phone: string | null;
   lat: number | null;
   lng: number | null;
   storeDeliveryEnabled: boolean;
@@ -58,6 +59,7 @@ export async function insertStore(
       city: values.city,
       state: values.state,
       zip: values.zip,
+      phone: values.phone,
       lat: values.lat,
       lng: values.lng,
       storeDeliveryEnabled: values.storeDeliveryEnabled,
