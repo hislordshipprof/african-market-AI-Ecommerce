@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   FakeVercelDomainsAdapter,
+  RealVercelDomainsAdapter,
   VercelApiError,
+  createVercelDomainsAdapter,
 } from "./vercel-domains";
 
 describe("FakeVercelDomainsAdapter", () => {
@@ -90,5 +92,32 @@ describe("FakeVercelDomainsAdapter", () => {
         adapter.getDomainConfig("shop.mamasmarket.com"),
       ).rejects.toThrow(VercelApiError);
     });
+  });
+});
+
+describe("createVercelDomainsAdapter", () => {
+  const keys = { VERCEL_TOKEN: "t", VERCEL_PROJECT_ID: "p" };
+
+  it("uses the fake in test and development when keys are missing", () => {
+    expect(createVercelDomainsAdapter({ NODE_ENV: "test" })).toBeInstanceOf(FakeVercelDomainsAdapter);
+    expect(createVercelDomainsAdapter({ NODE_ENV: "development" })).toBeInstanceOf(FakeVercelDomainsAdapter);
+  });
+
+  it("uses the real adapter whenever the keys are set", () => {
+    expect(createVercelDomainsAdapter({ NODE_ENV: "development", ...keys })).toBeInstanceOf(RealVercelDomainsAdapter);
+    expect(createVercelDomainsAdapter({ NODE_ENV: "production", VERCEL: "1", ...keys })).toBeInstanceOf(RealVercelDomainsAdapter);
+  });
+
+  it("throws in production when keys are missing instead of faking", () => {
+    expect(() => createVercelDomainsAdapter({ NODE_ENV: "production" })).toThrow(/VERCEL_TOKEN/);
+    expect(() => createVercelDomainsAdapter({ NODE_ENV: "production", VERCEL_TOKEN: "t" })).toThrow(/VERCEL_PROJECT_ID/);
+  });
+
+  it("throws on a Vercel deployment with missing keys even if NODE_ENV is not production", () => {
+    expect(() => createVercelDomainsAdapter({ NODE_ENV: "development", VERCEL: "1" })).toThrow(/VERCEL_TOKEN/);
+  });
+
+  it("throws when only some keys are set in development rather than half-faking", () => {
+    expect(() => createVercelDomainsAdapter({ NODE_ENV: "development", VERCEL_TOKEN: "t" })).toThrow(/VERCEL_PROJECT_ID/);
   });
 });

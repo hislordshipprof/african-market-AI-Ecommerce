@@ -211,13 +211,25 @@ export class FakeVercelDomainsAdapter implements VercelDomainsAdapter {
 
 let _adapter: VercelDomainsAdapter | undefined;
 
-export function getVercelDomainsAdapter(): VercelDomainsAdapter {
-  if (_adapter) return _adapter;
-  if (!process.env.VERCEL_TOKEN) {
-    _adapter = new FakeVercelDomainsAdapter();
-  } else {
-    _adapter = new RealVercelDomainsAdapter();
+// The fake is for tests and local dev only; a deployment without keys must fail, not pretend.
+export function createVercelDomainsAdapter(
+  env: Record<string, string | undefined> = process.env,
+): VercelDomainsAdapter {
+  const keyless = !env.VERCEL_TOKEN && !env.VERCEL_PROJECT_ID;
+  const localOnly = (env.NODE_ENV === "test" || env.NODE_ENV === "development") && !env.VERCEL;
+  if (keyless && localOnly) return new FakeVercelDomainsAdapter();
+  for (const name of ["VERCEL_TOKEN", "VERCEL_PROJECT_ID"]) {
+    if (!env[name]) {
+      throw new Error(
+        `${name} is required for Vercel domain operations outside tests and local dev.`,
+      );
+    }
   }
+  return new RealVercelDomainsAdapter();
+}
+
+export function getVercelDomainsAdapter(): VercelDomainsAdapter {
+  _adapter ??= createVercelDomainsAdapter();
   return _adapter;
 }
 
