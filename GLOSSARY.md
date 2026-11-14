@@ -216,7 +216,7 @@ The message asking a customer to approve a swap or a refund for a short line bef
 The ordered list of lines staff collect for one or more orders, with frozen items last.
 
 **Batch**:
-2 to 4 Accepted orders of one store that staff pick together from one combined Pick list (#564). Each shared item is one line with its total and its split per order; each order has a tote letter (one bag per order), A for the oldest. Units found fill the oldest order first, so a Short lands on the newest. While an order is in a batch it is picked only from the batch; leaving the batch keeps what is picked. "Start packing" on the batch's packing screen starts every order's Ready time.
+2 to 4 Accepted orders of one store that staff pick together from one combined Pick list (#564). Each shared item is one line with its total and its split per order; each order has a tote letter (one bag per order), A for the oldest. Units found fill the oldest order first, so a Short lands on the newest. While an order is in a batch it is picked only from the batch; leaving the batch keeps what is picked. "Start packing" on the batch's packing screen starts packing every order and books the courier for courier orders (Ready time).
 _Avoid_: Wave (a warehouse term for many batches)
 
 **Ready**:
