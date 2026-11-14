@@ -172,3 +172,17 @@ function sumTotals(rows: MovementRow[]): MovementTotals {
     short: t.short + row.short7,
   }), { online: 0, onlinePrior: 0, counter: 0, restocked: 0, short: 0 });
 }
+
+/** One sentence for an estimate, shared by the page and the copilot's fixed reply. */
+export function estimateText(estimate: StockEstimate): string {
+  switch (estimate.kind) {
+    case "estimate":
+      return `About ${estimate.perDay} a day, ${estimate.daysLeft} ${estimate.daysLeft === 1 ? "day" : "days"} left, est. out ${estimate.outDay}`;
+    case "not_enough_sales":
+      return "Not enough sales to estimate";
+    case "sold_out":
+      return "Sold out";
+    case "not_counted":
+      return "Counts not tracked";
+  }
+}
