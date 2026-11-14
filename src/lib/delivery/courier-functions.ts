@@ -1,7 +1,5 @@
 import { inngest } from "../inngest/client";
 import { sendSkipped, sendWithTimeout } from "../inngest/notify";
-import { DoorDashDriveProvider } from "./doordash";
-import { UberDirectProvider } from "./uber-direct";
 import { copyCourierProof } from "./proof";
 import { COURIER_REGISTRATION_REQUESTED, findStoresNeedingCourierRegistration, registerStoreCouriers } from "./courier-registration";
 import {
@@ -10,15 +8,15 @@ import {
   COURIER_DELIVERY_CREATED,
   COURIER_ORDER_READY,
   COURIER_PROOF_RECEIVED,
+  courierProviders,
   dispatchReadyOrder,
   runCourierFailover,
   type CourierEvent,
   type DispatchDeps,
 } from "./dispatch";
 
-/** Both adapters read their keys per call, so a provider without keys fails its quote and is skipped. */
 function productionDeps(): DispatchDeps {
-  return { providers: [new DoorDashDriveProvider(), new UberDirectProvider()], emit: emitCourierEvent };
+  return { providers: courierProviders(), emit: emitCourierEvent };
 }
 
 /** Event ids let Inngest drop a repeat from a retried step. */

@@ -5,6 +5,11 @@ export type OrderLineStatus =
   | "refunded"
   | "substituted";
 
+/** The status an order takes when picked: pickup waits for the customer, delivery is ready to go. */
+export function fulfilledStatus(fulfillment: string): "AWAITING_PICKUP" | "READY" {
+  return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+}
+
 export const RESOLVED_LINE_STATUSES: OrderLineStatus[] = ["picked", "refunded", "substituted"];
 
 /** Uncaptured states a store or Stripe can cancel from; the inbox button and the server share it. */

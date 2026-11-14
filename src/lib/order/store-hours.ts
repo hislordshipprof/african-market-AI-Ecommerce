@@ -8,7 +8,7 @@ const DAY_KEYS: Record<number, string[]> = {
   6: ["sat", "saturday"],
 };
 
-function parseTimeMinutes(raw: string): number | null {
+export function parseTimeMinutes(raw: string): number | null {
   const trimmed = raw.trim().toLowerCase().replace(/\./g, "");
   // 24h "09:00" / "21:00", 12h "9:00 AM", and compact "9am" / "9 PM".
   const match = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
@@ -168,14 +168,14 @@ function localFormatter(timezone: string): Intl.DateTimeFormat {
   return fmt;
 }
 
-interface LocalTime {
+export interface LocalTime {
   dayOfWeek: number;
   minuteOfDay: number;
   /** The local wall clock read as if it were UTC, at minute precision. */
   wallMs: number;
 }
 
-function getStoreLocalTime(timezone: string, now: Date): LocalTime {
+export function getStoreLocalTime(timezone: string, now: Date): LocalTime {
   const parts = localFormatter(timezone).formatToParts(now);
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "0";
   const hour = parseInt(get("hour"), 10) % 24;

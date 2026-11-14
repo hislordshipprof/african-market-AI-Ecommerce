@@ -4,6 +4,7 @@ import { blockInngestSend, devServerWithoutKey } from "./event-key";
 import type { OrderNotifyEvent } from "../notifications/record";
 
 const SEND_TIMEOUT_MS = 10_000;
+const SWEEP_ROUND_MS = 15 * 60_000;
 
 export function sendWithTimeout(payload: Parameters<typeof inngest.send>[0]): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -43,6 +44,14 @@ async function sendLogged(orderId: string, payload: Parameters<typeof inngest.se
   }
 }
 
+function notificationEvent(storeId: string, orderId: string, event: OrderNotifyEvent | string, round?: string) {
+  return {
+    id: `order-notify-${event}-${orderId}${round ? `-${round}` : ""}`,
+    name: "order/notification.requested",
+    data: { storeId, orderId, event },
+  };
+}
+
 /** `round` keeps a repeatable event (a later substitution prompt) apart from Inngest's 24 h dedupe. */
 export async function sendOrderNotification(
   storeId: string,
@@ -50,11 +59,24 @@ export async function sendOrderNotification(
   event: OrderNotifyEvent | string,
   round?: string,
 ): Promise<void> {
-  await sendLogged(orderId, {
-    id: `order-notify-${event}-${orderId}${round ? `-${round}` : ""}`,
-    name: "order/notification.requested",
-    data: { storeId, orderId, event },
-  });
+  await sendLogged(orderId, notificationEvent(storeId, orderId, event, round));
+}
+
+/**
+ * The sweep's re-send, in one call. Each 15-minute round gets a new id, so an event Inngest
+ * took but never ran is sent again; the row claim and the provider key stop a double send.
+ */
+export async function resendOrderNotifications(
+  rows: ReadonlyArray<{ storeId: string; orderId: string; event: OrderNotifyEvent }>,
+): Promise<void> {
+  if (rows.length === 0 || sendSkipped()) return;
+  const round = `sweep-${Math.floor(Date.now() / SWEEP_ROUND_MS)}`;
+  try {
+    await sendWithTimeout(rows.map((row) => notificationEvent(row.storeId, row.orderId, row.event, round)));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "send failed";
+    console.error(JSON.stringify({ event: "inngest_send_failed", count: rows.length, message }));
+  }
 }
 
 /** A courier order reached Ready: the dispatch function books its courier (#136). */

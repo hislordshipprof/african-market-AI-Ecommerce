@@ -1,13 +1,5 @@
 import type { EmailMessage } from "./email/send";
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtml } from "./format";
 
 function bareAddress(from: string): string {
   const wrapped = from.match(/<([^>]+)>/);
