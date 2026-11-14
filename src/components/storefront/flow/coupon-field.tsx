@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "../primitives";
+import { Button, Chip } from "../primitives";
 import styles from "./cart-checkout.module.css";
 
 /** The one store coupon code a cart takes (#557): type a code, or see the one applied and remove it. */
@@ -57,7 +57,7 @@ export function CouponField({
           <p className={styles.muted} role="status">
             {applied.message ? `${applied.code}: ${applied.message}` : `${applied.code} applied`}
           </p>
-          <Button type="button" disabled={busy} onClick={() => run(remove)}>Remove</Button>
+          <Chip type="button" disabled={busy} onClick={() => run(remove)}>Remove</Chip>
         </div>
       )}
     </div>

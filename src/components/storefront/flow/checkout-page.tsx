@@ -1328,9 +1328,9 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     ? `${quote.coupon.code}: ${quote.coupon.message}`
                     : `${quote.coupon.code} applied`}
                 </p>
-                <Button type="button" disabled={payState !== "idle"} onClick={() => removePromo()}>
+                <Chip type="button" disabled={payState !== "idle"} onClick={() => removePromo()}>
                   Remove
-                </Button>
+                </Chip>
               </div>
             )}
             {quote ? (
