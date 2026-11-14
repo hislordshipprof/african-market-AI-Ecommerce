@@ -29,7 +29,7 @@ REVIEW_FILE="$ROOT/.builder/review-$N.md"
 REVIEW_SHA_FILE="$ROOT/.builder/review-$N.sha"
 
 # Hosted CI is off, so a full run on main happens here, every CI_MAIN_EVERY merges. It runs detached and queues
-# for the machine-wide lock, so it never holds up this merge. A failure opens a bug issue.
+# for a local-ci slot, so it never holds up this merge. A failure opens a bug issue.
 start_main_run_if_due() {
   local root last due
   root="$(git rev-parse --show-toplevel)"
@@ -111,7 +111,7 @@ else
       printf '%s rebased-from %s\n' "$(git -C "$WT" rev-parse HEAD)" "$HEAD_SHA" > "$REVIEW_SHA_FILE"
       echo "PR #$PR rebased cleanly onto main; rerunning local-ci for what the rebase can affect."
       CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
-      if (cd "$WT" && CI_REBASE_OF="$HEAD_SHA" E2E_PORT="${E2E_PORT:-3950}" CI_DB=ci \
+      if (cd "$WT" && CI_REBASE_OF="$HEAD_SHA" E2E_PORT="${E2E_PORT:-3600}" CI_DB=ci \
         CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" bash "$ROOT/scripts/ci-local.sh" > "$CI_LOG" 2>&1); then
         MERGE_REBASED=1 exec bash "$0" $SELF_ARGS
       fi

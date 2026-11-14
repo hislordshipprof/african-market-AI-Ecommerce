@@ -88,8 +88,10 @@ describe("UberDirectProvider", () => {
     expect(created).toEqual({
       externalId: expect.stringMatching(/^del_/),
       trackingUrl: `https://www.ubereats.com/orders/${created.externalId}`,
+      pin: null,
     });
     expect(fake.calls.find((c) => c.path.endsWith("/deliveries"))!.body).toMatchObject({
+      dropoff_verification: { picture: true },
       quote_id: quote.quoteId,
       pickup_name: "Mama Ada Market",
       dropoff_name: "Ngozi Okafor",
@@ -101,6 +103,11 @@ describe("UberDirectProvider", () => {
     await expect(provider.create(quote.quoteId, request)).rejects.toMatchObject({ provider: "uber", status: 409 });
     await provider.cancel(created.externalId);
     await expect(provider.cancel(created.externalId)).rejects.toMatchObject({ status: 409, code: "noncancelable_delivery" });
+
+    // A PIN drop-off: Uber picks the PIN and returns it under dropoff.verification_requirements.
+    const pinned = { ...request, externalDeliveryId: "ord_123-2", dropoffPin: "4821" };
+    expect(await provider.create((await provider.quote(pinned)).quoteId, pinned)).toMatchObject({ pin: "6066" });
+    expect(fake.calls.filter((c) => c.path.endsWith("/deliveries")).at(-1)!.body).toMatchObject({ dropoff_verification: { pincode: { enabled: true } } });
   });
 
   it("shares one token across concurrent calls and gets a new one only once it expires", async () => {
@@ -186,7 +193,12 @@ describe("UberDirectProvider", () => {
       courier: { name: "Sam", vehicle: "Toyota Prius", dropoffEta: new Date("2026-11-13T15:40:00Z") },
     });
     expect(event(body("pickup_complete")).type).toBe("picked_up");
-    expect(event(body("delivered"))).toMatchObject({ type: "delivered", actualFeeCents: 799 });
+    expect(event(body("delivered", { dropoff: { verification: { picture: { image_url: "https://img.uber.com/p.jpg" }, pin_code: { entered: "6066" } } } }))).toMatchObject({
+      type: "delivered",
+      actualFeeCents: 799,
+      proof: { photoUrl: "https://img.uber.com/p.jpg", pinEntered: "6066" },
+    });
+    expect(event(body("returned")).type).toBe("returned");
     expect(event(body("canceled")).type).toBe("cancelled");
     expect(event(body("dropoff")).type).toBeNull();
 

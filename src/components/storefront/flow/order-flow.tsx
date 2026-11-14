@@ -44,6 +44,7 @@ export const statusLabel = (status: OrderStatus) =>
     SUBSTITUTION_PENDING: "Your choice is needed",
     READY: "Packed and ready",
     AWAITING_PICKUP: "Ready for pickup",
+    COURIER_REQUESTED: "Finding a driver",
     COURIER_ASSIGNED: "Driver assigned",
     PICKED_UP: "On the way",
     DELIVERED: "Delivered",

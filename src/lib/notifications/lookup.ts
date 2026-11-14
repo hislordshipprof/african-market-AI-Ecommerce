@@ -8,6 +8,13 @@ const orderInclude = {
     },
   },
   issueReports: { select: { state: true, amountCents: true } },
+  // The live courier delivery; failover leaves the replaced one cancelled.
+  deliveries: {
+    where: { status: { not: "cancelled" } },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+    select: { provider: true, status: true, courierJson: true, trackingUrl: true, pin: true },
+  },
 } as const;
 
 /** The tracking token only: no order-id fallback. For the private delivery photo. */

@@ -243,7 +243,10 @@ The customer asked the store to leave the order without a handoff. Frozen items 
 A store-delivery order the store's driver has left with. The step between Ready and Delivered.
 
 **Delivery proof**:
-The photo the store's driver takes when a store-delivery order is delivered. Required to mark it Delivered. Private: stored in its own private bucket, and only the order's tracking link opens it. The order id does not.
+The photo the store's driver takes when a store-delivery order is delivered. Required to mark it Delivered. Private: stored in its own private bucket, and only the order's tracking link opens it. The order id does not. A courier's drop-off photo is copied into the same bucket.
+
+**Drop-off PIN**:
+A 4-digit code the courier must get from the customer at the door. Required for an order with a frozen item or a total above $150; other courier orders get a Delivery proof photo instead.
 
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.

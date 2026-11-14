@@ -913,6 +913,7 @@ model AiConversation {
   @@unique([storeId, cartId])
   @@index([cartId])
   @@index([storeId])
+  @@index([storeId, createdAt])
   @@index([createdAt])
   @@index([customerId])
   @@map("ai_conversations")
@@ -934,6 +935,7 @@ model AiAction {
   @@index([conversationId])
   @@index([storeId])
   @@index([createdAt])
+  @@index([storeId, tool, createdAt])
   @@map("ai_actions")
 }
 
@@ -1104,6 +1106,7 @@ model Order {
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, sourceCartId, createdAt])
+  @@index([storeId, createdAt])
   @@index([customerId])
   @@map("orders")
 }
