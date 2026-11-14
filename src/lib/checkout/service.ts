@@ -286,9 +286,12 @@ function shownCourier(
   return { ok: true, feeCents: cart.courierFeeCents, provider: cart.courierProvider as "Uber Direct" | "DoorDash Drive", leaveAtDoor };
 }
 
-/** Courier delivery needs the store registered with a courier and a pickup point to measure the radius from. */
-export function courierOffered(store: { uberLocationId: string | null; doordashStoreId: string | null; addressLine1: string | null; city: string | null; state: string | null; zip: string | null; lat: number | null; lng: number | null }): boolean {
-  return Boolean((store.uberLocationId || store.doordashStoreId) && store.addressLine1 && store.city && store.state && store.zip && store.lat != null && store.lng != null);
+/**
+ * Courier delivery needs the store registered with a courier, a pickup point to measure the radius from, and a phone:
+ * Uber Direct will not book a pickup without one.
+ */
+export function courierOffered(store: { uberLocationId: string | null; doordashStoreId: string | null; addressLine1: string | null; city: string | null; state: string | null; zip: string | null; lat: number | null; lng: number | null; phone: string | null }): boolean {
+  return Boolean((store.uberLocationId || store.doordashStoreId) && store.addressLine1 && store.city && store.state && store.zip && store.lat != null && store.lng != null && store.phone);
 }
 
 export { COURIER_NOT_OFFERED, computeQuote, type StoreDeliveryQuote } from "./quote";

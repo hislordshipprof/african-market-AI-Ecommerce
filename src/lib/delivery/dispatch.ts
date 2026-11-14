@@ -198,7 +198,7 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
       deliveryState: true,
       deliveryZip: true,
       customer: { select: { name: true, phone: true } },
-      store: { select: { name: true, addressLine1: true, addressLine2: true, city: true, state: true, zip: true, doordashStoreId: true } },
+      store: { select: { name: true, addressLine1: true, addressLine2: true, city: true, state: true, zip: true, phone: true, doordashStoreId: true } },
     },
   });
   const { store, customer } = order;
@@ -223,8 +223,17 @@ type CourierStore = {
   city: string | null;
   state: string | null;
   zip: string | null;
+  phone: string | null;
   doordashStoreId: string | null;
 };
+
+/** Both couriers take E.164; checkout accepts any 10-digit US format. */
+function e164(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return phone.trim();
+}
 
 /** The courier request from the store's address and the customer's drop-off. Checkout quotes and dispatch books the same request. */
 export function buildCourierRequest(
@@ -242,10 +251,11 @@ export function buildCourierRequest(
     pickup: {
       businessName: store.name,
       address: { line1: store.addressLine1, line2: store.addressLine2, city: store.city, state: store.state, zip: store.zip },
+      phone: store.phone ? e164(store.phone) : undefined,
     },
     dropoff: {
       address: dropoff.address,
-      phone: dropoff.phone,
+      phone: e164(dropoff.phone),
       givenName,
       familyName: rest.join(" ") || undefined,
       contactless: dropoff.contactless,

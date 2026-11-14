@@ -5,6 +5,8 @@ import { platformAdminTransaction, storeScoped } from "../db";
 import { makeFakeStep } from "../inngest/fake-step";
 import { DoorDashDriveProvider } from "./doordash";
 import { fakeDoorDash } from "./doordash-fake";
+import { UberDirectProvider } from "./uber-direct";
+import { fakeUberDirect } from "./uber-direct-fake";
 import {
   COURIER_BOTH_FAILED,
   COURIER_DELIVERY_CREATED,
@@ -593,7 +595,7 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     raw ??= testPrismaClient();
     const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const store = await raw.store.create({
-      data: { slug: `flow-${stamp}`, name: "Flow Market", themePreset: "palm-and-shea", addressLine1: "8121 Georgia Ave", city: "Silver Spring", state: "MD", zip: "20910" },
+      data: { slug: `flow-${stamp}`, name: "Flow Market", themePreset: "palm-and-shea", addressLine1: "8121 Georgia Ave", city: "Silver Spring", state: "MD", zip: "20910", phone: "+13015550100" },
     });
     storeIds.push(store.id);
     await platformAdminTransaction((tx) => tx.storeSubscription.create({ data: { storeId: store.id, plan: opts.plan ?? "pro", status: "active" } }));
@@ -665,6 +667,18 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     expect(again).toMatchObject({ ok: true, existing: true });
     expect(fake.calls.filter((c) => c.path === "/drive/v2/quotes")).toHaveLength(1);
     expect(events.map((e) => e.name)).toEqual([COURIER_DELIVERY_CREATED]);
+  });
+
+  it("#527: Uber gets the store's phone as the pickup phone, which it requires to book", async () => {
+    const { storeId, orderId } = await readyOrder();
+    const keys = { UBER_DIRECT_CLIENT_ID: `client-527-${Date.now()}`, UBER_DIRECT_CLIENT_SECRET: "test-client-secret", UBER_DIRECT_CUSTOMER_ID: "a418e2aa-0000-4000-8000-000000000527" };
+    const fake = fakeUberDirect({ clientId: keys.UBER_DIRECT_CLIENT_ID, clientSecret: keys.UBER_DIRECT_CLIENT_SECRET, customerId: keys.UBER_DIRECT_CUSTOMER_ID, now: () => new Date() });
+    const uber = new UberDirectProvider({ env: keys, fetch: (input, init) => fake.fetch(input as string, init) });
+
+    const result = await dispatchReadyOrder(storeId, orderId, { providers: [uber], emit });
+
+    expect(result).toMatchObject({ ok: true, provider: "uber" });
+    expect(fake.calls.find((c) => c.path.endsWith("/deliveries"))?.body).toMatchObject({ pickup_phone_number: "+13015550100" });
   });
 
   it("plan gate: a Starter store's Ready courier order is never quoted", async () => {

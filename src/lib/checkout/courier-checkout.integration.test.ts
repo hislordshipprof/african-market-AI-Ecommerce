@@ -37,11 +37,13 @@ const ADDRESS: CheckoutAddress = { line1: "1100 WAYNE AVE", line2: null, city: "
 class StubCourier implements DeliveryProvider {
   readonly quotes = new Map<string, string>();
   readonly created: string[] = [];
+  readonly requests: DeliveryRequest[] = [];
   quoteCalls = 0;
   failQuote = false;
   constructor(readonly name: DeliveryProviderName, public feeCents: number) {}
   async quote(req: DeliveryRequest): Promise<DeliveryQuote> {
     this.quoteCalls++;
+    this.requests.push(req);
     if (this.failQuote) throw new Error("provider down");
     const quoteId = `${this.name}-q${this.quoteCalls}`;
     this.quotes.set(quoteId, req.externalDeliveryId);
@@ -90,7 +92,7 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     await raw.$disconnect();
   }, 30_000);
 
-  async function seed(opts: { plan?: "pro" | "starter"; registered?: boolean; weightG?: number; frozen?: boolean; perishable?: boolean } = {}) {
+  async function seed(opts: { plan?: "pro" | "starter"; registered?: boolean; phone?: string | null; weightG?: number; frozen?: boolean; perishable?: boolean } = {}) {
     const stamp = crypto.randomUUID().slice(0, 8);
     const store = await raw.store.create({
       data: {
@@ -108,6 +110,7 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
         lng: STORE_POINT.lng,
         deliveryRadiusMi: 8,
         uberLocationId: opts.registered === false ? null : `org-${stamp}`,
+        phone: opts.phone === undefined ? "+13015550100" : opts.phone,
       },
     });
     storeIds.push(store.id);
@@ -135,11 +138,19 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     expect(uber.created).toEqual([]);
   });
 
+  it("the courier gets both phones in E.164, however the shopper typed theirs", async () => {
+    const { store, cart } = await seed();
+    const uber = new StubCourier("uber", 749);
+    await quoteCheckout(store.id, 0, cart.id, { ...CONTACT, phone: "(301) 555-0199" }, "courier", ADDRESS, { couriers: [uber] });
+    expect(uber.requests[0]).toMatchObject({ pickup: { phone: "+13015550100" }, dropoff: { phone: "+13015550199" } });
+  });
+
   it("AC1: an ineligible order says why and asks no courier", async () => {
     const uber = new StubCourier("uber", 749);
     const cases = [
       { opts: { weightG: 23_000 }, message: /item in your basket is over the 50 lb courier limit/ },
       { opts: { registered: false }, message: /isn't set up for courier delivery/ },
+      { opts: { phone: null }, message: /isn't set up for courier delivery/ },
       { opts: { plan: "starter" as const }, message: /does not offer courier delivery/ },
     ];
     for (const { opts, message } of cases) {

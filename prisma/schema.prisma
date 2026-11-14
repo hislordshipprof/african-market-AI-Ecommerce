@@ -26,6 +26,8 @@ model Store {
   city                   String?
   state                  String?
   zip                    String?
+  /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
+  phone                  String?
   lat                    Float?
   lng                    Float?
   minimumOrderCents      Int      @default(3500) @map("minimum_order_cents")
