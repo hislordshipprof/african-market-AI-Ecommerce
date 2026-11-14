@@ -111,6 +111,8 @@ describe.skipIf(!hasDb)("prompt injection cannot place an order (#247)", () => {
           return { stream: streamOf([
             { type: "stream-start", warnings: [] },
             { type: "tool-call", toolCallId: "read", toolName: "search_catalog", input: JSON.stringify({ query: "egusi" }) },
+            // The cart is filled a step before prepare_checkout, which runs in parallel with the second add.
+            { type: "tool-call", toolCallId: "fill", toolName: "add_to_cart", input: JSON.stringify(inputs.add_to_cart) },
             { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
           ]) };
         }
