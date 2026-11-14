@@ -35,7 +35,10 @@ export async function registerStoreCouriers(
   }
 }
 
-/** Stores with an address and a provider still unregistered: new failures and stores from before #526. */
+/**
+ * Stores with an address and a provider still unregistered: new failures and stores from before #526. Oldest attempt
+ * first, since each attempt saves its result on the store, so stores that always fail cannot starve the rest.
+ */
 export function findStoresNeedingCourierRegistration(limit: number): Promise<Array<{ id: string }>> {
   return platformAdmin.store.findMany({
     where: {
@@ -45,7 +48,7 @@ export function findStoresNeedingCourierRegistration(limit: number): Promise<Arr
       zip: { not: null },
       OR: [{ uberLocationId: null }, { doordashStoreId: null }],
     },
-    orderBy: { createdAt: "asc" },
+    orderBy: { updatedAt: "asc" },
     take: limit,
     select: { id: true },
   });

@@ -15,8 +15,9 @@ const doordashKeys = {
   DOORDASH_SIGNING_SECRET: Buffer.from("test-signing-secret-bytes-0123456789").toString("base64url"),
 };
 
-function fakes(doordashDown = false) {
-  const uber = fakeUberDirect({ clientId: uberKeys.UBER_DIRECT_CLIENT_ID, clientSecret: uberKeys.UBER_DIRECT_CLIENT_SECRET, customerId, now: () => now });
+function fakes(doordashDown = false, clientId = uberKeys.UBER_DIRECT_CLIENT_ID) {
+  const keys = { ...uberKeys, UBER_DIRECT_CLIENT_ID: clientId };
+  const uber = fakeUberDirect({ clientId, clientSecret: uberKeys.UBER_DIRECT_CLIENT_SECRET, customerId, now: () => now });
   const doordash = fakeDoorDash({ developerId: doordashKeys.DOORDASH_DEVELOPER_ID, keyId: doordashKeys.DOORDASH_KEY_ID, signingSecret: doordashKeys.DOORDASH_SIGNING_SECRET, now: () => now });
   const doordashFetch: typeof fetch = doordashDown
     ? async () => new Response(JSON.stringify({ code: "service_unavailable", message: "try later" }), { status: 503 })
@@ -25,7 +26,7 @@ function fakes(doordashDown = false) {
     uber,
     doordash,
     opts: {
-      uber: { env: uberKeys, fetch: (input: RequestInfo | URL, init?: RequestInit) => uber.fetch(input as string, init), now: () => now },
+      uber: { env: keys, fetch: (input: RequestInfo | URL, init?: RequestInit) => uber.fetch(input as string, init), now: () => now },
       doordash: { env: doordashKeys, fetch: doordashFetch, now: () => now },
     },
   };
@@ -35,12 +36,12 @@ describe.skipIf(!process.env.DATABASE_URL)("courier registration at onboarding (
   let raw: PrismaClient;
   const ids: string[] = [];
 
-  async function makeStore(address: boolean) {
+  async function makeStore(address: boolean, name = "Mama Ada Market") {
     const stamp = `${Date.now().toString(36)}-${ids.length}`;
     const store = await raw.store.create({
       data: {
         slug: `courier-reg-${stamp}`,
-        name: "Mama Ada Market",
+        name,
         ...(address ? { addressLine1: "100 Main St", city: "Silver Spring", state: "MD", zip: "20910" } : {}),
       },
     });
@@ -90,5 +91,31 @@ describe.skipIf(!process.env.DATABASE_URL)("courier registration at onboarding (
 
     expect(found).toContain(unregistered);
     expect(found).not.toContain(noAddress);
+  });
+
+  it("two stores with the same name both register with Uber, which refuses a duplicate organization name", async () => {
+    const name = `Same Name Market ${Date.now().toString(36)}`;
+    const first = await makeStore(true, name);
+    const second = await makeStore(true, name);
+    const shared = fakes(false, "client-courier-reg-same-name");
+
+    await registerStoreCouriers(first, shared.opts);
+    await registerStoreCouriers(second, shared.opts);
+
+    const saved = await platform.store.findMany({ where: { id: { in: [first, second] } } });
+    expect(saved.map((s) => s.uberRegistrationError)).toEqual([null, null]);
+    expect(saved.every((s) => s.uberLocationId)).toBe(true);
+    expect(shared.uber.organizations).toHaveLength(2);
+  });
+
+  it("the retry job takes the store attempted longest ago first, so stores that always fail cannot starve the rest", async () => {
+    const failsEveryDay = await makeStore(true);
+    const neverTried = await makeStore(true);
+    await raw.store.update({ where: { id: failsEveryDay }, data: { uberRegistrationError: "409 already-exists" } });
+
+    const found = (await findStoresNeedingCourierRegistration(500)).map((s) => s.id);
+
+    expect(found.indexOf(neverTried)).toBeGreaterThanOrEqual(0);
+    expect(found.indexOf(neverTried)).toBeLessThan(found.indexOf(failsEveryDay));
   });
 });

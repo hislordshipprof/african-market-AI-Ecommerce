@@ -19,13 +19,13 @@ describe.skipIf(!hasKeys || !process.env.DATABASE_URL || process.env.COURIER_REG
       await raw.$disconnect();
     });
 
-    it("registers a new store as an Uber Direct organization and saves its id", async () => {
-      // Uber refuses a second organization with the same name under our account (409 already-exists).
+    it("registers a new store as an Uber Direct organization and saves its id, even with a name Uber already has", async () => {
+      // An organization named "Mama Ngozi African Market" already exists in the sandbox; the slug keeps ours unique.
       const stamp = Date.now().toString(36);
       storeId = (await raw.store.create({
         data: {
           slug: `courier-sandbox-${stamp}`,
-          name: `Sandbox Probe Market ${stamp}`,
+          name: "Mama Ngozi African Market",
           addressLine1: "8121 Georgia Ave",
           city: "Silver Spring",
           state: "MD",
