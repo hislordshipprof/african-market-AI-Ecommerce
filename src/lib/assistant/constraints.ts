@@ -189,8 +189,23 @@ export async function changeConstraints(
 }
 
 function words(text: string): string[] {
-  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
-    .map((word) => (word.length >= 4 && word.endsWith("s") ? word.slice(0, -1) : word));
+  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+/** A word and the singulars it could be: tomatoes → tomato, leaves → leaf, berries → berry, olives → olive. */
+function singulars(word: string): string[] {
+  if (word.length < 4) return [word];
+  const forms = [word];
+  if (word.endsWith("ies")) forms.push(`${word.slice(0, -3)}y`);
+  if (word.endsWith("ves")) forms.push(`${word.slice(0, -3)}f`, `${word.slice(0, -3)}fe`);
+  if (word.endsWith("es")) forms.push(word.slice(0, -2));
+  if (word.endsWith("s")) forms.push(word.slice(0, -1));
+  return forms;
+}
+
+function sameWord(left: string, right: string): boolean {
+  const forms = singulars(right);
+  return singulars(left).some((form) => forms.includes(form));
 }
 
 /**
@@ -201,7 +216,9 @@ function words(text: string): string[] {
 export function haveAtHomeCovers(term: string, ingredient: string): boolean {
   const said = words(term);
   const named = words(ingredient);
-  return said.length > 0 && said.at(-1) === named.at(-1) && said.every((word) => named.includes(word));
+  const last = named.at(-1);
+  return said.length > 0 && last != null && sameWord(said.at(-1)!, last)
+    && said.every((word) => named.some((other) => sameWord(word, other)));
 }
 
 /** A constraint by kind and value, so an allergen and an ingredient with the same name never share a status. */
