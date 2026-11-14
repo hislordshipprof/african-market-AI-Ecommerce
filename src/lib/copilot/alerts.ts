@@ -4,11 +4,12 @@ import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
 import { isValidTimezone } from "../order/store-hours";
 import { ASK_STORE_BELOW, stockBadge } from "../storefront/stock-badge";
+import { RUNNING_OUT_DAYS, inventoryReport, storeWeek } from "./inventory-report";
 
 /** Owner decision 2026-11-10: one store-wide threshold for counted listings. */
 export const LOW_STOCK_THRESHOLD = 5;
 
-export type AlertKind = "sold_out" | "running_low" | "order_needs_low_stock" | "confirm_request";
+export type AlertKind = "sold_out" | "running_low" | "running_out_soon" | "order_needs_low_stock" | "confirm_request";
 
 interface AlertDraft {
   kind: AlertKind;
@@ -56,6 +57,18 @@ async function writeAlerts(storeId: string, drafts: AlertDraft[]): Promise<numbe
   return written.count;
 }
 
+/** A counted listing estimated to sell out within 3 days, once per listing per store week. */
+async function runningOutSoonDrafts(storeId: string, listingIds?: string[]): Promise<AlertDraft[]> {
+  const now = new Date();
+  const report = await inventoryReport(storeId, { now, listingIds });
+  const week = storeWeek(report.timeZone, now);
+  return report.rows.flatMap((row) => (
+    row.estimate.kind === "estimate" && row.estimate.daysLeft <= RUNNING_OUT_DAYS
+      ? [{ kind: "running_out_soon" as const, listingId: row.listingId, dedupeKey: `running_out_soon:${row.listingId}:${week}` }]
+      : []
+  ));
+}
+
 /**
  * Alerts for an authorized order, read after checkout reserved its stock: sold out and
  * running low per listing per day, and one alert for the order when any line is on a
@@ -100,6 +113,8 @@ export async function createOrderStockAlerts(storeId: string, orderId: string): 
       dedupeKey: `order_needs_low_stock:${orderId}`,
     });
   }
+  const active = [...listings.values()].filter((listing) => listing.active).map((listing) => listing.id);
+  if (active.length > 0) drafts.push(...await runningOutSoonDrafts(storeId, active));
   return writeAlerts(storeId, drafts);
 }
 
@@ -144,6 +159,7 @@ export async function describeAlerts(
     const text = {
       sold_out: `${name} is sold out`,
       running_low: `${name} is running low${left}`,
+      running_out_soon: `${name} may run out within ${RUNNING_OUT_DAYS} days${left}`,
       order_needs_low_stock: `Order #${numberById.get(alert.orderId ?? "") ?? "?"} needs ${name}${left}`,
       confirm_request: `Do you still have ${name}?`,
     }[alert.kind as AlertKind] ?? name;
@@ -205,8 +221,12 @@ const STORES_PER_BATCH = 100;
 /** Same bound as the confidence batch: a step past Vercel's limit restarts from the same cursor. */
 const BATCH_BUDGET_MS = 120_000;
 
-/** One confirm-request for each active ask-store listing in the store that has no open one. */
+/**
+ * One confirm-request for each active ask-store listing in the store that has no open one,
+ * and this week's running-out-soon alerts.
+ */
 async function createStoreConfirmRequests(storeId: string): Promise<number> {
+  const runningOut = await writeAlerts(storeId, await runningOutSoonDrafts(storeId));
   const rows = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{ id: string }>>(tx, Prisma.sql`
     SELECT l.id
     FROM listings l
@@ -218,9 +238,9 @@ async function createStoreConfirmRequests(storeId: string): Promise<number> {
       )
     ORDER BY l.id
   `));
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) return runningOut;
   const day = await storeDay(storeId);
-  return writeAlerts(storeId, rows.map((row) => ({
+  return runningOut + await writeAlerts(storeId, rows.map((row) => ({
     kind: "confirm_request" as const,
     listingId: row.id,
     dedupeKey: `confirm_request:${row.id}:${day}`,
