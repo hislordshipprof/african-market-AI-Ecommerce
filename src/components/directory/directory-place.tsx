@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { groceryStoreJsonLd, jsonLdHtml } from "@/lib/directory/json-ld";
 import { StoreCard, type CardStore } from "./store-card";
@@ -17,14 +18,14 @@ export function DirectoryPlace({ crumbs, title, lede, stores, places }: {
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
-        <a href="/" className={styles.wordmark}>African Markets</a>
+        <Link href="/" className={styles.wordmark}>African Markets</Link>
       </header>
       <main className={styles.main}>
         <nav aria-label="Breadcrumb" className={styles.crumbs}>
           <ol>
             {crumbs.map((crumb) => (
               <li key={crumb.label}>
-                {crumb.href ? <a href={crumb.href}>{crumb.label}</a> : <span aria-current="page">{crumb.label}</span>}
+                {crumb.href ? <Link href={crumb.href}>{crumb.label}</Link> : <span aria-current="page">{crumb.label}</span>}
               </li>
             ))}
           </ol>
@@ -57,10 +58,10 @@ function PlaceLinks({ title, links }: { title: string; links: PlaceLink[] }): Re
       <ul className={styles.placeLinks}>
         {links.map((link) => (
           <li key={link.href}>
-            <a href={link.href} className={styles.placeLink}>
+            <Link href={link.href} className={styles.placeLink}>
               {link.name}
               <span className={styles.placeCount}>{link.count}</span>
-            </a>
+            </Link>
           </li>
         ))}
       </ul>
