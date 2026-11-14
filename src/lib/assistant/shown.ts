@@ -149,7 +149,7 @@ export function replyCountsAsEmpty(message: ShownMessage): boolean {
   });
 }
 
-const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products"]);
+const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes"]);
 const SHOWN_ID_LIMIT = 60;
 
 /**

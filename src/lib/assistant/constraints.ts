@@ -15,6 +15,8 @@ export interface ShopperConstraints {
   asked: Record<string, string>;
   /** Unknown listings the customer confirmed, one at a time, with the constraint keys unknown at that time. */
   confirmed: Array<{ listingId: string; messageId: string; at: string; needs: string[] }>;
+  /** The most the customer wants the cart's items to cost. A limit, not a need: it never changes a swap. */
+  budgetCents?: number;
 }
 
 export type ConstraintStatus = "ok" | "excluded" | "unknown";
@@ -51,6 +53,9 @@ export function parseConstraints(raw: unknown): ShopperConstraints {
         return [{ listingId: row.listingId, messageId: row.messageId, at: row.at, needs: strings(row.needs) }];
       })
       : [],
+    ...(typeof record.budgetCents === "number" && Number.isInteger(record.budgetCents) && record.budgetCents > 0
+      ? { budgetCents: record.budgetCents }
+      : {}),
   };
 }
 
@@ -127,7 +132,7 @@ export interface ConstraintChange {
 export async function changeConstraints(
   storeId: string,
   conversationId: string,
-  input: { avoidAllergens: Allergen[]; requireClaims: DietaryClaim[]; avoidIngredients: string[]; remove: string[] },
+  input: { avoidAllergens: Allergen[]; requireClaims: DietaryClaim[]; avoidIngredients: string[]; remove: string[]; budgetCents?: number },
 ): Promise<ConstraintChange> {
   const ask: ConstraintChange["ask"] = [];
   const unchecked: string[] = [];
@@ -166,6 +171,8 @@ export async function changeConstraints(
     constraints.requireClaims = constraints.requireClaims.filter((name) => !removed.has(name));
     constraints.avoidIngredients = constraints.avoidIngredients.filter((item) => !removed.has(item.term));
     constraints.preferences = constraints.preferences.filter((term) => !removed.has(term) && !answered.has(term));
+    if (input.budgetCents != null) constraints.budgetCents = input.budgetCents;
+    if (removed.has("budget")) delete constraints.budgetCents;
   });
   return { constraints, ask, cannotCheck: unchecked };
 }

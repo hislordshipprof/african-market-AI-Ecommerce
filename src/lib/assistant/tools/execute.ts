@@ -81,6 +81,7 @@ const MESSAGES: Record<string, string> = {
   excluded: "That item does not meet the customer's needs.",
   cannot_confirm: "I can't confirm that item meets the customer's needs.",
   unchecked_swap: "The store's own swap does not check the customer's needs. Name a substitute that meets them, or Exact item only for a refund.",
+  over_budget: "Adding this would take the cart's items over the customer's budget.",
 };
 
 function fail(code: string): ToolFailure {
@@ -233,6 +234,7 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     requireClaims: parsed.require_claims,
     avoidIngredients: parsed.avoid_ingredients,
     remove: parsed.remove,
+    budgetCents: parsed.budget_cents,
   });
   const output = {
     ok: true as const,
@@ -240,6 +242,7 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     requireClaims: saved.requireClaims,
     avoidIngredients: saved.avoidIngredients.map((item) => item.term),
     preferences: saved.preferences,
+    ...(saved.budgetCents != null ? { budgetCents: saved.budgetCents } : {}),
     ...(ask.length > 0 ? { ask } : {}),
     ...(cannotCheck.length > 0 ? { cannotCheck } : {}),
   };
@@ -342,13 +345,16 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
   return refused;
 }
 
+// Enough local names to explain an item without filling the model's context.
+const ALSO_CALLED_LIMIT = 8;
+
 export async function showProducts(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(showProductsInput, input);
   const scoped = storeScoped(ctx.storeId);
   const listings = await scoped.listing.findMany({
     where: { id: { in: parsed.listing_ids } },
     include: {
-      masterProduct: true,
+      masterProduct: { include: { synonyms: { select: { term: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: ALSO_CALLED_LIMIT } } },
       variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
     },
   });
@@ -385,6 +391,8 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
       badge: stockBadge(factsOf(listing)),
       mayBeUnavailable: mayBeUnavailable(listing),
       ...needsOf(verdicts, listing.id),
+      ...(listing.masterProduct?.description ? { about: listing.masterProduct.description } : {}),
+      ...(listing.masterProduct?.synonyms.length ? { alsoCalled: listing.masterProduct.synonyms.map((row) => row.term) } : {}),
     });
   }
   return recordRead(ctx, "show_products", parsed, { ok: true, cards, notFound, ...(excluded.length > 0 ? { excluded } : {}) });
@@ -442,13 +450,17 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
     take: 40,
   });
   const verdicts = await verdictsFor(ctx, candidates.map((candidate) => candidate.id));
-  const items = candidates.filter((candidate) => !isExcluded(verdicts, candidate.id)).slice(0, 5).map((candidate) => ({
-    listingId: candidate.id,
-    name: candidate.customName || candidate.masterProduct?.name || "Unnamed",
-    priceCents: candidate.variants[0]?.price ?? candidate.price,
-    mayBeUnavailable: mayBeUnavailable(candidate),
-    ...needsOf(verdicts, candidate.id),
-  }));
+  // A swap that may itself be out is no swap, and one with no variant cannot be kept as a substitute.
+  const items = candidates.filter((candidate) => !isExcluded(verdicts, candidate.id) && !mayBeUnavailable(candidate) && candidate.variants[0])
+    .slice(0, 5).map((candidate) => ({
+      listingId: candidate.id,
+      name: candidate.customName || candidate.masterProduct?.name || "Unnamed",
+      variantId: candidate.variants[0].id,
+      packLabel: candidate.variants[0].label,
+      priceCents: candidate.variants[0].price,
+      mayBeUnavailable: false,
+      ...needsOf(verdicts, candidate.id),
+    }));
   return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items });
 }
 
@@ -795,10 +807,19 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
     [...new Set(allowed.flatMap((item) => (item.backup_variant_id ? listingOf.get(item.backup_variant_id) ?? [] : [])))],
   );
   const backupRefused = (id: string | undefined) => !!id && backups.has(listingOf.get(id) ?? "");
-  const constrained = hasConstraints(await readConstraints(ctx.storeId, ctx.conversationId));
+  const saved = await readConstraints(ctx.storeId, ctx.conversationId);
+  const constrained = hasConstraints(saved);
   return recordWrite(ctx, "add_to_cart", raw, async (tx) => {
     const items = [];
+    let subtotal = (await readCartMoney(tx, ctx.cartId)).totals.subtotalCents;
     for (const item of allowed) {
+      if (saved.budgetCents != null) {
+        const variant = await tx.listingVariant.findUnique({ where: { id: item.variant_id }, select: { price: true } });
+        if (variant && subtotal + variant.price * item.qty > saved.budgetCents) {
+          items.push({ ...fail("over_budget"), variantId: item.variant_id, budgetCents: saved.budgetCents, subtotalCents: subtotal });
+          continue;
+        }
+      }
       const applied = await applyAddLine(tx, ctx.storeId, ctx.cartId, item.variant_id, item.qty, {
         source: "ai",
         clampToMax: true,
@@ -808,6 +829,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         items.push(fail(applied.code));
         continue;
       }
+      subtotal += applied.variant.price * applied.added;
       const flagged = mayBeUnavailable(applied.listing);
       let swapRule = applied.swapRule;
       let substituteVariantId: string | null = null;
@@ -865,6 +887,11 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
     }
     const decision = decideLineQty(parsed.qty, line.variant.listing.maxPerOrder);
     if (!decision.ok) return fail("max_per_order");
+    const { budgetCents } = await readConstraints(ctx.storeId, ctx.conversationId);
+    if (budgetCents != null && parsed.qty > line.qty) {
+      const { subtotalCents } = (await readCartMoney(tx, ctx.cartId)).totals;
+      if (subtotalCents + line.variant.price * (parsed.qty - line.qty) > budgetCents) return { ...fail("over_budget"), budgetCents, subtotalCents };
+    }
     await tx.cartLine.update({ where: { id: line.id }, data: { qty: parsed.qty } });
     const money = await readCartMoney(tx, ctx.cartId);
     const fresh = money.lines.find((row) => row.id === line.id);
