@@ -76,7 +76,7 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
           </Link>
         </nav>
         <a
-          href={`/admin/billing/ledger/export?month=${monthKey}`}
+          href={`/api/admin/billing/ledger/export?month=${monthKey}`}
           download
           className={`inline-flex min-h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 ${FOCUS}`}
         >

@@ -74,7 +74,7 @@ test.describe("platform fee ledger", () => {
   test("is for platform admins only", async ({ page, request }) => {
     await page.goto(`/admin/billing/ledger?month=${MONTH}`);
     await expect(page).toHaveURL(/\/admin\/sign-in/);
-    const csv = await request.get(`/admin/billing/ledger/export?month=${MONTH}`);
+    const csv = await request.get(`/api/admin/billing/ledger/export?month=${MONTH}`);
     expect(csv.status()).toBe(401);
   });
 

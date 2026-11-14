@@ -7,7 +7,7 @@ vi.mock("@/lib/admin/session", () => ({ platformAdminApiDenial: () => denial() }
 import { GET } from "./route";
 
 const hasDb = !!process.env.DATABASE_URL;
-const get = (query: string) => GET(new Request(`http://admin.example.com/admin/billing/ledger/export${query}`));
+const get = (query: string) => GET(new Request(`http://admin.example.com/api/admin/billing/ledger/export${query}`));
 
 describe.skipIf(!hasDb)("fee ledger CSV export route (lane DB)", () => {
   beforeEach(() => {
