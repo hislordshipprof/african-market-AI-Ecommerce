@@ -90,6 +90,7 @@ test.describe("Master catalog products", () => {
     await expect(page.getByText("Enter the weight in whole grams")).toBeVisible();
     await expect(page.getByLabel("Weight (grams)")).toHaveValue("12.5");
     await expect(page.getByLabel("Weight (grams)")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByLabel("Weight (grams)")).toBeFocused();
 
     await page.getByLabel("Name").fill(`${RUN} Pounded yam flour`);
     await page.getByLabel("Weight (grams)").fill("1814");

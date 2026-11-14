@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useTransition, type FormEvent } from "react";
+import { useActionState, useEffect, useRef, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveMasterProduct, type MasterProductEditor, type SaveState } from "@/lib/admin/master-catalog";
 import { MASTER_STATUSES, MASTER_STATUS_LABELS, STORAGE_OPTIONS, type MasterProductField } from "@/lib/admin/master-catalog-form";
@@ -13,9 +13,11 @@ export function ProductForm({ product, categories }: Pick<MasterProductEditor, "
   const router = useRouter();
   const [state, action, saving] = useActionState<SaveState, FormData>(saveMasterProduct, {});
   const [, startTransition] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (state.ok) router.refresh();
+    else formRef.current?.querySelector<HTMLElement>("[aria-invalid='true']")?.focus();
   }, [state, router]);
 
   // Submitting through a transition keeps what the admin typed when a field is refused.
@@ -29,7 +31,7 @@ export function ProductForm({ product, categories }: Pick<MasterProductEditor, "
   const described = (field: MasterProductField) => (error(field) ? { "aria-invalid": true, "aria-describedby": `${field}-error` } : {});
 
   return (
-    <form onSubmit={submit} noValidate className="mt-4 grid gap-4">
+    <form ref={formRef} onSubmit={submit} noValidate autoComplete="off" className="mt-4 grid gap-4">
       <input type="hidden" name="productId" value={product.id} />
 
       <Field id="name" label="Name" error={error("name")}>

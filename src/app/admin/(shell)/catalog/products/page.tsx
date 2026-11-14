@@ -43,7 +43,7 @@ export default async function MasterProductsPage(props: { searchParams: Promise<
       <form method="get" action="/admin/catalog/products" role="search" aria-label="Products" className="mt-6 grid gap-3 rounded-xl border border-border bg-card p-4 sm:p-5">
         <div className="grid gap-1.5">
           <label htmlFor="q" className="text-sm font-medium text-foreground">Search</label>
-          <input id="q" name="q" type="search" defaultValue={filters.q ?? ""} maxLength={200} placeholder="Name or local name" className={FIELD} />
+          <input id="q" name="q" type="search" defaultValue={filters.q ?? ""} maxLength={200} placeholder="Egusi, gari, palm oil…" autoComplete="off" spellCheck={false} className={FIELD} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <FilterSelect id="category" label="Category" value={filters.category} options={categories.map((c) => ({ value: c.id, label: c.name }))} />
