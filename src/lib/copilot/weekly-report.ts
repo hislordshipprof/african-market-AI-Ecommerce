@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { resolveAuthBaseUrl } from "../auth";
 import { CANCEL_REASON_LABELS, customersView, operationsView, productsView, salesRows, salesView } from "../analytics/queries";
 import type { AnalyticsRange } from "../analytics/range";
@@ -208,9 +209,10 @@ type ReportStore = { id: string; name: string; slug: string; timezone: string; d
 const STORE_SELECT = { id: true, name: true, slug: true, timezone: true, digestHour: true } as const;
 
 /**
- * Makes the week's row with its figures, claims it, emails each owner, and marks it sent. A failed send
- * releases the claim and throws; the figures stay, so the retry sends the same body under the same keys.
- * A retry of the same run (same `now`) retakes a claim left by a crash; the per-owner keys stop a second email.
+ * Makes the week's row with its figures, claims it, emails each owner not yet delivered to, and marks it sent.
+ * Each delivery is recorded as it succeeds; a failed send releases the claim and throws, and the retry sends
+ * only to the rest. A retry of the same run (same `now`) retakes a claim left by a crash.
+ * The key carries a hash of the message, so a store renamed between tries never reuses a key with a new body.
  */
 async function sendStoreReport(store: ReportStore, timeZone: string, now: Date, env: Record<string, string | undefined>): Promise<boolean> {
   const owners = await storeScoped(store.id).storeMembership.findMany({
@@ -244,17 +246,24 @@ async function sendStoreReport(store: ReportStore, timeZone: string, now: Date, 
   if (claim.count === 0) return false;
 
   try {
-    const row = await storeScopedTransaction(store.id, (tx) => tx.copilotWeeklyReport.findUniqueOrThrow({ where: key, select: { figures: true } }));
+    const row = await storeScopedTransaction(store.id, (tx) => tx.copilotWeeklyReport.findUniqueOrThrow({
+      where: key,
+      select: { figures: true, deliveredTo: true },
+    }));
     const figures = row.figures as unknown as WeeklyFigures;
     const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
+    const subject = `${store.name}: your week, ${weekLabel(figures)}`;
     const html = renderReport(store.name, figures, `${base}/store-admin/copilot?store=${encodeURIComponent(store.slug)}`);
+    const delivered = new Set(row.deliveredTo);
     for (const owner of owners) {
-      await sendEmail({
-        to: owner.user.email,
-        subject: `${store.name}: your week, ${weekLabel(figures)}`,
-        html,
-        idempotencyKey: `copilot-weekly:${store.id}:${week.isoWeek}:${owner.user.id}`,
-      });
+      if (delivered.has(owner.user.id)) continue;
+      const message = { to: owner.user.email, subject, html };
+      const hash = createHash("sha256").update(JSON.stringify(message)).digest("hex").slice(0, 16);
+      await sendEmail({ ...message, idempotencyKey: `copilot-weekly:${store.id}:${week.isoWeek}:${owner.user.id}:${hash}` });
+      await storeScopedTransaction(store.id, (tx) => tx.copilotWeeklyReport.update({
+        where: key,
+        data: { deliveredTo: { push: owner.user.id } },
+      }));
     }
     await storeScopedTransaction(store.id, (tx) => tx.copilotWeeklyReport.update({ where: key, data: { sentAt: new Date() } }));
     return true;

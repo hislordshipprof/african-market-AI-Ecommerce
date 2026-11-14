@@ -216,32 +216,83 @@ describe.skipIf(!hasDb)("copilot weekly report (lane database)", () => {
     expect(email.html).not.toContain("$999.00");
   });
 
-  it("a failed send releases the claim; the next run sends the same body to every owner once", async () => {
-    vi.stubEnv("RESEND_API_KEY", "re_test");
-    const storeC = (await raw.store.create({ data: { slug: `weekly-c-${RUN}`, name: "Weekly C", timezone: TZ, digestHour: 8 } })).id;
-    const ownersC = [`weekly-ownerc1-${RUN}`, `weekly-ownerc2-${RUN}`];
-    await raw.user.createMany({ data: ownersC.map((id) => ({ id, name: id, email: `${id}@example.com` })) });
-    await storeScoped(storeC).storeMembership.createMany({ data: ownersC.map((userId) => ({ storeId: storeC, userId, role: "owner" })) });
+  /** A Chicago store due at 8 with two owners, and a sender whose second owner's sends fail until `failing` is cleared. */
+  async function twoOwnerStore(tag: string, name: string, lostResponse = false) {
+    const storeId = (await raw.store.create({ data: { slug: `weekly-${tag}-${RUN}`, name, timezone: TZ, digestHour: 8 } })).id;
+    const ids = [`weekly-owner${tag}1-${RUN}`, `weekly-owner${tag}2-${RUN}`];
+    await raw.user.createMany({ data: ids.map((id) => ({ id, name: id, email: `${id}@example.com` })) });
+    await storeScoped(storeId).storeMembership.createMany({ data: ids.map((userId) => ({ storeId, userId, role: "owner" })) });
     const real = new TestSender();
-    let failing = true;
+    const state = { failing: true, providerCalls: [] as string[] };
     setEmailSenderForTests({
       async send(message) {
-        if (failing && message.to === `${ownersC[1]}@example.com`) throw new Error("Resend API error 503");
+        state.providerCalls.push(message.to);
+        if (state.failing && message.to === `${ids[1]}@example.com`) {
+          // A lost response: the provider took the email but the call still failed.
+          if (lostResponse) await real.send(message);
+          throw new Error("Resend API error 503");
+        }
         return real.send(message);
       },
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
+    const callsTo = (userId: string) => state.providerCalls.filter((to) => to === `${userId}@example.com`).length;
+    return { storeId, ids, state, callsTo };
+  }
+
+  it("a failed send releases the claim; the next run sends the same body to every owner once", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    const { storeId: storeC, ids: ownersC, state, callsTo } = await twoOwnerStore("c", "Weekly C");
 
     await expect(weeklyHandler({ step: makeFakeStep() })).rejects.toThrow(/still failing for 1 store/);
     const [held] = await reportRows(storeC);
     expect(held).toMatchObject({ claimedAt: null, sentAt: null });
     expect(sentTo(ownersC[1]!)).toHaveLength(0);
 
-    failing = false;
+    state.failing = false;
     await weeklyHandler({ step: makeFakeStep() });
     for (const owner of ownersC) expect(sentTo(owner)).toHaveLength(1);
     expect(sentTo(ownersC[1]!)[0]!.html).toBe(sentTo(ownersC[0]!)[0]!.html);
     expect((await reportRows(storeC))[0]!.sentAt).not.toBeNull();
+    // The owner who already had it is not sent to again, so a retry past the provider's 24-hour key window cannot double it.
+    expect(callsTo(ownersC[0]!)).toBe(1);
+  });
+
+  it("after a partial send, a store rename before the retry: the remaining owner gets the report once, the first owner nothing new", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    const { storeId, ids, state, callsTo } = await twoOwnerStore("rename", "Weekly Rename");
+
+    await expect(weeklyHandler({ step: makeFakeStep() })).rejects.toThrow(/still failing for 1 store/);
+    expect(sentTo(ids[0]!)).toHaveLength(1);
+
+    state.failing = false;
+    await raw.store.update({ where: { id: storeId }, data: { name: "Weekly Rename renamed" } });
+    await weeklyHandler({ step: makeFakeStep() });
+
+    expect(sentTo(ids[0]!)).toHaveLength(1);
+    expect(callsTo(ids[0]!)).toBe(1);
+    expect(sentTo(ids[1]!)).toHaveLength(1);
+    expect(sentTo(ids[1]!)[0]!.subject).toBe("Weekly Rename renamed: your week, Nov 9 to Nov 15");
+    expect((await reportRows(storeId))[0]!.sentAt).not.toBeNull();
+  });
+
+  it("a send the provider took but whose response was lost, then a rename: the retry still delivers the renamed report", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    const { storeId, ids, state } = await twoOwnerStore("lost", "Weekly Lost", true);
+
+    await expect(weeklyHandler({ step: makeFakeStep() })).rejects.toThrow(/still failing for 1 store/);
+    expect(sentTo(ids[1]!)).toHaveLength(1);
+
+    state.failing = false;
+    await raw.store.update({ where: { id: storeId }, data: { name: "Weekly Lost renamed" } });
+    await weeklyHandler({ step: makeFakeStep() });
+
+    expect(sentTo(ids[1]!).map((email) => email.subject)).toEqual([
+      "Weekly Lost: your week, Nov 9 to Nov 15",
+      "Weekly Lost renamed: your week, Nov 9 to Nov 15",
+    ]);
+    expect(sentTo(ids[0]!)).toHaveLength(1);
+    expect((await reportRows(storeId))[0]!.sentAt).not.toBeNull();
   });
 
   it("a claim another run holds is not sent again", async () => {
