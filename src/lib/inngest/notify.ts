@@ -87,6 +87,22 @@ export function scheduleCourierDispatch(storeId: string, orderId: string): void 
   );
 }
 
+/** Packing started on a courier order (#562): book its courier for the ready time. */
+export function scheduleCourierPacking(storeId: string, orderId: string): void {
+  scheduleAfterResponse(
+    () => sendLogged(orderId, { id: `courier-order-packing-${orderId}`, name: "courier/order.packing", data: { storeId, orderId } }),
+    "inngest_send_failed",
+  );
+}
+
+/** A courier order was cancelled: cancel its courier. The assignment timer is the backstop if this send is lost. */
+export function scheduleCourierCancel(storeId: string, orderId: string): void {
+  scheduleAfterResponse(
+    () => sendLogged(orderId, { id: `courier-order-cancelled-${orderId}`, name: "courier/order.cancelled", data: { storeId, orderId } }),
+    "inngest_send_failed",
+  );
+}
+
 export function scheduleOrderNotification(storeId: string, orderId: string, event: OrderNotifyEvent, round?: string): void {
   scheduleAfterResponse(
     () => sendOrderNotification(storeId, orderId, event, round),
