@@ -7,62 +7,62 @@ datasource db {
 }
 
 model Store {
-  id                     String   @id @default(cuid())
-  slug                   String   @unique
-  name                   String
-  customDomain           String?  @unique @map("custom_domain")
-  logoUrl                String?  @map("logo_url")
-  brandColor             String?  @map("brand_color")
-  themePreset            String   @default("palm-and-shea") @map("theme_preset")
-  status                 String   @default("active")
-  hours                  Json?
-  timezone               String   @default("America/New_York")
-  prepTimeMinutes        Int      @default(30) @map("prep_time_minutes")
-  deliveryRadiusMi       Decimal  @default(8) @map("delivery_radius_mi")
-  storeDeliveryEnabled   Boolean  @default(false) @map("store_delivery_enabled")
-  storeDeliveryFeeCents  Int      @default(0) @map("store_delivery_fee_cents")
+  id                        String   @id @default(cuid())
+  slug                      String   @unique
+  name                      String
+  customDomain              String?  @unique @map("custom_domain")
+  logoUrl                   String?  @map("logo_url")
+  brandColor                String?  @map("brand_color")
+  themePreset               String   @default("palm-and-shea") @map("theme_preset")
+  status                    String   @default("active")
+  hours                     Json?
+  timezone                  String   @default("America/New_York")
+  prepTimeMinutes           Int      @default(30) @map("prep_time_minutes")
+  deliveryRadiusMi          Decimal  @default(8) @map("delivery_radius_mi")
+  storeDeliveryEnabled      Boolean  @default(false) @map("store_delivery_enabled")
+  storeDeliveryFeeCents     Int      @default(0) @map("store_delivery_fee_cents")
   /// Scheduled slot settings per fulfillment (#565); shape in src/lib/order/slot-schedule.ts.
-  pickupSlotSettings        Json? @map("pickup_slot_settings")
-  storeDeliverySlotSettings Json? @map("store_delivery_slot_settings")
-  addressLine1           String?  @map("address_line1")
-  addressLine2           String?  @map("address_line2")
-  city                   String?
-  state                  String?
-  zip                    String?
+  pickupSlotSettings        Json?    @map("pickup_slot_settings")
+  storeDeliverySlotSettings Json?    @map("store_delivery_slot_settings")
+  addressLine1              String?  @map("address_line1")
+  addressLine2              String?  @map("address_line2")
+  city                      String?
+  state                     String?
+  zip                       String?
   /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
-  phone                  String?
-  lat                    Float?
-  lng                    Float?
-  minimumOrderCents      Int      @default(3500) @map("minimum_order_cents")
-  pickupEnabled          Boolean  @default(false) @map("pickup_enabled")
-  autoAcceptOrders       Boolean  @default(false) @map("auto_accept_orders")
-  autoRefundLimitCents   Int      @default(2500) @map("auto_refund_limit_cents")
-  supportSlaMinutes      Int      @default(30) @map("support_sla_minutes")
-  digestHour             Int      @default(20) @map("digest_hour")
+  phone                     String?
+  lat                       Float?
+  lng                       Float?
+  minimumOrderCents         Int      @default(3500) @map("minimum_order_cents")
+  pickupEnabled             Boolean  @default(false) @map("pickup_enabled")
+  autoAcceptOrders          Boolean  @default(false) @map("auto_accept_orders")
+  autoRefundLimitCents      Int      @default(2500) @map("auto_refund_limit_cents")
+  supportSlaMinutes         Int      @default(30) @map("support_sla_minutes")
+  digestHour                Int      @default(20) @map("digest_hour")
   /// Reorder suggestions (#551): days from order to shelf, and days the order should last after that.
-  reorderLeadDays        Int      @default(7) @map("reorder_lead_days")
-  reorderCoverDays       Int      @default(14) @map("reorder_cover_days")
-  stripeAccountId        String?  @unique @map("stripe_account_id")
-  stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
+  reorderLeadDays           Int      @default(7) @map("reorder_lead_days")
+  reorderCoverDays          Int      @default(14) @map("reorder_cover_days")
+  stripeAccountId           String?  @unique @map("stripe_account_id")
+  stripeOnboardingStatus    String   @default("not_started") @map("stripe_onboarding_status")
   /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
-  doordashStoreId        String?  @unique @map("doordash_store_id")
+  doordashStoreId           String?  @unique @map("doordash_store_id")
   /// Uber Direct organization id, set once the platform registers the store (#139).
-  uberLocationId         String?  @unique @map("uber_location_id")
+  uberLocationId            String?  @unique @map("uber_location_id")
   /// Why the last Uber Direct registration failed; set means the store needs a retry (#139).
-  uberRegistrationError  String?  @map("uber_registration_error")
+  uberRegistrationError     String?  @map("uber_registration_error")
   /// Why the last DoorDash Drive registration failed; set means the store needs a retry (#526).
-  doordashRegistrationError String? @map("doordash_registration_error")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  doordashRegistrationError String?  @map("doordash_registration_error")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
 
-  ownerName     String? @map("owner_name")
-  ownerStory    String? @map("owner_story")
-  ownerPhotoUrl String? @map("owner_photo_url")
+  ownerName     String?  @map("owner_name")
+  ownerStory    String?  @map("owner_story")
+  ownerPhotoUrl String?  @map("owner_photo_url")
   neighborhood  String?
-  deliveryInfo  String? @map("delivery_info")
+  deliveryInfo  String?  @map("delivery_info")
   /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on; a platform admin can override (#450).
-  listed        Boolean @default(false)
-  listingBlurb  String? @map("listing_blurb") @db.VarChar(160)
+  listed        Boolean  @default(false)
+  listingBlurb  String?  @map("listing_blurb") @db.VarChar(160)
   /// Up to 3 directory cuisine tags (src/lib/directory/cuisine.ts, #450).
   cuisineTags   String[] @default([]) @map("cuisine_tags")
 
@@ -797,10 +797,10 @@ model ReorderList {
 
 /// One line of a reorder list. A null quantity is a status listing marked "reorder (no count)".
 model ReorderListItem {
-  id        String  @id @default(cuid())
-  listId    String  @map("list_id")
-  storeId   String  @map("store_id")
-  listingId String  @map("listing_id")
+  id        String @id @default(cuid())
+  listId    String @map("list_id")
+  storeId   String @map("store_id")
+  listingId String @map("listing_id")
   name      String
   quantity  Int?
   position  Int
@@ -916,31 +916,31 @@ model StoreCollectionListing {
 }
 
 model Cart {
-  id                  String    @id @default(cuid())
-  storeId             String    @map("store_id")
-  userId              String?   @map("user_id")
-  customerId          String?   @map("customer_id")
-  paymentIntentId     String?   @unique @map("payment_intent_id")
-  paymentAttemptToken String?   @map("payment_attempt_token")
-  purchaseEpoch       Int       @default(0) @map("purchase_epoch")
-  deliveryLine1       String?   @map("delivery_line1")
-  deliveryLine2       String?   @map("delivery_line2")
-  deliveryCity        String?   @map("delivery_city")
-  deliveryState       String?   @map("delivery_state")
-  deliveryZip         String?   @map("delivery_zip")
-  deliveryLat         Float?    @map("delivery_lat")
-  deliveryLng         Float?    @map("delivery_lng")
-  leaveAtDoor         Boolean   @default(false) @map("leave_at_door")
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  userId                String?   @map("user_id")
+  customerId            String?   @map("customer_id")
+  paymentIntentId       String?   @unique @map("payment_intent_id")
+  paymentAttemptToken   String?   @map("payment_attempt_token")
+  purchaseEpoch         Int       @default(0) @map("purchase_epoch")
+  deliveryLine1         String?   @map("delivery_line1")
+  deliveryLine2         String?   @map("delivery_line2")
+  deliveryCity          String?   @map("delivery_city")
+  deliveryState         String?   @map("delivery_state")
+  deliveryZip           String?   @map("delivery_zip")
+  deliveryLat           Float?    @map("delivery_lat")
+  deliveryLng           Float?    @map("delivery_lng")
+  leaveAtDoor           Boolean   @default(false) @map("leave_at_door")
   /// The cheapest courier quote last shown at checkout (#527), for the basket and address in courierQuoteKey.
   courierFeeCents       Int?      @map("courier_fee_cents")
   courierProvider       String?   @map("courier_provider")
   courierQuoteKey       String?   @map("courier_quote_key")
   courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
-  source              String    @default("manual")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  source                String    @default("manual")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
   /// Last time the orphan-hold sweep found this cart's intent not held; cleared when the shopper reopens payment.
-  orphanCheckedAt     DateTime? @map("orphan_checked_at")
+  orphanCheckedAt       DateTime? @map("orphan_checked_at")
 
   store                 Store                  @relation(fields: [storeId], references: [id])
   user                  User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -1257,26 +1257,30 @@ model Order {
   @@index([storeId, sourceCartId, createdAt])
   @@index([storeId, createdAt])
   @@index([customerId])
+  @@index([readyAt])
+  @@index([cancelledAt])
   @@map("orders")
 }
 
 /// One refund the app asked Stripe for. Stripe owns the outcome; this row owns the request.
 model RefundRequest {
-  id                   String   @id @default(cuid())
-  storeId              String   @map("store_id")
-  orderId              String   @map("order_id")
-  paymentIntentId      String   @map("payment_intent_id")
-  key                  String   @unique
-  amountCents          Int      @map("amount_cents")
-  refundApplicationFee Boolean  @map("refund_application_fee")
+  id                   String    @id @default(cuid())
+  storeId              String    @map("store_id")
+  orderId              String    @map("order_id")
+  paymentIntentId      String    @map("payment_intent_id")
+  key                  String    @unique
+  amountCents          Int       @map("amount_cents")
+  refundApplicationFee Boolean   @map("refund_application_fee")
   state                String
-  providerRefundId     String?  @map("provider_refund_id")
-  providerStatus       String?  @map("provider_status")
+  providerRefundId     String?   @map("provider_refund_id")
+  providerStatus       String?   @map("provider_status")
   /// #495: on a courier issue refund, the service fee part the platform returns from its application fee.
-  serviceFeeShareCents Int      @default(0) @map("service_fee_share_cents")
-  feeRefundId          String?  @map("fee_refund_id")
-  createdAt            DateTime @default(now()) @map("created_at")
-  lastCheckedAt        DateTime @default(now()) @map("last_checked_at")
+  serviceFeeShareCents Int       @default(0) @map("service_fee_share_cents")
+  feeRefundId          String?   @map("fee_refund_id")
+  /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
+  succeededAt          DateTime? @map("succeeded_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  lastCheckedAt        DateTime  @default(now()) @map("last_checked_at")
 
   store Store @relation(fields: [storeId], references: [id])
   order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
@@ -1284,6 +1288,7 @@ model RefundRequest {
   @@index([storeId])
   @@index([orderId])
   @@index([storeId, state])
+  @@index([succeededAt])
   @@map("refund_requests")
 }
 
@@ -1339,22 +1344,22 @@ model NotificationLog {
 /// One store-delivery step: out_for_delivery or delivered.
 /// One courier booking for an order (DoorDash Drive or Uber Direct). Fees are the provider's quote, no markup (ADR-0006).
 model Delivery {
-  id             String   @id @default(cuid())
-  storeId        String   @map("store_id")
-  orderId        String   @map("order_id")
+  id             String    @id @default(cuid())
+  storeId        String    @map("store_id")
+  orderId        String    @map("order_id")
   provider       String
-  externalId     String   @map("external_id")
+  externalId     String    @map("external_id")
   status         String
-  quoteFeeCents  Int      @map("quote_fee_cents")
-  actualFeeCents Int?     @map("actual_fee_cents")
-  trackingUrl    String?  @map("tracking_url")
-  courierJson    Json?    @map("courier_json")
-  proofUrl       String?  @map("proof_url")
+  quoteFeeCents  Int       @map("quote_fee_cents")
+  actualFeeCents Int?      @map("actual_fee_cents")
+  trackingUrl    String?   @map("tracking_url")
+  courierJson    Json?     @map("courier_json")
+  proofUrl       String?   @map("proof_url")
   pin            String?
   /// The ready time sent to the provider (#562); null books the courier as soon as possible.
   pickupReadyAt  DateTime? @map("pickup_ready_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   store  Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
   order  Order           @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
