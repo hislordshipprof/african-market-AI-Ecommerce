@@ -45,13 +45,14 @@ test.describe("Master catalog products", () => {
       ids.category = category.id;
       ids.yam = (await tx.masterProduct.create({ data: { name: `${RUN} Pounded yam`, categoryId: category.id, status: "active", unit: "bag" } })).id;
       ids.kola = (await tx.masterProduct.create({ data: { name: `${RUN} Kola nut`, status: "archived" } })).id;
+      ids.egusi = (await tx.masterProduct.create({ data: { name: `${RUN} Egusi`, categoryId: category.id, status: "active" } })).id;
     });
   });
 
   test.afterAll(async () => {
     await asAdmin(async (tx) => {
-      await tx.auditLog.deleteMany({ where: { entityId: { in: [ids.yam, ids.kola] } } });
-      await tx.masterProduct.deleteMany({ where: { id: { in: [ids.yam, ids.kola] } } });
+      await tx.auditLog.deleteMany({ where: { entityId: { in: [ids.yam, ids.kola, ids.egusi] } } });
+      await tx.masterProduct.deleteMany({ where: { id: { in: [ids.yam, ids.kola, ids.egusi] } } });
     });
   });
 
@@ -115,6 +116,30 @@ test.describe("Master catalog products", () => {
       { name: `${RUN} Pounded yam flour`, weightG: 1814, perishable: true, storage: "ambient" },
       { status: "archived" },
     ]);
+  });
+
+  test("an editor opened before another admin's save is refused and keeps what the admin typed", async ({ page, context }) => {
+    await adminSignIn(page);
+    const other = await context.newPage();
+    await page.goto(`/admin/catalog/products/${ids.egusi}`);
+    await other.goto(`/admin/catalog/products/${ids.egusi}`);
+
+    // Two saves in a row from one editor, without a reload.
+    await page.getByLabel("Unit").fill("tin");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await page.getByLabel("Weight (grams)").fill("400");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await expect.poll(async () => (await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: ids.egusi } }))).weightG).toBe(400);
+
+    await other.getByLabel("Description").fill("Stale description");
+    await other.getByRole("button", { name: "Save changes" }).click();
+    await expect(other.getByRole("status").filter({ hasText: "Someone else changed this product after you opened it" })).toBeVisible();
+    await expect(other.getByLabel("Description")).toHaveValue("Stale description");
+
+    const product = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: ids.egusi } }));
+    expect(product).toMatchObject({ unit: "tin", weightG: 400, description: null });
   });
 
   test("an SVG photo is refused by its bytes", async ({ page }) => {

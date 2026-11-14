@@ -217,6 +217,8 @@ describe("master catalog (real sessions, lane DB)", () => {
     return form;
   }
 
+  /** The version the editor would load the product with now. */
+  const versionOf = async (id: string) => (await getMasterProductEditor(id))?.product.version;
   const readProduct = (id: string) => asPlatformAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id } }));
   const editAudits = (id: string) =>
     asPlatformAdmin((tx) => tx.auditLog.findMany({ where: { entityId: id, action: "catalog.product_edit" }, orderBy: { createdAt: "asc" } }));
@@ -235,6 +237,7 @@ describe("master catalog (real sessions, lane DB)", () => {
     it("saves every field and writes one audit row with the before and after values", async () => {
       const id = products["Palm oil"];
       const saved = await saveMasterProduct({}, editorForm(id, {
+        version: await versionOf(id),
         name: `${RUN} Palm oil red`,
         categoryId: categoryA,
         subcategory: "Oils",
@@ -245,7 +248,7 @@ describe("master catalog (real sessions, lane DB)", () => {
         perishable: "on",
         storage: "chilled",
       }));
-      expect(saved).toEqual({ ok: true, message: "Saved" });
+      expect(saved).toMatchObject({ ok: true, message: "Saved" });
 
       expect(await readProduct(id)).toMatchObject({
         name: `${RUN} Palm oil red`,
@@ -273,7 +276,8 @@ describe("master catalog (real sessions, lane DB)", () => {
     });
 
     it("revalidates the storefront of every store that lists the product, and no other store", async () => {
-      await saveMasterProduct({}, editorForm(products["Palm oil"], { description: "Revalidate me" }));
+      const id = products["Palm oil"];
+      await saveMasterProduct({}, editorForm(id, { version: await versionOf(id), description: "Revalidate me" }));
       expect(revalidated).toContain(`storefront:${storeA}`);
       expect(revalidated).not.toContain(`storefront:${storeB}`);
     });
@@ -281,13 +285,15 @@ describe("master catalog (real sessions, lane DB)", () => {
     it("refuses invalid fields with a message per field and writes nothing", async () => {
       const id = products["Garri white"];
       const before = await readProduct(id);
+      const version = await versionOf(id);
       const refused = await saveMasterProduct({}, editorForm(id, {
+        version,
         name: "   ", weightG: "12.5", storage: "fridge", status: "deleted", categoryId: "no-such-category",
       }));
       expect(refused.ok).toBeFalsy();
       expect(Object.keys(refused.fieldErrors ?? {}).sort()).toEqual(["name", "status", "storage", "weightG"]);
 
-      const badCategory = await saveMasterProduct({}, editorForm(id, { name: `${RUN} Garri white`, categoryId: "no-such-category" }));
+      const badCategory = await saveMasterProduct({}, editorForm(id, { version, name: `${RUN} Garri white`, categoryId: "no-such-category" }));
       expect(badCategory.fieldErrors?.categoryId).toBeTruthy();
       expect(await readProduct(id)).toEqual(before);
       expect(await editAudits(id)).toHaveLength(0);
@@ -308,7 +314,7 @@ describe("master catalog (real sessions, lane DB)", () => {
     it("removes the product from CSV, AI and manual match candidates while its listings keep selling unchanged", async () => {
       const id = products["Palm oil"];
       // The form as the editor shows it after the save above, with only the status changed.
-      await saveMasterProduct({}, editorForm(id, { description: "Revalidate me" }));
+      await saveMasterProduct({}, editorForm(id, { version: await versionOf(id), description: "Revalidate me" }));
       const name = (await readProduct(id)).name;
       const before = await getListingDetail(storeA, palmListing);
       expect(before).not.toBeNull();
@@ -316,7 +322,7 @@ describe("master catalog (real sessions, lane DB)", () => {
       expect((await searchMasterProducts(storeA, name)).map((m) => m.id)).toContain(id);
       expect((await listMasterProducts(name)).map((m) => m.id)).toContain(id);
 
-      const archived = await saveMasterProduct({}, editorForm(id, { name, description: "Revalidate me", status: "archived" }));
+      const archived = await saveMasterProduct({}, editorForm(id, { version: await versionOf(id), name, description: "Revalidate me", status: "archived" }));
       expect(archived.ok).toBe(true);
       expect((await readProduct(id)).status).toBe("archived");
       expect(revalidated).toContain(`storefront:${storeA}`);
@@ -330,6 +336,100 @@ describe("master catalog (real sessions, lane DB)", () => {
       const audit = (await editAudits(id)).at(-1);
       expect(audit?.before).toEqual({ status: "active" });
       expect(audit?.after).toEqual({ status: "archived" });
+    });
+  });
+
+  describe("two editors on one product", () => {
+    /** Opens the editor and returns its form as the browser would submit it, with the admin's changes on top. */
+    async function openEditor(id: string) {
+      const editor = await getMasterProductEditor(id);
+      if (!editor) throw new Error("product not found");
+      const { product } = editor;
+      return (changes: Record<string, string | undefined> = {}) => {
+        const values: Record<string, string | undefined> = {
+          productId: product.id,
+          version: product.version,
+          name: product.name,
+          categoryId: product.categoryId ?? "",
+          subcategory: product.subcategory ?? "",
+          description: product.description ?? "",
+          unit: product.unit ?? "",
+          weightG: product.weightG === null ? "" : String(product.weightG),
+          frozen: product.frozen ? "on" : undefined,
+          perishable: product.perishable ? "on" : undefined,
+          storage: product.storage ?? "",
+          status: product.status,
+          ...changes,
+        };
+        const form = new FormData();
+        for (const [key, value] of Object.entries(values)) if (value !== undefined) form.set(key, value);
+        return form;
+      };
+    }
+
+    async function makeProduct(key: string): Promise<string> {
+      const id = await asPlatformAdmin(async (tx) =>
+        (await tx.masterProduct.create({ data: { name: `${RUN} ${key}`, categoryId: categoryB, status: "active" } })).id);
+      products[key] = id;
+      return id;
+    }
+
+    it("refuses the second editor's save when the first saved after it opened, and keeps the first editor's changes", async () => {
+      const id = await makeProduct("Ogbono");
+      const editorA = await openEditor(id);
+      const editorB = await openEditor(id);
+
+      expect(await saveMasterProduct({}, editorA({ name: `${RUN} Ogbono seeds` }))).toMatchObject({ ok: true, message: "Saved" });
+      const stale = await saveMasterProduct({}, editorB({ description: "Second editor's description" }));
+      expect(stale.ok).toBe(false);
+      expect(stale.message).toMatch(/changed .* after you opened it.*reload/i);
+
+      expect(await readProduct(id)).toMatchObject({ name: `${RUN} Ogbono seeds`, description: null, status: "active" });
+      expect((await editAudits(id)).map((row) => row.after)).toEqual([{ name: `${RUN} Ogbono seeds` }]);
+
+      // After a reload the same change saves, and only the field the admin changed is written.
+      expect(await saveMasterProduct({}, (await openEditor(id))({ description: "Second editor's description" }))).toMatchObject({ ok: true });
+      expect(await readProduct(id)).toMatchObject({ name: `${RUN} Ogbono seeds`, description: "Second editor's description" });
+      expect((await editAudits(id)).at(-1)?.after).toEqual({ description: "Second editor's description" });
+    });
+
+    it("never un-archives a product from a form opened before the archive", async () => {
+      const id = await makeProduct("Locust beans");
+      const editorA = await openEditor(id);
+      const editorB = await openEditor(id);
+
+      expect(await saveMasterProduct({}, editorA({ status: "archived" }))).toMatchObject({ ok: true });
+      expect((await saveMasterProduct({}, editorB({ unit: "pack" }))).ok).toBe(false);
+
+      expect(await readProduct(id)).toMatchObject({ status: "archived", unit: null });
+      expect((await matchToMasterProducts([`${RUN} Locust beans`])).get(`${RUN} Locust beans`)).toEqual([]);
+    });
+
+    it("lets one editor save twice in a row with the version its last save returned", async () => {
+      const id = await makeProduct("Crayfish");
+      const editor = await openEditor(id);
+      const first = await saveMasterProduct({}, editor({ unit: "bag" }));
+      expect(first).toMatchObject({ ok: true });
+      const form = editor({ unit: "bag", weightG: "500" });
+      form.set("version", first.version ?? "");
+      expect(await saveMasterProduct({}, form)).toMatchObject({ ok: true, message: "Saved" });
+      expect(await readProduct(id)).toMatchObject({ unit: "bag", weightG: 500 });
+    });
+
+    it("does not count a photo upload as someone else's change to the details", async () => {
+      const id = await makeProduct("Dried fish");
+      const editor = await openEditor(id);
+      for (const [name, value] of Object.entries({ R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "key", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "bucket", R2_PUBLIC_URL: "" })) {
+        vi.stubEnv(name, value);
+      }
+      const photo = new FormData();
+      photo.set("productId", id);
+      const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#a33" } }).png().toBuffer();
+      photo.set("image", new File([new Uint8Array(png)], "fish.png", { type: "image/png" }));
+      expect(await uploadMasterProductImage({}, photo)).toMatchObject({ ok: true });
+      vi.unstubAllEnvs();
+
+      expect(await saveMasterProduct({}, editor({ unit: "pack" }))).toMatchObject({ ok: true, message: "Saved" });
     });
   });
 

@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { uploadCatalogPhoto } from "../catalog-image";
 import { PHOTO_UPLOAD_MAX_BYTES } from "../listing/csv-file-cap";
 import { Prisma, lockMasterProductRow, platformAdminRawQuery, platformAdminTransaction, storesListingMasterProduct } from "../db";
@@ -119,6 +120,8 @@ export type MasterProductEditor = {
     allergensStatus: string;
     dietaryStatus: string;
     updatedAt: Date;
+    /** The version of the editable fields this form was loaded with; a save from an older version is refused. */
+    version: string;
   };
   categories: Array<{ id: string; name: string }>;
   storeCount: number;
@@ -141,7 +144,7 @@ export async function getMasterProductEditor(productId: string): Promise<MasterP
     if (!product) return null;
     const categories = await tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
     const storeCount = (await storesListingMasterProduct(tx, product.id)).length;
-    return { product: { ...product, status: product.status as MasterStatus }, categories, storeCount };
+    return { product: { ...product, status: product.status as MasterStatus, version: detailsVersion(product) }, categories, storeCount };
   });
 }
 
@@ -152,11 +155,24 @@ export async function listCatalogCategories(): Promise<Array<{ id: string; name:
     tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }));
 }
 
-export type SaveState = { ok?: boolean; message?: string; fieldErrors?: Partial<Record<MasterProductField, string>> };
+export type SaveState = {
+  ok?: boolean;
+  message?: string;
+  fieldErrors?: Partial<Record<MasterProductField, string>>;
+  /** The details' version after a successful save, for the editor's next save. */
+  version?: string;
+};
 
 const EDITED_FIELDS = [
   "name", "categoryId", "subcategory", "description", "unit", "weightG", "frozen", "perishable", "storage", "status",
 ] as const satisfies readonly MasterProductField[];
+
+const STALE_MESSAGE = "Someone else changed this product after you opened it. Reload the page to see their changes, then make yours again.";
+
+// Hashes only the editor's fields, so a photo upload or attribute review does not make an open editor stale.
+function detailsVersion(product: Record<(typeof EDITED_FIELDS)[number], unknown>): string {
+  return createHash("sha256").update(JSON.stringify(EDITED_FIELDS.map((field) => product[field]))).digest("base64url");
+}
 
 /** Saves the editor form. Archive is the status "archived"; a master product is never deleted. */
 export async function saveMasterProduct(_prev: SaveState, form: FormData): Promise<SaveState> {
@@ -165,18 +181,21 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
   if (!parsed.success) {
     const fieldErrors: SaveState["fieldErrors"] = {};
     for (const issue of parsed.error.issues) {
-      const field = issue.path[0] as MasterProductField | "productId";
+      const field = issue.path[0] as MasterProductField | "productId" | "version";
       if (field === "productId") return { ok: false, message: "Product not found" };
+      if (field === "version") return { ok: false, message: STALE_MESSAGE };
       fieldErrors[field] ??= issue.message;
     }
     return { ok: false, message: "Check the highlighted fields", fieldErrors };
   }
-  const { productId, ...next } = parsed.data;
+  const { productId, version, ...next } = parsed.data;
 
   const result = await platformAdminTransaction(async (tx): Promise<SaveState & { storeIds?: string[] }> => {
     await lockMasterProductRow(tx, productId);
     const product = await tx.masterProduct.findUnique({ where: { id: productId } });
     if (!product) return { ok: false, message: "Product not found" };
+    // The form holds every field as it was loaded; saving it over a newer row would undo the other admin's change.
+    if (detailsVersion(product) !== version) return { ok: false, message: STALE_MESSAGE };
     if (next.categoryId && next.categoryId !== product.categoryId) {
       const category = await tx.category.findUnique({ where: { id: next.categoryId }, select: { id: true } });
       if (!category) return { ok: false, message: "Check the highlighted fields", fieldErrors: { categoryId: "Choose a category from the list" } };
@@ -190,7 +209,7 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
         after[field] = next[field];
       }
     }
-    if (Object.keys(after).length === 0) return { ok: true, message: "No changes to save" };
+    if (Object.keys(after).length === 0) return { ok: true, message: "No changes to save", version };
 
     await tx.masterProduct.update({ where: { id: productId }, data: after });
     await tx.auditLog.create({
@@ -204,7 +223,7 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
         after: after as Prisma.InputJsonObject,
       },
     });
-    return { ok: true, message: "Saved", storeIds: await storesListingMasterProduct(tx, productId) };
+    return { ok: true, message: "Saved", version: detailsVersion(next), storeIds: await storesListingMasterProduct(tx, productId) };
   });
 
   const { storeIds, ...state } = result;

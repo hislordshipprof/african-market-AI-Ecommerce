@@ -52,6 +52,7 @@ const optionalText = (max: number, message: string) =>
 
 export const masterProductFormSchema = z.strictObject({
   productId: z.string().min(1).max(200),
+  version: z.string().min(1).max(200),
   name: z.string().trim().min(1, "Enter a name").max(200, "Keep the name under 200 characters"),
   categoryId: z.string().max(200).transform((value) => value || null),
   subcategory: optionalText(100, "Keep the subcategory under 100 characters"),
@@ -69,7 +70,7 @@ export const masterProductFormSchema = z.strictObject({
   status: z.enum(MASTER_STATUSES, "Choose a status"),
 });
 export type MasterProductForm = z.infer<typeof masterProductFormSchema>;
-export type MasterProductField = Exclude<keyof MasterProductForm, "productId">;
+export type MasterProductField = Exclude<keyof MasterProductForm, "productId" | "version">;
 
 /** The editor's form as the schema's input. A missing text field stays undefined so the schema refuses it. */
 export function readMasterProductForm(form: FormData): Record<string, unknown> {
@@ -79,6 +80,7 @@ export function readMasterProductForm(form: FormData): Record<string, unknown> {
   };
   return {
     productId: text("productId"),
+    version: text("version"),
     name: text("name"),
     categoryId: text("categoryId"),
     subcategory: text("subcategory"),

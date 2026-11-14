@@ -14,16 +14,21 @@ export function ProductForm({ product, categories }: Pick<MasterProductEditor, "
   const [state, action, saving] = useActionState<SaveState, FormData>(saveMasterProduct, {});
   const [, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
+  // The version the fields were loaded with; only this editor's own save moves it on.
+  const version = useRef(product.version);
 
   useEffect(() => {
-    if (state.ok) router.refresh();
-    else formRef.current?.querySelector<HTMLElement>("[aria-invalid='true']")?.focus();
+    if (state.ok) {
+      if (state.version) version.current = state.version;
+      router.refresh();
+    } else formRef.current?.querySelector<HTMLElement>("[aria-invalid='true']")?.focus();
   }, [state, router]);
 
   // Submitting through a transition keeps what the admin typed when a field is refused.
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    form.set("version", version.current);
     startTransition(() => action(form));
   }
 
