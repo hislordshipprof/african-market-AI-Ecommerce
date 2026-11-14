@@ -19,7 +19,7 @@ const TOP_SELLERS = 10;
 const MOVERS = 5;
 export const REPORTS_SHOWN = 8;
 /** A claim older than this is from a run that died mid-send; the next run may take it. */
-const CLAIM_STALE_MS = 15 * 60_000;
+const CLAIM_STALE_MS = 5 * 60_000;
 const MONDAY = 1;
 
 export interface ReportWeek {
