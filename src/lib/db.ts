@@ -1310,6 +1310,18 @@ export async function findRecentMagicLinkVerifications(): Promise<
     LIMIT 5`;
 }
 
+/** Magic links for this inbox expiring after `after`. Exact match: a LIKE pattern lets `_` match another inbox. */
+export async function countMagicLinksForEmail(email: string, after: Date): Promise<number> {
+  // CASE keeps the JSON cast off rows of other verification types.
+  const [{ count }] = await prisma.$queryRaw<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM verifications
+    WHERE expires_at > ${after}
+      AND CASE WHEN left(identifier, 11) = 'magic-link:'
+          THEN lower(value::jsonb->>'email') = lower(${email})
+          ELSE false END`;
+  return count;
+}
+
 /** Minimal slice of a Prisma client needed to run a query under a statement timeout. */
 export interface TransactionalClient {
   $transaction<T>(

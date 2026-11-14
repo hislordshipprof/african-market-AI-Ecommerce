@@ -2,7 +2,7 @@ import { betterAuth, APIError } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
-import { authPrisma, platform } from "./db";
+import { authPrisma, countMagicLinksForEmail, platform } from "./db";
 import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
 import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
@@ -129,15 +129,7 @@ if (emailFromIssue) {
 const INBOX_CAP = 5;
 
 async function inboxCapReached(email: string): Promise<boolean> {
-  // Exact match on the parsed email key: a LIKE pattern lets `_` in one address match another inbox.
-  // CASE keeps the JSON cast off rows of other verification types.
-  const [{ recent }] = await authPrisma.$queryRaw<{ recent: number }[]>`
-    SELECT count(*)::int AS recent FROM "verifications"
-    WHERE "expires_at" > ${new Date(Date.now() + 5 * 60_000)}
-      AND CASE WHEN left("identifier", 11) = 'magic-link:'
-          THEN lower("value"::jsonb->>'email') = lower(${email})
-          ELSE false END`;
-  return recent > INBOX_CAP;
+  return (await countMagicLinksForEmail(email, new Date(Date.now() + 5 * 60_000))) > INBOX_CAP;
 }
 
 const baseUrl = resolveAuthBaseUrl();
