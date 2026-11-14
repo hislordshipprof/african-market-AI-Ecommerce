@@ -1,4 +1,9 @@
-import { claimInboundWhatsAppMessage, findStoreByWhatsAppPhoneNumberId, platformAdminTransaction } from "../db";
+import {
+  claimInboundWhatsAppMessage,
+  findStoreByWhatsAppPhoneNumberId,
+  platformAdminTransaction,
+  releaseInboundWhatsAppMessage,
+} from "../db";
 import { messageRef } from "./code";
 import { handleCustomerMessage } from "./customer-handler";
 import type { InboundMessage } from "./webhook-payload";
@@ -12,8 +17,9 @@ export type StoreInboundOutcome =
  * A message to any number other than the platform's (#558). The store is the
  * one whose registered number has exactly this phone_number_id; a number
  * no store has registered is dropped unclaimed with a hashed log line. The
- * lookup and the claim commit together; a failure rolls the claim back so
- * Meta's redelivery is handled.
+ * lookup and the claim commit together. A handler failure releases the claim
+ * and rethrows (the route answers 500), so Meta's redelivery is handled; a
+ * process that dies mid-handler still loses that message.
  */
 export async function handleStoreInboundMessage(
   phoneNumberId: string,
@@ -34,6 +40,13 @@ export async function handleStoreInboundMessage(
     }));
     return outcome;
   }
-  if (outcome.kind === "customer") await handleCustomerMessage({ storeId: outcome.storeId, message });
+  if (outcome.kind === "customer") {
+    try {
+      await handleCustomerMessage({ storeId: outcome.storeId, message });
+    } catch (error) {
+      await releaseInboundWhatsAppMessage(message.id);
+      throw error;
+    }
+  }
   return outcome;
 }

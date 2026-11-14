@@ -6,9 +6,16 @@ vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
 });
 
+// The Shopper assistant plugs in here (ADR-0010); a test makes it fail once.
+vi.mock("./customer-handler", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./customer-handler")>();
+  return { handleCustomerMessage: vi.fn(real.handleCustomerMessage) };
+});
+
 import { POST } from "@/app/api/webhooks/whatsapp/route";
 import { auth } from "../auth";
 import { authPrisma } from "../db";
+import { handleCustomerMessage } from "./customer-handler";
 import { WhatsAppApiError } from "./errors";
 import { fakeWhatsAppProvider } from "./fake";
 import { setWhatsAppProvider } from "./index";
@@ -186,6 +193,15 @@ describe.skipIf(!hasDb)("store WhatsApp number (lane database)", () => {
     expect(dropped).not.toContain("14045550123");
     expect(JSON.parse(dropped!).number).toMatch(/^[0-9a-f]{12}$/);
     expect(lines.join("\n")).not.toContain("fake-business-token");
+  });
+
+  it("a customer handler failure throws and Meta's redelivery is handled, not dropped as a duplicate", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const message = text("handled on redelivery");
+    vi.mocked(handleCustomerMessage).mockRejectedValueOnce(new Error("assistant down"));
+    await expect(handleStoreInboundMessage(PHONE_A, message)).rejects.toThrow("assistant down");
+    expect(await handleStoreInboundMessage(PHONE_A, message)).toEqual({ kind: "customer", storeId: storeA });
+    expect(await handleStoreInboundMessage(PHONE_A, message)).toEqual({ kind: "duplicate" });
   });
 
   it("a signed webhook to store A's number reaches store A through the route", async () => {

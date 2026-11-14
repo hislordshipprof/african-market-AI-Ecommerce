@@ -1637,6 +1637,11 @@ export async function claimInboundWhatsAppMessage(tx: RawTx, messageId: string):
   return true;
 }
 
+/** Undoes a committed claim whose handling failed, so Meta's redelivery is handled. */
+export async function releaseInboundWhatsAppMessage(messageId: string): Promise<void> {
+  await platformAdminTransaction((tx) => tx.$executeRaw`DELETE FROM whatsapp_inbound_messages WHERE id = ${messageId}`);
+}
+
 export type OwnerLinkCodeOutcome =
   | { kind: "no_pending" }
   | { kind: "wrong_or_expired" }
