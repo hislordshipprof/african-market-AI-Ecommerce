@@ -100,6 +100,9 @@ One row per ingredient, under one lower-case English name, with its local names 
 **Attribute proposal**:
 Product attributes Claude read from a master product's label photo and description, waiting for a platform admin to approve or reject. Nothing on the product changes until approved.
 
+**Listing draft**:
+One product Claude read from a store's shelf photo, matched to the master catalog (one match, several for the owner to pick, none, or already listed). It becomes a listing only when the owner sets or checks its price and taps Publish. The shelf photo stays private and is never a product image.
+
 **Reorder list**:
 The owner's saved list of what to buy from a wholesaler, started from the copilot's reorder suggestions and edited by the owner. One draft per store; saving replaces it. It orders nothing and changes no stock.
 
