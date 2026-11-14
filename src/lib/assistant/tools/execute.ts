@@ -298,11 +298,6 @@ async function verdictsFor(ctx: AssistantContext, listingIds: string[]): Promise
   return listingVerdicts(ctx.storeId, listingIds, constraints);
 }
 
-/** An excluded listing is never returned; any other carries its verdict's needs, and unknown is marked as not confirmed. */
-function needsOf(verdicts: Map<string, ListingVerdict> | null, listingId: string) {
-  return verdictFields(verdicts?.get(listingId));
-}
-
 /** With constraints, a listing the check did not return counts as excluded. */
 function isExcluded(verdicts: Map<string, ListingVerdict> | null, listingId: string): boolean {
   const status = verdicts?.get(listingId)?.status;
@@ -406,7 +401,7 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
       })),
       badge: stockBadge(factsOf(listing)),
       mayBeUnavailable: mayBeUnavailable(listing),
-      ...needsOf(verdicts, listing.id),
+      ...verdictFields(verdicts?.get(listing.id)),
     });
   }
   return recordRead(ctx, "show_products", parsed, { ok: true, cards, notFound, ...(excluded.length > 0 ? { excluded } : {}) });
@@ -482,7 +477,7 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
       name: listingName(candidate),
       priceCents: candidate.variants[0]?.price ?? candidate.price,
       mayBeUnavailable: mayBeUnavailable(candidate),
-      ...needsOf(verdicts, candidate.id),
+      ...verdictFields(verdicts?.get(candidate.id)),
     }];
   });
   return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items });
@@ -562,7 +557,7 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
       priceCents: variant.price,
       imageUrl: photo ?? null,
       mayBeUnavailable: mayBeUnavailable(listing),
-      ...needsOf(verdicts, listing.id),
+      ...verdictFields(verdicts?.get(listing.id)),
     });
   }
   const left = excluded.length > 0 ? { excluded } : {};
