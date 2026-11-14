@@ -2,16 +2,17 @@ import { inngest } from "../inngest/client";
 import { sendSkipped, sendWithTimeout } from "../inngest/notify";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
+import { copyCourierProof } from "./proof";
 import {
   COURIER_BOTH_FAILED,
   courierFailoverFailed,
   COURIER_DELIVERY_CREATED,
-  courierRequest,
+  COURIER_ORDER_READY,
+  COURIER_PROOF_RECEIVED,
+  dispatchReadyOrder,
   runCourierFailover,
-  selectAndDispatch,
   type CourierEvent,
   type DispatchDeps,
-  type DispatchResult,
 } from "./dispatch";
 
 /** Both adapters read their keys per call, so a provider without keys fails its quote and is skipped. */
@@ -21,6 +22,8 @@ function productionDeps(): DispatchDeps {
 
 /** Event ids let Inngest drop a repeat from a retried step. */
 function eventId(event: CourierEvent): string {
+  if (event.name === COURIER_ORDER_READY) return `courier-order-ready-${event.data.orderId}`;
+  if (event.name === COURIER_PROOF_RECEIVED) return `courier-proof-${event.data.deliveryId}`;
   if (event.name === COURIER_DELIVERY_CREATED) return `courier-delivery-created-${event.data.deliveryId}`;
   if (event.name === COURIER_BOTH_FAILED) return `courier-both-failed-${event.data.orderId}`;
   return `courier-failover-${event.data.orderId}-${event.data.fromProvider}`;
@@ -40,11 +43,24 @@ export async function emitCourierEvent(event: CourierEvent): Promise<void> {
   }
 }
 
-/** Books a courier for a Ready courier order with the platform's providers. */
-export async function dispatchCourier(storeId: string, orderId: string): Promise<DispatchResult> {
-  // Plan gate (#494): courier delivery is Pro only. The check goes here, before any quote; failover does not re-check.
-  return selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId)) }, productionDeps());
-}
+/** Books the courier once a courier order is Ready. A retried step finds the booked delivery and books no other. */
+export const courierDispatchOnReady = inngest.createFunction(
+  { id: "courier/dispatch-on-ready", idempotency: "event.data.orderId", triggers: [{ event: COURIER_ORDER_READY }] },
+  async ({ event, step }) => {
+    const { storeId, orderId } = event.data as { storeId?: string; orderId?: string };
+    if (!storeId || !orderId) return;
+    await step.run("courier-dispatch", () => dispatchReadyOrder(storeId, orderId, productionDeps()));
+  },
+);
+
+export const courierProofCopy = inngest.createFunction(
+  { id: "courier/proof-copy", idempotency: "event.data.deliveryId", triggers: [{ event: COURIER_PROOF_RECEIVED }] },
+  async ({ event, step }) => {
+    const { storeId, deliveryId } = event.data as { storeId?: string; deliveryId?: string };
+    if (!storeId || !deliveryId) return;
+    await step.run("courier-proof-copy", () => copyCourierProof(storeId, deliveryId));
+  },
+);
 
 export const courierAssignmentTimeout = inngest.createFunction(
   {

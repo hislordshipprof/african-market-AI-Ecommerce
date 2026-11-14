@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { findDeliveryByExternalId, storeScopedTransaction } from "@/lib/db";
 import { UberDirectProvider, UberWebhookSignatureError } from "@/lib/delivery/uber-direct";
 import type { DeliveryWebhookEvent } from "@/lib/delivery/provider";
+import { applyCourierWebhook } from "@/lib/delivery/webhook";
 import { parseInput } from "@/lib/security/parse-input";
 
 const eventIdsSchema = z.looseObject({
@@ -11,10 +11,6 @@ const eventIdsSchema = z.looseObject({
 });
 
 export const dynamic = "force-dynamic";
-
-/** Delivery statuses a webhook moves forward only; the courier_assigned step is what stops the failover timer (#140). */
-const COURIER_PROGRESS = ["requested", "courier_assigned", "picked_up", "delivered"] as const;
-type CourierProgress = (typeof COURIER_PROGRESS)[number];
 
 /**
  * Uber Direct delivery events (https://developer.uber.com/docs/deliveries/guides/webhooks). Each signed event the
@@ -40,33 +36,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Malformed webhook body" }, { status: 400 });
   }
 
-  const delivery = await findDeliveryByExternalId("uber", event.externalDeliveryId);
-  if (!delivery) {
-    console.warn(JSON.stringify({ event: "uber_direct_webhook_unknown_delivery", externalDeliveryId: event.externalDeliveryId, externalEventId: event.externalEventId }));
-    return NextResponse.json({ error: "Unknown delivery" }, { status: 404 });
-  }
-  if (!event.type) return NextResponse.json({ received: true, recorded: false });
-
-  const type = event.type;
-  await storeScopedTransaction(delivery.storeId, async (tx) => {
-    await tx.deliveryEvent.createMany({
-      data: [{
-        storeId: delivery.storeId,
-        orderId: delivery.orderId,
-        deliveryId: delivery.id,
-        externalEventId: event.externalEventId,
-        type,
-        payload: event.payload as object,
-      }],
-      skipDuplicates: true,
-    });
-    const step = COURIER_PROGRESS.indexOf(type as CourierProgress);
-    if (step > 0) {
-      await tx.delivery.updateMany({
-        where: { id: delivery.id, status: { in: COURIER_PROGRESS.slice(0, step) } },
-        data: { status: type },
-      });
-    }
-  });
-  return NextResponse.json({ received: true, recorded: true });
+  const result = await applyCourierWebhook(event);
+  if (result === "unknown_delivery") return NextResponse.json({ error: "Unknown delivery" }, { status: 404 });
+  return NextResponse.json({ received: true, recorded: result !== "not_recorded" });
 }
