@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { money } from "../format";
 import { evaluateOrderRefundStateAfterCommit, remainingCaptureCents, submitRefund } from "./refund-requests";
@@ -10,6 +11,9 @@ export const ISSUE_REFUND_NOT_STARTED = "The refund could not be started. Try ag
 export const ISSUE_REFUND_FAILED = "The refund did not go through. The platform has been alerted; do not refund the customer yourself.";
 export const ISSUE_AMOUNT_ABOVE_ISSUE = "Enter an amount from $0.01 up to the reported amount.";
 export const ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX = "That is more than is left to refund on this order";
+
+/** An issue id from a staff action or the photo route. */
+export const issueIdSchema = z.string().min(1).max(64);
 
 type Actor = { id: string; email: string };
 type ReviewResult = { ok: true } | { ok: false; error: string };
