@@ -95,7 +95,7 @@ function PickRow(props: {
   const { line } = props;
   return (
     <li
-      className={`rounded-2xl border border-border bg-card p-3 ${line.open ? "" : "opacity-70"}`}
+      className="rounded-2xl border border-border bg-card p-3"
       data-testid="batch-line"
     >
       <div className="flex gap-3">
@@ -240,7 +240,7 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
               <ToteLetter letter={tote.letter} size="lg" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold tabular-nums text-foreground">#{tote.number}</p>
-                <p className="truncate text-xs text-muted-foreground">{STATUS_LABELS[tote.status] ?? tote.status}</p>
+                <p className="text-xs text-muted-foreground">{STATUS_LABELS[tote.status] ?? tote.status}</p>
                 {tote.fulfillment === "courier" && (
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Truck className="size-3" aria-hidden />
