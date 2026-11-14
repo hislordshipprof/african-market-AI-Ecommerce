@@ -453,13 +453,14 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
     return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items: [], reason: "no_category" });
   }
   const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  const constrained = hasConstraints(constraints);
   // The saved needs filter in SQL before the cap, so excluded listings cannot crowd out allowed ones.
   const ranked = await storeScopedRawQuery<{ id: string }>(ctx.storeId, Prisma.sql`
     SELECT l.id FROM listings l
     JOIN master_products mp ON l.master_product_id = mp.id
-    ${effectiveAttributesSql}
+    ${constrained ? effectiveAttributesSql : Prisma.empty}
     WHERE l.active AND l.id <> ${listing.id} AND mp.category_id = ${categoryId}
-      AND NOT ${needExcludesSql(shopperNeed(constraints))}
+      ${constrained ? Prisma.sql`AND NOT ${needExcludesSql(shopperNeed(constraints))}` : Prisma.empty}
     ORDER BY l.confidence DESC, l.price ASC, l.id ASC
     LIMIT 5
   `);
@@ -468,7 +469,7 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
     where: { id: { in: ids } },
     include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
   })).map((row) => [row.id, row]));
-  const verdicts = hasConstraints(constraints) ? await listingVerdicts(ctx.storeId, ids, constraints) : null;
+  const verdicts = constrained ? await listingVerdicts(ctx.storeId, ids, constraints) : null;
   const items = ids.flatMap((id) => {
     const candidate = byId.get(id);
     if (!candidate || isExcluded(verdicts, id)) return [];
