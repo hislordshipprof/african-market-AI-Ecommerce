@@ -70,8 +70,10 @@ export async function disconnectStoreNumberAction(): Promise<StoreNumberActionRe
   return disconnect({ storeId: session.store.id, actorId: session.user.id, actorEmail: session.user.email });
 }
 
-async function adminActor(formData: FormData): Promise<StoreNumberActor | { error: string }> {
-  const session = await requirePlatformAdmin();
+async function adminActor(
+  session: { user: { id: string; email: string } },
+  formData: FormData,
+): Promise<StoreNumberActor | { error: string }> {
   const fields = parseInput(z.object({ storeId: z.string().min(1).max(200) }), readFormFields(formData, ["storeId"]));
   if (!fields.ok) return { error: "Store not found" };
   const store = await platformAdmin.store.findUnique({ where: { id: fields.data.storeId }, select: { id: true } });
@@ -80,13 +82,13 @@ async function adminActor(formData: FormData): Promise<StoreNumberActor | { erro
 }
 
 export async function adminLinkStoreNumberAction(formData: FormData): Promise<StoreNumberActionResult> {
-  const actor = await adminActor(formData);
+  const actor = await adminActor(await requirePlatformAdmin(), formData);
   if ("error" in actor) return actor;
   return link(actor, formData);
 }
 
 export async function adminDisconnectStoreNumberAction(formData: FormData): Promise<StoreNumberActionResult> {
-  const actor = await adminActor(formData);
+  const actor = await adminActor(await requirePlatformAdmin(), formData);
   if ("error" in actor) return actor;
   return disconnect(actor);
 }
