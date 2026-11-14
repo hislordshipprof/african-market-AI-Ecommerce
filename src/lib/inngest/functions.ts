@@ -6,7 +6,7 @@ import { applySubstitutionTimeout } from "../order/substitution";
 import { releaseOrphanHolds } from "../checkout/service";
 import { isValidTimezone, openMinutesDeadline } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
-import { sendOrderNotification } from "./notify";
+import { resendOrderNotifications } from "./notify";
 import { deliverOrderNotification, onNotificationFailure } from "../notifications/deliver";
 import { isOrderNotifyEvent } from "../notifications/record";
 import { systemAuditData } from "../system-actor";
@@ -293,10 +293,8 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
 
     if (found.notifications.length > 0) {
       await step.run("resend-notifications", async () => {
-        for (const row of found.notifications) {
-          if (!isOrderNotifyEvent(row.event)) continue;
-          await sendOrderNotification(row.storeId, row.orderId, row.event);
-        }
+        const rows = found.notifications.flatMap((row) => (isOrderNotifyEvent(row.event) ? [{ ...row, event: row.event }] : []));
+        await resendOrderNotifications(rows);
       });
     }
 
