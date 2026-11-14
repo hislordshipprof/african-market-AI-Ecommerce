@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "@/lib/db";
+import { copyCourierProof } from "@/lib/delivery/proof";
 import { POST } from "./route";
 
 const authorization = "Basic ZG9vcmRhc2g6cm91dGUtdGVzdA==";
@@ -92,7 +93,7 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/doordash", () => 
     expect(await orderStatus(orderId)).toBe("COURIER_REQUESTED");
   });
 
-  it("AC5: a standard drop-off stores the proof photo URL and marks the order delivered", async () => {
+  it("AC5: a standard drop-off stores the proof photo URL, marks the order delivered and copies the photo to the private bucket", async () => {
     const { orderId, deliveryId, externalId } = await courierOrder({ deliveryStatus: "picked_up" });
     const body = event(externalId, "DASHER_DROPPED_OFF", { fee: 899, dropoff_verification_image_url: "https://doordash-static.s3.amazonaws.com/proof.jpg" });
 
@@ -106,6 +107,30 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/doordash", () => 
     const order = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.status).toBe("DELIVERED");
     expect(order.deliveredAt).not.toBeNull();
+
+    const { default: sharp } = await import("sharp");
+    const photo = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#6b8e23" } }).png().toBuffer();
+    const uploads: string[] = [];
+    const previousBucket = process.env.R2_PROOF_BUCKET;
+    process.env.R2_PROOF_BUCKET = "proof-test";
+    try {
+      const deps = {
+        fetch: async (url: string | URL | Request) => {
+          expect(String(url)).toBe("https://doordash-static.s3.amazonaws.com/proof.jpg");
+          return new Response(new Uint8Array(photo), { headers: { "content-type": "image/png" } });
+        },
+        upload: async (key: string) => {
+          uploads.push(key);
+        },
+      };
+      expect(await copyCourierProof(storeId, deliveryId, deps)).toBe("copied");
+      expect(await copyCourierProof(storeId, deliveryId, deps)).toBe("skipped");
+    } finally {
+      if (previousBucket === undefined) delete process.env.R2_PROOF_BUCKET;
+      else process.env.R2_PROOF_BUCKET = previousBucket;
+    }
+    expect(uploads).toEqual([expect.stringMatching(new RegExp(`^delivery-proof/${orderId}/`))]);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).deliveryProofKey).toBe(uploads[0]);
   });
 
   it("a delivery replaced by failover records its events but never moves the order; a return leaves the order for the store", async () => {
