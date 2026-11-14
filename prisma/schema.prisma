@@ -21,6 +21,9 @@ model Store {
   deliveryRadiusMi       Decimal  @default(8) @map("delivery_radius_mi")
   storeDeliveryEnabled   Boolean  @default(false) @map("store_delivery_enabled")
   storeDeliveryFeeCents  Int      @default(0) @map("store_delivery_fee_cents")
+  /// Scheduled slot settings per fulfillment (#565); shape in src/lib/order/slot-schedule.ts.
+  pickupSlotSettings        Json? @map("pickup_slot_settings")
+  storeDeliverySlotSettings Json? @map("store_delivery_slot_settings")
   addressLine1           String?  @map("address_line1")
   addressLine2           String?  @map("address_line2")
   city                   String?
@@ -34,6 +37,9 @@ model Store {
   autoRefundLimitCents   Int      @default(2500) @map("auto_refund_limit_cents")
   supportSlaMinutes      Int      @default(30) @map("support_sla_minutes")
   digestHour             Int      @default(20) @map("digest_hour")
+  /// Reorder suggestions (#551): days from order to shelf, and days the order should last after that.
+  reorderLeadDays        Int      @default(7) @map("reorder_lead_days")
+  reorderCoverDays       Int      @default(14) @map("reorder_cover_days")
   stripeAccountId        String?  @unique @map("stripe_account_id")
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
   /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
@@ -87,6 +93,8 @@ model Store {
   ownerReports          OwnerReport[]
   ownerReportItems      OwnerReportItem[]
   listingDrafts         ListingDraft[]
+  reorderLists          ReorderList[]
+  reorderListItems      ReorderListItem[]
   notificationLogs      NotificationLog[]
   deliveryEvents        DeliveryEvent[]
   pushSubscriptions     PushSubscription[]
@@ -95,6 +103,7 @@ model Store {
   subscription          StoreSubscription?
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
+  ownerWhatsAppLinks    OwnerWhatsAppLink[]
 
   @@map("stores")
 }
@@ -147,6 +156,7 @@ model User {
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
   listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
   listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  reorderLists            ReorderList[]            @relation("ReorderListSaver")
 
   @@map("users")
 }
@@ -298,6 +308,8 @@ model StoreMembership {
 
   store Store @relation(fields: [storeId], references: [id])
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  whatsAppLink OwnerWhatsAppLink?
 
   @@unique([storeId, userId])
   @@index([userId])
@@ -476,6 +488,7 @@ model Listing {
   ownerReportItems  OwnerReportItem[]
   draftsListedAs    ListingDraft[]           @relation("ListingDraftExisting")
   draftsPublishedAs ListingDraft[]           @relation("ListingDraftPublished")
+  reorderListItems  ReorderListItem[]
   collectionItems   StoreCollectionListing[]
   attributes        ListingAttributes?
   ingredients       ListingIngredient[]
@@ -736,6 +749,42 @@ model OwnerReportItem {
   @@map("owner_report_items")
 }
 
+/// The owner's saved reorder list (#551): one draft per store, replaced on each save. Nothing is ordered from it.
+model ReorderList {
+  id        String   @id @default(cuid())
+  storeId   String   @unique @map("store_id")
+  savedById String   @map("saved_by_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store   Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  savedBy User              @relation("ReorderListSaver", fields: [savedById], references: [id], onDelete: Restrict)
+  items   ReorderListItem[]
+
+  @@index([savedById])
+  @@map("reorder_lists")
+}
+
+/// One line of a reorder list. A null quantity is a status listing marked "reorder (no count)".
+model ReorderListItem {
+  id        String  @id @default(cuid())
+  listId    String  @map("list_id")
+  storeId   String  @map("store_id")
+  listingId String  @map("listing_id")
+  name      String
+  quantity  Int?
+  position  Int
+
+  list    ReorderList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  store   Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, listingId])
+  @@index([storeId])
+  @@index([listingId])
+  @@map("reorder_list_items")
+}
+
 /// One item Claude read from a shelf photo (#552), waiting for the owner. Nothing is listed until the
 /// owner confirms a price and publishes; the shelf photo is never a product image.
 model ListingDraft {
@@ -955,6 +1004,8 @@ model AiConversation {
   messages      Json      @default("[]")
   /// Shopper constraints (#485): what to avoid, what must hold, and unknown items the customer confirmed.
   constraints   Json      @default("{}")
+  /// Assistant checkout draft (#247): fulfillment and pickup slot for the normal checkout page.
+  checkoutDraft Json?     @map("checkout_draft")
   inFlightUntil DateTime? @map("in_flight_until")
   createdAt     DateTime  @default(now()) @map("created_at")
   lastMessageAt DateTime  @default(now()) @map("last_message_at")
@@ -1159,6 +1210,7 @@ model Order {
   @@unique([storeId, number])
   @@index([storeId])
   @@index([storeId, status])
+  @@index([storeId, fulfillment, pickupSlot])
   @@index([storeId, sourceCartId, createdAt])
   @@index([storeId, createdAt])
   @@index([customerId])
@@ -1476,6 +1528,45 @@ model CardSaveConsent {
   @@index([userId])
   @@index([userId, paymentMethodId])
   @@map("card_save_consents")
+}
+
+/// A store owner's WhatsApp number (#143). Store-owned with RLS. The partial
+/// unique index on wa_id WHERE verified lives in the migration only.
+model OwnerWhatsAppLink {
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  userId                String    @map("user_id")
+  phoneNumber           String    @map("phone_number")
+  waId                  String    @map("wa_id")
+  /// Number a live or last-sent code is for. The linked number above changes only when it is verified.
+  pendingPhoneNumber    String?   @map("pending_phone_number")
+  pendingWaId           String?   @map("pending_wa_id")
+  verified              Boolean   @default(false)
+  optInAlerts           Boolean   @default(false) @map("opt_in_alerts")
+  optInDigest           Boolean   @default(false) @map("opt_in_digest")
+  verificationCodeHash  String?   @map("verification_code_hash")
+  verificationExpiresAt DateTime? @map("verification_expires_at")
+  verificationAttempts  Int       @default(0) @map("verification_attempts")
+  verifiedAt            DateTime? @map("verified_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  store      Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  membership StoreMembership @relation(fields: [storeId, userId], references: [storeId, userId], onDelete: Cascade)
+
+  @@unique([storeId, userId])
+  @@index([waId])
+  @@index([pendingWaId])
+  @@map("owner_whatsapp_links")
+}
+
+/// Processed inbound WhatsApp message ids. Not store-owned (no store_id, no RLS).
+model WhatsAppInboundMessage {
+  id         String   @id
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  @@index([receivedAt])
+  @@map("whatsapp_inbound_messages")
 }
 
 /// A store member's browser that gets a web push for each new order.

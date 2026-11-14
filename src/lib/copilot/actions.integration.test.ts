@@ -42,6 +42,8 @@ import { makeFakeStep } from "../inngest/fake-step";
 import { runConfirmRequestSteps } from "./alert-functions";
 import { FIXED_ERROR } from "./types";
 import { NOTHING_DRAFTED, NUMBER_REFUSED } from "./turn";
+import { saveReorder, updateReorderDays } from "./reorder-actions";
+import { loadReorderList } from "./reorder-list";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `t142-${Date.now()}`;
@@ -230,7 +232,7 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: egusiId } })).toBe(0);
 
     const names = ((fake.requests[0]?.body?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name).sort();
-    expect(names).toEqual(["find_listings", "inventory_report", "propose_stock_change"]);
+    expect(names).toEqual(["find_listings", "inventory_report", "propose_stock_change", "reorder_suggestions"]);
     const choice = fake.requests[0]?.body?.tool_choice;
     expect(choice == null || choice === "auto" || (typeof choice === "object" && (choice as { type?: string }).type === "auto")).toBe(true);
 
@@ -585,5 +587,77 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     const refused = await ask("how is okra selling?");
     expect(refused?.reply).toBe(`${NUMBER_REFUSED}\n\n${NOTHING_DRAFTED}`);
     expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: okraId } })).toBe(2);
+  });
+  it("reorder suggestions: owner only, Pro only, the tool reads and orders nothing (#551)", async () => {
+    const beansId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Beans", price: 500, stockMode: "counted", qty: 3, confidence: 1 },
+    })).id;
+    await storeScoped(storeAId).stockEvent.create({
+      data: { storeId: storeAId, listingId: beansId, type: "sale", delta: -28, actorId: ownerAId, createdAt: new Date(Date.now() - 86_400_000) },
+    });
+    const ask = async () => {
+      const sent = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "what should I reorder?" });
+      expect(sent.ok).toBe(true);
+      return sent.ok ? sent : null;
+    };
+    const toolResult = (fake: ReturnType<typeof script>) => JSON.stringify(fake.requests.at(-1)?.body?.messages ?? []);
+    const stock = async () => ({
+      events: await storeScoped(storeAId).stockEvent.count(),
+      beans: (await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: beansId } })).qty,
+    });
+    const before = await stock();
+
+    // Starter: the tool says locked and the actions refuse.
+    let fake = script([
+      { kind: "tool", toolName: "reorder_suggestions", toolInput: {} },
+      { kind: "text", text: "Reorder suggestions are on the Pro plan." },
+    ]);
+    await ask();
+    expect(toolResult(fake)).toContain(String.raw`{\"locked\":true`);
+    expect(await saveReorder({ lines: [{ listingId: beansId, quantity: 5 }] })).toEqual({ ok: false, message: "Reorder suggestions are on the Pro plan." });
+    expect(await updateReorderDays({ leadDays: 3, coverDays: 7 })).toEqual({ ok: false, message: "Reorder suggestions are on the Pro plan." });
+
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.storeSubscription.create({ data: { storeId: storeAId, plan: "pro", status: "active" } });
+    });
+    try {
+      // Staff are refused even on Pro.
+      asStore(storeASlug, cookiesStaff);
+      await expect(saveReorder({ lines: [{ listingId: beansId, quantity: 5 }] })).rejects.toThrow(/NEXT_REDIRECT:/);
+      await expect(updateReorderDays({ leadDays: 3, coverDays: 7 })).rejects.toThrow(/NEXT_REDIRECT:/);
+      asStore(storeASlug, cookiesA);
+
+      // 28 sold in 28 days is 1 a day; 21 days of need less 3 on hand is 18.
+      fake = script([
+        { kind: "tool", toolName: "reorder_suggestions", toolInput: {} },
+        { kind: "text", text: "Reorder 18 Beans." },
+      ]);
+      const quoted = await ask();
+      expect(toolResult(fake)).toContain(String.raw`{\"name\":\"Beans\",\"onHand\":3,\"soldLast28Days\":28,\"suggested\":18}`);
+      expect(quoted?.reply).toBe(`Reorder 18 Beans.\n\n${NOTHING_DRAFTED}`);
+      expect(quoted?.proposals).toEqual([]);
+
+      expect(await updateReorderDays({ leadDays: 3.5, coverDays: 7 })).toMatchObject({ ok: false });
+      expect(await updateReorderDays({ leadDays: 3, coverDays: 7 })).toEqual({ ok: true });
+      expect(await saveReorder({ lines: [{ listingId: beansId, quantity: 7 }], extra: 1 })).toMatchObject({ ok: false });
+      expect(await saveReorder({ lines: [{ listingId: beansId, quantity: 7 }] })).toEqual({ ok: true });
+      expect((await loadReorderList(storeAId))?.items).toEqual([{ listingId: beansId, name: "Beans", quantity: 7 }]);
+
+      // Store B's owner cannot save A's listing into B's list.
+      asStore(storeBSlug, cookiesB);
+      expect(await saveReorder({ lines: [{ listingId: beansId, quantity: 1 }] })).toMatchObject({ ok: false });
+      asStore(storeASlug, cookiesA);
+
+      expect(await stock()).toEqual(before);
+    } finally {
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.storeSubscription.delete({ where: { storeId: storeAId } });
+      });
+      await storeScoped(storeAId).listing.update({ where: { id: beansId }, data: { active: false } });
+    }
   });
 });

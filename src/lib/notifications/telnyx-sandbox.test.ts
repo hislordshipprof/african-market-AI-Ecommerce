@@ -20,7 +20,8 @@ describe.skipIf(!liveSandbox || !apiKey)("Telnyx sandbox", () => {
       idempotencyKey: `notif_reject_${Date.now()}`,
     }))).rejects.toSatisfy((error: { code?: string; message?: string }) => {
       const reason = `${error.code ?? ""} ${error.message ?? ""}`;
-      expect(["40310", "40305", "10015", "40002", "40300"].some((code) => reason.includes(code)) || /\b\d{5}\b/.test(reason)).toBe(true);
+      // 10004 (Missing required parameter) is what a real call returned for a reserved 555 number.
+      expect(["40310", "40305", "10015", "40002", "40300", "10004"].some((code) => reason.includes(code))).toBe(true);
       expect(reason).not.toContain("5555550100");
       expect(reason).not.toContain("5555550199");
       return true;
