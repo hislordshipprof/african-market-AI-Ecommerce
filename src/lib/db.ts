@@ -6,6 +6,7 @@ import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
 import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
+import { EARTH_RADIUS_MI } from "./address/geo";
 import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
 
 /** One TTL for preview cleanup and the import-token claim. */
@@ -78,6 +79,8 @@ export const platform = {
   productSynonym: wrapPlatformDelegate(prisma.productSynonym),
   recipe: wrapPlatformDelegate(prisma.recipe),
   platformSettings: wrapPlatformDelegate(prisma.platformSettings),
+  gazetteerZip: wrapPlatformDelegate(prisma.gazetteerZip),
+  gazetteerPlace: wrapPlatformDelegate(prisma.gazetteerPlace),
 };
 
 function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
@@ -134,6 +137,8 @@ export function storeScoped(storeId: string) {
     copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
     ownerReport: wrapDelegate(storeId, prisma.ownerReport),
     ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
+    reorderList: wrapDelegate(storeId, prisma.reorderList),
+    reorderListItem: wrapDelegate(storeId, prisma.reorderListItem),
     listingDraft: wrapDelegate(storeId, prisma.listingDraft),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     delivery: wrapDelegate(storeId, prisma.delivery),
@@ -333,7 +338,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -369,6 +374,8 @@ export async function storeScopedTransaction<T>(
       copilotDigest: tx.copilotDigest,
       ownerReport: tx.ownerReport,
       ownerReportItem: tx.ownerReportItem,
+      reorderList: tx.reorderList,
+      reorderListItem: tx.reorderListItem,
       listingDraft: tx.listingDraft,
       notificationLog: tx.notificationLog,
       delivery: tx.delivery,
@@ -435,6 +442,12 @@ export interface LockedStoreRow {
   deliveryRadiusMi: number;
   lat: number | null;
   lng: number | null;
+  hours: unknown;
+  timezone: string;
+  prepTimeMinutes: number;
+  pickupEnabled: boolean;
+  pickupSlotSettings: unknown;
+  storeDeliverySlotSettings: unknown;
 }
 
 export interface GeocodeCacheRow {
@@ -550,8 +563,15 @@ export async function lockStoreRow(
     delivery_radius_mi: unknown;
     lat: number | null;
     lng: number | null;
+    hours: unknown;
+    timezone: string;
+    prep_time_minutes: number;
+    pickup_enabled: boolean;
+    pickup_slot_settings: unknown;
+    store_delivery_slot_settings: unknown;
   }>>`
-    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng
+    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng,
+      hours, timezone, prep_time_minutes, pickup_enabled, pickup_slot_settings, store_delivery_slot_settings
     FROM stores
     WHERE id = ${storeId}
     FOR UPDATE
@@ -564,6 +584,12 @@ export async function lockStoreRow(
     deliveryRadiusMi: Number(row.delivery_radius_mi),
     lat: row.lat,
     lng: row.lng,
+    hours: row.hours,
+    timezone: row.timezone,
+    prepTimeMinutes: row.prep_time_minutes,
+    pickupEnabled: row.pickup_enabled,
+    pickupSlotSettings: row.pickup_slot_settings,
+    storeDeliverySlotSettings: row.store_delivery_slot_settings,
   };
 }
 
@@ -1317,6 +1343,18 @@ export async function findRecentMagicLinkVerifications(): Promise<
     LIMIT 5`;
 }
 
+/** Magic links for this inbox expiring after `after`. Exact match: a LIKE pattern lets `_` match another inbox. */
+export async function countMagicLinksForEmail(email: string, after: Date): Promise<number> {
+  // CASE keeps the JSON cast off rows of other verification types.
+  const [{ count }] = await prisma.$queryRaw<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM verifications
+    WHERE expires_at > ${after}
+      AND CASE WHEN left(identifier, 11) = 'magic-link:'
+          THEN lower(value::jsonb->>'email') = lower(${email})
+          ELSE false END`;
+  return count;
+}
+
 /** Minimal slice of a Prisma client needed to run a query under a statement timeout. */
 export interface TransactionalClient {
   $transaction<T>(
@@ -1912,5 +1950,39 @@ export async function claimAssistantChatWarning(
     UPDATE assistant_chat_months SET warned_at = now()
     WHERE store_id = ${storeId} AND month = ${month}::date AND warned_at IS NULL
     RETURNING store_id`;
+  return rows.length > 0;
+}
+
+/** Great-circle miles from the point to the row's lat/lng columns, in SQL (no PostGIS, ADR-0012). */
+function haversineMilesSql(point: { lat: number; lng: number }, alias: "s" | "z"): Prisma.Sql {
+  const lat = Prisma.raw(`${alias}.lat`);
+  const lng = Prisma.raw(`${alias}.lng`);
+  return Prisma.sql`(2 * ${EARTH_RADIUS_MI}::float8 * asin(sqrt(LEAST(1,
+    power(sin(radians(${lat} - ${point.lat}::float8) / 2), 2)
+    + cos(radians(${point.lat}::float8)) * cos(radians(${lat})) * power(sin(radians(${lng} - ${point.lng}::float8) / 2), 2)))))`;
+}
+
+/** Listed, active, located stores nearest the point first (Store directory near me, #452). */
+export function listedStoresByDistance(
+  point: { lat: number; lng: number },
+  limit: number,
+): Promise<{ slug: string; distance: number }[]> {
+  return appUserQuery((tx) => tx.$queryRaw<{ slug: string; distance: number }[]>`
+    SELECT slug, distance FROM (
+      SELECT s.slug, ${haversineMilesSql(point, "s")} AS distance
+      FROM stores s
+      WHERE s.listed AND s.status = 'active' AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+    ) d
+    ORDER BY distance, slug
+    LIMIT ${limit}`);
+}
+
+/** True when the point is within some Gazetteer ZIP's reach; bandDeg bounds the latitude scan (#452). */
+export async function pointWithinZipReach(point: { lat: number; lng: number }, bandDeg: number): Promise<boolean> {
+  const rows = await appUserQuery((tx) => tx.$queryRaw<{ hit: number }[]>`
+    SELECT 1 AS hit FROM gazetteer_zips z
+    WHERE z.lat BETWEEN ${point.lat - bandDeg}::float8 AND ${point.lat + bandDeg}::float8
+      AND ${haversineMilesSql(point, "z")} <= z.reach_mi
+    LIMIT 1`);
   return rows.length > 0;
 }

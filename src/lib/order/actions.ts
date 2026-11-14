@@ -15,6 +15,8 @@ import {
   cancelOrder,
 } from "./service";
 import { STORE_CANCEL_REASONS } from "./constants";
+import { courierProviders, pushReadyTime, READY_ALREADY_PUSHED, READY_NOT_PUSHABLE } from "../delivery/dispatch";
+import { emitCourierEvent } from "../delivery/courier-functions";
 import {
   DELIVERY_PROOF_MAX_BYTES,
   PROOF_PHOTO_MISSING,
@@ -35,6 +37,7 @@ import {
   ISSUE_REFUND_NOT_STARTED,
   approveIssue,
   declineIssue,
+  issueIdSchema,
 } from "./issue-review";
 
 const ALLOWED_STAFF_ERRORS = new Set([
@@ -52,6 +55,8 @@ const ALLOWED_STAFF_ERRORS = new Set([
   "Payment authorization was released — order cancelled; contact the customer",
   "Order status changed during cancellation",
   "Quantity found must be a whole number below the quantity ordered",
+  READY_ALREADY_PUSHED,
+  READY_NOT_PUSHABLE,
   STORE_DELIVERY_ONLY,
   PROOF_PHOTO_MISSING,
   PROOF_PHOTO_NOT_IMAGE,
@@ -176,6 +181,17 @@ export async function markReadyAction(orderId: string) {
   return runStaffAction("markReady", id.data, () => markReady(session.store.id, id.data));
 }
 
+/** The store's one "5 more minutes" on a courier order that is packing (#562). */
+export async function pushReadyTimeAction(orderId: string) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("pushReadyTime", id.data, () =>
+    pushReadyTime(session.store.id, id.data, { providers: courierProviders(), emit: emitCourierEvent }),
+  );
+}
+
 export async function completePickupAction(orderId: string) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
@@ -236,7 +252,7 @@ const declineReasonSchema = z.string().trim().min(1).max(500);
 export async function approveIssueAction(issueId: string, amountCents?: number) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
-  const id = parseInput(orderIdSchema, issueId);
+  const id = parseInput(issueIdSchema, issueId);
   if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
   const amount = parseInput(issueAmountSchema, amountCents);
   if (!amount.ok) return { ok: false as const, error: ISSUE_AMOUNT_ABOVE_ISSUE };
@@ -248,7 +264,7 @@ export async function approveIssueAction(issueId: string, amountCents?: number) 
 export async function declineIssueAction(issueId: string, reason: string) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
-  const id = parseInput(orderIdSchema, issueId);
+  const id = parseInput(issueIdSchema, issueId);
   if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
   const parsed = parseInput(declineReasonSchema, reason);
   if (!parsed.ok) return { ok: false as const, error: ISSUE_DECLINE_REASON_MISSING };

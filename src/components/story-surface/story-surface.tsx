@@ -43,11 +43,14 @@ export function StorySurface({
         fetchPriority="high"
       />
       {/* Phones anchor the form in thumb reach, except under a store header, where the
-          surface starts below the top of the screen and the anchor would push the form off it. */}
+          surface starts below the top of the screen and the anchor would push the form off it.
+          There, a short screen starts the form at the top and keeps it clear of the bottom nav. */}
       <Tag
         className={cn(
           "story-surface relative flex min-h-dvh flex-col items-center overflow-clip p-4 pb-6 sm:pb-10 lg:flex-row lg:justify-end lg:pr-[max(6vw,3rem)]",
-          asMain ? "justify-end" : "justify-center",
+          asMain
+            ? "justify-end"
+            : "justify-center max-md:pb-28 [@media(max-height:700px)]:justify-start",
         )}
       >
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-primary-deep">
@@ -89,7 +92,7 @@ export function StorySurface({
         </motion.div>
 
         {/* After the form in the DOM, so a screen reader reaches the form first. */}
-        <p className="relative z-10 order-first mb-2 w-full max-w-md lg:hidden">
+        <p className="relative z-10 order-first mb-2 w-full max-w-md lg:hidden [@media(max-height:600px)]:hidden">
           <span className="inline-block rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white">
             {scene.place}
           </span>

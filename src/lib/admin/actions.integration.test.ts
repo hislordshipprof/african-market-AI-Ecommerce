@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
 });
 
-const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));
+const { headerState, revalidated } = vi.hoisted(() => ({ headerState: new Headers(), revalidated: [] as string[] }));
 
 vi.mock("next/headers", () => ({
   headers: async () => headerState,
@@ -13,7 +13,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => () => fn(),
-  revalidateTag: () => {},
+  revalidateTag: (tag: string) => revalidated.push(tag),
   revalidatePath: () => {},
 }));
 
@@ -136,6 +136,25 @@ describe("store hours schema", () => {
     expect(await readHours(storeId)).toEqual(storedShape);
   });
 
+  it("platform admin overrides the directory listing from the store form, with an audit row (#450)", async () => {
+    revalidated.length = 0;
+    const listed = storeForm(storeId, storedShape);
+    listed.set("listed", "on");
+    expect(await updateStore({}, listed)).toMatchObject({ success: true, storeId });
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.listed).toBe(true);
+    expect(revalidated).toContain("store-directory");
+
+    expect(await updateStore({}, storeForm(storeId, storedShape))).toMatchObject({ success: true, storeId });
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.listed).toBe(false);
+    const audits = await storeScopedTransaction(storeId, (tx) =>
+      tx.auditLog.findMany({ where: { action: "store.update" }, orderBy: { createdAt: "desc" }, take: 2 }),
+    );
+    expect(audits.map((row) => [(row.before as { listed: boolean }).listed, (row.after as { listed: boolean }).listed])).toEqual([
+      [true, false],
+      [false, true],
+    ]);
+  });
+
   it("platform admin turns on store delivery with a confirmed store address, which queues courier registration (#526)", async () => {
     setAddressProvider(fakeAddressBackend());
     vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
@@ -170,6 +189,18 @@ describe("store hours schema", () => {
     expect(still?.addressLine1).toBe("4600 Silver Hill Rd");
     expect(still?.lat).toBeCloseTo(38.845, 2);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("saves the store phone in E.164 for the courier's pickup, and refuses one that is not a phone (#527)", async () => {
+    const data = storeForm(storeId, storedShape);
+    data.set("phone", "(301) 555-0100");
+    expect(await updateStore({}, data)).toMatchObject({ success: true, storeId });
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.phone).toBe("+13015550100");
+
+    const bad = storeForm(storeId, storedShape);
+    bad.set("phone", "12345");
+    expect((await updateStore({}, bad)).fieldErrors?.phone).toBeTruthy();
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.phone).toBe("+13015550100");
   });
 
   it("turning on store delivery geocodes again when the saved address has no coordinates", async () => {

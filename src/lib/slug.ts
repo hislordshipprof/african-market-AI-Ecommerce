@@ -24,6 +24,7 @@ export function isSlugRoutable(slug: string): boolean {
 export type HostResolution =
   | { kind: "slug"; slug: string }
   | { kind: "custom-domain"; hostname: string }
+  | { kind: "root" }
   | { kind: "none" };
 
 export function resolveHost(
@@ -31,13 +32,14 @@ export function resolveHost(
   rootDomain?: string,
 ): HostResolution {
   const hostname = host.split(":")[0].toLowerCase();
+  const root = rootDomain?.toLowerCase();
 
+  // Before the vercel.app and localhost rules: the directory is demoed on a vercel.app root.
+  if (root && (hostname === root || hostname === `www.${root}`)) return { kind: "root" };
   if (hostname.endsWith(".vercel.app")) return { kind: "none" };
   if (hostname === "localhost") return { kind: "none" };
 
-  if (rootDomain) {
-    const root = rootDomain.toLowerCase();
-    if (hostname === root || hostname === `www.${root}`) return { kind: "none" };
+  if (root) {
     if (hostname.endsWith(`.${root}`)) {
       const sub = hostname.slice(0, -(root.length + 1)) || null;
       if (!sub || !isSlugRoutable(sub)) return { kind: "none" };

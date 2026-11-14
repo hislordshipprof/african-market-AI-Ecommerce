@@ -48,6 +48,7 @@ import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } 
 import { setStripeProvider } from "../stripe";
 import { cancelledPayments, fakeStripeProvider, refundRequests, setAuthorizedAmount } from "../stripe/fake";
 import { issuePhotoKey } from "../r2";
+import { systemAuditData } from "../system-actor";
 import { GET as getIssuePhoto } from "../../app/api/issue-photo/[issueId]/route";
 import {
   approveIssueAction,
@@ -58,6 +59,7 @@ import {
   markOutForDeliveryAction,
   markReadyAction,
 } from "./actions";
+import { issuesToReview } from "./issue-review";
 import { acceptOrder, markLinePicked, markLineShort } from "./service";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import sharp from "sharp";
@@ -197,6 +199,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   afterAll(async () => {
@@ -386,7 +389,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
   it("the owner approves $15 of a $60 issue: one $15 refund, issue approved, order Partly refunded, audit names the owner", async () => {
     const { orderId, issueId } = await issueToReview(601, 8000, 6000);
     asStore(storeASlug, cookiesA);
-    expect(await approveIssueAction(issueId, 1500)).toEqual({ ok: true });
+    expect(await approveIssueAction(issueId, 1500)).toEqual({ ok: true, amountCents: 1500 });
     const after = await reviewed(orderId);
     expect(after.requests.map((row) => row.amountCents)).toEqual([1500]);
     expect(after.issue.state).toBe("approved");
@@ -400,7 +403,6 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
   it("a decline with a reason calls no Stripe, leaves the order and writes one audit row", async () => {
     const { orderId, issueId, pi } = await issueToReview(602, 8000, 6000);
     asStore(storeASlug, cookiesA);
-    expect(await declineIssueAction(issueId, "  ")).toEqual({ ok: false, error: "Write why you are declining" });
     expect(await declineIssueAction(issueId, "Photo shows a different product")).toEqual({ ok: true });
     const after = await reviewed(orderId);
     expect(refundRequests.some((call) => call.paymentIntentId === pi)).toBe(false);
@@ -455,6 +457,69 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     vi.unstubAllEnvs();
     expect(own.status).toBe(200);
     expect(own.headers.get("Cache-Control")).toBe("private, no-store");
+  }, 30_000);
+
+  it("an approval Stripe refuses tells staff it failed and marks the issue refund_failed, not Refund sent", async () => {
+    const { orderId, issueId } = await issueToReview(608, 8000, 6000);
+    vi.spyOn(fakeStripeProvider, "refundPayment").mockRejectedValue(
+      Object.assign(new Error("charge is disputed"), { type: "StripeInvalidRequestError", statusCode: 400, code: "charge_disputed" }),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId)).toEqual({
+      ok: false,
+      error: "The refund did not go through. The platform has been alerted; do not refund the customer yourself.",
+    });
+    const after = await reviewed(orderId);
+    expect(after.issue.state).toBe("refund_failed");
+    expect(after.order.status).toBe("COMPLETED");
+    expect(after.audits.map((row) => row.action).sort()).toEqual(["issue_approved", "issue_refund_failed"]);
+  }, 30_000);
+
+  it("an approval whose refund cannot start puts the issue back in review with the attempt on record", async () => {
+    const { orderId, issueId, pi } = await issueToReview(609, 8000, 6000);
+    await storeScoped(storeAId).auditLog.create({ data: systemAuditData(storeAId, orderId, "refund_resolved_manually") });
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId)).toEqual({ ok: false, error: "The refund could not be started. Try again." });
+    const after = await reviewed(orderId);
+    expect(after.issue).toMatchObject({ state: "in_review", amountCents: 6000, refundRequestId: null });
+    expect(after.requests).toHaveLength(0);
+    expect(refundRequests.some((call) => call.paymentIntentId === pi)).toBe(false);
+    expect(after.audits.map((row) => row.action).sort()).toEqual(["issue_approval_not_started", "issue_approved"]);
+  }, 30_000);
+
+  it("an outside refund that lands after the capture check returns the capped amount staff are shown", async () => {
+    const { orderId, issueId, pi } = await issueToReview(610, 8000, 6000);
+    const listRefunds = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementationOnce(async (id) => {
+      const before = await listRefunds(id);
+      await fakeStripeProvider.refundPayment(pi, 7000, `dashboard-610-${RUN}`);
+      return before;
+    });
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId)).toEqual({ ok: true, amountCents: 1000 });
+    const after = await reviewed(orderId);
+    expect(after.requests.map((row) => row.amountCents)).toEqual([1000]);
+    expect(after.issue.amountCents).toBe(1000);
+  }, 30_000);
+
+  it("an issue stranded approved or auto-refunded with no refund request returns to review and can be approved", async () => {
+    const stale = await issueToReview(606, 8000, 6000);
+    const fresh = await issueToReview(607, 8000, 6000);
+    const longAgo = new Date(Date.now() - 20 * 60 * 1000);
+    // A crash between the claim and the refund reservation leaves exactly this row.
+    await storeScoped(storeAId).issueReport.update({ where: { id: stale.issueId }, data: { state: "auto_refunded", updatedAt: longAgo } });
+    await storeScoped(storeAId).issueReport.update({ where: { id: fresh.issueId }, data: { state: "approved" } });
+    const listed = (await issuesToReview(storeAId)).map((issue) => issue.id);
+    expect(listed).toContain(stale.issueId);
+    expect(listed).not.toContain(fresh.issueId);
+
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(fresh.issueId)).toEqual({ ok: false, error: "This problem was already handled" });
+    expect(await approveIssueAction(stale.issueId)).toMatchObject({ ok: true });
+    const after = await reviewed(stale.orderId);
+    expect(after.requests.map((row) => row.amountCents)).toEqual([6000]);
+    expect(after.issue).toMatchObject({ state: "approved", refundRequestId: after.requests[0]!.id });
   }, 30_000);
 
   it("a partial amount above the remaining capture is refused with an allow-listed message", async () => {

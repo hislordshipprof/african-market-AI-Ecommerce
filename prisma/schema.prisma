@@ -21,11 +21,16 @@ model Store {
   deliveryRadiusMi       Decimal  @default(8) @map("delivery_radius_mi")
   storeDeliveryEnabled   Boolean  @default(false) @map("store_delivery_enabled")
   storeDeliveryFeeCents  Int      @default(0) @map("store_delivery_fee_cents")
+  /// Scheduled slot settings per fulfillment (#565); shape in src/lib/order/slot-schedule.ts.
+  pickupSlotSettings        Json? @map("pickup_slot_settings")
+  storeDeliverySlotSettings Json? @map("store_delivery_slot_settings")
   addressLine1           String?  @map("address_line1")
   addressLine2           String?  @map("address_line2")
   city                   String?
   state                  String?
   zip                    String?
+  /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
+  phone                  String?
   lat                    Float?
   lng                    Float?
   minimumOrderCents      Int      @default(3500) @map("minimum_order_cents")
@@ -34,6 +39,9 @@ model Store {
   autoRefundLimitCents   Int      @default(2500) @map("auto_refund_limit_cents")
   supportSlaMinutes      Int      @default(30) @map("support_sla_minutes")
   digestHour             Int      @default(20) @map("digest_hour")
+  /// Reorder suggestions (#551): days from order to shelf, and days the order should last after that.
+  reorderLeadDays        Int      @default(7) @map("reorder_lead_days")
+  reorderCoverDays       Int      @default(14) @map("reorder_cover_days")
   stripeAccountId        String?  @unique @map("stripe_account_id")
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
   /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
@@ -52,6 +60,11 @@ model Store {
   ownerPhotoUrl String? @map("owner_photo_url")
   neighborhood  String?
   deliveryInfo  String? @map("delivery_info")
+  /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on; a platform admin can override (#450).
+  listed        Boolean @default(false)
+  listingBlurb  String? @map("listing_blurb") @db.VarChar(160)
+  /// Up to 3 directory cuisine tags (src/lib/directory/cuisine.ts, #450).
+  cuisineTags   String[] @default([]) @map("cuisine_tags")
 
   rlsFixtures           RlsTestFixture[]
   auditLogs             AuditLog[]
@@ -84,6 +97,8 @@ model Store {
   ownerReports          OwnerReport[]
   ownerReportItems      OwnerReportItem[]
   listingDrafts         ListingDraft[]
+  reorderLists          ReorderList[]
+  reorderListItems      ReorderListItem[]
   notificationLogs      NotificationLog[]
   deliveryEvents        DeliveryEvent[]
   pushSubscriptions     PushSubscription[]
@@ -145,6 +160,7 @@ model User {
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
   listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
   listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  reorderLists            ReorderList[]            @relation("ReorderListSaver")
 
   @@map("users")
 }
@@ -262,6 +278,31 @@ model AddressGeocode {
   cachedAt         DateTime @map("cached_at")
 
   @@map("address_geocodes")
+}
+
+/// US Census Gazetteer ZCTA centroid, seeded once by migration for the directory's near-me search (#452).
+model GazetteerZip {
+  zip     String @id
+  lat     Float
+  lng     Float
+  /// A point within this many miles of the centroid is taken to be in the ZIP (for "is this point in the US").
+  reachMi Float  @map("reach_mi")
+
+  @@index([lat])
+  @@map("gazetteer_zips")
+}
+
+/// US Census Gazetteer place centroid; nameKey is placeKey(name) (#452).
+model GazetteerPlace {
+  state   String
+  nameKey String @map("name_key")
+  name    String
+  lat     Float
+  lng     Float
+
+  @@id([state, nameKey])
+  @@index([nameKey])
+  @@map("gazetteer_places")
 }
 
 model AuditLog {
@@ -476,6 +517,7 @@ model Listing {
   ownerReportItems  OwnerReportItem[]
   draftsListedAs    ListingDraft[]           @relation("ListingDraftExisting")
   draftsPublishedAs ListingDraft[]           @relation("ListingDraftPublished")
+  reorderListItems  ReorderListItem[]
   collectionItems   StoreCollectionListing[]
   attributes        ListingAttributes?
   ingredients       ListingIngredient[]
@@ -736,6 +778,42 @@ model OwnerReportItem {
   @@map("owner_report_items")
 }
 
+/// The owner's saved reorder list (#551): one draft per store, replaced on each save. Nothing is ordered from it.
+model ReorderList {
+  id        String   @id @default(cuid())
+  storeId   String   @unique @map("store_id")
+  savedById String   @map("saved_by_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store   Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  savedBy User              @relation("ReorderListSaver", fields: [savedById], references: [id], onDelete: Restrict)
+  items   ReorderListItem[]
+
+  @@index([savedById])
+  @@map("reorder_lists")
+}
+
+/// One line of a reorder list. A null quantity is a status listing marked "reorder (no count)".
+model ReorderListItem {
+  id        String  @id @default(cuid())
+  listId    String  @map("list_id")
+  storeId   String  @map("store_id")
+  listingId String  @map("listing_id")
+  name      String
+  quantity  Int?
+  position  Int
+
+  list    ReorderList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  store   Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, listingId])
+  @@index([storeId])
+  @@index([listingId])
+  @@map("reorder_list_items")
+}
+
 /// One item Claude read from a shelf photo (#552), waiting for the owner. Nothing is listed until the
 /// owner confirms a price and publishes; the shelf photo is never a product image.
 model ListingDraft {
@@ -852,6 +930,11 @@ model Cart {
   deliveryLat         Float?    @map("delivery_lat")
   deliveryLng         Float?    @map("delivery_lng")
   leaveAtDoor         Boolean   @default(false) @map("leave_at_door")
+  /// The cheapest courier quote last shown at checkout (#527), for the basket and address in courierQuoteKey.
+  courierFeeCents       Int?      @map("courier_fee_cents")
+  courierProvider       String?   @map("courier_provider")
+  courierQuoteKey       String?   @map("courier_quote_key")
+  courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
   source              String    @default("manual")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
@@ -1133,6 +1216,10 @@ model Order {
   prepEstimateMinutes     Int?      @map("prep_estimate_minutes")
   acceptedAt              DateTime? @map("accepted_at")
   readyAt                 DateTime? @map("ready_at")
+  /// Courier orders (#562): when the first line was picked or marked short, the ready time the courier is booked for, and the store's one push.
+  pickingStartedAt        DateTime? @map("picking_started_at")
+  readyEstimateAt         DateTime? @map("ready_estimate_at")
+  readyPushedAt           DateTime? @map("ready_pushed_at")
   completedAt             DateTime? @map("completed_at")
   cancelledAt             DateTime? @map("cancelled_at")
   inngestEventSentAt      DateTime? @map("inngest_event_sent_at")
@@ -1161,6 +1248,7 @@ model Order {
   @@unique([storeId, number])
   @@index([storeId])
   @@index([storeId, status])
+  @@index([storeId, fulfillment, pickupSlot])
   @@index([storeId, sourceCartId, createdAt])
   @@index([storeId, createdAt])
   @@index([customerId])
@@ -1258,6 +1346,8 @@ model Delivery {
   courierJson    Json?    @map("courier_json")
   proofUrl       String?  @map("proof_url")
   pin            String?
+  /// The ready time sent to the provider (#562); null books the courier as soon as possible.
+  pickupReadyAt  DateTime? @map("pickup_ready_at")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
