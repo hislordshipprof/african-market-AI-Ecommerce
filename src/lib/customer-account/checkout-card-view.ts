@@ -13,7 +13,6 @@ export interface SavedCardFact {
 
 export interface CheckoutCardView {
   showSaveTick: boolean;
-  saveTickDefault: false;
   selectable: SavedCardFact[];
   expired: SavedCardFact[];
   preselectedId: string | null;
@@ -22,7 +21,6 @@ export interface CheckoutCardView {
 
 /**
  * Newest consented unexpired card is pre-selected. Guests see no tick.
- * The tick default is the literal false.
  */
 export function checkoutCardView(input: {
   signedIn: boolean;
@@ -32,7 +30,6 @@ export function checkoutCardView(input: {
   if (!input.signedIn) {
     return {
       showSaveTick: false,
-      saveTickDefault: false,
       selectable: [],
       expired: [],
       preselectedId: null,
@@ -47,7 +44,6 @@ export function checkoutCardView(input: {
   const preselectedId = selectable[0]?.id ?? null;
   return {
     showSaveTick: true,
-    saveTickDefault: false,
     selectable,
     expired,
     preselectedId,
