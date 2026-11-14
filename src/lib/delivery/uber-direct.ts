@@ -152,6 +152,10 @@ function feeCents(value: unknown): number {
   return value as number;
 }
 
+function field(value: unknown, ...keys: string[]): unknown {
+  return keys.reduce<unknown>((v, k) => (typeof v === "object" && v !== null ? (v as Json)[k] : undefined), value);
+}
+
 /** The webhook's x-uber-signature is missing or does not match the body. */
 export class UberWebhookSignatureError extends Error {
   constructor(message: string) {
@@ -161,12 +165,13 @@ export class UberWebhookSignatureError extends Error {
 }
 
 // Delivery status values: https://developer.uber.com/docs/deliveries/daas/references/api/webhooks/delivery-status-webhook
-// pending, dropoff and returned carry no platform step; returned follows a failed dropoff and is handled with the order flow (#136).
+// pending and dropoff carry no platform step. returned: the courier brought a failed drop-off back to the store.
 const EVENT_TYPES: Record<string, CourierEventType> = {
   pickup: "courier_assigned",
   pickup_complete: "picked_up",
   delivered: "delivered",
   canceled: "cancelled",
+  returned: "returned",
 };
 
 export class UberDirectProvider implements DeliveryProvider {
@@ -225,9 +230,16 @@ export class UberDirectProvider implements DeliveryProvider {
       manifest_items: [{ name: "Grocery order", quantity: 1, size: "large", price: req.orderValueCents }],
       manifest_total_value: req.orderValueCents,
       tip: req.tipCents,
+      // Uber picks the PIN and texts it to the customer: https://developer.uber.com/docs/deliveries/guides/pincode
+      dropoff_verification: req.dropoffPin ? { pincode: { enabled: true } } : { picture: true },
     });
     if (typeof res.id !== "string") throw new Error("Uber Direct returned a delivery without an id");
-    return { externalId: res.id, trackingUrl: typeof res.tracking_url === "string" ? res.tracking_url : null };
+    const pin = field(res, "dropoff", "verification_requirements", "pincode", "value");
+    return {
+      externalId: res.id,
+      trackingUrl: typeof res.tracking_url === "string" ? res.tracking_url : null,
+      pin: req.dropoffPin && typeof pin === "string" ? pin : null,
+    };
   }
 
   /** POST /v1/customers/{customer_id}/deliveries/{delivery_id}/cancel */
@@ -268,6 +280,10 @@ export class UberDirectProvider implements DeliveryProvider {
       trackingUrl: text(data.tracking_url),
       actualFeeCents: type === "delivered" && data.fee !== undefined ? feeCents(data.fee) : null,
       courier: courier ? { name: text(courier.name), vehicle, dropoffEta: optionalDate(data.dropoff_eta) } : null,
+      proof: {
+        photoUrl: text(field(data, "dropoff", "verification", "picture", "image_url")),
+        pinEntered: text(field(data, "dropoff", "verification", "pin_code", "entered")),
+      },
       payload: body,
     };
   }

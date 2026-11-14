@@ -14,6 +14,7 @@ export type OrderStatus =
   | "SUBSTITUTION_PENDING"
   | "READY"
   | "AWAITING_PICKUP"
+  | "COURIER_REQUESTED"
   | "COURIER_ASSIGNED"
   | "PICKED_UP"
   | "DELIVERED"
