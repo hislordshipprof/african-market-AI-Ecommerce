@@ -3,12 +3,13 @@
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { adminDisconnectStoreNumberAction, adminLinkStoreNumberAction } from "@/lib/whatsapp/store-number-actions";
+import type { StoreNumberLinkMode, StoreNumberView } from "@/lib/whatsapp/store-number";
 
 interface Props {
   storeId: string;
-  mode: "form" | "meta" | "unavailable";
+  mode: StoreNumberLinkMode;
   number: {
-    status: "pending" | "registered" | "failed" | "disconnected";
+    status: StoreNumberView["status"];
     wabaId: string;
     phoneNumberId: string;
     displayNumber: string | null;
@@ -20,7 +21,7 @@ interface Props {
 const STATUS_LABEL = {
   pending: "Linking did not finish",
   registered: "Live",
-  failed: "Failed",
+  failed: "Not linked",
   disconnected: "Disconnected",
 } as const;
 

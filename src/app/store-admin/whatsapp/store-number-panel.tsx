@@ -9,9 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { disconnectStoreNumberAction, linkStoreNumberAction } from "@/lib/whatsapp/store-number-actions";
+import type { StoreNumberLinkMode, StoreNumberView } from "@/lib/whatsapp/store-number";
 
 export interface StoreNumberState {
-  status: "pending" | "registered" | "failed" | "disconnected";
+  status: StoreNumberView["status"];
   display: string;
   coexistence: boolean;
   failureCode: string | null;
@@ -19,7 +20,7 @@ export interface StoreNumberState {
 
 interface Props {
   storeName: string;
-  mode: "form" | "meta" | "unavailable";
+  mode: StoreNumberLinkMode;
   number: StoreNumberState | null;
 }
 
