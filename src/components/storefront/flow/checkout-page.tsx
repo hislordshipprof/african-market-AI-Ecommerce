@@ -382,12 +382,8 @@ function RealCheckoutForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey]);
 
-  const [draftSlot, setDraftSlot] = useState<{ value: string; label: string } | null>(null);
   const slotRequired = slotOptions?.required === true;
-  const offered = (slotOptions?.slots ?? []).map((option) => ({ value: option.id, label: option.label }));
-  const slots = draftSlot && fulfillment === "pickup" && !offered.some((option) => option.value === draftSlot.value)
-    ? [draftSlot, ...offered]
-    : offered;
+  const slots = (slotOptions?.slots ?? []).map((option) => ({ value: option.id, label: option.label }));
   const scheduled = slotRequired || (schedule && fulfillment === "pickup");
   // A choice the fresh list no longer offers falls back to its first time.
   const chosenSlot = !scheduled
@@ -396,7 +392,6 @@ function RealCheckoutForm({
 
   function takeFreshSlots(fresh: SlotOptions, message: string) {
     setSlotOptions(fresh);
-    setDraftSlot(null);
     setSlot(fresh.slots[0]?.id ?? "asap");
     setError(message);
     setPayState("idle");
@@ -414,7 +409,6 @@ function RealCheckoutForm({
       if (!active || !draft || !settings.pickupEnabled || shopperChose.current) return;
       setFulfillment("pickup");
       if (draft.slot.id === "asap") return;
-      setDraftSlot({ value: draft.slot.id, label: draft.slot.label });
       setSchedule(true);
       setSlot(draft.slot.id);
     }).catch(() => {});

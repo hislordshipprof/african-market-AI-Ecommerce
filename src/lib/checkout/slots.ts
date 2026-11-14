@@ -51,8 +51,11 @@ export async function slotOptions(
   now: Date,
 ): Promise<SlotOptions> {
   if (fulfillment === "pickup") {
-    const slots = pickupSlotsFor(store, now, await bookedCounts(client, storeId, fulfillment));
-    return { required: false, slots: slots.filter((slot) => slot.id !== ASAP_SLOT.id) };
+    const slots = pickupSlotsFor(store, now, await bookedCounts(client, storeId, fulfillment))
+      .filter((slot) => slot.id !== ASAP_SLOT.id);
+    // Without a schedule the times are today's and carry no date.
+    const today = !readSlotSchedule(store.pickupSlotSettings);
+    return { required: false, slots: today ? slots.map((slot) => ({ ...slot, label: `Today ${slot.label}` })) : slots };
   }
   const schedule = fulfillment === "store-delivery" ? readSlotSchedule(store.storeDeliverySlotSettings) : null;
   if (!schedule) return { required: false, slots: [] };
