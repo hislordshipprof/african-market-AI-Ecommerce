@@ -35,6 +35,7 @@ import {
   ISSUE_REFUND_NOT_STARTED,
   approveIssue,
   declineIssue,
+  issueIdSchema,
 } from "./issue-review";
 
 const ALLOWED_STAFF_ERRORS = new Set([
@@ -236,7 +237,7 @@ const declineReasonSchema = z.string().trim().min(1).max(500);
 export async function approveIssueAction(issueId: string, amountCents?: number) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
-  const id = parseInput(orderIdSchema, issueId);
+  const id = parseInput(issueIdSchema, issueId);
   if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
   const amount = parseInput(issueAmountSchema, amountCents);
   if (!amount.ok) return { ok: false as const, error: ISSUE_AMOUNT_ABOVE_ISSUE };
@@ -248,7 +249,7 @@ export async function approveIssueAction(issueId: string, amountCents?: number) 
 export async function declineIssueAction(issueId: string, reason: string) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
-  const id = parseInput(orderIdSchema, issueId);
+  const id = parseInput(issueIdSchema, issueId);
   if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
   const parsed = parseInput(declineReasonSchema, reason);
   if (!parsed.ok) return { ok: false as const, error: ISSUE_DECLINE_REASON_MISSING };

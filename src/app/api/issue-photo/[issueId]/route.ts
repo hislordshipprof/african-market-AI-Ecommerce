@@ -1,10 +1,8 @@
-import { z } from "zod";
 import { storeScoped } from "@/lib/db";
+import { issueIdSchema } from "@/lib/order/issue-review";
 import { streamIssuePhoto } from "@/lib/r2";
 import { parseInput } from "@/lib/security/parse-input";
 import { requireStoreMember } from "@/lib/store-admin/session";
-
-const issueIdSchema = z.string().min(1).max(64);
 
 function notFound() {
   return new Response(null, { status: 404, headers: { "Cache-Control": "private, no-store" } });
