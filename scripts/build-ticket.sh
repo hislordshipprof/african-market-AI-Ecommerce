@@ -322,11 +322,8 @@ CI_LOCAL="${CI_LOCAL:-$ROOT/scripts/ci-local.sh}"
 if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
   cd "$ROOT"
   while true; do
+    # The refusal at the top keeps prior under 3, and only the first round's autofix comes back here.
     prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
-    if [ "$prior" -ge 3 ]; then
-      echo "Ticket #$N already has $prior review rounds (cap is 3). No further review or automatic fix. The coordinator decides."
-      break
-    fi
     last=$(ticket_round_is_last "$MODE" "$prior")
     round=$((prior + 1))
     CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
