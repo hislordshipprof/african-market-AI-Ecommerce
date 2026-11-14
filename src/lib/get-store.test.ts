@@ -46,7 +46,7 @@ describe("storeTagsForId", () => {
 });
 
 describe("revalidateStore", () => {
-  it("revalidates both slug and id tags", async () => {
+  it("revalidates the slug, id and directory tags", async () => {
     const { revalidateTag } = await import("next/cache");
     vi.mocked(revalidateTag).mockClear();
 
@@ -56,7 +56,8 @@ describe("revalidateStore", () => {
       expire: 0,
     });
     expect(revalidateTag).toHaveBeenCalledWith("store:store-1", { expire: 0 });
-    expect(revalidateTag).toHaveBeenCalledTimes(2);
+    expect(revalidateTag).toHaveBeenCalledWith("store-directory", { expire: 0 });
+    expect(revalidateTag).toHaveBeenCalledTimes(3);
   });
 
   it("revalidates domain tag when customDomain is set", async () => {
@@ -73,7 +74,7 @@ describe("revalidateStore", () => {
       "store-domain:shop.mamasmarket.com",
       { expire: 0 },
     );
-    expect(revalidateTag).toHaveBeenCalledTimes(3);
+    expect(revalidateTag).toHaveBeenCalledTimes(4);
   });
 
   it("does not revalidate domain tag when customDomain is null", async () => {
@@ -82,7 +83,7 @@ describe("revalidateStore", () => {
 
     revalidateStore({ id: "store-1", slug: "mama-ngozi", customDomain: null });
 
-    expect(revalidateTag).toHaveBeenCalledTimes(2);
+    expect(revalidateTag).toHaveBeenCalledTimes(3);
   });
 });
 
