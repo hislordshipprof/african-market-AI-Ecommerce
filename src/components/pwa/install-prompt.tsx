@@ -128,11 +128,11 @@ export function InstallPrompt({ storeName }: { storeName: string }) {
           <ol className="sf-install-steps">
             <li>
               <span className="sf-install-step-icon"><Share size={18} aria-hidden /></span>
-              Tap <strong>Share</strong> in Safari&rsquo;s toolbar.
+              <span>Tap <strong>Share</strong> in Safari&rsquo;s toolbar.</span>
             </li>
             <li>
               <span className="sf-install-step-icon"><SquarePlus size={18} aria-hidden /></span>
-              Choose <strong>Add to Home Screen</strong>.
+              <span>Choose <strong>Add to Home Screen</strong>.</span>
             </li>
           </ol>
           <div className="sf-install-actions">
