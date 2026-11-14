@@ -28,7 +28,6 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("CI", "true");
     resetFakeCheckoutPayments();
-    await authPrisma.user.deleteMany({ where: { id: { startsWith: "user-t248-attempt-" } } });
     await authPrisma.user.create({ data: { id: userId, name: "Ada", email: `${userId}@example.test` } });
     const store = await platformAdmin.store.create({
       data: {
@@ -54,7 +53,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
   afterAll(async () => {
     vi.unstubAllEnvs();
     const stores = await platformAdmin.store.findMany({
-      where: { slug: { startsWith: "t248-attempt-" } },
+      where: { slug: { startsWith: run } },
       select: { id: true },
     });
     for (const store of stores) {
@@ -68,7 +67,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       await scoped.listing.deleteMany({ where: { storeId: store.id } });
       await platformAdmin.store.delete({ where: { id: store.id } });
     }
-    await authPrisma.user.deleteMany({ where: { id: { startsWith: "user-t248-attempt-" } } });
+    await authPrisma.user.deleteMany({ where: { id: userId } });
     resetFakeCheckoutPayments();
   });
 
