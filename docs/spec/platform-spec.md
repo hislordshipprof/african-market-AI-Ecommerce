@@ -156,7 +156,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - Short lines trigger the customer prompt (§5.5) automatically; picker sees the answer live (the inbox polls every 10 s and shows found/ordered, the offer, when the rule applies, and the outcome). Picking other lines continues while the order is SUBSTITUTION_PENDING; the store can cancel from it.
 - When all lines resolved → **Ready** (or *Ready in X min* to pre-call courier).
 - Handoff screen: courier name/vehicle/ETA, order bag count, handoff photo.
-- Batch view: multiple open orders, combined pick for shared items (phase 2).
+- **Batch picking** (#564): staff pick 2–4 Accepted orders of one store together. One combined line per item, grouped by product category (standing in for the aisle; no store-set aisle order yet) with chilled then frozen last, showing the total, the split per order and each order's bag letter (A for the oldest). Units found fill the oldest order first, so a short lands on the newest; each order line left short gets its own Substitution prompt (§5.5). An order in a batch is picked only from the batch, under the store lock; leaving the batch returns each order to normal picking with its progress kept. The phone packing screen shows photos and the shopper's pre-approved swaps; its "Start packing" moves every order to Picking and books the courier for courier orders (Ready time, #562). Each order still goes Ready, captures and notifies on its own; the batch moves no money.
 
 ### 6.4 Money & reports
 - Payout dashboard (Stripe Connect: weekly by default), per-order breakdown: item total, refunds, platform fee, card fees, courier fee policy.
@@ -569,7 +569,7 @@ Phase 2 started on 2026-11-14, alongside the Phase 1 tail (Build Board decision 
 - Reports & payouts dashboard; platform admin console.
 
 ### Phase 3: Scale
-Second metro, native apps, batch picking, scheduled van slots, nationwide shipping for dry goods, hot food/catering, agentic commerce (MCP/ACP), store reorder from wholesalers.
+Second metro, native apps, scheduled van slots, nationwide shipping for dry goods, hot food/catering, agentic commerce (MCP/ACP), store reorder from wholesalers.
 
 ---
 
