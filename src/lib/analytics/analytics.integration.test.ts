@@ -28,7 +28,9 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
   let raw: PrismaClient;
   let storeA = "";
   let storeB = "";
+  let storeC = "";
   let data: StoreAnalytics;
+  let edges: StoreAnalytics;
 
   async function asStore<T>(storeId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return raw.$transaction(async (tx) => {
@@ -117,14 +119,44 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     });
   }
 
+  /**
+   * Money edges (store C), hand-computed:
+   * P pickup 10-20 (before the range) captured 1000 fee 59. Two $5.00 refunds with fee back:
+   *   10-25 share round(59 × 500 / 1000) = 30; 11-02 share min(30, 59 − 30) = 29 (Stripe caps the total at the fee)
+   *   → 11-02 has only a refund: store bears 500 − 29 = 471, net −4.71.
+   * Q courier 11-03 captured 1000 fee 59, courier fee 999: the application fee caps at captured,
+   *   so the courier share is 1000 − 59 = 941 and net is 0.
+   * A chat filled cart R; R's order was cancelled before capture, so it did not lead to an order.
+ * A missed search for "-1+cmd" would run as a formula if exported bare.
+   */
+  async function seedStoreC() {
+    await asStore(storeC, async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeC, name: "Dayo" } });
+      const base = { storeId: storeC, customerId: customer.id, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0 };
+      const p = await tx.order.create({ data: { ...base, number: 1, fulfillment: "pickup", status: "COMPLETED", capturedAmountCents: 1000, platformFeeCents: 59, createdAt: at("2026-10-20T15:00:00Z") } });
+      for (const [key, createdAt] of [["c1", "2026-10-25T15:00:00Z"], ["c2", "2026-11-02T15:00:00Z"]]) {
+        await tx.refundRequest.create({ data: { storeId: storeC, orderId: p.id, paymentIntentId: `pi_${run}_p`, key: `${run}-${key}`, amountCents: 500, refundApplicationFee: true, state: "CREATED", providerStatus: "succeeded", createdAt: at(createdAt) } });
+      }
+      await tx.order.create({ data: { ...base, number: 2, fulfillment: "courier", status: "DELIVERED", deliveryFeeCents: 999, capturedAmountCents: 1000, platformFeeCents: 59, createdAt: at("2026-11-03T15:00:00Z") } });
+      const cart = await tx.cart.create({ data: { storeId: storeC } });
+      const conv = await tx.aiConversation.create({ data: { storeId: storeC, cartId: cart.id, model: "test", createdAt: at("2026-11-04T15:00:00Z") } });
+      await tx.aiAction.create({ data: { storeId: storeC, conversationId: conv.id, tool: "add_to_cart", input: {}, output: { ok: true }, ok: true, createdAt: at("2026-11-04T15:01:00Z") } });
+      await tx.aiAction.create({ data: { storeId: storeC, conversationId: conv.id, tool: "search_catalog", input: { query: "-1+cmd" }, output: { ok: true, items: [] }, ok: true, createdAt: at("2026-11-04T15:02:00Z") } });
+      await tx.order.create({ data: { ...base, number: 3, status: "CANCELLED", sourceCartId: cart.id, createdAt: at("2026-11-04T15:10:00Z"), cancelledAt: at("2026-11-04T16:10:00Z") } });
+    });
+  }
+
   beforeAll(async () => {
     raw = testPrismaClient();
     await raw.$connect();
     storeA = (await raw.store.create({ data: { slug: `an-a-${run}`, name: "Analytics A", timezone: TZ } })).id;
     storeB = (await raw.store.create({ data: { slug: `an-b-${run}`, name: "Analytics B", timezone: TZ } })).id;
     await seedStoreA();
+    storeC = (await raw.store.create({ data: { slug: `an-c-${run}`, name: "Analytics C", timezone: TZ } })).id;
     await seedStoreB();
+    await seedStoreC();
     data = await storeAnalytics(storeA, TZ, RANGE);
+    edges = await storeAnalytics(storeC, TZ, RANGE);
   });
 
   afterAll(async () => {
@@ -193,5 +225,24 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     expect(analyticsCsv("customers", data)).toContain("Repeat rate %,100\r\n");
     expect(analyticsCsv("operations", data)).toContain("Cancelled: Out of stock,1\r\n");
     expect(analyticsCsv("assistant", data)).toContain("Chats that led to an order,1\r\n");
+  });
+
+  it("caps the fee returned across partial refunds and the courier fee at what was captured", () => {
+    const byDay = Object.fromEntries(edges.sales.days.map((d) => [d.day, d]));
+    expect(byDay["2026-11-02"]).toMatchObject({ orders: 0, refundsCents: 500, netCents: -471 });
+    expect(byDay["2026-11-03"]).toMatchObject({ orders: 1, goodsCents: 1, cardFeeCents: 59, courierFeeCents: 941, netCents: 0 });
+    expect(edges.sales.totals).toMatchObject({ refundsCents: 500, courierFeeCents: 941, netCents: -471 });
+  });
+
+  it("exports a negative amount as a plain number a spreadsheet can sum", () => {
+    const sales = analyticsCsv("sales", edges).split("\r\n");
+    expect(sales).toContain("2026-11-02,0,0.00,0.00,5.00,0.00,0.00,-4.71");
+    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,1,0.01,0.01,5.00,0.59,9.41,-4.71");
+    // Shopper search text that would run as a formula stays guarded.
+    expect(analyticsCsv("products", edges)).toContain("\"Searched, not carried\",'-1+cmd,,,,,1\r\n");
+  });
+
+  it("does not count a chat whose order was cancelled before capture as leading to an order", () => {
+    expect(edges.assistant).toEqual({ chatsInRange: 1, ledToCart: 1, ledToOrder: 0 });
   });
 });

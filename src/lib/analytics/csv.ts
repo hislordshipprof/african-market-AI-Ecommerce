@@ -20,7 +20,8 @@ function cell(value: string | number | null): string {
   if (value === null) return "";
   const text = String(value);
   // A leading =, +, - or @ would run as a formula in a spreadsheet; shopper search text can start with one.
-  const safe = /^[=+\-@\t\r]/.test(text) && typeof value === "string" ? `'${text}` : text;
+  // A plain number such as a negative amount cannot run, and must stay a number so the sheet sums it.
+  const safe = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text) ? `'${text}` : text;
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 

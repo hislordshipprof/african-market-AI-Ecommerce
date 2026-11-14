@@ -7,10 +7,11 @@ import { rangeDays, type AnalyticsRange } from "./range";
  *
  * Money rules, from what each order stored at capture (never recomputed rates):
  * - Goods = captured − tip − delivery fee.
- * - Card fee = the order's stored platform fee. Courier orders also pass the courier fee to the platform.
+ * - Card fee = the order's stored platform fee. Courier orders also pass the courier fee to the platform,
+ *   capped with the card fee at captured, as at capture.
  * - Net to store = captured − card fee − courier fee − the store's share of succeeded refunds.
- * - A refund with refund_application_fee returns the platform's fee in proportion (Stripe's rule),
- *   so the store bears the amount less that share; otherwise the store bears all of it.
+ * - A refund with refund_application_fee returns the platform's fee in proportion (Stripe's rule), never more
+ *   than that fee across all the order's refunds, so the store bears the amount less that share; otherwise all of it.
  */
 
 export const FULFILLMENTS = ["pickup", "store_delivery", "courier"] as const;
@@ -114,32 +115,40 @@ type MoneyRow = {
   refund_store_cost: number;
 };
 
+/** What the platform kept at capture: card fee plus courier fee, capped at captured (applicationFeeForCapture). */
+const APPLICATION_FEE = Prisma.sql`LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents ELSE 0 END, o.captured_amount_cents)`;
+
 async function salesRows(storeId: string, range: AnalyticsRange, timeZone: string): Promise<MoneyRow[]> {
   return storeScopedRawQuery<MoneyRow>(storeId, Prisma.sql`
-    WITH b AS (${bounds(range, timeZone)})
+    WITH b AS (${bounds(range, timeZone)}),
+    r AS (
+      SELECT r.created_at, o.fulfillment, r.amount_cents, fee.total AS fee_total, share.proportional,
+             SUM(share.proportional) OVER (PARTITION BY r.order_id ORDER BY r.created_at, r.id) AS running
+      FROM refund_requests r
+      JOIN orders o ON o.id = r.order_id AND o.store_id = r.store_id
+      CROSS JOIN LATERAL (SELECT ${APPLICATION_FEE} AS total) fee
+      CROSS JOIN LATERAL (SELECT CASE WHEN r.refund_application_fee AND o.captured_amount_cents > 0
+        THEN ROUND(fee.total::numeric * r.amount_cents / o.captured_amount_cents) ELSE 0 END AS proportional) share, b
+      WHERE r.store_id = ${storeId} AND r.provider_status = 'succeeded' AND r.created_at < b.hi
+    )
     SELECT 'order' AS kind, ${storeDay(Prisma.sql`o.created_at`, timeZone)} AS day, o.fulfillment,
            COUNT(*)::int AS orders,
            SUM(o.captured_amount_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
            SUM(COALESCE(o.platform_fee_cents, 0))::int AS card_fee,
-           SUM(CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents ELSE 0 END)::int AS courier_fee,
+           SUM(${APPLICATION_FEE} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
            SUM(o.captured_amount_cents)::int AS captured,
            0 AS refunds, 0 AS refund_store_cost
     FROM orders o, b
     WHERE o.store_id = ${storeId} AND o.created_at >= b.lo AND o.created_at < b.hi AND o.captured_amount_cents > 0
     GROUP BY 2, 3
     UNION ALL
-    SELECT 'refund', ${storeDay(Prisma.sql`r.created_at`, timeZone)}, o.fulfillment,
+    -- Stripe returns the fee in proportion but never more than the fee in total across partial refunds (stripe/fake.ts).
+    SELECT 'refund', ${storeDay(Prisma.sql`r.created_at`, timeZone)}, r.fulfillment,
            0, 0, 0, 0, 0,
            SUM(r.amount_cents)::int,
-           SUM(r.amount_cents - CASE
-             WHEN r.refund_application_fee AND o.captured_amount_cents > 0 THEN LEAST(
-               ROUND(LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents ELSE 0 END, o.captured_amount_cents)::numeric
-                 * r.amount_cents / o.captured_amount_cents),
-               LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents ELSE 0 END, o.captured_amount_cents))
-             ELSE 0 END)::int
-    FROM refund_requests r
-    JOIN orders o ON o.id = r.order_id AND o.store_id = r.store_id, b
-    WHERE r.store_id = ${storeId} AND r.provider_status = 'succeeded' AND r.created_at >= b.lo AND r.created_at < b.hi
+           SUM(r.amount_cents - (LEAST(r.fee_total, r.running) - LEAST(r.fee_total, r.running - r.proportional)))::int
+    FROM r, b
+    WHERE r.created_at >= b.lo
     GROUP BY 2, 3`);
 }
 
@@ -345,6 +354,7 @@ async function assistantView(storeId: string, range: AnalyticsRange, timeZone: s
            COUNT(*) FILTER (WHERE ${ASSISTANT_CART(Prisma.sql`c.cart_id`, storeId)})::int AS "ledToCart",
            COUNT(*) FILTER (WHERE ${ASSISTANT_CART(Prisma.sql`c.cart_id`, storeId)} AND EXISTS (
              SELECT 1 FROM orders o WHERE o.store_id = ${storeId} AND o.source_cart_id = c.cart_id AND o.created_at >= c.created_at
+               AND o.captured_amount_cents > 0
            ))::int AS "ledToOrder"
     FROM ai_conversations c, b
     WHERE c.store_id = ${storeId} AND c.created_at >= b.lo AND c.created_at < b.hi`);
