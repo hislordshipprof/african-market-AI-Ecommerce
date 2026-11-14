@@ -1,4 +1,4 @@
-import { appRateLimitCleanup, appRateLimitUpsert } from "../db";
+import { appRateLimitCleanup, appRateLimitPeek, appRateLimitUpsert } from "../db";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_BATCH = 100;
@@ -28,6 +28,11 @@ export async function takeRateLimit(
     Math.ceil((Number(row.windowStart) + windowMs - now) / 1000),
   );
   return { ok: false, count: row.count, retryAfter };
+}
+
+/** True while the key has slots left in its window. Takes none: callers count only failures. */
+export async function peekRateLimit(key: string, max: number, windowMs: number, now = Date.now()): Promise<boolean> {
+  return (await appRateLimitPeek(key, BigInt(now) - BigInt(windowMs))) < max;
 }
 
 /** Drops rows whose window started more than 24h ago. A live window is kept. */

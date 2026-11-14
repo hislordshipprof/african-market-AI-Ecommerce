@@ -19,7 +19,8 @@ import { readServiceFeeSettings } from "../order/service-fee-settings";
 import { reserveOrderStock } from "../order/stock-ledger";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
-import { COURIER_NOT_OFFERED, computeQuote, type CourierQuoteInput, type StoreDeliveryQuote } from "./quote";
+import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
+import { couponCustomerKey, readCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCheapestCourier } from "../delivery/dispatch";
 import { checkCourierEligibility, readCourierWeightSettings } from "../delivery/eligibility";
 import type { DeliveryProvider } from "../delivery/provider";
@@ -157,6 +158,16 @@ export interface QuoteCheckoutOptions {
   couriers?: DeliveryProvider[];
   /** Pay: ask the couriers again, and report a fee that differs from the one last shown (#527 AC2). */
   recheckCourier?: boolean;
+  /** The signed-in shopper, whose account a coupon's per-customer limit counts against (#557). */
+  actorUserId?: string | null;
+}
+
+/** The cart's coupon code checked for this shopper now, or null when the cart has none (#557). */
+async function cartCoupon(storeId: string, cartId: string, contact: Contact, actorUserId: string | null): Promise<QuoteCouponInput | null> {
+  const scoped = storeScoped(storeId);
+  const cart = await scoped.cart.findUnique({ where: { id: cartId }, select: { couponCode: true } });
+  if (!cart?.couponCode) return null;
+  return readCartCoupon(scoped, storeId, cart.couponCode, { email: contact.email, userId: actorUserId, now: new Date() });
 }
 
 export async function quoteCheckout(
@@ -168,10 +179,11 @@ export async function quoteCheckout(
   request?: DeliveryRequest | null,
   options: QuoteCheckoutOptions = {},
 ): Promise<CheckoutQuote> {
-  const [cart, store, serviceFee] = await Promise.all([
+  const [cart, store, serviceFee, coupon] = await Promise.all([
     getCartWithLines(storeId, cartId),
     platform.store.findUnique({ where: { id: storeId } }),
     readServiceFeeSettings(),
+    cartCoupon(storeId, cartId, contact, options.actorUserId ?? null),
   ]);
   if (!store) throw new Error("Store not found");
   const serverLines = (cart?.lines ?? []).map((line) => ({
@@ -182,17 +194,17 @@ export async function quoteCheckout(
     perishable: line.variant.listing.perishable,
   }));
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
-    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
+    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee, null, null, coupon);
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
   }
   if (fulfillment === "courier") {
     const courier = cart
       ? await courierQuoteFor(store, cart, contact, request ?? null, options)
       : null;
-    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, courier);
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, courier, coupon);
   }
   if (fulfillment !== "store-delivery") {
-    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee);
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, null, coupon);
   }
   let point: { lat: number; lng: number } | null = null;
   if (request && store.lat != null && store.lng != null) {
@@ -209,6 +221,8 @@ export async function quoteCheckout(
     fulfillment,
     serviceFee,
     deliveryQuoteInput(store, point, request?.leaveAtDoor === true),
+    null,
+    coupon,
   );
 }
 
@@ -603,6 +617,11 @@ export async function recordAuthorizedOrder(
         ? shownCourier(cart, cart.leaveAtDoor || input.leaveAtDoor === true)
         : null;
       const serviceFee = await readServiceFeeSettings(tx);
+      // Under the store lock, so two orders cannot both take a coupon's last use (#557).
+      const couponUserId = input.actorUserId !== undefined ? input.actorUserId : cart.userId;
+      const coupon = cart.couponCode
+        ? await readCartCoupon(tx, storeId, cart.couponCode, { email: input.contact.email, userId: couponUserId, now })
+        : null;
       const currentQuote = computeQuote(
         input.minimumOrderCents ?? 0,
         current,
@@ -611,7 +630,9 @@ export async function recordAuthorizedOrder(
         serviceFee,
         delivery,
         courier,
+        coupon,
       );
+      const couponId = appliedCouponId(coupon, currentQuote);
       if (
         currentQuote.problems.length > 0
         || currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)
@@ -686,6 +707,9 @@ export async function recordAuthorizedOrder(
           totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
+          couponId,
+          discountCents: currentQuote.discountCents,
+          couponCustomerKey: couponId ? couponCustomerKey(couponUserId, input.contact.email) : null,
           serviceFeeCents: currentQuote.serviceFeeCents,
           serviceFeeBps: serviceFee.rateBps,
           serviceFeeMinCents: serviceFee.minCents,
@@ -740,6 +764,7 @@ export async function recordAuthorizedOrder(
           paymentIntentId: null,
           paymentAttemptToken: null,
           purchaseEpoch: { increment: 1 },
+          couponCode: null,
         },
       });
       const notify = await recordOrderNotification(tx, storeId, order.id, "placed");
@@ -1088,9 +1113,10 @@ export async function placeOrder(
     frozen: l.frozen,
     perishable: l.perishable,
   }));
-  const [storeRow, serviceFee] = await Promise.all([
+  const [storeRow, serviceFee, coupon] = await Promise.all([
     platform.store.findUnique({ where: { id: storeId } }),
     readServiceFeeSettings(),
+    cartCoupon(storeId, cartId, contact, actorUserId),
   ]);
   if (!storeRow) throw new Error("Store not found");
   const point = cart.delivery.lat != null && cart.delivery.lng != null
@@ -1108,7 +1134,7 @@ export async function placeOrder(
         cart.delivery.leaveAtDoor || leaveAtDoor,
       )
     : null;
-  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier);
+  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier, coupon);
 
   const contactOnly = quote.problems.length > 0
     && quote.problems.every((problem) => problem.code === "invalid-contact");
