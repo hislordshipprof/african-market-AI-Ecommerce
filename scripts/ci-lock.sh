@@ -10,6 +10,8 @@
 # Two runs in one slot share its ci-runner checkout and drop each other's database.
 # Tests: bash scripts/ci-lock.test.sh
 
+. "$(dirname "${BASH_SOURCE[0]}")/review-watch.sh"
+
 # ci_lock_try <lock> <pid> <token>: take the lock if it is free.
 ci_lock_try() {
   mkdir "$1" 2>/dev/null || return 1
@@ -20,7 +22,8 @@ ci_lock_try() {
 
 # _ci_lock_started <pid>: the process start time. With the pid it names one process, so a pid reused after a
 # reboot is not taken for the owner. Empty where ps has no -o (Git Bash); the pid alone is used there.
-_ci_lock_started() { ps -o lstart= -p "$1" 2>/dev/null || true; }
+# UTC and the C locale, so callers in different time zones or locales read the same time.
+_ci_lock_started() { TZ=UTC LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null || true; }
 
 # ci_lock_release <lock> <token>: remove the lock only when it is still ours.
 ci_lock_release() {
@@ -28,14 +31,17 @@ ci_lock_release() {
   rm -rf "$1"
 }
 
-_ci_lock_age() { echo $(( $(date +%s) - $(stat -c %Y "$1" 2>/dev/null || date +%s) )); }
+_ci_lock_age() { echo $(( $(date +%s) - $(file_mtime "$1" || date +%s) )); }
 
 # ci_lock_stale <lock>: the owner is gone (its pid is dead or now another process), or the lock never got a pid
-# (its owner died between the writes).
+# (its owner died between the writes). A lock with no start time (written before it was recorded) has its pid only.
 ci_lock_stale() {
-  local owner; owner=$(cat "$1/pid" 2>/dev/null || true)
+  local owner started; owner=$(cat "$1/pid" 2>/dev/null || true)
   if [ -n "$owner" ]; then
-    ! kill -0 "$owner" 2>/dev/null || [ "$(_ci_lock_started "$owner")" != "$(cat "$1/started" 2>/dev/null || true)" ]
+    started=$(cat "$1/started" 2>/dev/null || true)
+    # Lanes on branches older than #413 still write the time in their own zone and locale.
+    ! kill -0 "$owner" 2>/dev/null || { [ -n "$started" ] && [ "$(_ci_lock_started "$owner")" != "$started" ] \
+      && [ "$(ps -o lstart= -p "$owner" 2>/dev/null || true)" != "$started" ]; }
   else
     [ "$(_ci_lock_age "$1")" -gt "${CI_LOCK_NOPID_SEC:-120}" ]
   fi

@@ -59,6 +59,28 @@ kill -0 "$stranger" 2>/dev/null && ok "a reused pid's program is not stopped" ||
 [ -d "$L" ] && bad "a lock with a reused pid stayed" || ok "a lock with a reused pid is freed"
 kill "$stranger" 2>/dev/null; wait "$stranger" 2>/dev/null
 
+# #413 N2: a lock written before the start time was recorded (no started file, or an empty one) belongs to its pid.
+sleep 300 & old=$!
+for started in missing empty; do
+  ci_lock_try "$L" "$old" old
+  if [ "$started" = missing ]; then rm "$L/started"; else : > "$L/started"; fi
+  ci_lock_takeover "$L"
+  [ -d "$L" ] && ok "a live owner's lock with $started start time stays" || bad "a live owner's lock with $started start time was taken"
+  rm -rf "$L"
+done
+kill "$old" 2>/dev/null; wait "$old" 2>/dev/null
+# Every caller reads the start time the same way, whatever its own TZ or locale.
+ci_lock_try "$L" "$$" tz
+TZ=Asia/Tokyo ci_lock_takeover "$L"
+[ -d "$L" ] && ok "a waiter in another time zone keeps a live owner's lock" || bad "a waiter in another time zone took a live lock"
+ci_lock_release "$L" tz
+# A lane on an older branch still writes its start time in local time.
+ci_lock_try "$L" "$$" local
+TZ=Asia/Tokyo ps -o lstart= -p "$$" > "$L/started"
+TZ=Asia/Tokyo ci_lock_takeover "$L"
+[ -d "$L" ] && ok "an older lane's local start time still names its live owner" || bad "an older lane's live lock was taken"
+ci_lock_release "$L" local
+
 # While one takeover is in progress another backs off.
 mkdir "$L.takeover"
 ci_lock_try "$L" "$dead" gone
