@@ -1,21 +1,27 @@
 import { notFound } from "next/navigation";
-import { getStoreById, getStoreSubscription, setPilotAction } from "@/lib/admin/actions";
+import { getStoreById, getStoreSubscription, retryCourierRegistrationAction, setPilotAction } from "@/lib/admin/actions";
 import { effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
 import { PILOT_FREE_MONTHS, PILOT_STORE_CAP } from "@/lib/billing/service";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { StoreForm } from "../store-form";
 import { InviteOwnerForm } from "./invite-owner-form";
 
+function courierState(id: string | null, error: string | null): string {
+  if (id) return `Registered · ${id}`;
+  if (error) return `Failed · ${error}`;
+  return "Not registered";
+}
+
 export default async function EditStorePage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ pilotError?: string }>;
+  searchParams: Promise<{ pilotError?: string; courierRetry?: string }>;
 }) {
   await requirePlatformAdmin();
   const { id } = await params;
-  const { pilotError } = await searchParams;
+  const { pilotError, courierRetry } = await searchParams;
   const store = await getStoreById(id);
   if (!store) notFound();
   const subscription = await getStoreSubscription(store.id);
@@ -50,6 +56,31 @@ export default async function EditStorePage({
         </form>
         {pilotError && (
           <p role="alert" className="mt-2 text-sm text-red-700">{pilotError}</p>
+        )}
+      </section>
+      <section aria-labelledby="couriers" className="mb-8 rounded-lg border border-[#e2e4e9] bg-white p-5">
+        <h2 id="couriers" className="text-base font-semibold text-[#15201A]">Courier registration</h2>
+        <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+          <dt className="font-medium text-[#15201A]">Uber Direct</dt>
+          <dd className="break-words text-[#55625A]">{courierState(store.uberLocationId, store.uberRegistrationError)}</dd>
+          <dt className="font-medium text-[#15201A]">DoorDash</dt>
+          <dd className="break-words text-[#55625A]">{courierState(store.doordashStoreId, store.doordashRegistrationError)}</dd>
+        </dl>
+        {(!store.uberLocationId || !store.doordashStoreId) && (
+          <form action={retryCourierRegistrationAction} className="mt-4 flex flex-wrap items-center gap-3">
+            <input type="hidden" name="storeId" value={store.id} />
+            <button
+              type="submit"
+              className="min-h-11 rounded-full border border-[#1F5A43] px-5 text-sm font-medium text-[#1F5A43] hover:bg-[#EBF3EC]"
+            >
+              Retry registration
+            </button>
+            <span role="status" className="text-sm text-[#55625A]">
+              {courierRetry === "queued"
+                ? "Registration queued. Refresh in a minute to see the result."
+                : "Registration runs once the store has a full address, and again every day until it succeeds."}
+            </span>
+          </form>
         )}
       </section>
       <StoreForm mode="edit" store={store} />
