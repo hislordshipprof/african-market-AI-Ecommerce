@@ -8,6 +8,8 @@ import { auth } from "@/lib/auth";
 import { loadCheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import { LIVE_MODE_BLOCKED_MESSAGE, liveModeCheck } from "@/lib/checkout/live-mode";
 import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
+import { slotOptions } from "@/lib/checkout/slots";
+import { platform, storeScoped } from "@/lib/db";
 
 export default async function CheckoutRoute() {
   // Before the prefill (which calls Stripe for saved cards) and before any key reaches the browser.
@@ -26,14 +28,20 @@ export default async function CheckoutRoute() {
   const harness = checkoutHarnessOn(cookieStore);
   const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
   const prefill = !unavailable && session?.user?.id ? await loadCheckoutPrefill(session.user.id) : null;
+  const takesPayment = !unavailable && checkoutTakesPayment(store.stripeOnboardingStatus, publishableKey, harness);
+  const slotStore = takesPayment ? await platform.store.findUnique({ where: { id: store.id } }) : null;
+  const pickupSlots = slotStore
+    ? await slotOptions(storeScoped(store.id), store.id, slotStore, "pickup", new Date())
+    : undefined;
   const stripeConfig =
-    !unavailable && checkoutTakesPayment(store.stripeOnboardingStatus, publishableKey, harness)
+    takesPayment
       ? {
           publishableKey: publishableKey || "pk_test_e2e_harness",
           onBehalfOf: store.stripeAccountId ?? undefined,
           harness,
           signedIn: Boolean(session?.user?.id),
           prefill,
+          pickupSlots,
         }
       : undefined;
 

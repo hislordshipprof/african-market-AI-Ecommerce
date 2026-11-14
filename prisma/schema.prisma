@@ -21,6 +21,9 @@ model Store {
   deliveryRadiusMi       Decimal  @default(8) @map("delivery_radius_mi")
   storeDeliveryEnabled   Boolean  @default(false) @map("store_delivery_enabled")
   storeDeliveryFeeCents  Int      @default(0) @map("store_delivery_fee_cents")
+  /// Scheduled slot settings per fulfillment (#565); shape in src/lib/order/slot-schedule.ts.
+  pickupSlotSettings        Json? @map("pickup_slot_settings")
+  storeDeliverySlotSettings Json? @map("store_delivery_slot_settings")
   addressLine1           String?  @map("address_line1")
   addressLine2           String?  @map("address_line2")
   city                   String?
@@ -1161,6 +1164,7 @@ model Order {
   @@unique([storeId, number])
   @@index([storeId])
   @@index([storeId, status])
+  @@index([storeId, fulfillment, pickupSlot])
   @@index([storeId, sourceCartId, createdAt])
   @@index([storeId, createdAt])
   @@index([customerId])

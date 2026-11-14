@@ -435,6 +435,12 @@ export interface LockedStoreRow {
   deliveryRadiusMi: number;
   lat: number | null;
   lng: number | null;
+  hours: unknown;
+  timezone: string;
+  prepTimeMinutes: number;
+  pickupEnabled: boolean;
+  pickupSlotSettings: unknown;
+  storeDeliverySlotSettings: unknown;
 }
 
 export interface GeocodeCacheRow {
@@ -550,8 +556,15 @@ export async function lockStoreRow(
     delivery_radius_mi: unknown;
     lat: number | null;
     lng: number | null;
+    hours: unknown;
+    timezone: string;
+    prep_time_minutes: number;
+    pickup_enabled: boolean;
+    pickup_slot_settings: unknown;
+    store_delivery_slot_settings: unknown;
   }>>`
-    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng
+    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng,
+      hours, timezone, prep_time_minutes, pickup_enabled, pickup_slot_settings, store_delivery_slot_settings
     FROM stores
     WHERE id = ${storeId}
     FOR UPDATE
@@ -564,6 +577,12 @@ export async function lockStoreRow(
     deliveryRadiusMi: Number(row.delivery_radius_mi),
     lat: row.lat,
     lng: row.lng,
+    hours: row.hours,
+    timezone: row.timezone,
+    prepTimeMinutes: row.prep_time_minutes,
+    pickupEnabled: row.pickup_enabled,
+    pickupSlotSettings: row.pickup_slot_settings,
+    storeDeliverySlotSettings: row.store_delivery_slot_settings,
   };
 }
 
