@@ -8,7 +8,7 @@ vi.mock("next/cache", () => ({
 
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../../db";
-import { quoteCheckout } from "../../checkout/service";
+import { quoteCheckout, recordAuthorizedOrder } from "../../checkout/service";
 import { computeQuote } from "../../checkout/quote";
 import { readServiceFeeSettings } from "../../order/service-fee-settings";
 import { loadCheckoutDraft } from "../checkout-draft";
@@ -58,7 +58,11 @@ describe.skipIf(!hasDb)("assistant checkout handoff tools (#247)", () => {
   afterAll(async () => {
     for (const id of [storeA, storeB].filter(Boolean)) {
       const scoped = storeScoped(id);
+      await scoped.orderLine.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
       await scoped.cart.deleteMany({});
+      await scoped.stockEvent.deleteMany({});
       await scoped.listing.deleteMany({});
     }
     await raw.store.deleteMany({ where: { id: { in: [storeA, storeB].filter(Boolean) } } });
@@ -160,5 +164,31 @@ describe.skipIf(!hasDb)("assistant checkout handoff tools (#247)", () => {
     expect("thrown" in crossWrite || crossWrite.ok === false).toBe(true);
     const b = await storeScoped(storeB).aiConversation.findUnique({ where: { id: conversationB } });
     expect(b?.checkoutDraft).toBeNull();
+  });
+
+  it("placing the order clears the draft, so the next checkout on this cart starts fresh", async () => {
+    const scoped = storeScoped(storeA);
+    const cart = await scoped.cart.create({ data: { storeId: storeA, source: "manual" } });
+    await scoped.cartLine.create({ data: { storeId: storeA, cartId: cart.id, variantId, qty: 2 } });
+    const conversation = await scoped.aiConversation.create({
+      data: { storeId: storeA, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
+    });
+    await runner({ cartId: cart.id, conversationId: conversation.id })("set_fulfillment", { fulfillment: "pickup", slot_id: "asap" });
+    expect(await loadCheckoutDraft(storeA, cart.id)).not.toBeNull();
+
+    const lines = [{ variantId, qty: 2, price: 900, swapRule: "exact_only", substituteVariantId: null }];
+    await recordAuthorizedOrder(storeA, {
+      cartId: cart.id,
+      contact: CONTACT,
+      fulfillment: "pickup",
+      pickupSlot: null,
+      notes: null,
+      paymentIntentId: `pi_draft_${suffix}`,
+      quote: computeQuote(0, lines.map((line) => ({ ...line, maxPerOrder: null })), CONTACT, "pickup", await readServiceFeeSettings()),
+      lines,
+    });
+
+    await scoped.cartLine.create({ data: { storeId: storeA, cartId: cart.id, variantId, qty: 1 } });
+    expect(await loadCheckoutDraft(storeA, cart.id)).toBeNull();
   });
 });

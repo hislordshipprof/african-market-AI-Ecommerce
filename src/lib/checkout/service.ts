@@ -620,6 +620,8 @@ export async function recordAuthorizedOrder(
         lockedStock,
       );
       await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
+      // The assistant's pickup time was for this order; the next basket starts fresh (#247).
+      await tx.aiConversation.updateMany({ where: { cartId: input.cartId }, data: { checkoutDraft: Prisma.DbNull } });
       await tx.cart.update({
         where: { id: input.cartId },
         data: {
