@@ -55,3 +55,78 @@ describe("photo well token", () => {
     }
   });
 });
+
+describe("neutral grounds (#528)", () => {
+  const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  // A trace of warmth is fine; a visible green, brown or teal cast is not.
+  const tint = (hex: string) => {
+    const [r, g, b] = channels(hex);
+    return Math.max(r, g, b) - Math.min(r, g, b);
+  };
+  const GROUND_KEYS = ["--store-bg", "--store-surface", "--store-raised", "--store-line", "--store-soft"] as const;
+
+  it.each(VALID_PRESETS)("%s grounds carry no more than a trace of tint in light and dark", (preset) => {
+    for (const mode of ["light", "dark"] as const) {
+      const vars = resolveStoreTheme(preset, null)[mode];
+      for (const key of GROUND_KEYS) expect(tint(vars[key]), `${mode} ${key} ${vars[key]}`).toBeLessThanOrEqual(12);
+      expect(tint(vars["--store-photo-well"]), `${mode} photo-well`).toBeLessThanOrEqual(12);
+    }
+    const dark = resolveStoreTheme(preset, null).dark;
+    expect(tint(dark["--store-line-strong"])).toBeLessThanOrEqual(12);
+  });
+
+  it.each(VALID_PRESETS)("%s light grounds are warm white and dark grounds are charcoal", (preset) => {
+    const { light, dark } = resolveStoreTheme(preset, null);
+    expect(contrastRatio(light["--store-bg"], "#FFFFFF")).toBeLessThan(1.08);
+    expect(contrastRatio(dark["--store-bg"], "#000000")).toBeLessThan(1.25);
+  });
+
+  it("keeps the brand colour on primary and the grounds neutral", () => {
+    const { light } = resolveStoreTheme("palm-and-shea", "#3BAA5C");
+    expect(light["--store-primary"]).not.toBe("#3BAA5C");
+    expect(tint(light["--store-bg"])).toBeLessThanOrEqual(12);
+  });
+});
+
+describe("text on every ground (#528)", () => {
+  const LIGHT_GROUNDS = ["--store-bg", "--store-surface", "--store-raised", "--store-soft"] as const;
+
+  it.each(VALID_PRESETS)("%s ink and muted pass AA on every ground", (preset) => {
+    for (const mode of ["light", "dark"] as const) {
+      const vars = resolveStoreTheme(preset, null)[mode];
+      for (const ground of LIGHT_GROUNDS) {
+        expect(contrastRatio(vars["--store-ink"], vars[ground]), `${mode} ink on ${ground}`).toBeGreaterThanOrEqual(7);
+        expect(contrastRatio(vars["--store-muted"], vars[ground]), `${mode} muted on ${ground}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it.each(VALID_PRESETS)("%s deal and success read as text on bg and surface", (preset) => {
+    for (const mode of ["light", "dark"] as const) {
+      const vars = resolveStoreTheme(preset, null)[mode];
+      for (const ground of ["--store-bg", "--store-surface"] as const) {
+        expect(contrastRatio(vars["--store-deal"], vars[ground]), `${mode} deal`).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(vars["--store-success"], vars[ground]), `${mode} success`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it.each(VALID_PRESETS)("%s fills carry readable text", (preset) => {
+    for (const mode of ["light", "dark"] as const) {
+      const vars = resolveStoreTheme(preset, null)[mode];
+      expect(contrastRatio(vars["--store-on-primary"], vars["--store-primary"])).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(vars["--store-on-primary-deep"], vars["--store-primary-deep"])).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(vars["--store-on-accent"], vars["--store-accent"])).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each(VALID_PRESETS)("%s dark layers stay apart and line-strong edges controls at 3:1", (preset) => {
+    const dark = resolveStoreTheme(preset, null).dark;
+    expect(contrastRatio(dark["--store-surface"], dark["--store-bg"])).toBeGreaterThanOrEqual(1.15);
+    expect(contrastRatio(dark["--store-raised"], dark["--store-surface"])).toBeGreaterThanOrEqual(1.15);
+    expect(contrastRatio(dark["--store-raised"], dark["--store-bg"])).toBeGreaterThanOrEqual(1.4);
+    for (const ground of ["--store-bg", "--store-surface", "--store-raised"] as const) {
+      expect(contrastRatio(dark["--store-line-strong"], dark[ground])).toBeGreaterThanOrEqual(3);
+    }
+  });
+});

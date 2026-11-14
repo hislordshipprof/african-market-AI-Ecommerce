@@ -73,7 +73,7 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
     const bgColor = await page.locator("body").evaluate((el) =>
       getComputedStyle(el).getPropertyValue("--store-bg").trim(),
     );
-    expect(bgColor).toBe("#0D1410");
+    expect(bgColor).toBe("#121211");
   });
 
   test("light mode uses light theme tokens", async ({ page }) => {
@@ -83,7 +83,7 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
     const bgColor = await page.locator("body").evaluate((el) =>
       getComputedStyle(el).getPropertyValue("--store-bg").trim(),
     );
-    expect(bgColor).toBe("#F3F4EF");
+    expect(bgColor).toBe("#FAFAF7");
   });
 
   test("dark mode brand color passes WCAG AA contrast", async ({ page }) => {
