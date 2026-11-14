@@ -54,7 +54,10 @@ function logLink(event: string, storeId: string, phone: string, extra: Record<st
 export async function startOwnerLink(owner: Owner, rawPhone: string): Promise<{ ok: true } | { error: string }> {
   const phone = normalizeOwnerPhone(rawPhone);
   if (!phone.ok) return { error: phone.error };
-  if (!canSendWhatsApp()) return { error: NOT_SET_UP_ERROR };
+  if (!canSendWhatsApp()) {
+    console.error(JSON.stringify({ event: "whatsapp_not_configured", storeId: owner.storeId }));
+    return { error: NOT_SET_UP_ERROR };
+  }
 
   const perStore = await takeRateLimit(`wa-link-store:${owner.storeId}`, SENDS_PER_STORE_PER_HOUR, HOUR_MS);
   if (!perStore.ok) return { error: TOO_MANY_CODES_ERROR };

@@ -35,7 +35,7 @@ import { WhatsAppApiError } from "./errors";
 import { NOT_LINKED_REPLY, WRONG_CODE_REPLY } from "./inbound";
 import { ownerMessageReply } from "./owner-handler";
 import { setWhatsAppProvider } from "./index";
-import { getOwnerLink, resolveOwnerByPhone, SEND_FAILED_ERROR } from "./owner-link";
+import { getOwnerLink, NOT_SET_UP_ERROR, resolveOwnerByPhone, SEND_FAILED_ERROR } from "./owner-link";
 import { signWhatsAppBody } from "./signature";
 import type { OutboundMessage } from "./types";
 
@@ -403,6 +403,23 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     expect(await getOwnerLink(storeB, ownerB)).toMatchObject({ phoneNumber: phone.e164, verified: true, codeLive: true });
     expect(await resolveOwnerByPhone(phone.e164)).toMatchObject({ storeId: storeB, userId: ownerB });
     expect(await resolveOwnerByPhone(next.e164)).toBeNull();
+  });
+
+  it("no WhatsApp keys: start-link refuses with the not-set-up error, writes nothing and logs an error", async () => {
+    setWhatsAppProvider(null);
+    for (const key of ["WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "E2E_FAKE_WHATSAPP"]) vi.stubEnv(key, "");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const before = await storeScoped(storeA).ownerWhatsAppLink.findUnique({
+      where: { storeId_userId: { storeId: storeA, userId: ada } },
+    });
+
+    expect(await startWhatsAppLinkAction(phoneForm(randomUsNumber().typed))).toEqual({ error: NOT_SET_UP_ERROR });
+    expect(await storeScoped(storeA).ownerWhatsAppLink.findUnique({
+      where: { storeId_userId: { storeId: storeA, userId: ada } },
+    })).toEqual(before);
+    expect(getFakeOutbox()).toHaveLength(0);
+    expect(errorLog.mock.calls.flat().join(" ")).toContain("whatsapp_not_configured");
+    errorLog.mockRestore();
   });
 
   it("a message without a phone number (username user) does not stop the other messages in the payload", async () => {
