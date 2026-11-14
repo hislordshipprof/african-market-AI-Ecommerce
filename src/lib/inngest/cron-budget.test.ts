@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { copilotDailyDigest } from "../copilot/digest";
+import { courierRegistrationRetry } from "../delivery/courier-functions";
 import { assistantRetention, dailyConfidence, inngestFunctions, reconcileStuckTransitional, sweepOrphanedAuthorized } from "./functions";
 
 function cronOf(fn: { opts: { triggers?: Array<{ cron?: string }> } }): string | undefined {
@@ -22,16 +23,19 @@ describe("Inngest cron budget (ADR-0016)", () => {
     const retention = cronOf(assistantRetention);
     const confidence = cronOf(dailyConfidence);
     const digest = cronOf(copilotDailyDigest);
+    const courierRetry = cronOf(courierRegistrationRetry);
     expect(orphan).toBe("*/15 * * * *");
     expect(reconcile).toBe("*/15 * * * *");
     expect(retention).toBe("TZ=UTC 17 3 * * *");
     expect(confidence).toBe("TZ=UTC 23 9 * * *");
     expect(digest).toBe("TZ=UTC 0 * * * *");
+    expect(courierRetry).toBe("TZ=UTC 41 6 * * *");
+    expect(inngestFunctions).toContain(courierRegistrationRetry);
     expect(inngestFunctions).toContain(dailyConfidence);
     expect(inngestFunctions).toContain(copilotDailyDigest);
     const total = monthlyRuns(orphan!) + monthlyRuns(reconcile!) + monthlyRuns(retention!) + monthlyRuns(confidence!)
-      + monthlyRuns(digest!);
-    expect(total).toBe(6_540);
+      + monthlyRuns(digest!) + monthlyRuns(courierRetry!);
+    expect(total).toBe(6_570);
     expect(total).toBeLessThan(35_000);
   });
 });

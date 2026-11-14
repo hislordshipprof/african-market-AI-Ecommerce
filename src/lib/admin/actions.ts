@@ -13,6 +13,7 @@ import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
 import { getAddressProvider } from "../address/provider";
 import { setPilot } from "../billing/service";
+import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -355,6 +356,20 @@ function deliveryAudit(row: {
   };
 }
 
+/** Spec §6.1 step 5, run when the platform admin saves a store with its full address. */
+async function queueCourierRegistration(store: {
+  id: string;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  uberLocationId: string | null;
+  doordashStoreId: string | null;
+}): Promise<void> {
+  if (!hasFullAddress(store) || (store.uberLocationId && store.doordashStoreId)) return;
+  await requestCourierRegistration(store.id);
+}
+
 export async function createStore(
   _prev: StoreFormState,
   data: FormData,
@@ -459,6 +474,7 @@ export async function createStore(
   });
 
   revalidateStore(store);
+  await queueCourierRegistration(store);
 
   return {
     success: true,
@@ -614,6 +630,7 @@ export async function updateStore(
   if (before.slug !== store.slug) {
     revalidateStore({ id: before.id, slug: before.slug });
   }
+  await queueCourierRegistration(store);
 
   return {
     success: true,
@@ -702,6 +719,31 @@ export async function setPilotAction(formData: FormData): Promise<void> {
   const query = result.ok ? "" : `?pilotError=${encodeURIComponent(result.error)}`;
   revalidatePath(`/admin/stores/${fields.data.storeId}`);
   redirect(`/admin/stores/${fields.data.storeId}${query}`);
+}
+
+/** Platform admin queues the courier registration job again for one store (#526). */
+export async function retryCourierRegistrationAction(formData: FormData): Promise<void> {
+  const session = await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({ storeId: z.string().min(1).max(200) }), readFormFields(formData, ["storeId"]));
+  if (!fields.ok) redirect("/admin/stores");
+  const { storeId } = fields.data;
+  const store = await platformAdmin.store.findUnique({ where: { id: storeId }, select: { id: true } });
+  if (!store) redirect("/admin/stores");
+  await platformAdminTransaction((tx) =>
+    tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "store.courier_registration_retry",
+        entityType: "store",
+        entityId: storeId,
+      },
+    }),
+  );
+  const queued = await requestCourierRegistration(storeId);
+  revalidatePath(`/admin/stores/${storeId}`);
+  redirect(`/admin/stores/${storeId}?courierRetry=${queued ? "queued" : "failed"}`);
 }
 
 export async function getStoreById(id: string) {
