@@ -2,7 +2,7 @@ import { resolveAuthBaseUrl } from "../auth";
 import { platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { sendEmail } from "../email/send";
 import { inngest } from "../inngest/client";
-import { escapeHtml } from "../notifications/messages";
+import { escapeHtml } from "../format";
 import { isValidTimezone } from "../order/store-hours";
 import { stockBadge, type StockBadge } from "../storefront/stock-badge";
 import { describeAlerts, type AlertKind, type AlertView } from "./alerts";

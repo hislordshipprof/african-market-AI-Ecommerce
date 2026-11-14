@@ -95,7 +95,8 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ### 5.4 Checkout
 - Fulfillment: **Delivery** (address validated, within store radius, courier-eligible weight) or **Pickup** (time slot).
 - If cart > 50 lb: delivery options become *Pickup*, *Store delivery* (if store has a driver), or *Scheduled van* (if offered).
-- **Store closed:** orders are still accepted. The customer sees when the store opens and an estimated ready time. The card is authorized now and the order joins the queue at opening. A store with no opening in the next 7 days, or whose next opening is more than 6 × 24 hours away, refuses the order before any card is held ("This store isn't taking orders right now"), because a card hold lasts 7 days. Scheduled delivery slots come later.
+- **Store closed:** orders are still accepted. The customer sees when the store opens and an estimated ready time. The card is authorized now and the order joins the queue at opening. A store with no opening in the next 7 days, or whose next opening is more than 6 × 24 hours away, refuses the order before any card is held ("This store isn't taking orders right now"), because a card hold lasts 7 days.
+- **Scheduled slots (#565):** a store can set pickup and store delivery slots: slot length (default 60 min), windows per weekday, closed dates, lead time (at least 2 h), orders per slot, and days ahead (1–5, so capture fits inside the shortest card hold). Slots are computed on the server in the store's timezone. A slot is reserved when the order is placed, under the store lock; a full slot is refused with fresh times, and a cancelled order frees its place. With delivery slots set, store delivery always takes a slot (this is the scheduled van for carts over 50 lb); without them it stays as soon as possible. Courier delivery stays on demand.
 - Payment: card / Apple Pay / Google Pay via Stripe. **Authorize at checkout (total + small buffer), capture the final amount after picking** (see §10). Auth window 7 days; pickup orders > 6 days out not allowed.
 - The Stripe Payment Element takes the store's theme: its colors are read from the store's tokens, with Stripe's `night` theme in dark mode, so labels stay AA in both schemes (#379). Stripe Link is turned off in the Payment Element, so our "Save this card for next time" is the only save offer.
 - Delivery instructions, apartment/gate code, leave-at-door toggle (disabled when frozen items present).
@@ -397,11 +398,13 @@ Built in #134: staff in the order inbox mark a store-delivery order Out for deli
 | Delivered (store delivery) | Email + SMS | — |
 | Completed | Email + SMS | Push |
 | Cancelled | Email + SMS | — |
-| Item short | — | Live update on pick screen |
-| Issue reported (in review only, #431) | — | Push "Problem to review" + Problems to review on the orders page |
+| Item short | Email + SMS with a link to choose a swap or refund (#13) | Live update on pick screen |
+| Issue reported (in review only, #431) | Email (later ticket) | Push "Problem to review" + Problems to review on the orders page |
 | Daily summary | — | AI copilot digest |
 
-Customer email and SMS go out for placed, accepted, ready, out for delivery, delivered, completed, cancelled and refund issued (once per order, when it first becomes Partly refunded or Refunded, including from a Stripe-dashboard refund, #428). Delivered and completed are the same final step (a store-delivery order ends at delivered, a pickup order at completed), so neither supersedes the other. Each message carries the store's name and an unguessable tracking link. Item short and channel preferences are separate tickets; the owner's daily digest email is #433 (§8.2).
+Customer email and SMS go out for placed, accepted, ready, out for delivery, delivered, completed, cancelled and refund issued (once per order, when it first becomes Partly refunded or Refunded, including from a Stripe-dashboard refund, #428). Delivered and completed are the same final step (a store-delivery order ends at delivered, a pickup order at completed), so neither supersedes the other. Each message carries the store's name and an unguessable tracking link. Item short sends the `substitution` prompt (§5.3, #13). The owner's daily digest email is #433 (§8.2). A notification not yet handed to the provider expires after 2 hours; one already `sending` replays its idempotency key for up to 24 hours, so a lost result is recorded as sent, not expired (#403). The 15-minute sweep re-sends open notifications in one batch, with a new event id each round.
+
+Later tickets: customers choose a preferred channel; the customer email when an issue report is reviewed.
 
 Channels: Resend (email), Telnyx (SMS), Web Push (ADR-0017).
 
@@ -454,6 +457,7 @@ OwnerReportItem(id, report_id, store_id, extracted_name, extracted_qty?, unit?, 
       Filename masking checks every 13-19 digit stretch of a run split by anything but a letter, and exempts a run that is one camera date and time. Digits split by letters are not treated as a card.
 AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
 AssistantSpendDay(day, cost_micros, cap_alerted_at) — platform ledger, no store id; retention never deletes it
+OwnerWhatsAppLink(id, store_id, user_id, phone_number, wa_id, verified, opt_in_alerts, opt_in_digest, verification_code_hash?, verification_expires_at?, verification_attempts, verified_at?) — the Linked WhatsApp number (#143); one per membership, at most one verified per wa_id platform-wide
 AssistantFileTurn(id, key, at_ms) — platform rate-limit row, no store id and no RLS (same pattern as rate_limits; GRANT to app_user).
       Key `assistant:files:cart:<cartId>`; 10 file turns per cart per rolling hour. Under pg_advisory_xact_lock(hashtextextended(key, 0))
       it deletes rows with at_ms <= now - window, counts the rest, and inserts one row if under the limit. The check runs before

@@ -156,6 +156,9 @@ A stock alert the Store copilot raises for the store owner: sold out, running lo
 **Confirm-request**:
 A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
 
+**Linked WhatsApp number**:
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
 ## Ordering and fulfillment
 
 **Order**:
@@ -239,6 +242,10 @@ How a customer gets an order: store delivery, courier delivery, or pickup.
 
 **Store delivery**:
 Delivery done by the store's own driver, at a fee the store sets.
+
+**Slot**:
+A time window a customer books for pickup or store delivery, set by the store and shown in the store's timezone. Each slot takes a set number of orders; a cancelled order frees its place.
+_Avoid_: Time slot, Delivery window
 
 **Delivery radius**:
 The straight-line distance, in miles, from the store's confirmed coordinates. An address at exactly that distance is inside the area.
