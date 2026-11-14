@@ -67,7 +67,8 @@ _Avoid_: Store locator, geo search
 ## Catalog
 
 **Master product**:
-A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms.
+A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected or archived. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
+_Avoid_: Deleting a master product
 
 **Listing**:
 A store's offer of a product: its price, sizes and stock at that store.
