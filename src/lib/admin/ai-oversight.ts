@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Prisma, platformAdminTransaction } from "../db";
+import { Prisma, platformAdminTransaction, txQuery } from "../db";
 import { parseInput } from "../security/parse-input";
 import { requirePlatformAdmin } from "./session";
 import {
@@ -38,6 +38,8 @@ export interface ConversationSample {
   shopper: SampleRow[];
   copilot: SampleRow[];
   hidden: { shopper: number; copilot: number };
+  /** Every store, for the store filter. */
+  stores: Array<{ id: string; name: string }>;
 }
 
 const dayPattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -104,7 +106,7 @@ export async function listConversationSample(input: { day?: string; storeId?: st
   return platformAdminTransaction(async (tx) => {
     const inStore = (column: Prisma.Sql) => (storeId ? Prisma.sql`AND ${column} = ${storeId}` : Prisma.empty);
 
-    const sampledIds = await tx.$queryRaw<Array<{ id: string }>>`
+    const sampledIds = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
       SELECT id FROM (
         SELECT c.id, row_number() OVER (PARTITION BY c.store_id ORDER BY md5(c.id || ${day}), c.id) AS rn
         FROM ai_conversations c
@@ -113,9 +115,9 @@ export async function listConversationSample(input: { day?: string; storeId?: st
           ${inStore(Prisma.sql`c.store_id`)}
       ) ranked
       WHERE rn <= ${SAMPLE_PER_STORE}
-    `;
+    `);
     // A broad prefilter; actionFlagReasons decides.
-    const candidates = await tx.$queryRaw<Array<{ conversationId: string; tool: string; ok: boolean; output: unknown }>>`
+    const candidates = await txQuery<Array<{ conversationId: string; tool: string; ok: boolean; output: unknown }>>(tx, Prisma.sql`
       SELECT a.conversation_id AS "conversationId", a.tool, a.ok, a.output
       FROM ai_actions a
       WHERE a.created_at >= ${lo}::timestamp AND a.created_at < ${hi}::timestamp
@@ -129,7 +131,7 @@ export async function listConversationSample(input: { day?: string; storeId?: st
           OR (a.tool = 'turn_cost' AND jsonb_typeof(a.output -> 'costMicros') = 'number'
               AND (a.output ->> 'costMicros')::numeric > ${TURN_COST_FLAG_MICROS})
         )
-    `;
+    `);
     const reasonsOf = new Map<string, Set<FlagReason>>();
     for (const action of candidates) {
       const reasons = actionFlagReasons(action);
@@ -140,18 +142,18 @@ export async function listConversationSample(input: { day?: string; storeId?: st
     }
     const sampled = new Set(sampledIds.map((row) => row.id));
     const shopperIds = [...new Set([...sampled, ...reasonsOf.keys()])];
-    const shopperRows = shopperIds.length === 0 ? [] : await tx.$queryRaw<DbRow[]>`
+    const shopperRows = shopperIds.length === 0 ? [] : await txQuery<DbRow[]>(tx, Prisma.sql`
       SELECT c.id, c.store_id AS "storeId", s.name AS "storeName", c.last_message_at AS "lastMessageAt",
              jsonb_array_length(c.messages)::int AS "messageCount"
       FROM ai_conversations c JOIN stores s ON s.id = c.store_id
       WHERE c.id IN (${Prisma.join(shopperIds)})
-    `;
+    `);
     const shopper = ordered(shopperRows.map((row) => {
       const reasons = reasonsOf.get(row.id);
       return toRow("shopper", row, sampled.has(row.id), reasons ? FLAG_REASONS.filter((reason) => reasons.has(reason)) : []);
     }));
 
-    const copilotRows = await tx.$queryRaw<Array<DbRow & { sampled: boolean; costly: boolean }>>`
+    const copilotRows = await txQuery<Array<DbRow & { sampled: boolean; costly: boolean }>>(tx, Prisma.sql`
       SELECT ranked.id, ranked.store_id AS "storeId", s.name AS "storeName", ranked.last_message_at AS "lastMessageAt",
              ranked.message_count AS "messageCount", ranked.rn <= ${SAMPLE_PER_STORE} AS sampled, ranked.costly
       FROM (
@@ -164,7 +166,7 @@ export async function listConversationSample(input: { day?: string; storeId?: st
           ${inStore(Prisma.sql`c.store_id`)}
       ) ranked JOIN stores s ON s.id = ranked.store_id
       WHERE ranked.rn <= ${SAMPLE_PER_STORE} OR ranked.costly
-    `;
+    `);
     const copilot = ordered(copilotRows.map((row) => toRow("copilot", row, row.sampled, row.costly ? ["costly_turn"] : [])));
 
     const shown = { shopper: shopper.slice(0, LIST_CAP), copilot: copilot.slice(0, LIST_CAP) };
@@ -186,9 +188,11 @@ export async function listConversationSample(input: { day?: string; storeId?: st
     }
     for (const row of [...shown.shopper, ...shown.copilot]) row.labels = labelsOf.get(row.id) ?? [];
 
+    const stores = await tx.store.findMany({ select: { id: true, name: true }, orderBy: [{ name: "asc" }, { id: "asc" }] });
     return {
       day,
       storeId,
+      stores,
       ...shown,
       hidden: { shopper: shopper.length - shown.shopper.length, copilot: copilot.length - shown.copilot.length },
     };
@@ -345,11 +349,11 @@ export async function readTranscript(input: { kind: ConversationKind; id: string
     if (!row) return null;
     await audit(row.storeId, "copilot_conversation");
     const listingIds = [...new Set(row.proposals.map((proposal) => proposal.listingId))];
-    const names = listingIds.length === 0 ? [] : await tx.$queryRaw<Array<{ id: string; name: string }>>`
+    const names = listingIds.length === 0 ? [] : await txQuery<Array<{ id: string; name: string }>>(tx, Prisma.sql`
       SELECT l.id, COALESCE(l.custom_name, mp.name, 'Unnamed listing') AS name
       FROM listings l LEFT JOIN master_products mp ON mp.id = l.master_product_id
       WHERE l.store_id = ${row.storeId} AND l.id IN (${Prisma.join(listingIds)})
-    `;
+    `);
     const nameOf = new Map(names.map((entry) => [entry.id, entry.name]));
     return {
       kind,
