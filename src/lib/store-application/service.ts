@@ -3,7 +3,7 @@ import { z } from "zod";
 import { platformAdmin, platformAdminTransaction } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { normalizeEmail } from "../email";
-import { sendEmail } from "../email/send";
+import { sendEmail, type EmailMessage } from "../email/send";
 import { escapeHtml } from "../format";
 import { USPS_STATE_CODES } from "../customer-account/address-validation";
 import { isSlugRoutable } from "../slug";
@@ -308,12 +308,7 @@ export async function rejectStoreApplication(id: string, rawReason: string, acto
   }
 
   try {
-    await sendEmail({
-      to: application.email,
-      subject: "Your application to sell on African Markets",
-      html: rejectionHtml(application.ownerName, application.businessName),
-      idempotencyKey: `store-application-rejected/${id}`,
-    });
+    await sendEmail(rejectionMessage(application));
   } catch (err) {
     console.error(JSON.stringify({
       event: "store_application_reject_email_failed",
@@ -327,6 +322,16 @@ export async function rejectStoreApplication(id: string, rawReason: string, acto
     data: { rejectionEmailedAt: new Date() },
   });
   return { ok: true, emailed: true };
+}
+
+/** The one plain rejection email. It names no reason; the idempotency key stops a retry from mailing twice. */
+export function rejectionMessage(application: { id: string; email: string; ownerName: string; businessName: string }): EmailMessage {
+  return {
+    to: application.email,
+    subject: "Your application to sell on African Markets",
+    html: rejectionHtml(application.ownerName, application.businessName),
+    idempotencyKey: `store-application-rejected/${application.id}`,
+  };
 }
 
 function rejectionHtml(ownerName: string, businessName: string): string {

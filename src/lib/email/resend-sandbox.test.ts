@@ -3,6 +3,7 @@ import { magicLinkMessage } from "../magic-link-mail";
 import { quotedFrom } from "./from";
 import { liveSandbox, providerSandbox } from "../test-live-provider";
 import { ResendSender } from "./send";
+import { rejectionMessage } from "../store-application/service";
 
 const apiKey = process.env.RESEND_API_KEY;
 const fromAddress = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
@@ -56,5 +57,16 @@ describe.skipIf(!liveSandbox || !apiKey)("Resend magic-link sandbox", () => {
     const second = await sender.send(message);
     expect(first.id).toMatch(/\S/);
     expect(second.id).toBe(first.id);
+  }), 20_000);
+
+  it("delivers the plain store-application rejection email (#554)", sandbox.test(async () => {
+    const message = rejectionMessage({
+      id: `sandbox-${Date.now()}`,
+      email: "delivered@resend.dev",
+      ownerName: "Ada Obi",
+      businessName: "Sandbox African Market",
+    });
+    const result = await new ResendSender(apiKey!, fromAddress).send(message);
+    expect(result.id).toMatch(/\S/);
   }), 20_000);
 });
