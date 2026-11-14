@@ -290,7 +290,7 @@ export async function quoteCheckout(
     frozen: line.variant.listing.frozen,
   }));
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
-    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup");
+    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
   }
   if (fulfillment !== "store-delivery") {
