@@ -41,6 +41,8 @@ model Store {
   uberLocationId         String?  @unique @map("uber_location_id")
   /// Why the last Uber Direct registration failed; set means the store needs a retry (#139).
   uberRegistrationError  String?  @map("uber_registration_error")
+  /// Why the last DoorDash Drive registration failed; set means the store needs a retry (#526).
+  doordashRegistrationError String? @map("doordash_registration_error")
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
