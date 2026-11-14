@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Stripe from "stripe";
+import { sandboxConnectedAccountId } from "./test-sandbox-account";
 
 const hasKey = Boolean(process.env.STRIPE_SECRET_KEY);
 
@@ -11,14 +12,8 @@ describe.skipIf(!hasKey)("saved card sandbox", () => {
 
   beforeAll(async () => {
     stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-    for await (const account of stripe.accounts.list({ limit: 100 })) {
-      if (account.capabilities?.card_payments === "active" && account.capabilities?.transfers === "active") {
-        accountId = account.id;
-        break;
-      }
-    }
-    expect(accountId).toBeTruthy();
-  }, 60_000);
+    accountId = await sandboxConnectedAccountId(stripe);
+  }, 120_000);
 
   afterAll(async () => {
     if (!stripe) return;

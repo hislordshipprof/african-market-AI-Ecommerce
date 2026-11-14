@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { stripeProvider } from "./provider";
 import { OverRefundError } from "./errors";
 import { ProviderStateError } from "./types";
+import { sandboxConnectedAccountId } from "./test-sandbox-account";
 
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 
@@ -98,16 +99,8 @@ describe.skipIf(!hasKey)(
   () => {
     beforeAll(async () => {
       stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-      for await (const acct of stripe.accounts.list({ limit: 100 })) {
-        if (acct.capabilities?.transfers === "active") {
-          stripeAccountId = acct.id;
-          break;
-        }
-      }
-      if (!stripeAccountId) {
-        throw new Error("Need at least 1 transfers-capable sandbox account");
-      }
-    }, 60_000);
+      stripeAccountId = await sandboxConnectedAccountId(stripe);
+    }, 120_000);
 
     it("partial capture returns amount_received", async () => {
       const piId = await createAuthorizedPI(1000);

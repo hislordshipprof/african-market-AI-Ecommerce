@@ -10,6 +10,7 @@ import {
 } from "./fake";
 import { stripeProvider } from "./provider";
 import type { StripeProvider } from "./types";
+import { sandboxConnectedAccountId } from "./test-sandbox-account";
 
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 
@@ -113,14 +114,8 @@ describe("Stripe contract: fake and sandbox", () => {
   beforeAll(async () => {
     if (!hasKey) return;
     stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-    for await (const account of stripe.accounts.list({ limit: 100 })) {
-      if (account.capabilities?.transfers === "active") {
-        accountId = account.id;
-        break;
-      }
-    }
-    if (!accountId) throw new Error("Need a transfers-capable sandbox account");
-  }, 60_000);
+    accountId = await sandboxConnectedAccountId(stripe);
+  }, 120_000);
 
   afterAll(async () => {
     if (!stripe) return;
