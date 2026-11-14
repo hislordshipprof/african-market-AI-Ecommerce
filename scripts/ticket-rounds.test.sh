@@ -57,6 +57,17 @@ mk ticket-90 20261106-010000 "2026-11-06 09:00:00"      # another ticket
 mk review-9 20261106-023000 "2026-11-06 04:00:00"       # a review is not builder time
 mk plan-9 20261105-220000 "2026-11-05 22:20:00"
 eq "builder minutes add up build and fix sessions only" 150 "$(ticket_builder_minutes "$T/time" 9)"
+# #413 N6: macOS has BSD date and stat, which take other flags.
+if [ -x /usr/bin/stat ] && ! /usr/bin/stat -c %Y / >/dev/null 2>&1; then
+  eq "builder minutes add up with BSD date and stat" 150 "$(PATH=/usr/bin:/bin ticket_builder_minutes "$T/time" 9)"
+else ok "builder minutes with BSD date and stat (skipped: no BSD stat here)"; fi
+touch "$T/time/ticket-9-notastamp.json"
+eq "a log whose start time cannot be read is not counted" 150 "$(ticket_builder_minutes "$T/time" 9 2>/dev/null)"
+case "$(ticket_builder_minutes "$T/time" 9 2>&1 >/dev/null)" in
+  *ticket-9-notastamp.json*) ok "a log whose start time cannot be read is warned about" ;;
+  *) bad "a log whose start time cannot be read is warned about" ;;
+esac
+rm "$T/time/ticket-9-notastamp.json"
 eq "a ticket with no sessions has used nothing" 0 "$(ticket_builder_minutes "$T/time" 7)"
 
 eq "a fresh ticket gets the full session cap" 90 "$(ticket_session_cap 90 300 0)"
@@ -73,7 +84,6 @@ eq "a ticket with no logs has age 0" 0 "$(ticket_lane_age_min "$T/time" 7)"
 
 # A session stopped at its cap is charged its wall time. The engine opens its log at the start and writes
 # only on exit, so a killed session leaves an empty log whose last write is its start.
-. "$ROOT/scripts/review-watch.sh"
 agent_run() { : > "$2"; touch -d "-5 min" "$2"; return 124; }
 (
   ROOT="$T/capped"; N=9; mkdir -p "$ROOT/.builder/logs"
@@ -82,5 +92,45 @@ agent_run() { : > "$2"; touch -d "-5 min" "$2"; return 124; }
   echo "rc=$? min=$(ticket_builder_minutes "$ROOT/.builder/logs" 9)"
 ) > "$T/capped.out"
 eq "a session stopped at its cap is charged its wall minutes" "rc=124 min=5" "$(cat "$T/capped.out")"
+
+# The orchestrator end to end (#413 N4), in a throwaway repository: a fake gh, engine, reviewer and local-ci.
+P="$T/proj"; W="$T/lane"
+git init -q -b main "$P"; git -C "$P" config user.email t@t; git -C "$P" config user.name t
+mkdir -p "$P/scripts" "$P/.builder/logs" "$T/bin"
+cp "$ROOT"/scripts/{build-ticket,review-watch}.sh "$P/scripts/"
+cat > "$P/scripts/agent-cli.sh" <<'EOF'
+AGENT_ENGINE=claude
+agent_run() { echo "$1" >> "$FAKE_DIR/sessions"; : > "$2"; }
+agent_session_id() { :; }
+EOF
+echo 'prepare_lane_env() { :; }' > "$P/scripts/lane-env.sh"
+: > "$P/scripts/lane-env.mjs"
+printf '.builder/\n' > "$P/.gitignore"
+git -C "$P" add .; git -C "$P" commit -qm init; git -C "$P" remote add origin "$P"; git -C "$P" fetch -q origin
+git -C "$P" worktree add -q -b ticket-9-x "$W" origin/main
+printf '#!/usr/bin/env bash\ncase "$*" in *"--jq .title"*) echo "A thing" ;; esac\n' > "$T/bin/gh"; chmod +x "$T/bin/gh"
+# The reviewer writes its round's log, as review-ticket.sh does, and prints the verdict.
+cat > "$T/review.sh" <<'EOF'
+touch "$ROOT_P/.builder/logs/review-9-$(date +%Y%m%d-%H%M%S)-$RANDOM.json"; echo "$FAKE_VERDICT" > "$ROOT_P/.builder/review-9.md"; echo "$FAKE_VERDICT"
+EOF
+# build <verdict> <local-ci exit> <local-ci output>: one --continue run of ticket 9.
+build() {
+  rm -f "$T/sessions" "$P"/.builder/logs/review-9-*
+  printf 'echo "%s"; exit %s\n' "$3" "$2" > "$T/ci.sh"
+  (cd "$P" && PATH="$T/bin:$PATH" FAKE_DIR="$T" ROOT_P="$P" FAKE_VERDICT="$1" WT="$W" LANE_DB=neon RISK=0 \
+    REVIEW_TICKET="$T/review.sh" CI_LOCAL="$T/ci.sh" REVIEW_WATCH_POLL_SEC=1 bash scripts/build-ticket.sh 9 --continue) 2>&1
+}
+out=$(build "VERDICT: PASS" 1 "local-ci SETUP: HEAD is not on any remote branch. Push first."); rc=$?
+[[ "$out" == *"failed in setup, not in the code. No fix round"* ]] && [ "$(wc -l < "$T/sessions")" = 1 ] \
+  && ok "a passed review with a local-ci setup failure gets no fix round" || bad "a passed review with a local-ci setup failure gets no fix round (rc=$rc: $out)"
+out=$(build "VERDICT: BLOCKING" 0 "local-ci PASSED"); rc=$?
+[[ "$out" == *"The fix round for #9 made no commit. No second review"* ]] && [ "$(ls "$P"/.builder/logs/review-9-* | wc -l)" = 1 ] \
+  && [ "$(wc -l < "$T/sessions")" = 2 ] && ok "a fix round with no commit gets no second review" || bad "a fix round with no commit gets no second review (rc=$rc: $out)"
+rm -f "$P"/.builder/logs/review-9-*; for i in 1 2 3; do touch "$P/.builder/logs/review-9-2026110$i-010101.json"; done
+rm -f "$T/sessions"
+out=$(cd "$P" && PATH="$T/bin:$PATH" FAKE_DIR="$T" WT="$W" bash scripts/build-ticket.sh 9 --continue 2>&1); rc=$?
+[ "$rc" = 1 ] && [[ "$out" == *"Refusing to run #9 (--continue): 3 review rounds already exist"* ]] && [ ! -f "$T/sessions" ] \
+  && ok "a ticket with 3 review rounds is refused before any session" || bad "a ticket with 3 review rounds is refused before any session (rc=$rc: $out)"
+git -C "$P" worktree remove --force "$W"
 
 exit "$fail"

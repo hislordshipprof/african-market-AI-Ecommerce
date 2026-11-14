@@ -21,6 +21,7 @@ import {
   createPaymentIntentAction,
   placeOrderAction,
   confirmAddressAction,
+  assistantCheckoutDraftAction,
 } from "@/lib/checkout/actions";
 import type {
   CheckoutInput,
@@ -44,6 +45,7 @@ import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
+import type { SlotOptions } from "@/lib/checkout/slots";
 import styles from "./cart-checkout.module.css";
 
 type Outcome =
@@ -59,6 +61,8 @@ interface StripeConfig {
   harness?: boolean;
   signedIn?: boolean;
   prefill?: CheckoutPrefill | null;
+  /** Pickup times drawn with the page, so they show before the first quote (#565). */
+  pickupSlots?: SlotOptions;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -312,6 +316,8 @@ function RealCheckoutForm({
   const [schedule, setSchedule] = useState(false);
   const [slot, setSlot] = useState("asap");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
+  // Server-computed times for the chosen fulfillment, in store time (#565).
+  const [slotOptions, setSlotOptions] = useState<SlotOptions | null>(stripeConfig.pickupSlots ?? null);
   const [quoteKey, setQuoteKey] = useState("");
   const [error, setError] = useState("");
   const [errorHref, setErrorHref] = useState<string | null>(null);
@@ -366,6 +372,7 @@ function RealCheckoutForm({
         if (!active) return;
         if (result.ok) {
           setQuote(result.quote);
+          setSlotOptions(result.slots);
           setQuoteKey(JSON.stringify({ contact, fulfillment, delivery }));
         } else {
           setError(result.error);
@@ -377,29 +384,46 @@ function RealCheckoutForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey]);
 
-  const [slots] = useState(() => {
-    const first = new Date();
-    first.setHours(10, 0, 0, 0);
-    if (first.getTime() <= Date.now()) first.setDate(first.getDate() + 1);
-    return Array.from({ length: 6 }, (_, i) => {
-      const date = new Date(first);
-      date.setDate(date.getDate() + i);
-      return {
-        value: date.toISOString(),
-        label: date.toLocaleString("en-US", {
-          weekday: "short", month: "short", day: "numeric", hour: "numeric",
-        }),
-      };
-    });
-  });
+  const slotRequired = slotOptions?.required === true;
+  const slots = (slotOptions?.slots ?? []).map((option) => ({ value: option.id, label: option.label }));
+  const scheduled = slotRequired || (schedule && fulfillment === "pickup");
+  // A choice the fresh list no longer offers falls back to its first time.
+  const chosenSlot = !scheduled
+    ? "asap"
+    : slots.some((option) => option.value === slot) ? slot : slots[0]?.value ?? "asap";
+
+  function takeFreshSlots(fresh: SlotOptions, message: string) {
+    setSlotOptions(fresh);
+    setSlot(fresh.slots[0]?.id ?? "asap");
+    setError(message);
+    setPayState("idle");
+  }
+
+  // The pickup time chosen with the assistant, in store time (#247). It never
+  // overrides a choice the shopper made on this page before it loaded.
+  const shopperChose = useRef(false);
+  function chosenByShopper<T>(set: (value: T) => void) {
+    return (value: T) => { shopperChose.current = true; set(value); };
+  }
+  useEffect(() => {
+    let active = true;
+    assistantCheckoutDraftAction().then((draft) => {
+      if (!active || !draft || !settings.pickupEnabled || shopperChose.current) return;
+      setFulfillment("pickup");
+      if (draft.slot.id === "asap") return;
+      setSchedule(true);
+      setSlot(draft.slot.id);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [settings.pickupEnabled]);
 
   async function pay(event: FormEvent) {
     event.preventDefault();
     setSubmitted(true);
     setError("");
     setErrorHref(null);
-    if (schedule && slot === "asap") {
-      setError("Choose a pickup time within the next six days.");
+    if (scheduled && chosenSlot === "asap") {
+      setError(fulfillment === "pickup" ? "Choose a pickup time." : "Choose a delivery time.");
       return;
     }
     if (fulfillment === "store-delivery" && !delivery) {
@@ -453,8 +477,13 @@ function RealCheckoutForm({
             }
           : undefined,
         delivery,
+        chosenSlot,
       );
       if (!piResult.ok) {
+        if (piResult.code === "slot_unavailable") {
+          takeFreshSlots(piResult.slots, piResult.error);
+          return;
+        }
         if (piResult.code === "basket_already_ordered") {
           setErrorHref("/account");
           setError(piResult.error);
@@ -509,10 +538,15 @@ function RealCheckoutForm({
         contact,
         fulfillment,
         notes,
-        schedule ? slot : "asap",
+        chosenSlot,
         delivery,
       );
       if (!orderResult.ok) {
+        if (orderResult.code === "slot_unavailable") {
+          // The hold was released; Pay again holds a new one for the new time.
+          takeFreshSlots(orderResult.slots, orderResult.error);
+          return;
+        }
         setErrorHref(orderResult.code === "basket_already_ordered" ? "/account" : null);
         if (orderResult.code === "basket_changed" || orderResult.code === "basket_already_ordered") {
           setError(orderResult.error);
@@ -546,7 +580,7 @@ function RealCheckoutForm({
       lines={lines}
       subtotal={subtotal}
       fulfillment={fulfillment}
-      setFulfillment={setFulfillment}
+      setFulfillment={chosenByShopper(setFulfillment)}
       deliveryEditor={
         <StoreDeliveryFields
           line1={line1}
@@ -627,10 +661,11 @@ function RealCheckoutForm({
       leaveAtDoor={false}
       setLeaveAtDoor={() => {}}
       schedule={schedule}
-      setSchedule={setSchedule}
-      slot={slot}
-      setSlot={setSlot}
+      setSchedule={chosenByShopper(setSchedule)}
+      slot={chosenSlot}
+      setSlot={chosenByShopper(setSlot)}
       slots={slots}
+      slotRequired={slotRequired}
       promo=""
       setPromo={() => {}}
       appliedPromo=""
@@ -840,6 +875,8 @@ interface CheckoutLayoutProps {
   slot: string;
   setSlot: (v: string) => void;
   slots: { value: string; label: string }[];
+  /** Store delivery with a schedule: no ASAP, the order takes a slot (#565). */
+  slotRequired?: boolean;
   promo: string;
   setPromo: (v: string) => void;
   appliedPromo: string;
@@ -875,7 +912,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     contact, setContact, address, setAddress, query, setQuery,
     suggestions, setSuggestions, searching, notes, setNotes,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
-    slot, setSlot, slots, promo, setPromo,
+    slot, setSlot, slots, slotRequired = false, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
@@ -1022,35 +1059,42 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </p>
               </div>
             )}
-            <div className={styles.options}>
-              <Chip
-                type="button"
-                selected={!schedule}
-                onClick={() => setSchedule(false)}
-              >
-                {settings.closed
-                  ? "When the store opens"
-                  : `ASAP · about ${settings.prepTimeMinutes} min`}
-              </Chip>
-              {fulfillment === "pickup" && (
+            {!slotRequired && (
+              <div className={styles.options}>
                 <Chip
                   type="button"
-                  selected={schedule}
-                  onClick={() => { setSchedule(true); setSlot(slots[0].value); }}
+                  selected={!schedule}
+                  onClick={() => setSchedule(false)}
                 >
-                  Schedule pickup
+                  {settings.closed
+                    ? "When the store opens"
+                    : `ASAP · about ${settings.prepTimeMinutes} min`}
                 </Chip>
-              )}
-            </div>
-            {schedule && fulfillment === "pickup" && (
+                {fulfillment === "pickup" && slots.length > 0 && (
+                  <Chip
+                    type="button"
+                    selected={schedule}
+                    onClick={() => { setSchedule(true); setSlot(slots[0].value); }}
+                  >
+                    Schedule pickup
+                  </Chip>
+                )}
+              </div>
+            )}
+            {slotRequired && slots.length === 0 && (
+              <p className={styles.error} role="status">
+                No delivery times are open right now. Choose pickup, or check back later.
+              </p>
+            )}
+            {((schedule && fulfillment === "pickup") || slotRequired) && slots.length > 0 && (
               <label className={styles.field}>
-                Pickup time
+                {fulfillment === "pickup" ? "Pickup time" : "Delivery time"}
                 <select value={slot} onChange={(e) => setSlot(e.target.value)}>
                   {slots.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-                <small>Pickup is available within the next six days.</small>
+                <small>Times are in the store&apos;s timezone.</small>
               </label>
             )}
             <label className={styles.field}>
