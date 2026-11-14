@@ -59,6 +59,7 @@ import {
   markOutForDeliveryAction,
   markReadyAction,
 } from "./actions";
+import { leaveBatchAction, pickBatchLineAction, readBatchAction, startBatchAction, startBatchPackingAction } from "./actions";
 import { issuesToReview } from "./issue-review";
 import { acceptOrder, markLinePicked, markLineShort } from "./service";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
@@ -217,6 +218,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
       await tx.$executeRaw`DELETE FROM refund_requests WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM order_lines WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM orders WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM pick_batches WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM customers WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM listing_variants WHERE listing_id IN (SELECT id FROM listings WHERE store_id IN (${storeAId}, ${storeBId}))`;
       await tx.$executeRaw`DELETE FROM listings WHERE store_id IN (${storeAId}, ${storeBId})`;
@@ -289,6 +291,41 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     const audit = await storeScoped(storeAId).auditLog.findUnique({ where: { id: auditId } });
     expect(audit?.action).toBe("seed_marker");
     expect(await storeScoped(storeAId).auditLog.count({ where: { entityId: orderId } })).toBe(1);
+  });
+
+  it("#564: staff of another store cannot batch, read, pick, start or leave this store's batch; signed out is sent to sign-in", async () => {
+    const customer = await storeScoped(storeAId).customer.findFirstOrThrow();
+    const accepted = await Promise.all([1, 2].map((n) => storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId, number: 5640 + n, customerId: customer.id, status: "ACCEPTED", fulfillment: "pickup",
+        subtotalCents: 1000, bufferCents: 100, totalAuthorizedCents: 1100, totalCents: 1000, paymentIntentId: `pi_${RUN}_b${n}`,
+      },
+    })));
+    const ids = accepted.map((order) => order.id);
+
+    asStore(storeBSlug, cookiesB);
+    expect(await startBatchAction(ids)).toEqual({ ok: false, error: "Order not found" });
+
+    asStore(storeASlug, cookiesA);
+    const started = await startBatchAction(ids);
+    if (!started.ok) throw new Error(started.error);
+    expect((await readBatchAction(started.batchId))?.totes).toHaveLength(2);
+
+    asStore(storeBSlug, cookiesB);
+    expect(await readBatchAction(started.batchId)).toBeNull();
+    expect(await startBatchPackingAction(started.batchId)).toEqual({ ok: false, error: "Batch not found" });
+    expect(await pickBatchLineAction(started.batchId, "any-variant", 0)).toEqual({ ok: false, error: "Batch not found" });
+    expect(await leaveBatchAction(started.batchId)).toEqual({ ok: false, error: "Batch not found" });
+    const stored = await storeScoped(storeAId).order.findMany({ where: { id: { in: ids } } });
+    expect(stored.map((order) => [order.status, order.pickBatchId])).toEqual([["ACCEPTED", started.batchId], ["ACCEPTED", started.batchId]]);
+
+    headerState.delete("cookie");
+    headerState.set("x-store-slug", storeASlug);
+    const toSignIn = (error: unknown) =>
+      isRedirectError(error) && getURLFromRedirectError(error) === `/store-admin/sign-in?store=${storeASlug}`;
+    await expect(startBatchAction(ids)).rejects.toSatisfy(toSignIn);
+    await expect(readBatchAction(started.batchId)).rejects.toSatisfy(toSignIn);
+    await expect(leaveBatchAction(started.batchId)).rejects.toSatisfy(toSignIn);
   });
 
   it("a signed-out request redirects to the store sign-in", async () => {
