@@ -83,14 +83,14 @@ export async function insertGuestOrder(input: {
   email: string;
   name: string;
   phone: string;
-}): Promise<{ orderId: string; guestCustomerId: string; number: number }> {
+}): Promise<{ orderId: string; guestCustomerId: string; number: number; lineName: string }> {
   return withMama(async (tx, storeId) => {
     await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
     const max = await tx.order.aggregate({ where: { storeId }, _max: { number: true } });
     const number = (max._max.number ?? 0) + 1;
     const listing = await tx.listing.findFirstOrThrow({
       where: { storeId, variants: { some: {} } },
-      include: { variants: { take: 1 } },
+      include: { variants: { take: 1 }, masterProduct: { select: { name: true } } },
     });
     const guest = await tx.customer.create({
       data: { storeId, name: input.name, email: input.email.trim().toLowerCase(), phone: input.phone },
@@ -111,7 +111,9 @@ export async function insertGuestOrder(input: {
         },
       },
     });
-    return { orderId: order.id, guestCustomerId: guest.id, number };
+    const productName = listing.customName ?? listing.masterProduct?.name ?? "";
+    const lineName = [productName, listing.variants[0].label].filter(Boolean).join(" · ");
+    return { orderId: order.id, guestCustomerId: guest.id, number, lineName };
   });
 }
 
