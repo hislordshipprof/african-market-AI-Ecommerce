@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       });
       stripeAccountId = existing?.stripeAccountId ?? stripeAccountId;
     }
-    revalidateStore({ id: store.id, slug: store.slug });
+    revalidateStore(store);
   }
 
   const origin = req.nextUrl.origin;
