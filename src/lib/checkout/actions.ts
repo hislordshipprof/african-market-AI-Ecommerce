@@ -26,6 +26,7 @@ import { clientIp } from "../assistant/client-ip";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform, storeScoped } from "../db";
 import { loadCheckoutDraft } from "../assistant/checkout-draft";
+import { applyCartCoupon, removeCartCoupon, type ApplyCouponResult } from "../coupon/checkout";
 import type { PickupSlot } from "../order/pickup-slots";
 
 const contactSchema = z.strictObject({
@@ -129,6 +130,7 @@ export async function quoteCheckoutAction(
         input.contact,
         input.fulfillment,
         request,
+        { actorUserId },
       ),
       checkoutSlotOptions(store.id, input.fulfillment),
     ]);
@@ -195,7 +197,7 @@ export async function createPaymentIntentAction(
       input.contact,
       input.fulfillment,
       request,
-      { recheckCourier: input.fulfillment === "courier" },
+      { recheckCourier: input.fulfillment === "courier", actorUserId },
     );
     if (quote.problems.length) {
       const error = quote.problems.map((p) => p.message).join(" ");
@@ -320,6 +322,29 @@ export async function placeOrderAction(
       error: e instanceof Error ? e.message : "Could not place order",
     };
   }
+}
+
+/** Puts one store coupon code on the shopper's cart (#557). The next quote shows what it takes off. */
+export async function applyCouponAction(code: unknown, email?: unknown): Promise<ApplyCouponResult> {
+  const parsed = parseInput(z.string().max(40), code);
+  const typed = parseInput(z.string().max(320).optional(), email);
+  if (!parsed.ok || !typed.ok) return { ok: false, error: "That code isn't valid at this store." };
+  const store = await getStore();
+  const resolved = await resolveShopperCart();
+  if (!resolved) return { ok: false, error: "No cart found" };
+  return applyCartCoupon(store.id, resolved.cartId, parsed.data, {
+    ip: clientIp(await headers()),
+    userId: await signedInUserId(),
+    email: typed.data,
+  });
+}
+
+export async function removeCouponAction(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const store = await getStore();
+  const resolved = await resolveShopperCart();
+  if (!resolved) return { ok: false, error: "No cart found" };
+  await removeCartCoupon(store.id, resolved.cartId);
+  return { ok: true };
 }
 
 export async function confirmAddressAction(delivery: unknown): Promise<
