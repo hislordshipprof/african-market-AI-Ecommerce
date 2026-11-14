@@ -83,6 +83,7 @@ model Store {
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
   pushSubscriptions PushSubscription[]
+  orderPushSubscriptions OrderPushSubscription[]
   supportThreads SupportThread[]
   supportMessages SupportMessage[]
   subscription    StoreSubscription?
@@ -1095,6 +1096,7 @@ model Order {
   refundRequests RefundRequest[]
   issueReports   IssueReport[]
   notificationLogs NotificationLog[]
+  pushSubscriptions OrderPushSubscription[]
   deliveryEvents DeliveryEvent[]
   deliveries     Delivery[]
   supportThreads SupportThread[]
@@ -1439,6 +1441,24 @@ model PushSubscription {
   @@unique([storeId, endpoint])
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+/// Customer web push for one order's updates (#563). The tracking token is the only credential; 404/410 deletes the row.
+model OrderPushSubscription {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  orderId   String   @map("order_id")
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@unique([orderId, endpoint])
+  @@index([storeId, orderId])
+  @@map("order_push_subscriptions")
 }
 
 /// Store subscription on Stripe Billing (#494, ADR-0021). Billing state comes from Stripe webhooks; the admin sets `pilot`.

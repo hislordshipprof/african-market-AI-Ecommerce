@@ -1,5 +1,6 @@
 import { customerStatusLabel } from "../customer-account/order-history-view";
 import { presetPrimary } from "../theme";
+import type { PushMessage } from "../push/sender";
 import type { OrderNotifyEvent } from "./record";
 
 export type NotifyLine = {
@@ -19,6 +20,7 @@ export type NotifyLine = {
 
 export type NotifyOrder = {
   id: string;
+  storeId: string;
   number: number;
   status: string;
   fulfillment: string;
@@ -213,6 +215,7 @@ export type RenderedMessage = {
   subject?: string;
   html?: string;
   text?: string;
+  push?: { storeId: string; orderId: string; message: PushMessage };
 };
 
 /** The subject and first line: the order status, or that the store answered the customer's message. */
@@ -280,6 +283,15 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     from: quotedFrom(storeName, fromAddress),
     subject,
     html: parts.join(""),
+  };
+}
+
+/** A lock-screen line: the store's name and the status, never money or items. */
+export function renderPush(order: NotifyOrder, event: OrderNotifyEvent, url: string): RenderedMessage {
+  const body = `Order #${order.number}: ${headline(order, event)}`;
+  return {
+    to: order.id,
+    push: { storeId: order.storeId, orderId: order.id, message: { title: order.store.name, body, url, tag: `order-${order.number}` } },
   };
 }
 
