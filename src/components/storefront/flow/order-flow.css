@@ -103,7 +103,7 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: var(--color-soft);
+  background: var(--color-raised);
   border: 1px solid var(--color-line);
   border-radius: 12px;
   color: var(--color-primary-text);
