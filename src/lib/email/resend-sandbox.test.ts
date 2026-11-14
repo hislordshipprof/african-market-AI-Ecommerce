@@ -1,33 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { magicLinkMessage } from "../magic-link-mail";
 import { quotedFrom } from "../notifications/messages";
-import { isProviderQuotaError } from "./provider-quota";
-import { ResendSender, type EmailMessage } from "./send";
+import { liveSandbox, providerSandbox } from "../test-live-provider";
+import { ResendSender } from "./send";
 
 const apiKey = process.env.RESEND_API_KEY;
 const fromAddress = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
 
-// The sandbox sends real email, so the account's daily quota can run out. That says nothing about our code,
-// so a quota refusal skips the test with a warning instead of failing it (#591).
-async function sendOrSkipOnQuota(ctx: { skip: () => void }, sender: ResendSender, message: EmailMessage) {
-  try {
-    return await sender.send(message);
-  } catch (error) {
-    if (!isProviderQuotaError(error)) throw error;
-    console.warn(`Resend sandbox skipped: provider quota reached (${(error as Error).message.slice(0, 120)})`);
-    ctx.skip();
-    throw error;
-  }
-}
+// Sends real email, so it runs only with LIVE_SANDBOX=1 and the daily quota can still run out (#591).
+const sandbox = providerSandbox("Resend");
 
-describe.skipIf(!apiKey)("Resend magic-link sandbox", () => {
+describe.skipIf(!liveSandbox || !apiKey)("Resend magic-link sandbox", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  it("delivers a store-branded magic link to the sandbox recipient", async (ctx) => {
+  it("delivers a store-branded magic link to the sandbox recipient", sandbox.test(async () => {
     const message = magicLinkMessage({
       to: "delivered@resend.dev",
       url: "https://mama-ngozi.localhost/api/auth/magic-link/verify?token=sandbox&callbackURL=%2Faccount",
@@ -46,13 +36,13 @@ describe.skipIf(!apiKey)("Resend magic-link sandbox", () => {
     };
 
     const sender = new ResendSender(apiKey!, fromAddress);
-    const result = await sendOrSkipOnQuota(ctx, sender, message);
+    const result = await sender.send(message);
 
     expect(serializedFrom).toBe(message.from);
     expect(result.id).toMatch(/\S/);
-  }, 20_000);
+  }), 20_000);
 
-  it("an order email sent twice with one idempotency key is accepted once", async (ctx) => {
+  it("an order email sent twice with one idempotency key is accepted once", sandbox.test(async () => {
     const key = `notif_sandbox_${Date.now()}`;
     const message = {
       to: "delivered@resend.dev",
@@ -62,9 +52,9 @@ describe.skipIf(!apiKey)("Resend magic-link sandbox", () => {
       idempotencyKey: key,
     };
     const sender = new ResendSender(apiKey!, fromAddress);
-    const first = await sendOrSkipOnQuota(ctx, sender, message);
-    const second = await sendOrSkipOnQuota(ctx, sender, message);
+    const first = await sender.send(message);
+    const second = await sender.send(message);
     expect(first.id).toMatch(/\S/);
     expect(second.id).toBe(first.id);
-  }, 20_000);
+  }), 20_000);
 });
