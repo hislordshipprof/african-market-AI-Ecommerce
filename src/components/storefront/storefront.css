@@ -195,6 +195,11 @@
   max-width: 215px;
   min-width: 0;
   overflow-wrap: anywhere;
+  /* A long store name holds two lines; the full name is in the title and the footer. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .sf-header-window {
   flex-shrink: 0;
@@ -704,6 +709,10 @@
   bottom: 8px;
   filter: drop-shadow(0 2px 6px #0002);
 }
+/* The fallback name centres above the 44px add button, never under it. */
+.sf-product-photo:has(.sf-quick-add) .sf-product-fallback {
+  padding-bottom: 56px;
+}
 .sf-photo-tag {
   position: absolute;
   left: 8px;
@@ -1072,8 +1081,13 @@
   gap: 8px;
   margin-block: 24px;
 }
-.sf-filters select {
+.sf-filters form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
+}
+.sf-filters select {
   min-height: 44px;
   background: var(--color-surface);
   border-radius: 999px;
@@ -1619,6 +1633,7 @@
     z-index: 20;
     background: var(--color-bg);
     margin-inline: -16px;
+    margin-bottom: 16px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--color-line);
   }
@@ -1640,11 +1655,14 @@
     font-size: 13px;
     padding-inline: 12px;
   }
+  .sf-filters form {
+    gap: 6px;
+    margin-left: 0;
+  }
   .sf-filters select {
     max-width: 135px;
     font-size: 13px;
     padding-inline: 10px;
-    margin-left: 0;
   }
   .sf-page-title {
     font-size: 32px;
