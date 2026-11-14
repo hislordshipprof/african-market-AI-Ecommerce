@@ -215,7 +215,7 @@ const STORE_SELECT = { id: true, name: true, slug: true, timezone: true, digestH
 async function sendStoreReport(store: ReportStore, timeZone: string, now: Date, env: Record<string, string | undefined>): Promise<boolean> {
   const owners = await storeScoped(store.id).storeMembership.findMany({
     where: { role: "owner" },
-    select: { user: { select: { email: true } } },
+    select: { user: { select: { id: true, email: true } } },
   });
   if (owners.length === 0) return false;
 
@@ -253,7 +253,7 @@ async function sendStoreReport(store: ReportStore, timeZone: string, now: Date, 
         to: owner.user.email,
         subject: `${store.name}: your week, ${weekLabel(figures)}`,
         html,
-        idempotencyKey: `copilot-weekly:${store.id}:${week.isoWeek}:${owner.user.email}`,
+        idempotencyKey: `copilot-weekly:${store.id}:${week.isoWeek}:${owner.user.id}`,
       });
     }
     await storeScopedTransaction(store.id, (tx) => tx.copilotWeeklyReport.update({ where: key, data: { sentAt: new Date() } }));

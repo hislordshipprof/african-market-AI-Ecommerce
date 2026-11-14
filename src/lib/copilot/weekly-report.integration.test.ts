@@ -314,6 +314,23 @@ describe.skipIf(!hasDb)("copilot weekly report (lane database)", () => {
     expect((await reportRows(storeF))[0]!.sentAt).not.toBeNull();
   });
 
+  it("an owner with a valid 254-character email gets the report", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    const storeG = (await raw.store.create({ data: { slug: `weekly-long-${RUN}`, name: "Weekly Long", timezone: TZ, digestHour: 8 } })).id;
+    const ownerG = `weekly-ownerlong-${RUN}`;
+    // RFC 5321 limits: local part 64, whole address 254.
+    const domain = `${RUN}.${"b".repeat(63)}.${"c".repeat(63)}.`;
+    const email = `${"a".repeat(64)}@${domain}${"d".repeat(254 - 65 - domain.length - 4)}.com`;
+    expect(email).toHaveLength(254);
+    await raw.user.create({ data: { id: ownerG, name: ownerG, email } });
+    await storeScoped(storeG).storeMembership.create({ data: { storeId: storeG, userId: ownerG, role: "owner" } });
+
+    await weeklyHandler({ step: makeFakeStep() });
+
+    expect(getTestSentEmails().filter((sent) => sent.to === email)).toHaveLength(1);
+    expect((await reportRows(storeG))[0]!.sentAt).not.toBeNull();
+  });
+
   it("copilot_weekly_reports: storeScoped(B) reads none of W's rows, cannot insert one for W, and updates nothing", async () => {
     vi.stubEnv("RESEND_API_KEY", "re_test");
     await weeklyHandler({ step: makeFakeStep() });
