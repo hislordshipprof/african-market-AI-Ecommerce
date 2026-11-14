@@ -61,6 +61,7 @@ import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from 
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { CourierTiming } from "./courier-timing";
+import { BatchPicking, packingHref } from "./batch-picking";
 
 const STATUS_CONFIG: Record<
   string,
@@ -554,6 +555,17 @@ export function OrderInbox({
                     <h3 className="mb-2 text-sm font-semibold text-foreground">
                       Pick list
                     </h3>
+                    {selectedOrder.pickBatchId && (
+                      <p className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm text-foreground">
+                        This order is in a batch. Pick it from the packing screen.
+                        <Link
+                          href={packingHref(selectedOrder.pickBatchId, storeParam)}
+                          className="min-h-11 content-center font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          Open packing screen
+                        </Link>
+                      </p>
+                    )}
                     <div className="space-y-2">
                       {sortedPickLines.map((line) => (
                         <div
@@ -590,7 +602,7 @@ export function OrderInbox({
                               </div>
                             )}
                           </div>
-                          {line.status === "pending" ? (
+                          {line.status === "pending" && selectedOrder.pickBatchId ? null : line.status === "pending" ? (
                             <div className="flex shrink-0 gap-2">
                               <Button
                                 variant="ghost"
@@ -758,6 +770,7 @@ export function OrderInbox({
         ) : (
           <div>
             {problems}
+            <BatchPicking orders={orders} storeParam={storeParam} />
             {orders.length === 0 ? (
               <div className="py-20 text-center">
                 <ShoppingBag className="mx-auto mb-4 size-12 text-muted-foreground/50" />

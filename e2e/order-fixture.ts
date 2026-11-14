@@ -222,3 +222,51 @@ export async function deleteDriverRouteOrders(numbers: number[], slot: string): 
     await tx.driverRoute.deleteMany({ where: { storeId, slot } });
   });
 }
+
+/**
+ * Accepted orders for batch picking (#564), oldest first, sharing the store's first listing.
+ * Order i gets the shared item ×(i === 0 ? 2 : 1) plus one item of its own. Remove with deleteBatchOrders.
+ */
+export async function insertBatchOrders(numbers: number[], fulfillments: string[]): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number: { in: numbers } } });
+    const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
+    const listings = await tx.listing.findMany({
+      where: { storeId, active: true, variants: { some: {} } },
+      include: { variants: { take: 1 } },
+      orderBy: { id: "asc" },
+      take: numbers.length + 1,
+    });
+    if (listings.length < numbers.length + 1) throw new Error("mama-ngozi needs more listings");
+    const [shared, ...own] = listings;
+    for (const [i, number] of numbers.entries()) {
+      const sharedQty = i === 0 ? 2 : 1;
+      const lines = [
+        { listingVariantId: shared.variants[0].id, qtyOrdered: sharedQty, unitPriceCents: shared.variants[0].price },
+        { listingVariantId: own[i].variants[0].id, qtyOrdered: 1, unitPriceCents: own[i].variants[0].price },
+      ];
+      const subtotal = lines.reduce((sum, line) => sum + line.qtyOrdered * line.unitPriceCents, 0);
+      await tx.order.create({
+        data: {
+          storeId, number, customerId: customer.id, status: "ACCEPTED", fulfillment: fulfillments[i] ?? "pickup",
+          subtotalCents: subtotal, bufferCents: subtotal, totalAuthorizedCents: subtotal * 2, totalCents: subtotal,
+          paymentIntentId: `pi_seed_e2e_${number}_${Date.now()}`, acceptedAt: new Date(),
+          createdAt: new Date(Date.now() - (numbers.length - i) * 60_000),
+          lines: { create: lines },
+        },
+      });
+    }
+  });
+}
+
+export async function deleteBatchOrders(numbers: number[]): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    const orders = await tx.order.findMany({ where: { storeId, number: { in: numbers } }, select: { id: true, pickBatchId: true } });
+    const batchIds = [...new Set(orders.flatMap((order) => (order.pickBatchId ? [order.pickBatchId] : [])))];
+    const ids = orders.map((order) => order.id);
+    await tx.substitutionRequest.deleteMany({ where: { orderId: { in: ids } } });
+    await tx.notificationLog.deleteMany({ where: { orderId: { in: ids } } });
+    await tx.order.deleteMany({ where: { id: { in: ids } } });
+    await tx.pickBatch.deleteMany({ where: { id: { in: batchIds } } });
+  });
+}
