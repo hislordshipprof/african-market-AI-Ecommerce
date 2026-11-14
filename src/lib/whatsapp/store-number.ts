@@ -46,7 +46,8 @@ function logLink(event: string, storeId: string, extra: Record<string, string> =
 
 /**
  * Links the store's own WhatsApp number (#558): a pending row is committed
- * first, then the provider (Embedded Signup, or the fake taking ids from a
+ * first (one link in flight per store; a retry of a registered link is a
+ * no-op), then the provider (Embedded Signup, or the fake taking ids from a
  * form) returns the store's business token, which is sealed before it is
  * written. The token never leaves this function.
  */
@@ -70,7 +71,7 @@ export async function linkStoreNumber(
   }
 
   try {
-    await beginStoreWhatsAppNumberLink({ ...actor, ...input });
+    if ((await beginStoreWhatsAppNumberLink({ ...actor, ...input })) === "linked") return { ok: true };
   } catch (error) {
     if (error instanceof StoreWhatsAppNumberTakenError) return { error: ALREADY_LINKED_ERROR };
     throw error;
@@ -90,11 +91,15 @@ export async function linkStoreNumber(
     storeId: actor.storeId,
     phoneNumberId: input.phoneNumberId,
   });
-  await finishStoreWhatsAppNumberLink(actor.storeId, input.phoneNumberId, {
+  const registered = await finishStoreWhatsAppNumberLink(actor.storeId, input.phoneNumberId, {
     status: "registered",
     displayNumber: connected.displayNumber,
     sealedToken,
   });
+  if (!registered) {
+    logLink("whatsapp_number_link_superseded", actor.storeId);
+    return { error: LINK_FAILED_ERROR };
+  }
   logLink("whatsapp_number_linked", actor.storeId);
   return { ok: true };
 }
