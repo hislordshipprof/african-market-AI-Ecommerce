@@ -54,6 +54,8 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
     listing.ugu = await sell(storeA, await master("Ugu leaves", greens), 700, { stockMode: "status", status: "out_of_stock" });
     listing.spinach = await sell(storeA, await master("Spinach", greens), 450);
     listing.bitterleaf = await sell(storeA, await master("Bitter leaf", greens), 480, { stockMode: "counted", qty: 0 });
+    listing.maggi = await sell(storeA, await master("Maggi cubes"), 100);
+    await storeScoped(storeA).listing.update({ where: { id: listing.maggi.listingId }, data: { maxPerOrder: 3 } });
   });
 
   afterAll(async () => {
@@ -86,6 +88,15 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
 
     expect(await setShopperNeeds(ctx, { remove: ["budget"] })).not.toHaveProperty("budgetCents");
     expect(await addToCart(ctx, { items: [{ variant_id: listing.oil.variantId, qty: 1 }] })).toMatchObject({ ok: true, added: 1 });
+  });
+
+  it("prices the qty the store's limit lets in, not the qty asked for", async () => {
+    const ctx = await conversation(storeA);
+    await setShopperNeeds(ctx, { budget_cents: 1000 });
+    await addToCart(ctx, { items: [{ variant_id: listing.rice.variantId, qty: 1 }] });
+    // 10 x $1 is over the $10 budget, but the max of 3 adds $3 and the cart stays at $9.
+    expect(await addToCart(ctx, { items: [{ variant_id: listing.maggi.variantId, qty: 10 }] }))
+      .toMatchObject({ ok: true, added: 3, subtotalCents: 900 });
   });
 
   it("explains an item from the catalog's own description and local names", async () => {

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import {
   backupSwap,
+  decideAddQty,
   decideLineQty,
   decideNamedSubstitute,
   substituteIdForSwap,
@@ -14,7 +15,7 @@ import {
   type CartWriteTx,
   type SwapRuleValue,
 } from "../../cart/service";
-import { storeScoped } from "../../db";
+import { lockCartLineByVariant, storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
 import {
   changeConstraints,
@@ -823,8 +824,15 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
     let subtotal = (await readCartMoney(tx, ctx.cartId)).totals.subtotalCents;
     for (const item of allowed) {
       if (saved.budgetCents != null) {
-        const variant = await tx.listingVariant.findUnique({ where: { id: item.variant_id }, select: { price: true } });
-        if (variant && subtotal + variant.price * item.qty > saved.budgetCents) {
+        const variant = await tx.listingVariant.findUnique({
+          where: { id: item.variant_id },
+          select: { price: true, listing: { select: { maxPerOrder: true } } },
+        });
+        const existing = variant ? await lockCartLineByVariant(tx, ctx.cartId, item.variant_id) : null;
+        const decision = variant
+          ? decideAddQty({ existingQty: existing?.qty ?? 0, addQty: item.qty, maxPerOrder: variant.listing.maxPerOrder, clampToMax: true })
+          : null;
+        if (variant && decision?.ok && subtotal + variant.price * decision.added > saved.budgetCents) {
           items.push({ ...fail("over_budget"), variantId: item.variant_id, budgetCents: saved.budgetCents, subtotalCents: subtotal });
           continue;
         }
