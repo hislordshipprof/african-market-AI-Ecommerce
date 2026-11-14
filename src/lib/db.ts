@@ -1612,6 +1612,18 @@ export async function claimAssistantCapDay(day: string): Promise<boolean> {
   });
 }
 
+/** Ledger days from `last` back `days` days, newest first, for the admin eval and spend page (#545). */
+export async function listAssistantSpendDays(last: string, days: number): Promise<Array<{ day: Date; cost: bigint; alerted: boolean }>> {
+  return appUserQuery((tx) =>
+    tx.$queryRaw<Array<{ day: Date; cost: bigint; alerted: boolean }>>`
+      SELECT day, cost_micros AS cost, cap_alerted_at IS NOT NULL AS alerted
+      FROM assistant_spend_days
+      WHERE day <= CAST(${last} AS date) AND day > CAST(${last} AS date) - ${days}::int
+      ORDER BY day DESC
+    `,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // WhatsApp inbound (#143). Called inside one platformAdminTransaction, so the
 // claim and the verification write commit or roll back together. Each query
@@ -1940,6 +1952,22 @@ export async function incrementAssistantChatMonth(
     WHERE assistant_chat_months.chats < ${cap}
     RETURNING chats`;
   return rows[0]?.chats ?? null;
+}
+
+export type AssistantChatMonthRow = { storeId: string; storeName: string; chats: number; subscriptionPlan: string | null; subscriptionStatus: string | null };
+
+/** Every store with chats in the month, with its subscription, for the platform admin (#545). */
+export async function listAssistantChatMonthRows(month: string): Promise<AssistantChatMonthRow[]> {
+  return platformAdminTransaction((tx) =>
+    tx.$queryRaw<AssistantChatMonthRow[]>`
+      SELECT m.store_id AS "storeId", s.name AS "storeName", m.chats,
+             sub.plan AS "subscriptionPlan", sub.status AS "subscriptionStatus"
+      FROM assistant_chat_months m
+      JOIN stores s ON s.id = m.store_id
+      LEFT JOIN store_subscriptions sub ON sub.store_id = m.store_id
+      WHERE m.month = CAST(${month} AS date) AND m.chats > 0
+    `,
+  );
 }
 
 /** Marks the month's owner warning sent. False when it already was. */

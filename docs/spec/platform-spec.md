@@ -171,7 +171,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - Master catalog: products, synonyms (by language), images, recipes, category tree; merge duplicates proposed by AI.
 - Orders & disputes across tenants; manual refund; courier incident log.
 - Courier config: provider priorities, failover timeout, per-metro settings.
-- AI oversight: conversation sampling, flagged answers, eval dashboard.
+- AI oversight: conversation sampling, flagged answers, eval dashboard. The eval and spend page `/admin/ai/eval-spend` (#545) is read only: the committed #146 report (model, date, both runs, precision, recall, dish pass rate, made-up items, verdict, cost), platform AI spend by UTC day for the last 30 days against the cap and whether the assistant is resting, and each store's shopper-assistant chats this UTC month against its plan cap, with stores at 80% or more marked. It never calls the model and never starts an eval; live runs stay on the command line.
 - Billing: subscriptions (Stripe Billing), platform fees ledger.
 
 ---

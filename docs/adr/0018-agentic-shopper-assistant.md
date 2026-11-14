@@ -80,6 +80,7 @@ The 2026-11-04 design (a confirm card in the sheet, a single-use `checkoutToken`
 - **Spend cap:**
   - **$10 total** for this build phase, covering all assistant and eval calls through the app's AI client, measured from token usage;
   - at the cap the assistant switches off with a "the helper is resting" message, the storefront keeps working, and the platform admin is alerted;
+  - the platform admin sees the total against the cap, spend by UTC day and whether the assistant is resting at `/admin/ai/eval-spend` (#545, added 2026-11-14);
   - the owner also sets a matching limit in the Anthropic console;
   - per-store budgets come later, once real costs are known.
 - **Costs are kept low** with prompt caching on the system prompt and tool definitions, a cap on tool steps per turn, and rate limits per cart and per IP.

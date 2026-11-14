@@ -2,7 +2,7 @@ import committedReport from "../assistant/eval/report.json";
 import { assistantSpendState } from "../assistant/spend";
 import { chatMonth } from "../billing/assistant-chats";
 import { assistantChatCap, assistantChatWarnAt, effectivePlan, type Plan } from "../billing/plan";
-import { appUserQuery, platformAdminTransaction } from "../db";
+import { listAssistantChatMonthRows, listAssistantSpendDays, type AssistantChatMonthRow } from "../db";
 
 type Verdict = "haiku-ok" | "sonnet-candidate";
 
@@ -88,14 +88,6 @@ export function formatAiUsd(micros: bigint): string {
   return `$${dollars}.${(cents % BigInt(100)).toString().padStart(2, "0")}`;
 }
 
-export type ChatMonthRow = {
-  storeId: string;
-  storeName: string;
-  chats: number;
-  subscriptionPlan: string | null;
-  subscriptionStatus: string | null;
-};
-
 export type StoreChatUsage = {
   storeId: string;
   storeName: string;
@@ -108,7 +100,7 @@ export type StoreChatUsage = {
 };
 
 /** Each store against its own plan cap, fullest first. Cut to `limit` rows, never dropping a store at 80% or more. */
-export function storeChatUsage(rows: ChatMonthRow[], limit = 50): { stores: StoreChatUsage[]; hidden: number } {
+export function storeChatUsage(rows: AssistantChatMonthRow[], limit = 50): { stores: StoreChatUsage[]; hidden: number } {
   const all = rows
     .map((row): StoreChatUsage => {
       const plan = effectivePlan(row.subscriptionPlan && row.subscriptionStatus ? { plan: row.subscriptionPlan, status: row.subscriptionStatus } : null);
@@ -134,31 +126,14 @@ const SPEND_DAYS = 30;
 
 /** Ledger rows for `at`'s UTC day and the 29 before it, newest first. Days with no spend have no row. */
 export async function listSpendDays(at: Date): Promise<SpendDay[]> {
-  const last = at.toISOString().slice(0, 10);
-  const rows = await appUserQuery((tx) =>
-    tx.$queryRaw<Array<{ day: Date; cost: bigint; alerted: boolean }>>`
-      SELECT day, cost_micros AS cost, cap_alerted_at IS NOT NULL AS alerted
-      FROM assistant_spend_days
-      WHERE day <= CAST(${last} AS date) AND day > CAST(${last} AS date) - ${SPEND_DAYS}::int
-      ORDER BY day DESC
-    `,
-  );
+  const rows = await listAssistantSpendDays(at.toISOString().slice(0, 10), SPEND_DAYS);
   return rows.map((row) => ({ day: row.day.toISOString().slice(0, 10), costMicros: BigInt(row.cost), capAlerted: row.alerted }));
 }
 
 /** Every store's shopper-assistant chats in `at`'s UTC month, read as platform admin. */
 export async function listChatMonth(at: Date): Promise<{ month: string; stores: StoreChatUsage[]; hidden: number }> {
   const month = chatMonth(at);
-  const rows = await platformAdminTransaction((tx) =>
-    tx.$queryRaw<ChatMonthRow[]>`
-      SELECT m.store_id AS "storeId", s.name AS "storeName", m.chats,
-             sub.plan AS "subscriptionPlan", sub.status AS "subscriptionStatus"
-      FROM assistant_chat_months m
-      JOIN stores s ON s.id = m.store_id
-      LEFT JOIN store_subscriptions sub ON sub.store_id = m.store_id
-      WHERE m.month = CAST(${month} AS date) AND m.chats > 0
-    `,
-  );
+  const rows = await listAssistantChatMonthRows(month);
   return { month, ...storeChatUsage(rows) };
 }
 
