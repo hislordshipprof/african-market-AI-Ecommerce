@@ -12,6 +12,7 @@ import { readCustomerMessages } from "@/lib/support/thread";
 import { issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
 import { courierBrand } from "@/lib/delivery/dispatch";
 import type { DeliveryProviderName } from "@/lib/delivery/provider";
+import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
 
@@ -49,7 +50,7 @@ export default async function OrderPage({
       : null;
     return (
       <StorefrontShell store={context.store}>
-        <div style={{ maxWidth: 600, margin: "0 auto", padding: "2rem 1rem" }}>
+        <div style={{ maxWidth: 600, margin: "0 auto", padding: "2rem 1rem", display: "grid", gap: 16 }}>
           <FlowHeading
             title={query.placed === "1" ? "You're all set." : `Order #${realOrder.number}`}
             description={`Order #${realOrder.number} · ${context.store.name}`}
@@ -77,14 +78,14 @@ export default async function OrderPage({
           )}
           <FlowCard title="Order details">
             <p><strong>Status:</strong> {customerStatusLabel(realOrder.status)}</p>
-            <p><strong>Fulfillment:</strong> {realOrder.fulfillment}</p>
+            <p><strong>Fulfillment:</strong> {FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment}</p>
             {realOrder.customer && (
               <p><strong>Customer:</strong> {realOrder.customer.name}</p>
             )}
             <ul style={{ listStyle: "none", padding: 0, margin: "1rem 0" }}>
               {realOrder.lines.map((line) => (
                 <li key={line.id} style={{ display: "flex", justifyContent: "space-between", padding: "0.25rem 0" }}>
-                  <span>{line.qtyOrdered} × {line.listingVariant?.listing?.customName ?? line.listingVariant?.label ?? "Item"}</span>
+                  <span>{line.qtyOrdered} × {[line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant?.label].filter(Boolean).join(" · ") || "Item"}</span>
                   <span>{money(line.unitPriceCents * line.qtyOrdered)}</span>
                 </li>
               ))}
