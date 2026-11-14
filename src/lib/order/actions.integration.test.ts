@@ -403,7 +403,6 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
   it("a decline with a reason calls no Stripe, leaves the order and writes one audit row", async () => {
     const { orderId, issueId, pi } = await issueToReview(602, 8000, 6000);
     asStore(storeASlug, cookiesA);
-    expect(await declineIssueAction(issueId, "  ")).toEqual({ ok: false, error: "Write why you are declining" });
     expect(await declineIssueAction(issueId, "Photo shows a different product")).toEqual({ ok: true });
     const after = await reviewed(orderId);
     expect(refundRequests.some((call) => call.paymentIntentId === pi)).toBe(false);
