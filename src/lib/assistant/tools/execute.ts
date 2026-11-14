@@ -435,16 +435,24 @@ export async function checkAvailability(ctx: AssistantContext, input: unknown): 
 
 export async function suggestSubstitutes(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(suggestSubstitutesInput, input);
+  const found = await swapCandidates(ctx, parsed.listing_id, 5);
+  if (!found.ok) return recordRead(ctx, "suggest_substitutes", parsed, fail(found.code));
+  return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items: found.items, ...(found.reason ? { reason: found.reason } : {}) });
+}
+
+/**
+ * In-stock listings of the same category that meet the saved needs: a swap that may itself be out is no swap,
+ * and one with no variant cannot be kept as a substitute.
+ */
+async function swapCandidates(ctx: AssistantContext, listingId: string, limit: number) {
   const scoped = storeScoped(ctx.storeId);
   const listing = await scoped.listing.findUnique({
-    where: { id: parsed.listing_id },
+    where: { id: listingId },
     include: { masterProduct: true },
   });
-  if (!listing) return recordRead(ctx, "suggest_substitutes", parsed, fail("listing_not_found"));
+  if (!listing) return { ok: false as const, code: "listing_not_found" };
   const categoryId = listing.masterProduct?.categoryId;
-  if (!categoryId) {
-    return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items: [], reason: "no_category" });
-  }
+  if (!categoryId) return { ok: true as const, items: [], reason: "no_category" };
   const candidates = await scoped.listing.findMany({
     where: { active: true, id: { not: listing.id }, masterProduct: { categoryId } },
     include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
@@ -452,9 +460,8 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
     take: 40,
   });
   const verdicts = await verdictsFor(ctx, candidates.map((candidate) => candidate.id));
-  // A swap that may itself be out is no swap, and one with no variant cannot be kept as a substitute.
   const items = candidates.filter((candidate) => !isExcluded(verdicts, candidate.id) && !mayBeUnavailable(candidate) && candidate.variants[0])
-    .slice(0, 5).map((candidate) => ({
+    .slice(0, limit).map((candidate) => ({
       listingId: candidate.id,
       name: candidate.customName || candidate.masterProduct?.name || "Unnamed",
       variantId: candidate.variants[0].id,
@@ -463,7 +470,7 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
       mayBeUnavailable: false,
       ...needsOf(verdicts, candidate.id),
     }));
-  return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items });
+  return { ok: true as const, items };
 }
 
 async function chooseBackup(
@@ -858,6 +865,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         swapRule,
         mayBeUnavailable: flagged,
         ...(substituteVariantId ? { substituteVariantId } : {}),
+        ...(flagged && swapRule !== "named_substitute" ? await swapIdeas(ctx, applied.listing.id) : {}),
       });
     }
     items.push(...refusedItems);
@@ -872,6 +880,16 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       ...money.totals,
     };
   });
+}
+
+/** Swaps the reply may suggest for a line that may be unavailable; the customer's yes keeps one as its named substitute. */
+async function swapIdeas(
+  ctx: AssistantContext,
+  listingId: string,
+): Promise<{ swapIdeas?: Array<{ listingId: string; name: string; variantId: string; packLabel: string }> }> {
+  const found = await swapCandidates(ctx, listingId, 3);
+  if (!found.ok || found.items.length === 0) return {};
+  return { swapIdeas: found.items.map(({ listingId: id, name, variantId, packLabel }) => ({ listingId: id, name, variantId, packLabel })) };
 }
 
 export async function updateCart(ctx: AssistantContext, input: unknown): Promise<ToolResult> {

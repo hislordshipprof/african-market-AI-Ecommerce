@@ -119,9 +119,17 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
     expect(suggested.items.find((item) => item.listingId === listing.spinach.listingId))
       .toMatchObject({ variantId: listing.spinach.variantId, packLabel: "Each", mayBeUnavailable: false });
 
+    // Adding the out item with no backup offers the same in-stock swaps, so the reply can suggest one.
+    const plain = await addToCart(await conversation(storeA), { items: [{ variant_id: listing.ugu.variantId, qty: 1 }] });
+    expect(plain).toMatchObject({ ok: true, mayBeUnavailable: true, swapRule: "store_suggests" });
+    const ideas = (plain as unknown as { swapIdeas: Array<{ listingId: string; variantId: string }> }).swapIdeas;
+    expect(ideas.map((idea) => idea.listingId)).toContain(listing.spinach.listingId);
+    expect(ideas.map((idea) => idea.listingId)).not.toContain(listing.bitterleaf.listingId);
+
     // The existing swap rules keep it: ugu stays on the cart with spinach as its named substitute.
     const added = await addToCart(ctx, { items: [{ variant_id: listing.ugu.variantId, qty: 1, backup_variant_id: listing.spinach.variantId }] });
     expect(added).toMatchObject({ ok: true, mayBeUnavailable: true, swapRule: "named_substitute", substituteVariantId: listing.spinach.variantId });
+    expect(added).not.toHaveProperty("swapIdeas");
     const lineId = (added as unknown as { lineId: string }).lineId;
     expect(await setSwapRule(ctx, { line_id: lineId, rule: "named_substitute", substitute_variant_id: listing.spinach.variantId })).toMatchObject({ ok: true });
 

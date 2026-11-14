@@ -7967,7 +7967,8 @@
     "id": "extras-out-of-stock-swap",
     "category": "helpful-extras",
     "turns": [
-      "Add 1 Scotch bonnet pepper for my pepper stew."
+      "Add 1 Scotch bonnet pepper for my pepper stew.",
+      "Yes, keep that as the backup."
     ],
     "mustHave": [
       {
