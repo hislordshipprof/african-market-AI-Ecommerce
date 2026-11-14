@@ -58,13 +58,14 @@ cp "$ROOT/scripts/ship-guard/gh" "$P/scripts/ship-guard/" 2>/dev/null
 ( cd "$P" && git init -q -b main && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
 for n in 77 408; do printf 'VERDICT: PASS\n' > "$P/.builder/review-$n.md"; echo "$A" > "$P/.builder/review-$n.sha"; done
 cat > "$P/scripts/agent-cli.sh" <<'EOF'
-agent_run() { "${SESSION_GH:-gh}" pr merge 77 --squash >/dev/null 2>&1 || true; }
+agent_run() { echo "${GH_CONFIG_DIR:-} $(ls -A "${GH_CONFIG_DIR:-/nonexistent}" 2>/dev/null | wc -l | tr -d ' ') ${GH_TOKEN:-}" > "$FAKE_DIR/session-env"; "${SESSION_GH:-gh}" pr merge 77 --squash >/dev/null 2>&1 || true; }
 EOF
 # With FAKE_REMOTE set, the PR is the branch FAKE_REF on that bare repository, against its main.
 cat > "$T/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 remote() { git --git-dir="$FAKE_REMOTE" "$@"; }
 case "$*" in
+  "auth token") echo fake-token ;;
   "pr list"*) [ -z "${FAKE_TICKET_PR:-}" ] || echo "$FAKE_TICKET_PR" ;;
   "pr merge"*) echo "$*" >> "$FAKE_DIR/merged" ;;
   "pr checks"*) echo "${FAKE_NOT_GREEN:-0}" ;;
@@ -155,6 +156,19 @@ rm -f "$T/merged"
 guard pr -R o/r merge 7 && bad "guard let pr -R merge through" || ok "guard refuses pr merge after a flag"
 guard api -X PUT repos/o/r/pulls/7/merge && bad "guard let the merge API through" || ok "guard refuses the merge API"
 guard pr checks 7 && ok "guard passes other gh calls" || bad "guard blocked pr checks"
+# #413 N1: gh takes its repo flag before the command too, so "pr" is not always the first argument.
+guard -R o/r pr merge 7 && bad "guard let -R pr merge through" || ok "guard refuses -R before pr merge"
+guard --repo o/r pr merge 7 && bad "guard let --repo pr merge through" || ok "guard refuses --repo before pr merge"
+guard --repo=o/r pr merge 7 && bad "guard let --repo= pr merge through" || ok "guard refuses --repo= before pr merge"
+guard -R o/r api -X PUT repos/o/r/pulls/7/merge && bad "guard let -R api merge through" || ok "guard refuses the merge API after a flag"
+# An alias the session defines expands inside the real gh, past the guard.
+guard alias set m 'pr merge' && bad "guard let an alias be set" || ok "guard refuses gh alias"
+guard -R o/r pr view 7 && ok "guard passes pr view after a flag" || bad "guard blocked pr view after a flag"
+# The session's gh reads an empty config dir (no saved aliases), signed in through GH_TOKEN; the dir goes after.
+rm -f "$T/session-env"; SHIP_PR=77 in_proj bash scripts/ship-ticket.sh 77 >/dev/null
+read -r cfg files tok < "$T/session-env" 2>/dev/null
+if [ -n "${cfg:-}" ] && [ "${files:-}" = 0 ] && [ "${tok:-}" = fake-token ] && [ ! -e "$cfg" ]; then ok "a ship session's gh has no saved aliases and keeps its login"
+else bad "a ship session's gh has no saved aliases and keeps its login ($(cat "$T/session-env" 2>/dev/null))"; fi
 
 # A login shell puts Homebrew's gh ahead of the guard, so a Claude ship session also needs the tool itself denied.
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$CLAUDE_ARGS"\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"

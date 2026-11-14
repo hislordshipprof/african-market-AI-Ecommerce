@@ -19,6 +19,11 @@ DO NOT MERGE and do not close the issue, whatever the skill says: stop once the 
 . "$ROOT/scripts/agent-cli.sh"
 . "$ROOT/scripts/review-watch.sh"
 export REAL_GH; REAL_GH="$(command -v gh)"
+# The session's gh reads an empty config dir, so no saved or newly set alias can expand to a merge; GH_TOKEN keeps
+# it (and git's gh credential helper) signed in.
+SHIP_GH_TOKEN=$(gh auth token) || { echo "gh is not signed in"; exit 1; }
+SHIP_GH_CONFIG=$(mktemp -d); trap 'rm -rf "$SHIP_GH_CONFIG"' EXIT
+GH_CONFIG_DIR="$SHIP_GH_CONFIG" GH_TOKEN="$SHIP_GH_TOKEN" \
 PATH="$ROOT/scripts/ship-guard:$PATH" WATCH_WHAT="ship session" run_capped "${SHIP_TIMEOUT_MIN:-45}" agent_run ship "$LOG" "$PROMPT" || status=$?
 [ "${status:-0}" != 124 ] || echo "Ship session for #$N was stopped at its ${SHIP_TIMEOUT_MIN:-45}-minute cap."
 PR="${SHIP_PR:-$(gh pr list -R "$REPO" --state all --search "head:ticket-$N-" --json number --jq '.[0].number // empty')}"

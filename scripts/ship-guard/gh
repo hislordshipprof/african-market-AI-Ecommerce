@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # First on PATH inside a ship session only (scripts/ship-ticket.sh), which repairs a branch and must never merge it.
+# gh takes -R/--repo before the command too, so every argument is looked at, not only the first. An absolute path
+# to gh still gets past this; ship-ticket.sh checks after the session, and branch protection on main is the real stop.
 refuse() { echo "gh: merging is refused in a ship session. Stop once the branch is pushed and local-ci is green." >&2; exit 1; }
-case "${1:-}" in
-  pr) for a in "$@"; do [ "$a" != merge ] || refuse; done ;;
-  api) case "$*" in */pulls/*/merge* | *mergePullRequest* | *enablePullRequestAutoMerge*) refuse ;; esac ;;
-esac
+cmd="" pr="" skip=""
+for a in "$@"; do
+  if [ -n "$skip" ]; then skip=""
+  elif [ -z "$cmd" ]; then case "$a" in -R | --repo) skip=1 ;; -*) ;; *) cmd="$a" ;; esac; fi
+  [ "$a" != pr ] || pr=1
+  [ -z "$pr" ] || [ "$a" != merge ] || refuse
+done
+# An alias expands inside the real gh, past this guard.
+[ "$cmd" != alias ] || refuse
+case " $* " in *" api "*) case "$*" in */pulls/*/merge* | *mergePullRequest* | *enablePullRequestAutoMerge*) refuse ;; esac ;; esac
 exec "${REAL_GH:?ship-ticket.sh sets REAL_GH}" "$@"
