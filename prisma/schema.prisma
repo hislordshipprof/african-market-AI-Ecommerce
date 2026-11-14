@@ -58,9 +58,11 @@ model Store {
   ownerPhotoUrl String? @map("owner_photo_url")
   neighborhood  String?
   deliveryInfo  String? @map("delivery_info")
-  /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on.
+  /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on; a platform admin can override (#450).
   listed        Boolean @default(false)
   listingBlurb  String? @map("listing_blurb") @db.VarChar(160)
+  /// Up to 3 directory cuisine tags (src/lib/directory/cuisine.ts, #450).
+  cuisineTags   String[] @default([]) @map("cuisine_tags")
 
   rlsFixtures           RlsTestFixture[]
   auditLogs             AuditLog[]

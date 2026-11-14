@@ -172,6 +172,12 @@
   overflow-wrap: anywhere;
 }
 
+.cuisines {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--d-muted);
+}
+
 .foot {
   margin-top: auto;
   display: flex;

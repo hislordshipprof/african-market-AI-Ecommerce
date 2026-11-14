@@ -3,6 +3,7 @@ import { unstable_cache, revalidateTag } from "next/cache";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { platform } from "./db";
+import { DIRECTORY_CACHE_TAG } from "./directory/stores";
 import { VALID_PRESETS, type ThemePreset } from "./theme";
 import type { Store } from "@prisma/client";
 
@@ -94,6 +95,7 @@ export function revalidateStore(store: {
   const tags = [
     ...storeTagsForSlug(store.slug),
     ...storeTagsForId(store.id),
+    DIRECTORY_CACHE_TAG,
   ];
   if (store.customDomain) {
     tags.push(...storeTagsForDomain(store.customDomain));

@@ -57,7 +57,7 @@ function formText(data: unknown, key: string): string | null {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "storeDeliveryFee", "storeDeliveryEnabled", ...SLOT_FIELD_NAMES]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "storeDeliveryFee", "storeDeliveryEnabled", "listed", ...SLOT_FIELD_NAMES]) {
     const v = formText(data, key);
     if (v != null) raw[key] = v;
   }
@@ -253,7 +253,7 @@ const STORE_FORM_FIELDS = [
   "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes",
   "pickupEnabled", "timezone", "storeId",
   "addressLine1", "addressLine2", "city", "state", "zip",
-  "storeDeliveryFee", "storeDeliveryEnabled",
+  "storeDeliveryFee", "storeDeliveryEnabled", "listed",
   ...SLOT_FIELD_NAMES,
 ];
 const storeFormSchema = z.strictObject({
@@ -279,6 +279,7 @@ const storeFormSchema = z.strictObject({
   zip: z.string().max(12).nullable(),
   storeDeliveryFee: z.string().max(20).nullable(),
   storeDeliveryEnabled: z.string().max(10).nullable(),
+  listed: z.string().max(10).nullable(),
   ...Object.fromEntries(SLOT_FIELD_NAMES.map((name) => [name, z.string().max(400).nullable()])),
 });
 
@@ -584,6 +585,8 @@ export async function updateStore(
         lng: coords.lng,
         storeDeliveryEnabled: values.storeDeliveryEnabled,
         storeDeliveryFeeCents: values.storeDeliveryFeeCents,
+        // The platform admin's override of the owner's directory switch (#450).
+        listed: formText(data, "listed") === "on",
         pickupSlotSettings: values.pickupSlotSettings ?? Prisma.JsonNull,
         storeDeliverySlotSettings: values.storeDeliverySlotSettings ?? Prisma.JsonNull,
       },
@@ -612,6 +615,7 @@ export async function updateStore(
           autoRefundLimitCents: before.autoRefundLimitCents,
           supportSlaMinutes: before.supportSlaMinutes,
           timezone: before.timezone,
+          listed: before.listed,
           ...deliveryAudit(before),
         },
         after: {
@@ -629,6 +633,7 @@ export async function updateStore(
           autoRefundLimitCents: s.autoRefundLimitCents,
           supportSlaMinutes: s.supportSlaMinutes,
           timezone: s.timezone,
+          listed: s.listed,
           ...deliveryAudit(s),
         },
       },

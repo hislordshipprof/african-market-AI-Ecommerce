@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn, revalidateTag: vi.fn() }));
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { listDirectoryStores } from "./stores";
@@ -19,6 +21,7 @@ const PUBLIC_FIELDS = [
   "pickupEnabled",
   "storeDeliveryEnabled",
   "listingBlurb",
+  "cuisineTags",
   "ownerName",
   "ownerStory",
   "ownerPhotoUrl",
