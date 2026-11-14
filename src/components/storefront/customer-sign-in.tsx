@@ -106,6 +106,7 @@ export function CustomerSignIn({
                   required
                   autoComplete="email"
                   placeholder="you@example.com"
+                  className="min-h-[44px] md:text-base"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
