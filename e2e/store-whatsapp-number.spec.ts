@@ -30,13 +30,13 @@ async function clearNumber() {
 async function shoot(page: Page, name: string) {
   for (const scheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: scheme });
-    for (const [label, size] of [["1280px", { width: 1280, height: 900 }], ["390px", { width: 390, height: 844 }]] as const) {
+    for (const [label, size] of [["1440px", { width: 1440, height: 900 }], ["390px", { width: 390, height: 844 }]] as const) {
       await page.setViewportSize(size);
       await page.screenshot({ path: `${SHOTS}/558-${name}-${scheme}-${label}.png`, fullPage: true });
     }
   }
   await page.emulateMedia({ colorScheme: "light" });
-  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 test.describe.configure({ mode: "serial" });

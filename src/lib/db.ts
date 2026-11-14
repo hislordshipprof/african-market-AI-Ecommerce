@@ -1914,7 +1914,7 @@ export interface StoreWhatsAppNumberRow {
   updatedAt: Date;
 }
 
-/** The phone_number_id is already another store's (unique platform-wide). */
+/** The phone_number_id is held by another store's pending or registered row. */
 export class StoreWhatsAppNumberTakenError extends Error {
   constructor() {
     super("WhatsApp number is linked to another store");
