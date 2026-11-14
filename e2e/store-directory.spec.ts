@@ -402,3 +402,58 @@ test("unlisting the only Houston store turns its city page into a 404 at once, a
     await running.stop();
   }
 });
+
+// Store cards (#453). Mama Ngozi is seeded in Houston (America/Chicago) with pickup, its own delivery within 8 miles
+// and an owner story; ZIP 77002 is about 5 miles away. The browser clock is fixed, so open and closed never depend on the hour.
+test("store cards: open now or opens at from the browser clock, distance, pickup and delivers to you, the owner's face and story", async ({ browser }) => {
+  test.setTimeout(240_000);
+  const port = await reservePort(laneSmokePort());
+  const root = `http://localhost:${port}`;
+  const running = await rootServer(port);
+  try {
+    const context = await browser.newContext({ timezoneId: "America/Chicago" });
+    const page = await context.newPage();
+    // Monday 16 Nov 2026, 10:00 in Houston.
+    await page.clock.setFixedTime(new Date("2026-11-16T16:00:00Z"));
+    await page.goto(`${root}/`);
+    const card = page.getByRole("link", { name: /Mama Ngozi African Market/ });
+    await expect(card).toContainText("Open now");
+    await expect(card).toContainText("Pickup");
+    await expect(card).toContainText("Delivery");
+    await expect(card).not.toContainText("Delivers to you");
+    await expect(card).toContainText("Run by Ngozi Okafor");
+    await expect(card).toContainText("bringing the flavors of home");
+    await expect(card).toContainText("West African");
+
+    await page.getByLabel("ZIP code or city").fill("77002");
+    await page.getByRole("button", { name: "Find stores" }).click();
+    await expect(page.getByRole("heading", { name: "Stores near 77002" })).toBeVisible();
+    const near = page.getByRole("region", { name: "Stores near 77002" }).getByRole("link", { name: /Mama Ngozi African Market/ });
+    await expect(near).toContainText(/\d\.\d mi away/);
+    await expect(near).toContainText("Delivers to you");
+    await shoot(page, "453-card-near-open", "Stores near 77002");
+    await context.close();
+
+    // The cached city page, read at 08:30 on a Monday in Houston: the hours come from the browser, not the cache.
+    const early = await browser.newContext({ timezoneId: "America/Chicago" });
+    const city = await early.newPage();
+    await city.clock.setFixedTime(new Date("2026-11-16T14:30:00Z"));
+    await city.goto(`${root}/stores/texas/houston`);
+    const closed = city.getByRole("link", { name: /Mama Ngozi African Market/ });
+    await expect(closed).toContainText("Closed");
+    await expect(closed).toContainText("Opens 9 AM");
+    await expect(closed).not.toContainText("Open now");
+    await shoot(city, "453-card-city-closed", "African grocery stores in Houston, TX");
+    await early.close();
+
+    // A shopper in New York sees the store's own clock, with its zone named.
+    const east = await browser.newContext({ timezoneId: "America/New_York" });
+    const away = await east.newPage();
+    await away.clock.setFixedTime(new Date("2026-11-16T14:30:00Z"));
+    await away.goto(`${root}/stores/texas`);
+    await expect(away.getByRole("link", { name: /Mama Ngozi African Market/ })).toContainText("Opens 9 AM CST");
+    await east.close();
+  } finally {
+    await running.stop();
+  }
+});
