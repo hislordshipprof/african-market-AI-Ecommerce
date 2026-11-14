@@ -197,6 +197,7 @@ export class UberDirectProvider implements DeliveryProvider {
       dropoff_phone_number: req.dropoff.phone,
       manifest_total_value: req.orderValueCents,
       external_store_id: req.pickup.providerStoreId,
+      pickup_ready_dt: req.pickupReadyAt?.toISOString(),
     });
     const created = requiredDate(res.created, "created");
     return {
@@ -230,6 +231,8 @@ export class UberDirectProvider implements DeliveryProvider {
       manifest_items: [{ name: "Grocery order", quantity: 1, size: "large", price: req.orderValueCents }],
       manifest_total_value: req.orderValueCents,
       tip: req.tipCents,
+      // "Send this field when preparation time is known": https://developer.uber.com/docs/deliveries/guides/delivery-window
+      pickup_ready_dt: req.pickupReadyAt?.toISOString(),
       // Uber picks the PIN and texts it to the customer: https://developer.uber.com/docs/deliveries/guides/pincode
       dropoff_verification: req.dropoffPin ? { pincode: { enabled: true } } : { picture: true },
     });
@@ -245,6 +248,16 @@ export class UberDirectProvider implements DeliveryProvider {
   /** POST /v1/customers/{customer_id}/deliveries/{delivery_id}/cancel */
   async cancel(externalId: string): Promise<void> {
     await this.client.request("eats.deliveries", "POST", this.path(`/deliveries/${encodeURIComponent(externalId)}/cancel`));
+  }
+
+  /**
+   * POST /v1/customers/{customer_id}/deliveries/{delivery_id} updates a delivery; pickup_ready_dt is editable until
+   * pickup is complete: https://developer.uber.com/docs/deliveries/faq
+   */
+  async reschedule(externalId: string, pickupReadyAt: Date): Promise<void> {
+    await this.client.request("eats.deliveries", "POST", this.path(`/deliveries/${encodeURIComponent(externalId)}`), {
+      pickup_ready_dt: pickupReadyAt.toISOString(),
+    });
   }
 
   /**
@@ -279,7 +292,7 @@ export class UberDirectProvider implements DeliveryProvider {
       occurredAt,
       trackingUrl: text(data.tracking_url),
       actualFeeCents: type === "delivered" && data.fee !== undefined ? feeCents(data.fee) : null,
-      courier: courier ? { name: text(courier.name), vehicle, dropoffEta: optionalDate(data.dropoff_eta) } : null,
+      courier: courier ? { name: text(courier.name), vehicle, pickupEta: optionalDate(data.pickup_eta), dropoffEta: optionalDate(data.dropoff_eta) } : null,
       proof: {
         photoUrl: text(field(data, "dropoff", "verification", "picture", "image_url")),
         pinEntered: text(field(data, "dropoff", "verification", "pin_code", "entered")),

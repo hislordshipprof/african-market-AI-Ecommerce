@@ -88,6 +88,15 @@ class StubProvider implements DeliveryProvider {
     this.created.set(externalId, "cancelled");
   }
 
+  /** Ready times this stub moved, by delivery; set rescheduleError to refuse. */
+  readonly rescheduled = new Map<string, Date>();
+  rescheduleError?: Error;
+  async reschedule(externalId: string, pickupReadyAt: Date): Promise<void> {
+    if (this.rescheduleError) throw this.rescheduleError;
+    if (this.created.get(externalId) !== "active") throw new DeliveryProviderError(this.name, 404, "not_found", "unknown delivery");
+    this.rescheduled.set(externalId, pickupReadyAt);
+  }
+
   handleWebhook(): DeliveryWebhookEvent {
     throw new Error("not used");
   }

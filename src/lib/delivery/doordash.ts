@@ -44,7 +44,7 @@ export function createDoorDashClient(opts: DoorDashOptions = {}) {
   const doFetch = opts.fetch ?? fetch;
   const now = opts.now ?? (() => new Date());
 
-  return async function request(method: "GET" | "POST" | "PUT", path: string, body?: Json): Promise<Json> {
+  return async function request(method: "GET" | "POST" | "PUT" | "PATCH", path: string, body?: Json): Promise<Json> {
     const missing = KEY_NAMES.filter((name) => !env[name]);
     if (missing.length) throw new Error(`DoorDash Drive is not configured: missing ${missing.join(", ")}`);
     const token = signJwt(env.DOORDASH_DEVELOPER_ID!, env.DOORDASH_KEY_ID!, env.DOORDASH_SIGNING_SECRET!, now());
@@ -140,6 +140,9 @@ export class DoorDashDriveProvider implements DeliveryProvider {
         : undefined,
       order_value: req.orderValueCents,
       tip: req.tipCents,
+      // "A Dasher will show up at this time": https://developer.doordash.com/en-US/docs/drive/how_to/schedule_deliveries
+      // Accept takes no time, so it is set on the quote.
+      pickup_time: req.pickupReadyAt?.toISOString(),
     });
     return {
       quoteId: String(res.external_delivery_id),
@@ -167,6 +170,11 @@ export class DoorDashDriveProvider implements DeliveryProvider {
   /** PUT /drive/v2/deliveries/{external_delivery_id}/cancel */
   async cancel(externalId: string): Promise<void> {
     await this.request("PUT", `/drive/v2/deliveries/${encodeURIComponent(externalId)}/cancel`);
+  }
+
+  /** PATCH /drive/v2/deliveries/{external_delivery_id} takes pickup_time: https://developer.doordash.com/en-US/api/drive/ */
+  async reschedule(externalId: string, pickupReadyAt: Date): Promise<void> {
+    await this.request("PATCH", `/drive/v2/deliveries/${encodeURIComponent(externalId)}`, { pickup_time: pickupReadyAt.toISOString() });
   }
 
   /**
@@ -203,6 +211,7 @@ export class DoorDashDriveProvider implements DeliveryProvider {
         ? {
             name: typeof body.dasher_name === "string" ? body.dasher_name : null,
             vehicle: vehicle || null,
+            pickupEta: optionalDate(body.pickup_time_estimated),
             dropoffEta: optionalDate(body.dropoff_time_estimated),
           }
         : null,
