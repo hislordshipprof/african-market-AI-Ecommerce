@@ -95,7 +95,7 @@ export function NearMe({ states, children }: { states: StateGroup[]; children: R
       <div aria-live="polite" className={styles.status}>
         {view.kind === "busy" ? <p className={styles.note}>Finding stores…</p> : null}
         {view.kind === "message" ? <p className={styles.note}>{view.text}</p> : null}
-        {view.kind === "none" ? <p className={styles.note}>We couldn&apos;t find that ZIP code or city. Check the spelling, or add the state.</p> : null}
+        {view.kind === "none" ? <p className={styles.note}>We don&apos;t have that ZIP code or city on our map. Some ZIP codes, like PO boxes, aren&apos;t on it: try your city, or add the state.</p> : null}
         {view.kind === "outside" ? <p className={styles.note}>You look to be outside the US. Our stores are all in the US: browse them by state below.</p> : null}
         {view.kind === "ambiguous" ? (
           <div className={styles.choice}>

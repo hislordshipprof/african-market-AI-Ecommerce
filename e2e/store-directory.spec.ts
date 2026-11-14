@@ -240,6 +240,12 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await page.getByRole("button", { name: "Find stores" }).click();
     await page.getByRole("button", { name: "Springfield, IL" }).click();
     await expect(page.getByRole("heading", { name: "No stores within 50 miles of Springfield, IL" })).toBeVisible();
+
+    // 77001 is a real Houston ZIP of PO boxes only, so the Census ZIP areas leave it out.
+    await page.getByLabel("ZIP code or city").fill("77001");
+    await page.getByRole("button", { name: "Find stores" }).click();
+    await expect(page.getByText(/try your city/i)).toBeVisible();
+    await expect(page.getByText(/check the spelling/i)).toHaveCount(0);
     await denied.close();
 
     // A granted location abroad shows the state list.
