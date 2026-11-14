@@ -1,4 +1,5 @@
 import { validPhone } from "../customer-account/phone";
+import { money } from "../format";
 import { serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
 import type { CheckoutQuote, Contact, FlowProblem, Fulfillment } from "../customer-flow/contracts";
 
@@ -22,13 +23,19 @@ export interface StoreDeliveryQuote {
 /** A Starter store does not offer courier delivery (ADR-0021). */
 export const COURIER_NOT_OFFERED = "This store does not offer courier delivery.";
 
+/** The cheapest live courier quote (#140 selection), or why courier delivery is unavailable. */
+export type CourierQuoteInput =
+  | { ok: true; feeCents: number; provider: "Uber Direct" | "DoorDash Drive"; leaveAtDoor: boolean; changed?: boolean }
+  | { ok: false; problem: FlowProblem };
+
 export function computeQuote(
   minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean }>,
+  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean }>,
   contact: Contact,
   fulfillment: Fulfillment,
   serviceFee: ServiceFeeSettings,
   delivery?: StoreDeliveryQuote | null,
+  courier?: CourierQuoteInput | null,
 ): CheckoutQuote {
   const problems: FlowProblem[] = [];
   let subtotalCents = 0;
@@ -69,11 +76,24 @@ export function computeQuote(
   }
 
   let deliveryFeeCents = 0;
+  let courierFeeCents = 0;
+  let courierProvider: CheckoutQuote["courierProvider"];
   if (fulfillment === "courier") {
-    problems.push({
-      code: "ineligible",
-      message: "Only pickup is available for this store.",
-    });
+    if (!courier) {
+      problems.push({ code: "ineligible", message: "Only pickup is available for this store." });
+    } else if (!courier.ok) {
+      problems.push(courier.problem);
+    } else {
+      // The provider's quote, no markup (ADR-0006).
+      courierFeeCents = courier.feeCents;
+      courierProvider = courier.provider;
+      if (courier.changed) {
+        problems.push({ code: "quote-changed", message: `The courier fee is now ${money(courier.feeCents)}. Check your new total, then place your order.` });
+      }
+      if (courier.leaveAtDoor && cartLines.some((line) => line.frozen || line.perishable)) {
+        problems.push({ code: "ineligible", message: "Frozen and perishable items need a hand-to-hand delivery. Turn off Leave at door." });
+      }
+    }
   } else if (fulfillment === "store-delivery") {
     // The fee stays in the hold when delivery is switched off or the radius
     // shrinks, so those refusals are visible as problems rather than a new total.
@@ -104,7 +124,7 @@ export function computeQuote(
 
   const tipCents = 0;
   const serviceFeeCentsQuoted = serviceFeeCents(subtotalCents, serviceFee);
-  const totalCents = subtotalCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents;
+  const totalCents = subtotalCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents + courierFeeCents;
   const bufferCents = Math.min(Math.round(subtotalCents * 0.1), 2000);
   const holdCents = totalCents + bufferCents;
 
@@ -112,7 +132,8 @@ export function computeQuote(
     id: crypto.randomUUID(),
     subtotalCents,
     deliveryFeeCents,
-    courierFeeCents: 0,
+    courierFeeCents,
+    ...(courierProvider ? { courierProvider } : {}),
     serviceFeeCents: serviceFeeCentsQuoted,
     taxCents: 0,
     tipCents,

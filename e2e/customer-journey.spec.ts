@@ -250,3 +250,89 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     await prisma.$disconnect();
   }
 });
+
+test("courier delivery is offered at a registered Pro store and says why an order cannot go by courier (#527)", async ({ page }) => {
+  test.setTimeout(90_000);
+  const slug = `courier-${Date.now().toString(36)}`;
+  const light = `Courier Yam ${slug}`;
+  const heavy = `Courier Rice Sack ${slug}`;
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  const store = await prisma.store.create({
+    data: {
+      slug,
+      name: "Courier Lane",
+      themePreset: "palm-and-shea",
+      stripeOnboardingStatus: "complete",
+      stripeAccountId: `acct_${slug.replace(/[^a-z0-9]/g, "").slice(0, 20)}`,
+      pickupEnabled: true,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 0,
+      addressLine1: "8400 Park Place Blvd",
+      city: "Houston",
+      state: "TX",
+      zip: "77017",
+      phone: "+17135550100",
+      lat: 29.693857800118,
+      lng: -95.266257879374,
+      uberLocationId: `e2e-org-${slug}`,
+    },
+  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.storeSubscription.create({ data: { storeId: store.id, plan: "pro", status: "active" } });
+      for (const [name, weightG] of [[light, 900], [heavy, 25_000]] as const) {
+        const listing = await tx.listing.create({
+          data: { storeId: store.id, customName: name, price: 4000, stockMode: "unlimited", frozen: false, perishable: false },
+        });
+        await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 4000, weightG } });
+      }
+    });
+    await page.context().addCookies([{
+      name: "e2e_stripe_harness",
+      value: "1",
+      url: `http://localhost:${process.env.E2E_PORT || "3000"}`,
+    }]);
+    const count = page.getByTestId("storefront-header").getByTestId("cart-count");
+    const add = async (name: string, total: string) => {
+      const button = page.getByRole("button", { name: `Add ${name} to cart` });
+      await expect(async () => {
+        await page.goto(`/?store=${slug}`);
+        await expect(button).toBeVisible();
+      }).toPass({ timeout: 20_000 });
+      await button.click();
+      await expect(count).toHaveText(total);
+      await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
+    };
+    const chooseCourier = async () => {
+      await expect(async () => {
+        await page.goto(`/checkout?store=${slug}`);
+        await expect(page.getByRole("button", { name: /^Courier/ })).toBeVisible();
+      }).toPass({ timeout: 20_000 });
+      await page.getByRole("button", { name: /^Courier/ }).click();
+    };
+
+    await add(light, "1");
+    await chooseCourier();
+    await expect(page.getByText("Confirm your delivery address to see the courier fee.")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByLabel("Street address")).toBeVisible();
+
+    await add(heavy, "2");
+    await chooseCourier();
+    await expect(page.getByText(/over the 50 lb courier limit\. Choose pickup or store delivery\./)).toBeVisible({ timeout: 10_000 });
+  } finally {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.cartLine.deleteMany({ where: { storeId: store.id } });
+      await tx.cart.deleteMany({ where: { storeId: store.id } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
+      await tx.listing.deleteMany({ where: { storeId: store.id } });
+      await tx.storeSubscription.deleteMany({ where: { storeId: store.id } });
+      await tx.auditLog.deleteMany({ where: { storeId: store.id } });
+    });
+    await prisma.store.delete({ where: { id: store.id } });
+    await prisma.$disconnect();
+  }
+});

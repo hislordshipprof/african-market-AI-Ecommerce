@@ -909,9 +909,10 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       await expect(rejected, field.label).rejects.toThrow(field.message);
       await expect(rejected, field.label).rejects.not.toThrow(winner.token);
     }
+    // A courier order (#527) goes through the same provenance checks.
     await expect(
       placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "courier", null, null, seeded.paymentIntentId),
-    ).rejects.toThrow(/Only pickup fulfillment is supported/);
+    ).rejects.toThrow(/store_id metadata does not match/);
     expect(await persistedOrder(owner.id, winner.token)).toEqual(beforeRows);
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
     expect(await counts(owner.id)).toEqual({ orders: 1, customers: 1 });
