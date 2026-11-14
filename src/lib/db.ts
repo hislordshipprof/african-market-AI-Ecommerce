@@ -128,6 +128,7 @@ export function storeScoped(storeId: string) {
     substitutionRequest: wrapDelegate(storeId, prisma.substitutionRequest),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
+    aiReviewFlag: wrapDelegate(storeId, prisma.aiReviewFlag),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
     ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
@@ -298,7 +299,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "aiReviewFlag" | "copilotConversation" | "stockProposal" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -324,6 +325,9 @@ export async function platformAdminTransaction<T>(
       attributeProposal: tx.attributeProposal,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
+      aiReviewFlag: tx.aiReviewFlag,
+      copilotConversation: tx.copilotConversation,
+      stockProposal: tx.stockProposal,
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
       storeSubscription: tx.storeSubscription,
@@ -1528,6 +1532,34 @@ export function deleteExpiredAssistantConversations(
         DELETE FROM ai_conversations
         WHERE id IN (SELECT id FROM doomed)
           AND (in_flight_until IS NULL OR in_flight_until <= ${now})
+        RETURNING id
+      )
+      SELECT count(*)::int AS deleted FROM removed
+    `,
+  );
+}
+
+/**
+ * Deletes one batch of AI review flags (#544) older than the naive timestamp. Shopper flags already went with
+ * their conversation; this removes copilot flags, whose conversations have no retention job.
+ */
+export function deleteExpiredReviewFlags(
+  cutoff: string,
+  batchSize: number,
+  batchKey: string,
+): Promise<number> {
+  return deleteExpiredBatch(batchKey, (tx) =>
+    tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH doomed AS (
+        SELECT id FROM ai_review_flags
+        WHERE created_at < ${cutoff}
+        ORDER BY created_at, id
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      ),
+      removed AS (
+        DELETE FROM ai_review_flags
+        WHERE id IN (SELECT id FROM doomed)
         RETURNING id
       )
       SELECT count(*)::int AS deleted FROM removed

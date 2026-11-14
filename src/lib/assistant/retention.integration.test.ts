@@ -75,6 +75,7 @@ describe.skipIf(!hasDb)("assistant retention", () => {
   let raw: PrismaClient;
   let storeA = "";
   let storeB = "";
+  let reviewer = "";
   const carts: string[] = [];
 
   beforeAll(async () => {
@@ -85,6 +86,9 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     })).id;
     storeB = (await raw.store.create({
       data: { slug: `ai-ret-b-${suffix}`, name: "Retention B", themePreset: "lagoon-and-coral" },
+    })).id;
+    reviewer = (await raw.user.create({
+      data: { id: `ai-ret-admin-${suffix}`, email: `ai-ret-admin-${suffix}@example.com`, name: "Reviewer", emailVerified: true },
     })).id;
   });
 
@@ -102,7 +106,12 @@ describe.skipIf(!hasDb)("assistant retention", () => {
   afterAll(async () => {
     if (storeA) await storeScoped(storeA).cart.deleteMany({});
     if (storeB) await storeScoped(storeB).cart.deleteMany({});
+    await platformAdminTransaction(async (tx) => {
+      await tx.aiReviewFlag.deleteMany({ where: { storeId: { in: [storeA, storeB].filter(Boolean) } } });
+      await tx.copilotConversation.deleteMany({ where: { storeId: { in: [storeA, storeB].filter(Boolean) } } });
+    });
     if (raw) {
+      if (reviewer) await raw.user.deleteMany({ where: { id: reviewer } });
       await raw.store.deleteMany({ where: { id: { in: [storeA, storeB].filter(Boolean) } } });
       await raw.$disconnect();
     }
@@ -185,6 +194,29 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: recent.conversationId } })).not.toBeNull();
   });
 
+  it("deletes review flags with their conversation, and any flag older than 90 days", async () => {
+    pinClock();
+    const old = await conversation(storeA, OLD);
+    const shopperFlag = (await storeScoped(storeA).aiReviewFlag.create({
+      data: { storeId: storeA, aiConversationId: old.conversationId, label: "wrong_price", note: "said $9", createdById: reviewer, createdAt: NEWER },
+    })).id;
+    const chat = (await storeScoped(storeB).copilotConversation.create({
+      data: { storeId: storeB, userId: reviewer, model: "claude-haiku-5-5", messages: [], createdAt: OLD, lastMessageAt: NEWER },
+    })).id;
+    const flag = (createdAt: Date) => storeScoped(storeB).aiReviewFlag.create({
+      data: { storeId: storeB, copilotConversationId: chat, label: "tone", createdById: reviewer, createdAt },
+    });
+    const oldCopilotFlag = (await flag(OLD)).id;
+    const edgeCopilotFlag = (await flag(BOUNDARY)).id;
+
+    const result = await runAssistantRetention(makeFaithfulStep());
+
+    expect(await storeScoped(storeA).aiReviewFlag.findUnique({ where: { id: shopperFlag } })).toBeNull();
+    expect(await storeScoped(storeB).aiReviewFlag.findUnique({ where: { id: oldCopilotFlag } })).toBeNull();
+    expect(await storeScoped(storeB).aiReviewFlag.findUnique({ where: { id: edgeCopilotFlag } })).not.toBeNull();
+    expect(result.flagsDeleted).toBeGreaterThanOrEqual(1);
+  });
+
   it("deletes old actions on a leased conversation and keeps the conversation", async () => {
     pinClock();
     const leased = await conversation(storeA, OLD, new Date("2001-06-01T01:00:00.000Z"));
@@ -201,8 +233,8 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     await action(storeA, recent.conversationId, NEWER);
     const step = makeFaithfulStep();
     const result = await runAssistantRetention(step);
-    expect(result).toEqual({ actionsDeleted: 0, conversationsDeleted: 0 });
-    expect(step.calls).toBe(3);
+    expect(result).toEqual({ actionsDeleted: 0, conversationsDeleted: 0, flagsDeleted: 0 });
+    expect(step.calls).toBe(4);
     expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: recent.conversationId } })).not.toBeNull();
   });
 
@@ -290,7 +322,7 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     const result = await runAssistantRetention(step);
     expect(result.actionsDeleted).toBe(2500);
     expect(result.conversationsDeleted).toBe(1);
-    expect(step.calls).toBe(5);
+    expect(step.calls).toBe(6);
     expect(await storeScoped(storeB).aiAction.count({ where: { conversationId: recent.conversationId } })).toBe(1);
   }, 60_000);
 
@@ -320,7 +352,7 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     const step = makeFaithfulStep();
     await runAssistantRetention(step);
     const again = await runAssistantRetention(makeFaithfulStep());
-    expect(again).toEqual({ actionsDeleted: 0, conversationsDeleted: 0 });
+    expect(again).toEqual({ actionsDeleted: 0, conversationsDeleted: 0, flagsDeleted: 0 });
     expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: recent.conversationId } })).not.toBeNull();
   });
 

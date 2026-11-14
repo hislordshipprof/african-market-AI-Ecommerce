@@ -35,6 +35,7 @@ import {
   ASSISTANT_DISABLED_STATUS,
   assistantChatEnabled,
 } from "./contract";
+import { TURN_COST_FLAG_MICROS } from "../admin/ai-review";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
 import { acceptanceForTurn, shownProductIds } from "./shown";
@@ -329,6 +330,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         await persistTurn({
           storeId: store.id,
           conversationId: turn.id,
+          turnId: parsed.id,
           messages,
           result,
           modelId,
@@ -420,6 +422,7 @@ async function turnFinishedNormally(result: { finishReason: PromiseLike<string> 
 async function persistTurn(args: {
   storeId: string;
   conversationId: string;
+  turnId: string;
   messages: UIMessage[];
   result: { steps: PromiseLike<Array<{ usage: unknown }>> };
   modelId: ReturnType<typeof assistantModelId>;
@@ -457,6 +460,22 @@ async function persistTurn(args: {
   } catch (error) {
     console.error("[assistant] transcript not saved", args.conversationId, error);
     await releaseLease(args.storeId, args.conversationId);
+    return;
+  }
+  // AI oversight (#544) flags a costly turn for platform review.
+  if (cost > BigInt(TURN_COST_FLAG_MICROS)) {
+    await storeScoped(args.storeId).aiAction.create({
+      data: {
+        storeId: args.storeId,
+        conversationId: args.conversationId,
+        tool: "turn_cost",
+        input: {},
+        output: { costMicros: Number(cost), turn: args.turnId },
+        ok: true,
+      },
+    }).catch((error: unknown) => {
+      console.error("[assistant] turn cost not saved", args.conversationId, error);
+    });
   }
 }
 
