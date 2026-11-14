@@ -12,6 +12,8 @@ import { getRecipeInput, parseToolInput } from "./schemas";
 export interface RecipeDeps {
   /** Model for the web lookup: the chat's own model, so its calls are metered like the chat's. */
   lookupModel?: LanguageModel;
+  /** False answers a dish missing from the base with recipe_not_found and never looks it up (the #146 eval, #607). */
+  onlineLookup?: boolean;
   now?: () => Date;
 }
 
@@ -160,6 +162,7 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
   let recipe = await findRecipe(parsed.dish);
   let lookedUp = false;
   if (!recipe) {
+    if (deps.onlineLookup === false) return notFound();
     const now = (deps.now ?? (() => new Date()))();
     if (!(await takeLookupSlot(ctx.storeId, now))) {
       return recordRead(ctx, "get_recipe", parsed, {

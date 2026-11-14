@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appUserQuery, platformAdmin, platformSessionUser, storeScoped } from "../../db";
+import { findRecipe } from "../recipes";
 import * as spend from "../spend";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-api-double";
 import { createEvalStores, deleteOwnedStores, sweepAbandonedEvalStores, writeLease, type CreatedEvalStores } from "./fixture-store";
@@ -184,6 +185,32 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(failed?.strippedAmounts).toHaveLength(1);
     expect(failed?.ungroundedAmountsShown).toEqual([]);
   }, 90_000);
+
+  it("never looks a dish up online: a dish missing from the recipe base comes back not found and is not saved", async () => {
+    const dish = `Unseeded stew ${randomInt(1_000_000)}`;
+    const fake = createFakeAnthropicFetch({
+      expectedKey: KEY,
+      steps: [
+        { kind: "tool", toolName: "get_recipe", toolInput: { dish, servings: 4 } },
+        { kind: "text", text: "I couldn't find that recipe. Tell me the ingredients and I'll find them." },
+      ],
+    });
+    const result = await run([evalCase({
+      id: "unseeded-dish",
+      category: "recipe-to-cart",
+      turns: [`${dish} for 4 people.`],
+      mustHave: [],
+      mayHave: [],
+      gaps: [],
+      dish: { name: dish, core: [{ label: "rice", options: ["rice"] }], askServings: false },
+    })], [listing("rice", "rice-parboiled-long-grain", "A", 1299), listing("yam", "yam-white-puna", "B", 899)], () => fake.fetch, { maxAttempts: 1 });
+    expect(result.result.cases.map((item) => item.id)).toEqual(["unseeded-dish"]);
+    const tools = fake.requests.flatMap((request) => (Array.isArray(request.body?.tools) ? request.body.tools : []));
+    expect(tools.some((tool) => (tool as { name?: unknown }).name === "web_search")).toBe(false);
+    expect(fake.requests).toHaveLength(2);
+    expect(JSON.stringify(fake.requests[1]?.body?.messages)).toContain("recipe_not_found");
+    expect(await findRecipe(dish)).toBeNull();
+  }, 60_000);
 
   it("reads evidence as app_runtime and denies another store read and write", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];

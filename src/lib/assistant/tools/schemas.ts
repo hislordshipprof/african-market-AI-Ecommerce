@@ -105,7 +105,7 @@ export const forwardToStoreInput = z.object({
 });
 
 export const getRecipeInput = z.object({
-  dish: z.string().trim().min(1).max(80).describe("The dish name the customer said, such as jollof rice."),
+  dish: z.string().trim().min(1).max(80).describe("The dish name the customer said, such as jollof rice, without the servings or the ingredients they asked for."),
   servings: z.number().int().min(1).max(200).optional().describe(
     "How many people the customer said. Omit when the customer did not say.",
   ),

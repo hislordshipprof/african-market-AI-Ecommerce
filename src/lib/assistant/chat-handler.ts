@@ -68,6 +68,8 @@ const RESTING_MESSAGE = "The helper is resting right now. You can still shop and
 export interface ChatHandlerOptions {
   model?: LanguageModel;
   now?: () => Date;
+  /** False never looks a dish up online; the #146 eval runs on the seeded recipe base only (#607). */
+  onlineRecipeLookup?: boolean;
   /** Test seam. Runs after the unlocked transcript read and before classification. */
   afterSnapshot?: (messages: UIMessage[]) => Promise<void>;
 }
@@ -239,7 +241,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
       acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
     };
-    const tools = assistantTools(turnCtx, { lookupModel: model });
+    const tools = assistantTools(turnCtx, { lookupModel: model, onlineLookup: options.onlineRecipeLookup });
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
       const current = withUser.find((message) => message.id === parsed.id);
