@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getCheckoutPayments } from "@/lib/stripe/checkout-payments";
+import { checkoutPaymentsUseFake, getCheckoutPayments } from "@/lib/stripe/checkout-payments";
 import { parseInput } from "@/lib/security/parse-input";
 import { testOnlyRoutesAllowed } from "@/lib/security/test-only-routes";
 
-/** Closed unless this route's own flag passes the shared test-route gate. */
+/** Closed unless this route's own flag passes the shared test-route gate and payments use the fake, never real Stripe. */
 export function fakeConfirmRouteAllowed(
   env: Record<string, string | undefined>,
 ): boolean {
-  return testOnlyRoutesAllowed(env, env.E2E_FAKE_STRIPE);
+  return testOnlyRoutesAllowed(env, env.E2E_FAKE_STRIPE) && checkoutPaymentsUseFake();
 }
 
 /** Confirms a fake PaymentIntent. The gate runs before parsing or the provider. */
