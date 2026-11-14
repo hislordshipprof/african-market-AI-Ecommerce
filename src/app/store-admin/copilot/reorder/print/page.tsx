@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { storeMayUse } from "@/lib/billing/plan";
-import { NO_COUNT, loadReorderList } from "@/lib/copilot/reorder-list";
+import { loadReorderList } from "@/lib/copilot/reorder-list";
 import { PrintButton } from "./print-button";
 
 const savedLabel = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" });
@@ -38,7 +38,7 @@ export default async function ReorderPrintPage() {
           {list.items.map((item) => (
             <tr key={item.listingId} className="border-b border-border">
               <td className="py-2">{item.name}</td>
-              <td className="py-2 text-right tabular-nums">{item.quantity ?? NO_COUNT}</td>
+              <td className="py-2 text-right tabular-nums">{item.quantity ?? "Reorder (no count)"}</td>
             </tr>
           ))}
         </tbody>

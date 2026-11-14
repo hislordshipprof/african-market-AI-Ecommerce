@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { saveReorder, updateReorderDays } from "@/lib/copilot/reorder-actions";
 import type { ReorderRow } from "@/lib/copilot/reorder";
 
+const ACTION = buttonVariants({ variant: "outline", className: "min-h-11 rounded-full px-4" });
 const INPUT = "min-h-11 rounded-lg border border-border bg-background px-3 text-base text-foreground tabular-nums";
 const savedLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -67,6 +68,7 @@ function DaysForm({ leadDays, coverDays }: { leadDays: number; coverDays: number
 }
 
 function SavedList({ saved, storeSlug }: { saved: SavedListView; storeSlug: string }) {
+  const titleId = useId();
   const [copied, setCopied] = useState<string | null>(null);
   const store = encodeURIComponent(storeSlug);
 
@@ -80,9 +82,9 @@ function SavedList({ saved, storeSlug }: { saved: SavedListView; storeSlug: stri
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <section aria-labelledby={titleId} className="rounded-xl border border-border bg-card">
       <div className="px-4 pt-4">
-        <h3 className="text-base font-semibold text-foreground">Saved reorder list</h3>
+        <h3 id={titleId} className="text-base font-semibold text-foreground">Saved reorder list</h3>
         <p className="text-sm text-muted-foreground">{`Draft saved ${savedLabel.format(new Date(saved.savedAt))}. Nothing is ordered.`}</p>
       </div>
       <ul className="mt-2 divide-y divide-border">
@@ -96,22 +98,22 @@ function SavedList({ saved, storeSlug }: { saved: SavedListView; storeSlug: stri
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
         <a
           href={`/store-admin/copilot/reorder/export?store=${store}`}
-          className="inline-flex min-h-11 items-center rounded-full border border-border px-4 text-sm font-medium text-foreground"
+          className={ACTION}
         >
           Download CSV
         </a>
         <Link
           href={`/store-admin/copilot/reorder/print?store=${store}`}
-          className="inline-flex min-h-11 items-center rounded-full border border-border px-4 text-sm font-medium text-foreground"
+          className={ACTION}
         >
           Print
         </Link>
-        <Button type="button" variant="outline" className="min-h-11 rounded-full px-4" onClick={copy}>
+        <button type="button" className={ACTION} onClick={copy}>
           Copy as text
-        </Button>
+        </button>
         {copied ? <p role="status" className="text-sm text-muted-foreground">{copied}</p> : null}
       </div>
-    </div>
+    </section>
   );
 }
 
