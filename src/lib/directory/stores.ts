@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { platform } from "@/lib/db";
+import { storefrontUrl } from "./links";
 
 // The only Store columns the public directory may read. `stores_read` is open to every
 // role, so whole rows would leak Stripe, fee, limit and address columns (#449). No lat/lng:
@@ -42,4 +43,14 @@ export function listDirectoryStores(): Promise<DirectoryStore[]> {
     ["store-directory"],
     { revalidate: 300, tags: [DIRECTORY_CACHE_TAG] },
   )();
+}
+
+/** Listed stores with their storefront links, for pages cached for every request (no request host). */
+export async function listDirectoryCards(): Promise<(DirectoryStore & { href: string })[]> {
+  const root = process.env.PLATFORM_ROOT_DOMAIN ?? "";
+  const host = process.env.PORT ? `${root}:${process.env.PORT}` : root;
+  return (await listDirectoryStores()).flatMap((store) => {
+    const href = storefrontUrl(store.slug, root, host);
+    return href ? [{ ...store, href }] : [];
+  });
 }
