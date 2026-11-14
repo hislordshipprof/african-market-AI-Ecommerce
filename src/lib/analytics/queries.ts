@@ -133,7 +133,7 @@ export async function salesRows(storeId: string, range: AnalyticsRange, timeZone
     )
     SELECT 'order' AS kind, ${storeDay(Prisma.sql`o.created_at`, timeZone)} AS day, o.fulfillment,
            COUNT(*)::int AS orders,
-           SUM(o.captured_amount_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
+           SUM(o.captured_amount_cents - o.service_fee_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
            SUM(COALESCE(o.platform_fee_cents, 0))::int AS card_fee,
            SUM(${APPLICATION_FEE} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
            SUM(o.captured_amount_cents)::int AS captured,

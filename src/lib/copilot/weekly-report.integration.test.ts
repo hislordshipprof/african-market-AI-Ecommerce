@@ -19,7 +19,7 @@ const at = (iso: string) => new Date(iso);
 
 /**
  * Hand-computed fixture for store W (Chicago, digest hour 8).
- * This week: O1 Tue 10 Nov, Ada, egusi 2×$10.00 picked, captured 2000.
+ * This week: O1 Tue 10 Nov, Ada, egusi 2×$10.00 picked, $0.99 service fee, captured 2099 (goods 2000).
  *            O2 Sun 15 Nov 11:30 pm Chicago (UTC Mon 05:30), Bisi, palm oil 1×$15.00 picked, gari 1 short (refunded), captured 1500.
  *            O4 cancelled Thu 12 Nov, out of stock.
  * Next week: Mon 16 Nov 00:30 Chicago, egusi 9×$10.00, captured 9000: not counted.
@@ -88,7 +88,7 @@ describe.skipIf(!hasDb)("copilot weekly report (lane database)", () => {
       const line = (orderId: string, listingVariantId: string, qtyOrdered: number, qtyPicked: number, unitPriceCents: number, status: string) =>
         tx.orderLine.create({ data: { storeId: storeW, orderId, listingVariantId, qtyOrdered, qtyPicked, unitPriceCents, status } });
 
-      const o1 = await order(ada.id, at("2026-11-10T18:00:00Z"), 2000);
+      const o1 = await order(ada.id, at("2026-11-10T18:00:00Z"), 2099, { serviceFeeCents: 99 });
       await line(o1.id, vEgusi.id, 2, 2, 1000, "picked");
       const o2 = await order(bisi.id, at("2026-11-16T05:30:00Z"), 1500);
       await line(o2.id, vPalm.id, 1, 1, 1500, "picked");
