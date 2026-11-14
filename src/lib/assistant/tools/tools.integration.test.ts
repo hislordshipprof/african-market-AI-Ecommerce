@@ -348,6 +348,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       lineTotalCents: 3297,
       addedTotalCents: 2198,
       subtotalCents: 3547,
+      // #495: every cart write returns the fee and total, so the model never adds them itself.
+      serviceFeeCents: 106,
+      totalBeforeDeliveryCents: 3653,
     });
     const action = await storeScoped(storeA).aiAction.findFirst({
       where: { conversationId: talk, tool: "add_to_cart" },
@@ -357,6 +360,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       lineTotalCents: 3297,
       addedTotalCents: 2198,
       subtotalCents: 3547,
+      serviceFeeCents: 106,
+      totalBeforeDeliveryCents: 3653,
     });
     const doubled = await addToCart(ctx({ cartId: cart, conversationId: talk }), {
       items: [
@@ -365,7 +370,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
         { variant_id: variantB, qty: 1 },
       ],
     });
-    expect(doubled).toMatchObject({ ok: true, subtotalCents: 6844 });
+    expect(doubled).toMatchObject({ ok: true, subtotalCents: 6844, serviceFeeCents: 205, totalBeforeDeliveryCents: 7049 });
     const rows = (doubled as unknown as { items: Array<Record<string, unknown>> }).items;
     expect(rows[0]).toMatchObject({ ok: true, added: 1, qty: 4, lineTotalCents: 4396, addedTotalCents: 1099 });
     expect(rows[1]).toMatchObject({ ok: true, added: 2, qty: 6, lineTotalCents: 6594, addedTotalCents: 2198 });
@@ -535,6 +540,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       lineTotalCents: 1200,
     })]);
     expect(summary.subtotalCents).toBe(1200);
+    // #495: the total the assistant may quote includes the service fee ($0.99 minimum).
+    expect(summary.serviceFeeCents).toBe(99);
+    expect(summary.totalBeforeDeliveryCents).toBe(1299);
     expect(summary.minimumOrderCents).toBe(2000);
     expect(summary.minimumMet).toBe(false);
     expect(summary.missingCents).toBe(800);
@@ -972,11 +980,11 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     await addLine(storeA, keeperCart, keeper.variantId, 1, null);
     const gone = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: item.variantId } });
     const result = await updateCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: gone!.id, qty: 0 });
-    expect(result).toMatchObject({ ok: true, removed: true, qty: 0, subtotalCents: 40 });
+    expect(result).toMatchObject({ ok: true, removed: true, qty: 0, subtotalCents: 40, serviceFeeCents: 99, totalBeforeDeliveryCents: 139 });
     expect(result).not.toHaveProperty("lineTotalCents");
     const kept = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: keeper.variantId } });
     const removed = await removeFromCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: kept!.id });
-    expect(removed).toMatchObject({ ok: true, removed: true, subtotalCents: 0 });
+    expect(removed).toMatchObject({ ok: true, removed: true, subtotalCents: 0, serviceFeeCents: 0, totalBeforeDeliveryCents: 0 });
     expect(removed).not.toHaveProperty("lineTotalCents");
   });
 
@@ -999,6 +1007,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       unitPriceCents: 80,
       lineTotalCents: 240,
       subtotalCents: 240,
+      serviceFeeCents: 99,
+      totalBeforeDeliveryCents: 339,
     });
     const result = await updateCart(ctx(), { line_id: line!.id, qty: 3 });
     expect(result).toMatchObject({
@@ -1208,6 +1218,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       expect(result).toEqual({
         ok: true,
         subtotalCents: 5030,
+        serviceFeeCents: 151,
+        totalBeforeDeliveryCents: 5181,
         items: [
           {
             ok: true,

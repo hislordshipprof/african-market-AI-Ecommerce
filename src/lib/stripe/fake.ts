@@ -91,6 +91,8 @@ const refundedPayments = new Map<string, number>();
 const refunds = new Map<string, RefundEntry>();
 const nextRefundStatus = new Map<string, string>();
 const feeRefunded = new Map<string, number>();
+/** Application fee parts returned to the connected account, by the refund's reservation key. */
+const feeRefundParts = new Map<string, { paymentIntentId: string; amountCents: number; feeRefundId: string }>();
 const refundRequests: Array<{
   paymentIntentId: string;
   amountCents: number;
@@ -140,6 +142,7 @@ function reset() {
   refunds.clear();
   nextRefundStatus.clear();
   feeRefunded.clear();
+  feeRefundParts.clear();
   refundRequests.length = 0;
   captureErrorBudget.clear();
   captureConflicts.clear();
@@ -502,6 +505,21 @@ const fakeStripeProvider: StripeProvider = {
     });
   },
 
+  async refundApplicationFeePart(paymentIntentId, amountCents, reservationKey) {
+    const prior = feeRefundParts.get(reservationKey);
+    if (prior) return { feeRefundId: prior.feeRefundId };
+    const chargedFee = capturedFees.get(paymentIntentId) ?? 0;
+    const returned = (feeRefunded.get(paymentIntentId) ?? 0) + [...feeRefundParts.values()]
+      .filter((part) => part.paymentIntentId === paymentIntentId)
+      .reduce((sum, part) => sum + part.amountCents, 0);
+    if (!Number.isInteger(amountCents) || amountCents < 1 || amountCents > chargedFee - returned) {
+      throw new FakeStripeError("amount_too_large", "Refund amount is greater than the unrefunded application fee.");
+    }
+    const feeRefundId = `fr_fake_${reservationKey}`;
+    feeRefundParts.set(reservationKey, { paymentIntentId, amountCents, feeRefundId });
+    return { feeRefundId };
+  },
+
   async listRefunds(paymentIntentId) {
     const known =
       authorizedAmounts.has(paymentIntentId) ||
@@ -615,4 +633,15 @@ function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
+/**
+ * What the connected account paid back for refunds on this payment. With `reverse_transfer` the
+ * transfer is reversed by each refund; fee refunds return part of that to the account.
+ */
+function storeFundedRefundCents(paymentIntentId: string): number {
+  const parts = [...feeRefundParts.values()]
+    .filter((part) => part.paymentIntentId === paymentIntentId)
+    .reduce((sum, part) => sum + part.amountCents, 0);
+  return (refundedPayments.get(paymentIntentId) ?? 0) - (feeRefunded.get(paymentIntentId) ?? 0) - parts;
+}
+
+export { FakeStripeError, feeRefundParts, storeFundedRefundCents, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };

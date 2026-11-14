@@ -275,10 +275,10 @@ describe("settlement and identity", () => {
       subtotalCents: 900,
       discountCents: 90,
       taxCents: 49,
-      totalCents: 859,
+      totalCents: 958,
     });
     expect(orderIssueRefundCents(o, [JSON.stringify(["rice", null])])).toBe(
-      859,
+      958,
     );
     o.substitutions[0].decision = "refund";
     expect(effectiveOrderLines(o)).toEqual([]);
@@ -289,7 +289,7 @@ describe("settlement and identity", () => {
     const id = crypto.randomUUID();
     const products = [
       catalog[0],
-      { ...catalog[1], price: 1101 },
+      { ...catalog[1], price: 1110 },
       { ...catalog[1], listingId: "chosen", price: 950 },
     ];
     setSwapRule(id, JSON.stringify(["rice", null]), {

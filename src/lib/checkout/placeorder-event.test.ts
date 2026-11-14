@@ -10,6 +10,7 @@ vi.mock("../inngest/send", () => ({
 import { sendOrderAuthorized } from "../inngest/send";
 import { placeOrder, computeQuote } from "./service";
 import { getStripeClient } from "../stripe/provider";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 const hasDb = !!process.env.DATABASE_URL;
@@ -128,7 +129,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   it("emits exactly one sendOrderAuthorized event on first placeOrder", async (ctx) => {
     if (!canRun) { ctx.skip(); return; }
     const contact = { name: "Event Test", phone: "+15551234567", email: "evt@test.com" };
-    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup");
+    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE);
 
     const scoped = storeScoped(storeId);
     const cart = await scoped.cart.create({ data: { storeId } });
@@ -163,7 +164,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   it("does NOT re-send event on idempotent replay", async (ctx) => {
     if (!canRun) { ctx.skip(); return; }
     const contact = { name: "Replay Test", phone: "+15551234567", email: "replay@test.com" };
-    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup");
+    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE);
 
     const scoped = storeScoped(storeId);
     const cart = await scoped.cart.create({ data: { storeId } });
@@ -200,7 +201,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   it("rejects a PaymentIntent that belongs to another cart", async (ctx) => {
     if (!canRun) { ctx.skip(); return; }
     const contact = { name: "Foreign Replay", phone: "+15551234567", email: "foreign-replay@test.com" };
-    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup");
+    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE);
     const scoped = storeScoped(storeId);
     const cart = await scoped.cart.create({ data: { storeId } });
     cartsCreated.push(cart.id);
@@ -239,7 +240,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   it("two concurrent placeOrder calls with one PaymentIntent send one order/authorized event", async (ctx) => {
     if (!canRun) { ctx.skip(); return; }
     const contact = { name: "Race Test", phone: "+15551234567", email: "race@test.com" };
-    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup");
+    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE);
     const scoped = storeScoped(storeId);
     const cart = await scoped.cart.create({ data: { storeId } });
     cartsCreated.push(cart.id);
@@ -274,7 +275,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   it("two confirmed PaymentIntents on one basket place one order and release the other hold", async (ctx) => {
     if (!canRun) { ctx.skip(); return; }
     const contact = { name: "Two Tab", phone: "+15551234567", email: "two-tab@test.com" };
-    const quote = computeQuote(0, [{ price: 1500, qty: 1, maxPerOrder: null }], contact, "pickup");
+    const quote = computeQuote(0, [{ price: 1500, qty: 1, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE);
     const scoped = storeScoped(storeId);
     const cart = await scoped.cart.create({ data: { storeId } });
     cartsCreated.push(cart.id);

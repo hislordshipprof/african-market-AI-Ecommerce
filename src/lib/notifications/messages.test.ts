@@ -12,6 +12,7 @@ function order(status: string, capturedAmountCents: number | null = 2500): Notif
     subtotalCents: 2000,
     tipCents: 0,
     deliveryFeeCents: 500,
+    serviceFeeCents: 0,
     totalAuthorizedCents: 2750,
     capturedAmountCents,
     refundId: null,
@@ -49,5 +50,11 @@ describe("store delivery messages", () => {
       for (const copy of CANCEL_COPY) expect(email.html).not.toContain(copy);
     }
     expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).toContain("Charged $25.00.");
+  });
+
+  it("#495: the charged email shows the service fee inside the charged amount", () => {
+    const html = renderEmail({ ...order("DELIVERED", 2560), serviceFeeCents: 60 }, "delivered", URL, "orders@example.com").html;
+    expect(html).toContain("<p>Service fee $0.60.</p><p>Charged $25.60.</p>");
+    expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).not.toContain("Service fee");
   });
 });

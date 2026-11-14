@@ -287,6 +287,25 @@ export const stripeProvider: StripeProvider = {
     } satisfies RefundResult;
   },
 
+  async refundApplicationFeePart(paymentIntentId, amountCents, reservationKey) {
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge"] });
+    const charge = pi.latest_charge as Stripe.Charge | null;
+    const fee = charge?.application_fee;
+    const feeId = typeof fee === "string" ? fee : fee?.id;
+    if (!feeId) throw new Error(`Payment ${paymentIntentId} has no application fee to refund`);
+    // The idempotency key lasts 24h; the metadata match stops a later replay from paying twice.
+    for await (const prior of stripe.applicationFees.listRefunds(feeId, { limit: 100 })) {
+      if (prior.metadata?.reservation === reservationKey) return { feeRefundId: prior.id };
+    }
+    const refund = await stripe.applicationFees.createRefund(
+      feeId,
+      { amount: amountCents, metadata: { reservation: reservationKey } },
+      { idempotencyKey: `${reservationKey}:service-fee` },
+    );
+    return { feeRefundId: refund.id };
+  },
+
   async refundPayment(paymentIntentId, amountCents, idempotencyKey, options) {
     const stripe = getStripeClient();
     try {

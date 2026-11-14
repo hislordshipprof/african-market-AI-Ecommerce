@@ -50,6 +50,8 @@ import {
   suggestSubstitutesInput,
   updateCartInput,
 } from "./schemas";
+import { serviceFeeCents } from "../../order/platform-fee";
+import { readServiceFeeSettings } from "../../order/service-fee-settings";
 
 export interface AssistantContext {
   storeId: string;
@@ -540,18 +542,22 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
   return recordRead(ctx, "offer_choices", parsed, { ok: true, options: chosen, notFound, ...left });
 }
 
+/** The subtotal with its service fee and total, so any total the model quotes is one a tool returned. */
+async function cartTotals(subtotalCents: number) {
+  const fee = serviceFeeCents(subtotalCents, await readServiceFeeSettings());
+  return { subtotalCents, serviceFeeCents: fee, totalBeforeDeliveryCents: subtotalCents + fee };
+}
+
 async function readCartMoney(tx: CartWriteTx, cartId: string) {
   const lines = await tx.cartLine.findMany({
     where: { cartId },
     orderBy: { createdAt: "asc" },
     include: { variant: { select: { id: true, price: true } } },
   });
-  return {
-    lines,
-    subtotalCents: cartLineSubtotalCents(
-      lines.map((line) => ({ priceCents: line.variant.price, qty: line.qty })),
-    ),
-  };
+  const totals = await cartTotals(cartLineSubtotalCents(
+    lines.map((line) => ({ priceCents: line.variant.price, qty: line.qty })),
+  ));
+  return { lines, totals };
 }
 
 function withLineMoney<T extends { ok: true; lineId: string; qty: number; added: number }>(
@@ -839,7 +845,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       ok: true as const,
       items: priced,
       ...(priced.length === 1 && first?.ok ? first : {}),
-      subtotalCents: money.subtotalCents,
+      ...money.totals,
     };
   });
 }
@@ -855,7 +861,7 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
     if (parsed.qty <= 0) {
       await tx.cartLine.delete({ where: { id: line.id } });
       const money = await readCartMoney(tx, ctx.cartId);
-      return { ok: true, removed: true, lineId: line.id, qty: 0, subtotalCents: money.subtotalCents };
+      return { ok: true, removed: true, lineId: line.id, qty: 0, ...money.totals };
     }
     const decision = decideLineQty(parsed.qty, line.variant.listing.maxPerOrder);
     if (!decision.ok) return fail("max_per_order");
@@ -872,7 +878,7 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
       variantId: fresh.variant.id,
       unitPriceCents,
       lineTotalCents: unitPriceCents * parsed.qty,
-      subtotalCents: money.subtotalCents,
+      ...money.totals,
     };
   });
 }
@@ -884,7 +890,7 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
     await tx.cartLine.delete({ where: { id: line.id } });
     const money = await readCartMoney(tx, ctx.cartId);
-    return { ok: true, removed: true, subtotalCents: money.subtotalCents };
+    return { ok: true, removed: true, ...money.totals };
   });
 }
 
@@ -989,12 +995,15 @@ export async function getCartSummary(ctx: AssistantContext, input: unknown): Pro
   const subtotalCents = cartLineSubtotalCents(
     lines.map((line) => ({ priceCents: line.unitPriceCents, qty: line.qty })),
   );
-  const minimum = await checkMinimumOrder(ctx.storeId, ctx.cartId);
+  const [minimum, totals] = await Promise.all([
+    checkMinimumOrder(ctx.storeId, ctx.cartId),
+    cartTotals(subtotalCents),
+  ]);
   const missingCents = Math.max(0, minimum.minimumCents - subtotalCents);
   return recordRead(ctx, "get_cart_summary", parsed, {
     ok: true,
     lines,
-    subtotalCents,
+    ...totals,
     minimumOrderCents: minimum.minimumCents,
     minimumMet: subtotalCents >= minimum.minimumCents,
     missingCents,

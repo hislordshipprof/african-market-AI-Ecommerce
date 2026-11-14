@@ -11,6 +11,7 @@ export type AccountOrderRecord = {
   subtotalCents: number;
   tipCents: number;
   deliveryFeeCents: number;
+  serviceFeeCents: number;
   capturedAmountCents: number | null;
   refundId: string | null;
   trackingToken: string | null;
@@ -71,7 +72,7 @@ function amountLabel(order: AccountOrderRecord): string {
   if (order.capturedAmountCents != null) return money(order.capturedAmountCents);
   if (order.status === "CANCELLED" || order.status === "CANCELLING") return "Not charged";
   if (order.status === "REFUND_FAILED") return "Refund pending";
-  return `Estimated ${money(order.subtotalCents + order.tipCents + order.deliveryFeeCents)}`;
+  return `Estimated ${money(order.subtotalCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents)}`;
 }
 
 export function accountOrderRow(order: AccountOrderRecord, timeZone: string): AccountOrderRow {

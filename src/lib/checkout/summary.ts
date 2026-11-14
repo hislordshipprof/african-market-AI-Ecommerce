@@ -17,6 +17,9 @@ export interface OrderSummaryView {
 /** The money lines the basket and checkout both show, read only from the server quote. */
 export function orderSummary(quote: CheckoutQuote, fulfillment: Fulfillment): OrderSummaryView {
   const lines: SummaryLine[] = [{ key: "subtotal", label: "Subtotal", cents: quote.subtotalCents }];
+  if (quote.serviceFeeCents > 0) {
+    lines.push({ key: "service-fee", label: "Service fee", cents: quote.serviceFeeCents });
+  }
   if (fulfillment === "store-delivery") {
     lines.push({ key: "delivery", label: "Store delivery", cents: quote.deliveryFeeCents });
   }

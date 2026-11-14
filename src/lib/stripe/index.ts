@@ -18,6 +18,7 @@ const unconfiguredStripeProvider: StripeProvider = {
   cancelPaymentIntent: async () => throwUnconfigured(),
   retrievePaymentIntent: async () => throwUnconfigured(),
   refundPayment: async () => throwUnconfigured(),
+  refundApplicationFeePart: async () => throwUnconfigured(),
   listRefunds: async () => throwUnconfigured(),
   retrieveRefund: async () => throwUnconfigured(),
 };

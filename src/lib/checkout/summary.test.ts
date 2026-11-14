@@ -8,12 +8,13 @@ function quote(overrides: Partial<CheckoutQuote> = {}): CheckoutQuote {
     subtotalCents: 4194,
     deliveryFeeCents: 0,
     courierFeeCents: 0,
+    serviceFeeCents: 126,
     taxCents: 0,
     tipCents: 0,
     discountCents: 0,
-    totalCents: 4194,
+    totalCents: 4320,
     bufferCents: 419,
-    holdCents: 4613,
+    holdCents: 4739,
     expiresAt: "2026-11-09T12:00:00.000Z",
     problems: [],
     ...overrides,
@@ -24,14 +25,15 @@ const labels = (view: ReturnType<typeof orderSummary>) =>
   view.lines.map((line) => line.label);
 
 describe("orderSummary", () => {
-  it("shows the server quote's money for a pickup basket, with no invented tax or tip", () => {
+  it("shows the server quote's money for a pickup basket, with its service fee and no invented tax or tip", () => {
     const view = orderSummary(quote(), "pickup");
     expect(view.lines.map((line) => [line.label, line.cents])).toEqual([
       ["Subtotal", 4194],
+      ["Service fee", 126],
       ["Estimated tax", 0],
     ]);
-    expect(view.totalCents).toBe(4194);
-    expect(view.holdCents).toBe(4613);
+    expect(view.totalCents).toBe(4320);
+    expect(view.holdCents).toBe(4739);
     expect(view.bufferCents).toBe(419);
   });
 
@@ -42,6 +44,7 @@ describe("orderSummary", () => {
     );
     expect(view.lines.map((line) => [line.label, line.cents])).toEqual([
       ["Subtotal", 4194],
+      ["Service fee", 126],
       ["Store delivery", 499],
       ["Estimated tax", 0],
       ["Tip", 0],

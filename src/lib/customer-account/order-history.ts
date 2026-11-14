@@ -27,6 +27,7 @@ export async function listAccountOrders(
       subtotalCents: true,
       tipCents: true,
       deliveryFeeCents: true,
+      serviceFeeCents: true,
       capturedAmountCents: true,
       refundId: true,
       trackingToken: true,

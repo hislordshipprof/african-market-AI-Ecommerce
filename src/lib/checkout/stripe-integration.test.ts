@@ -5,6 +5,8 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { checkoutTestHooks, createPaymentIntent, placeOrder, computeQuote, releaseOrphanHolds } from "./service";
 import { holdAuthorizedAt } from "../stripe/checkout-payments";
+import { ADR_0021_SERVICE_FEE, captureSplit, serviceFeeCents } from "../order/platform-fee";
+import { stripeProvider } from "../stripe/provider";
 
 type ConnectedAccountCaps = {
   id: string;
@@ -299,7 +301,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           { name: "Test", phone: "+15551234567", email: "t@t.com" },
-          "pickup",
+          "pickup", ADR_0021_SERVICE_FEE,
         );
         const result = await createPaymentIntent(storeAId, cartAId, quote.holdCents);
         piToCleanup.push(result.paymentIntentId);
@@ -318,6 +320,80 @@ describe.skipIf(!hasKey || !hasDb)(
     );
 
     it(
+      "#495 ADR-0021 example: $60 goods + $8.99 courier captures $70.79, the store receives $57.96",
+      { timeout: 30_000 },
+      async () => {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+        const goods = 6000;
+        const fee = serviceFeeCents(goods, ADR_0021_SERVICE_FEE);
+        const captured = goods + fee + 899;
+        const split = captureSplit({ capturedCents: captured, serviceFeeCents: fee, courierFeeCents: 899 });
+        const pi = await stripe.paymentIntents.create({
+          amount: captured + 600,
+          currency: "usd",
+          capture_method: "manual",
+          payment_method: "pm_card_visa",
+          confirm: true,
+          return_url: "https://example.com/return",
+          on_behalf_of: stripeAccountAId,
+          transfer_data: { destination: stripeAccountAId },
+          metadata: { test: "ticket-495" },
+        });
+        const result = await stripeProvider.capturePaymentIntent(pi.id, captured, `capture:t495:${pi.id}`, split.applicationFeeCents);
+        expect(result.amountCaptured).toBe(7079);
+        const charge = await stripe.charges.retrieve(String(
+          (await stripe.paymentIntents.retrieve(pi.id)).latest_charge,
+        ), { expand: ["transfer"] });
+        expect(charge.application_fee_amount).toBe(1283);
+        // Destination charges transfer the whole capture and collect the application fee back from it.
+        expect((charge.transfer as Stripe.Transfer).amount - charge.application_fee_amount!).toBe(5796);
+        expect(split.platformKeepsCents).toBe(149);
+        await stripe.refunds.create({ payment_intent: pi.id, reverse_transfer: true, refund_application_fee: true });
+      },
+    );
+
+    it(
+      "#495 courier issue refund: the store funds the goods only, the platform funds the service fee share",
+      { timeout: 30_000 },
+      async () => {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+        const goods = 6000;
+        const fee = serviceFeeCents(goods, ADR_0021_SERVICE_FEE);
+        const captured = goods + fee + 899;
+        const split = captureSplit({ capturedCents: captured, serviceFeeCents: fee, courierFeeCents: 899 });
+        const pi = await stripe.paymentIntents.create({
+          amount: captured,
+          currency: "usd",
+          capture_method: "manual",
+          payment_method: "pm_card_visa",
+          confirm: true,
+          return_url: "https://example.com/return",
+          on_behalf_of: stripeAccountAId,
+          transfer_data: { destination: stripeAccountAId },
+          metadata: { test: "ticket-495-courier-refund" },
+        });
+        await stripeProvider.capturePaymentIntent(pi.id, captured, `capture:t495c:${pi.id}`, split.applicationFeeCents);
+        // $21 of goods reported plus its 63¢ share of the $1.80 fee, as submitRefund sends it on a courier order.
+        const key = `refund:t495c:${pi.id}`;
+        const refund = await stripeProvider.refundPayment(pi.id, 2163, key, { reservationKey: key });
+        expect(refund.status).toBe("succeeded");
+        const first = await stripeProvider.refundApplicationFeePart(pi.id, 63, key);
+        const replay = await stripeProvider.refundApplicationFeePart(pi.id, 63, key);
+        expect(replay.feeRefundId).toBe(first.feeRefundId);
+        const stripeRefund = await stripe.refunds.retrieve(refund.refundId, { expand: ["transfer_reversal"] });
+        const charge = await stripe.charges.retrieve(String(
+          (await stripe.paymentIntents.retrieve(pi.id)).latest_charge,
+        ), { expand: ["application_fee"] });
+        const reversed = (stripeRefund.transfer_reversal as Stripe.TransferReversal).amount;
+        const feeReturned = (charge.application_fee as Stripe.ApplicationFee).amount_refunded;
+        expect(reversed).toBe(2163);
+        expect(feeReturned).toBe(63);
+        expect(reversed - feeReturned).toBe(2100);
+        await stripe.refunds.create({ payment_intent: pi.id, reverse_transfer: true, refund_application_fee: true });
+      },
+    );
+
+    it(
       "end-to-end: confirm with pm_card_visa and place order",
       { timeout: 30_000 },
       async () => {
@@ -326,7 +402,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup",
+          "pickup", ADR_0021_SERVICE_FEE,
         );
 
         const freshCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
@@ -388,7 +464,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup",
+          "pickup", ADR_0021_SERVICE_FEE,
         );
 
         const declineCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
@@ -440,7 +516,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup",
+          "pickup", ADR_0021_SERVICE_FEE,
         );
 
         const xCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
@@ -498,7 +574,7 @@ describe.skipIf(!hasKey || !hasDb)(
               0,
               [{ price: 1500, qty: 2, maxPerOrder: null }],
               contact,
-              "pickup",
+              "pickup", ADR_0021_SERVICE_FEE,
             );
             const cart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
             cartsCreated.push(cart.id);
@@ -599,7 +675,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup",
+          "pickup", ADR_0021_SERVICE_FEE,
         );
         const cart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
         cartsCreated.push(cart.id);
@@ -678,7 +754,7 @@ describe.skipIf(!hasKey || !hasDb)(
         { subtotal: 50000, expected: 2000 },
       ];
       for (const { subtotal, expected } of cases) {
-        const q = computeQuote(0, [{ price: subtotal, qty: 1, maxPerOrder: null }], validContact, "pickup");
+        const q = computeQuote(0, [{ price: subtotal, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE);
         expect(q.bufferCents).toBe(expected);
       }
     });

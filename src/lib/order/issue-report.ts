@@ -6,6 +6,7 @@ import { money } from "../format";
 import { prepareProofPhoto } from "./delivery-proof";
 import { evaluateOrderRefundStateAfterCommit, recordIssueRefundNotStarted, submitRefund } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
+import { serviceFeeRefundCents } from "./platform-fee";
 
 export const ISSUE_TYPES = ["missing", "damaged", "wrong", "poor_freshness"] as const;
 export type IssueType = (typeof ISSUE_TYPES)[number];
@@ -57,6 +58,10 @@ export function issueWindowOpen(order: ReportableOrder, now = new Date()): boole
 }
 
 type OrderWithLines = ReportableOrder & {
+  serviceFeeCents: number;
+  capturedAmountCents: number | null;
+  tipCents: number;
+  deliveryFeeCents: number;
   lines: Array<{ id: string; qtyPicked: number; unitPriceCents: number }>;
 };
 
@@ -73,7 +78,7 @@ function issueAmountCents(order: OrderWithLines, chosen: IssueReportInput["lines
     seen.add(pick.lineId);
     total += pick.qty * line.unitPriceCents;
   }
-  return total > 0 ? total : null;
+  return total > 0 ? total + serviceFeeRefundCents(total, order) : null;
 }
 
 function refusal(
