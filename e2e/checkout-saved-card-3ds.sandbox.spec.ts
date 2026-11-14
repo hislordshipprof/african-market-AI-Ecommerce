@@ -5,6 +5,7 @@ import Stripe from "stripe";
 import { resolveDirectUrl } from "../src/lib/env";
 import { E2E_PORT } from "./urls";
 import { sandboxConnectedAccountId } from "../src/lib/stripe/test-sandbox-account";
+import { cleanupSavedCard3dsRun } from "./saved-card-3ds-run";
 
 // Real Stripe.js against the Stripe test mode, on a server started without the fake provider
 // (E2E_REAL_STRIPE=1 marks that lane; see the #311 report for the command).
@@ -19,12 +20,12 @@ test("real Stripe.js: a 3DS card is saved after its challenge, then pays again f
   const origin = `http://localhost:${E2E_PORT}`;
   const email = `e2e-t311-3ds-${Date.now().toString(36)}@test.example`;
   const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
-  // stores.stripe_account_id is unique and the sandbox has one ready account (#160), so the test uses the store that owns it.
+  // stores.stripe_account_id is unique and the sandbox has one ready account (#160), so the test shares the store that owns it;
+  // its listing and shopper are its own, and cleanup deletes only those (cleanupSavedCard3dsRun).
   const store = await prisma.store.findUniqueOrThrow({ where: { stripeAccountId: accountId } });
   const slug = `${store.slug}`;
   const name = `Three DS Yam ${Date.now().toString(36)}`;
   let listingId = "";
-  const intents: string[] = [];
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -74,30 +75,19 @@ test("real Stripe.js: a 3DS card is saved after its challenge, then pays again f
     expect(orders).toHaveLength(2);
     for (const order of orders) {
       const id = order.paymentIntentId as string;
-      intents.push(id);
       const intent = await stripe.paymentIntents.retrieve(id);
       expect([intent.status, intent.on_behalf_of, intent.transfer_data?.destination]).toEqual(["requires_capture", accountId, accountId]);
       console.info(`[t311] 3DS e2e PaymentIntent ${id} ${intent.status}`);
     }
   } finally {
-    const user = await prisma.user.findFirst({ where: { email }, select: { id: true } });
-    const profile = user ? await prisma.platformCustomerProfile.findUnique({ where: { userId: user.id } }) : null;
-    for (const id of intents) await stripe.paymentIntents.cancel(id).catch(() => undefined);
-    if (profile?.stripeCustomerId) await stripe.customers.del(profile.stripeCustomerId).catch(() => undefined);
-    await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      const mine = { storeId: store.id, paymentIntentId: { in: intents } };
-      await tx.orderLine.deleteMany({ where: { order: mine } });
-      await tx.order.deleteMany({ where: mine });
-      await tx.cartLine.deleteMany({ where: { variant: { listingId } } });
-      await tx.cart.deleteMany({ where: { storeId: store.id, lines: { none: {} } } });
-      await tx.customer.deleteMany({ where: { storeId: store.id, email } });
-      await tx.listingVariant.deleteMany({ where: { listingId } });
-      await tx.listing.deleteMany({ where: { id: listingId } });
-    });
-    await prisma.user.deleteMany({ where: { email } });
-    await prisma.$disconnect();
+    try {
+      await cleanupSavedCard3dsRun(prisma, { storeId: store.id, email, listingId }, {
+        cancelHold: (id) => stripe.paymentIntents.cancel(id),
+        deleteCustomer: (id) => stripe.customers.del(id),
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
   }
 });
 
