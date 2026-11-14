@@ -79,7 +79,7 @@ export default function AdminSignIn() {
         setStep("totp");
         setLoading(false);
       } else {
-        router.push("/admin/stores");
+        router.push("/admin");
       }
     } catch {
       setError(NETWORK_ERROR);
@@ -103,7 +103,7 @@ export default function AdminSignIn() {
         setLoading(false);
         focusField(TOTP_ID);
       } else {
-        router.push("/admin/stores");
+        router.push("/admin");
       }
     } catch {
       setError(NETWORK_ERROR);

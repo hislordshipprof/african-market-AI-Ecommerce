@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { listOrdersToCheck } from "@/lib/admin/orders-to-check";
 import { ROW_LIMIT, type OrderAlertRow } from "@/lib/admin/orders-to-check-query";
 import type { OrderRecoveryGroup } from "@/lib/db";
@@ -33,14 +32,6 @@ export default async function OrdersToCheckPage() {
     <div className="mx-auto max-w-5xl px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Orders to check</h1>
-        <div className="flex items-center gap-4">
-          <Link href="/admin/orders" className="text-sm text-primary underline">
-            Refunds
-          </Link>
-          <Link href="/admin/stores" className="text-sm text-primary underline">
-            Stores
-          </Link>
-        </div>
       </div>
 
       <h2 className="mb-3 text-lg font-semibold text-foreground">Stuck orders</h2>

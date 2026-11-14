@@ -119,7 +119,7 @@ export default function Enroll2FA() {
         focusField(CODE_ID);
       } else {
         setVerified(true);
-        router.push("/admin/stores");
+        router.push("/admin");
       }
     } catch {
       setError(NETWORK_ERROR);

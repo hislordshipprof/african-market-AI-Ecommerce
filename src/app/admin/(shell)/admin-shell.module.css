@@ -1,0 +1,52 @@
+/* Admin grounds are neutral, as in #528; primary marks only actions and the current page.
+   Set on body too, so dialogs portalled out of the shell share the tokens. */
+:global(body):has(.shell),
+.shell {
+  color-scheme: light;
+  --background: #FAFAF7;
+  --foreground: #1A1A18;
+  --card: #FFFFFF;
+  --card-foreground: #1A1A18;
+  --popover: #FFFFFF;
+  --popover-foreground: #1A1A18;
+  --muted: #F1F1EC;
+  --muted-foreground: #5F5F58;
+  --border: #E4E4DD;
+  --input: #8C8C84;
+  --primary: #0B6B3A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EAF4EC;
+  --secondary-foreground: #1A1A18;
+  --ring: #0B6B3A;
+  --destructive: #B42335;
+
+}
+
+.shell {
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+@media (prefers-color-scheme: dark) {
+  :global(body):has(.shell),
+  .shell {
+    color-scheme: dark;
+    --background: #121211;
+    --foreground: #F2F2EE;
+    --card: #1C1C1A;
+    --card-foreground: #F2F2EE;
+    --popover: #1C1C1A;
+    --popover-foreground: #F2F2EE;
+    --muted: #272725;
+    --muted-foreground: #A8A8A0;
+    --border: #33332F;
+    --input: #8A8A82;
+    --primary: #5FD08A;
+    --primary-foreground: #0B0B0B;
+    --secondary: #1F2A22;
+    --secondary-foreground: #F2F2EE;
+    --ring: #5FD08A;
+    --destructive: #F28793;
+  }
+}

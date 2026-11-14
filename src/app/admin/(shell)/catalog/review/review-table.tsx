@@ -22,8 +22,8 @@ import {
 function ConfidenceBadge({ confidence }: { confidence: string | null }) {
   const color =
     confidence === "medium"
-      ? "bg-[#E1EEE3] text-[#1F5A43] dark:bg-[#21412E] dark:text-[#6CC08F]"
-      : "bg-[#B42335]/10 text-[#B42335] dark:bg-[#F28793]/15 dark:text-[#F28793]";
+      ? "bg-secondary text-foreground"
+      : "bg-destructive/10 text-destructive";
   return (
     <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${color}`}>
       {confidence ?? "unknown"}
@@ -123,63 +123,63 @@ function EditModal({
       >
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">Edit product</DialogTitle>
-          <DialogDescription className="dark:text-[#A3B1A7]">
+          <DialogDescription className="">
             Changes are saved to the master catalog and recorded in the audit log.
           </DialogDescription>
         </DialogHeader>
         {error && (
-          <p role="alert" className="text-sm text-red-600">{error}</p>
+          <p role="alert" className="text-sm text-destructive">{error}</p>
         )}
         <div className="space-y-3">
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Name</span>
+            <span className="mb-1 block text-xs font-semibold text-muted-foreground">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Description</span>
+            <span className="mb-1 block text-xs font-semibold text-muted-foreground">Description</span>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Unit</span>
+              <span className="mb-1 block text-xs font-semibold text-muted-foreground">Unit</span>
               <input
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
-                className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Storage</span>
+              <span className="mb-1 block text-xs font-semibold text-muted-foreground">Storage</span>
               <input
                 value={storage}
                 onChange={(e) => setStorage(e.target.value)}
-                className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </label>
           </div>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[#55625A] dark:text-[#A3B1A7]">Origin countries</span>
+            <span className="mb-1 block text-xs font-semibold text-muted-foreground">Origin countries</span>
             <input
               value={originCountries}
               onChange={(e) => setOriginCountries(e.target.value)}
-              className="w-full rounded-lg border border-[#DCDFD6] bg-white px-3 py-2 text-sm text-[#15201A] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43] dark:border-[#35463B] dark:bg-[#0D1410] dark:text-[#EEF2EC]"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </label>
         </div>
-        <DialogFooter className="border-[#DCDFD6] bg-transparent dark:border-[#35463B]">
+        <DialogFooter className="border-border bg-transparent">
           <Button
             type="button"
             variant="ghost"
-            className="dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
+            className=""
             onClick={() => {
               if (open && !isPending && !saveStarted.current) onClose();
             }}
@@ -273,13 +273,13 @@ export function ReviewTable({
 
   if (products.length === 0 && total === 0) {
     return (
-      <div className="rounded-xl border border-[#DCDFD6] bg-white p-12 text-center dark:border-[#35463B] dark:bg-[#1E2C23]">
-        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950">
-          <svg aria-hidden="true" className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+      <div className="rounded-xl border border-border bg-card p-12 text-center">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-secondary">
+          <svg aria-hidden="true" className="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
           </svg>
         </div>
-        <p className="text-sm font-medium text-[#55625A] dark:text-[#A3B1A7]">
+        <p className="text-sm font-medium text-muted-foreground">
           No products to review. All caught up!
         </p>
       </div>
@@ -289,12 +289,12 @@ export function ReviewTable({
   if (products.length === 0) {
     const lastPage = Math.max(1, totalPages);
     return (
-      <div className="rounded-xl border border-[#DCDFD6] bg-white p-12 text-center dark:border-[#35463B] dark:bg-[#1E2C23]">
-        <p className="text-sm font-medium text-[#15201A] dark:text-[#EEF2EC]">No items on this page.</p>
-        <p className="mt-1 text-sm text-[#55625A] dark:text-[#A3B1A7]">
+      <div className="rounded-xl border border-border bg-card p-12 text-center">
+        <p className="text-sm font-medium text-foreground">No items on this page.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
           {total} {total === 1 ? "product remains" : "products remain"} on other pages.
         </p>
-        <Button type="button" variant="outline" className="mt-4 dark:border-[#71907D] dark:bg-transparent dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]" onClick={() => goToPage(lastPage)}>
+        <Button type="button" variant="outline" className="mt-4" onClick={() => goToPage(lastPage)}>
           Back to page {lastPage}
         </Button>
       </div>
@@ -304,7 +304,7 @@ export function ReviewTable({
   return (
     <>
       {actionError && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+        <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {actionError}
         </div>
       )}
@@ -327,21 +327,21 @@ export function ReviewTable({
         {products.map((p) => (
           <div
             key={p.id}
-            className="rounded-xl border border-[#DCDFD6] bg-white p-4 dark:border-[#35463B] dark:bg-[#1E2C23]"
+            className="rounded-xl border border-border bg-card p-4"
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold text-[#15201A] dark:text-[#EEF2EC]">{p.name}</h3>
-                <p className="mt-0.5 text-xs text-[#55625A] dark:text-[#A3B1A7]">
+                <h3 className="text-sm font-semibold text-foreground">{p.name}</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
                   {p.categoryName ?? "Uncategorized"}{p.subcategory ? ` / ${p.subcategory}` : ""}
                 </p>
               </div>
               <ConfidenceBadge confidence={p.confidence} />
             </div>
             {p.description && (
-              <p className="mb-2 text-xs text-[#55625A] line-clamp-2 dark:text-[#A3B1A7]">{p.description}</p>
+              <p className="mb-2 text-xs text-muted-foreground line-clamp-2">{p.description}</p>
             )}
-            <div className="mb-3 flex flex-wrap gap-2 text-xs text-[#55625A] dark:text-[#A3B1A7]">
+            <div className="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
               {p.originCountries && <span>{p.originCountries}</span>}
               {p.unit && <span>{p.unit}</span>}
               {p.synonymCount > 0 && <span>{p.synonymCount} synonyms</span>}
@@ -351,7 +351,7 @@ export function ReviewTable({
                 type="button"
                 onClick={() => handleApprove(p.id)}
                 disabled={isPending}
-                className="flex-1 rounded-full bg-[#2E7D4F] px-3 py-2 text-xs font-medium text-white hover:bg-[#246b40] disabled:opacity-50"
+                className="flex-1 rounded-full bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 Approve
               </button>
@@ -359,7 +359,7 @@ export function ReviewTable({
                 type="button"
                 onClick={() => openProduct(p)}
                 disabled={isPending}
-                className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] dark:border-[#35463B] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
+                className="rounded-full border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted"
               >
                 Edit
               </button>
@@ -367,7 +367,7 @@ export function ReviewTable({
                 type="button"
                 onClick={() => handleReject(p.id)}
                 disabled={isPending}
-                className="rounded-full border border-red-200 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                className="rounded-full border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10"
               >
                 Reject
               </button>
@@ -375,7 +375,7 @@ export function ReviewTable({
                 type="button"
                 onClick={() => handleProposeAttributes(p.id)}
                 disabled={isPending}
-                className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] disabled:opacity-50 dark:border-[#35463B] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
+                className="rounded-full border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
               >
                 Read attributes
               </button>
@@ -385,28 +385,28 @@ export function ReviewTable({
       </div>
 
       {/* Desktop table */}
-      <div className="hidden overflow-hidden rounded-xl border border-[#DCDFD6] bg-white md:block dark:border-[#35463B] dark:bg-[#1E2C23]">
+      <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-[#DCDFD6] bg-[#F3F4EF] dark:border-[#35463B] dark:bg-[#0D1410]">
+          <thead className="border-b border-border bg-muted">
             <tr>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Product</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Category</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Confidence</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Origin</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Synonyms</th>
-              <th className="px-4 py-3 font-medium text-[#55625A] dark:text-[#A3B1A7]">Actions</th>
+              <th className="px-4 py-3 font-medium text-muted-foreground">Product</th>
+              <th className="px-4 py-3 font-medium text-muted-foreground">Category</th>
+              <th className="px-4 py-3 font-medium text-muted-foreground">Confidence</th>
+              <th className="px-4 py-3 font-medium text-muted-foreground">Origin</th>
+              <th className="px-4 py-3 font-medium text-muted-foreground">Synonyms</th>
+              <th className="px-4 py-3 font-medium text-muted-foreground">Actions</th>
             </tr>
           </thead>
           <tbody>
             {products.map((p) => (
-              <tr key={p.id} className="border-b border-[#DCDFD6] last:border-0 dark:border-[#35463B]">
+              <tr key={p.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-3">
-                  <p className="font-medium text-[#15201A] dark:text-[#EEF2EC]">{p.name}</p>
+                  <p className="font-medium text-foreground">{p.name}</p>
                   {p.description && (
-                    <p className="mt-0.5 text-xs text-[#55625A] line-clamp-1 dark:text-[#A3B1A7]">{p.description}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{p.description}</p>
                   )}
                 </td>
-                <td className="px-4 py-3 text-[#55625A] dark:text-[#A3B1A7]">
+                <td className="px-4 py-3 text-muted-foreground">
                   {p.categoryName ?? "—"}
                   {p.subcategory && (
                     <span className="block text-xs opacity-70">{p.subcategory}</span>
@@ -415,10 +415,10 @@ export function ReviewTable({
                 <td className="px-4 py-3">
                   <ConfidenceBadge confidence={p.confidence} />
                 </td>
-                <td className="max-w-[140px] truncate px-4 py-3 text-xs text-[#55625A] dark:text-[#A3B1A7]">
+                <td className="max-w-[140px] truncate px-4 py-3 text-xs text-muted-foreground">
                   {p.originCountries ?? "—"}
                 </td>
-                <td className="px-4 py-3 text-[#55625A] dark:text-[#A3B1A7]">
+                <td className="px-4 py-3 text-muted-foreground">
                   {p.synonymCount}
                 </td>
                 <td className="px-4 py-3">
@@ -427,7 +427,7 @@ export function ReviewTable({
                       type="button"
                       onClick={() => handleApprove(p.id)}
                       disabled={isPending}
-                      className="rounded-full bg-[#2E7D4F] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#246b40] disabled:opacity-50"
+                      className="rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                     >
                       Approve
                     </button>
@@ -435,7 +435,7 @@ export function ReviewTable({
                       type="button"
                       onClick={() => openProduct(p)}
                       disabled={isPending}
-                      className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] dark:border-[#71907D] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
+                      className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
                     >
                       Edit
                     </button>
@@ -443,7 +443,7 @@ export function ReviewTable({
                       type="button"
                       onClick={() => handleReject(p.id)}
                       disabled={isPending}
-                      className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                      className="rounded-full border border-destructive/30 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
                     >
                       Reject
                     </button>
@@ -451,7 +451,7 @@ export function ReviewTable({
                       type="button"
                       onClick={() => handleProposeAttributes(p.id)}
                       disabled={isPending}
-                      className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#E7E9E2] disabled:opacity-50 dark:border-[#71907D] dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
+                      className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
                     >
                       Read attributes
                     </button>
@@ -466,7 +466,7 @@ export function ReviewTable({
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between">
-          <p className="text-xs text-[#55625A] dark:text-[#A3B1A7]">
+          <p className="text-xs text-muted-foreground">
             Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
           </p>
           <div className="flex items-center gap-1">
@@ -474,7 +474,7 @@ export function ReviewTable({
               type="button"
               onClick={() => goToPage(page - 1)}
               disabled={page <= 1}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#55625A] hover:bg-[#E7E9E2] disabled:opacity-40 dark:text-[#A3B1A7] dark:hover:bg-[#2B3F33]"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
             >
               Prev
             </button>
@@ -496,8 +496,8 @@ export function ReviewTable({
                   onClick={() => goToPage(pageNum)}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
                     pageNum === page
-                      ? "bg-[#1F5A43] text-white"
-                      : "text-[#55625A] hover:bg-[#E7E9E2] dark:text-[#A3B1A7] dark:hover:bg-[#2B3F33]"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
                   {pageNum}
@@ -508,7 +508,7 @@ export function ReviewTable({
               type="button"
               onClick={() => goToPage(page + 1)}
               disabled={page >= totalPages}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#55625A] hover:bg-[#E7E9E2] disabled:opacity-40 dark:text-[#A3B1A7] dark:hover:bg-[#2B3F33]"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
             >
               Next
             </button>

@@ -30,7 +30,7 @@ export function SuspendButton({
       onClick={handleClick}
       disabled={loading}
       className={`text-sm hover:underline disabled:opacity-50 ${
-        isSuspended ? "text-green-700" : "text-red-700"
+        isSuspended ? "text-primary" : "text-destructive"
       }`}
     >
       {loading

@@ -31,17 +31,17 @@ export function InviteOwnerForm({ storeId }: Props) {
   }
 
   return (
-    <div className="rounded-lg border border-[#D1D5C8] bg-white p-6">
-      <h2 className="mb-2 text-lg font-semibold text-[#15201A]">Invite Store Owner</h2>
-      <p className="mb-4 text-sm text-[#55625A]">
+    <div className="rounded-lg border border-input bg-card p-6">
+      <h2 className="mb-2 text-lg font-semibold text-foreground">Invite Store Owner</h2>
+      <p className="mb-4 text-sm text-muted-foreground">
         Send an invitation to the store owner to set up their account.
       </p>
       {message && (
         <div
           className={`mb-4 rounded-md p-3 text-sm ${
             message.type === "success"
-              ? "bg-green-50 text-green-800"
-              : "bg-red-50 text-red-800"
+              ? "bg-secondary text-foreground"
+              : "bg-destructive/10 text-destructive"
           }`}
         >
           {message.text}
@@ -54,12 +54,12 @@ export function InviteOwnerForm({ storeId }: Props) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="owner@example.com"
-          className="flex-1 rounded-md border border-[#D1D5C8] bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1F5A43]"
+          className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <button
           type="submit"
           disabled={isPending}
-          className="rounded-md bg-[#1F5A43] px-4 py-2 text-sm font-medium text-white hover:bg-[#174432] disabled:opacity-50"
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {isPending ? "Sending..." : "Send Invite"}
         </button>

@@ -49,10 +49,10 @@ export function StoreForm({
       )}
 
       {state.success && state.brandColorNudged && (
-        <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">
+        <div className="rounded-md border border-border bg-muted p-3 text-sm text-foreground">
           The brand color was adjusted to{" "}
           <span
-            className="inline-block h-4 w-4 rounded-sm align-text-bottom border border-amber-200"
+            className="inline-block h-4 w-4 rounded-sm align-text-bottom border border-input"
             style={{ backgroundColor: state.nudgedColor }}
           />{" "}
           <code>{state.nudgedColor}</code> to meet accessibility contrast

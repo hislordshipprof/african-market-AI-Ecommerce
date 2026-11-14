@@ -23,12 +23,12 @@ export default async function EditStorePage({
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-8">
-      <h1 className="mb-6 text-2xl font-bold text-[#15201A]">
+      <h1 className="mb-6 text-2xl font-bold text-foreground">
         Edit: {store.name}
       </h1>
-      <section aria-labelledby="billing" className="mb-8 rounded-lg border border-[#e2e4e9] bg-white p-5">
-        <h2 id="billing" className="text-base font-semibold text-[#15201A]">Plan and billing</h2>
-        <p className="mt-1 text-sm text-[#55625A]">
+      <section aria-labelledby="billing" className="mb-8 rounded-lg border border-border bg-card p-5">
+        <h2 id="billing" className="text-base font-semibold text-foreground">Plan and billing</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
           {plan} · {subscription?.status ?? "none"}
           {subscription?.trialEndsAt && ` · trial ends ${subscription.trialEndsAt.toISOString().slice(0, 10)}`}
           {subscription?.paymentFailedAt && " · last payment failed"}
@@ -38,18 +38,18 @@ export default async function EditStorePage({
           <input type="hidden" name="pilot" value={subscription?.pilot ? "false" : "true"} />
           <button
             type="submit"
-            className="min-h-11 rounded-full border border-[#1F5A43] px-5 text-sm font-medium text-[#1F5A43] hover:bg-[#EBF3EC]"
+            className="min-h-11 rounded-full border border-primary px-5 text-sm font-medium text-primary hover:bg-secondary"
           >
             {subscription?.pilot ? "Remove pilot offer" : `Make a pilot store (${PILOT_FREE_MONTHS} months free)`}
           </button>
-          <span className="text-sm text-[#55625A]">
+          <span className="text-sm text-muted-foreground">
             {subscription?.pilot
               ? "This store is a pilot store. Removing the offer during the free months charges the store now."
               : `Up to ${PILOT_STORE_CAP} pilot stores.`}
           </span>
         </form>
         {pilotError && (
-          <p role="alert" className="mt-2 text-sm text-red-700">{pilotError}</p>
+          <p role="alert" className="mt-2 text-sm text-destructive">{pilotError}</p>
         )}
       </section>
       <StoreForm mode="edit" store={store} />

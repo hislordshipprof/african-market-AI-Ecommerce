@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { formatInZone } from "@/lib/format";
 import { listEscalatedThreads } from "@/lib/support/platform-actions";
 import { PlatformThreadActions } from "./thread-actions";
@@ -23,14 +22,6 @@ export default async function SupportQueuePage() {
     <div className="mx-auto max-w-5xl px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Escalated messages</h1>
-        <div className="flex items-center gap-4">
-          <Link href="/admin/orders" className="text-sm text-primary underline">
-            Refunds to resolve
-          </Link>
-          <Link href="/admin/stores" className="text-sm text-primary underline">
-            Stores
-          </Link>
-        </div>
       </div>
       {threads.length === 0 ? (
         <p className="rounded-lg border border-input bg-card p-8 text-center text-muted-foreground">

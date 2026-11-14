@@ -26,7 +26,7 @@ async function adminSignIn(page: import("@playwright/test").Page) {
   await page.click("button[type='submit']");
 
   try {
-    await page.waitForURL("**/admin/stores", { timeout: 15000 });
+    await page.waitForURL("**/admin", { timeout: 15000 });
   } catch {
     const url = page.url();
     const errText = await page.locator(".bg-red-50").textContent().catch(() => "");
@@ -62,11 +62,17 @@ test.describe("Platform admin console", () => {
     await expect(page.getByLabel("Email")).toBeVisible();
   });
 
-  test("sign-in with valid credentials and TOTP reaches stores", async ({
+  test("sign-in with valid credentials and TOTP lands on the home page", async ({
     page,
   }) => {
     await adminSignIn(page);
-    await expect(page.locator("h1")).toHaveText("Stores");
+    await expect(page.locator("h1")).toHaveText("Home");
+  });
+
+  test("sign-in and 2FA pages stay outside the admin menu", async ({ page }) => {
+    await page.goto("/admin/sign-in");
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
   });
 
   test("sign-in form works over the poster when WebGL is unavailable", async ({
@@ -122,6 +128,7 @@ test.describe("Platform admin console", () => {
 test.describe("Store management (authenticated)", () => {
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
+    await page.goto("/admin/stores");
   });
 
   test("stores list page shows seeded stores", async ({ page }) => {
@@ -748,7 +755,73 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     await page.fill("input[inputmode='numeric']", code);
     await page.click("button:has-text('Verify and continue')");
 
-    await page.waitForURL("**/admin/stores", { timeout: 15000 });
-    await expect(page.locator("h1")).toHaveText("Stores");
+    await page.waitForURL("**/admin", { timeout: 15000 });
+    await expect(page.locator("h1")).toHaveText("Home");
+  });
+});
+
+test.describe("Admin shell (authenticated)", () => {
+  const MENU = ["Home", "Stores", "Catalog review", "Refunds", "Orders to check", "Messages"];
+
+  test.beforeEach(async ({ page }) => {
+    await adminSignIn(page);
+  });
+
+  test("every admin page has the menu with the current page marked", async ({ page }) => {
+    const pages: Array<[string, string]> = [
+      ["/admin", "Home"],
+      ["/admin/stores", "Stores"],
+      ["/admin/stores/new", "Stores"],
+      ["/admin/catalog/review", "Catalog review"],
+      ["/admin/orders", "Refunds"],
+      ["/admin/orders/check", "Orders to check"],
+      ["/admin/support", "Messages"],
+    ];
+    for (const [path, current] of pages) {
+      await page.goto(path);
+      const menu = page.getByRole("navigation", { name: "Admin" });
+      await expect(menu.getByRole("link")).toHaveText(MENU);
+      await expect(menu.locator("[aria-current='page']")).toHaveText(current);
+      await expect(page.getByText("admin@platform.test")).toBeVisible();
+    }
+  });
+
+  test("home counts link to their queues", async ({ page }) => {
+    const links: Array<[string, string]> = [
+      ["count-stores", "/admin/stores"],
+      ["count-refunds", "/admin/orders"],
+      ["count-orders-to-check", "/admin/orders/check"],
+      ["count-messages", "/admin/support"],
+      ["count-catalog-review", "/admin/catalog/review"],
+    ];
+    for (const [testId, href] of links) {
+      await expect(page.getByTestId(testId)).toHaveAttribute("href", href);
+    }
+    await expect(page.getByTestId("count-stores")).toContainText(/\d+ active/);
+    await expect(page.getByTestId("count-catalog-review")).toContainText(/\d+/);
+  });
+
+  test("the phone menu opens, closes with Escape and navigates", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const toggle = page.getByRole("button", { name: "Menu" });
+    const menu = page.getByRole("navigation", { name: "Admin" });
+    await expect(menu).toBeHidden();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(toggle).toBeFocused();
+    await toggle.click();
+    await menu.getByRole("link", { name: "Catalog review" }).click();
+    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+    await expect(menu).toBeHidden();
+  });
+
+  test("sign-out ends the session and returns to sign-in", async ({ page }) => {
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.waitForURL("**/admin/sign-in", { timeout: 15000 });
+    await page.goto("/admin/stores");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
   });
 });
