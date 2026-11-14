@@ -133,7 +133,8 @@ async function inboxCapReached(email: string): Promise<boolean> {
     where: {
       identifier: { startsWith: "magic-link:" },
       expiresAt: { gt: new Date(Date.now() + 5 * 60_000) },
-      value: { contains: JSON.stringify(email), mode: "insensitive" },
+      // The email key only: `name` comes from the request body, and JSON escaping stops it forging this.
+      value: { contains: `"email":${JSON.stringify(email)}`, mode: "insensitive" },
     },
   });
   return recent > INBOX_CAP;
@@ -241,6 +242,10 @@ export const auth = betterAuth({
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path.startsWith("/two-factor/") && ctx.body?.trustDevice) {
         return { context: { body: { ...ctx.body, trustDevice: false } } };
+      }
+      // The storefront never sends a name. Blanked, not dropped: hook context merges skip undefined.
+      if (ctx.path === "/sign-in/magic-link" && ctx.body?.name) {
+        return { context: { body: { ...ctx.body, name: "" } } };
       }
     }),
   },

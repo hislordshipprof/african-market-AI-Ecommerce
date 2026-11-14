@@ -21,7 +21,7 @@ import { verifyUrlFromEmail } from "./test-magic-link";
 const stamp = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const slug = `rl-${stamp}`;
 
-function sendLink(email: string, ip: string): Promise<Response> {
+function sendLink(email: string, ip: string, name?: string): Promise<Response> {
   return auth.handler(
     new Request("http://localhost:3000/api/auth/sign-in/magic-link", {
       method: "POST",
@@ -31,7 +31,7 @@ function sendLink(email: string, ip: string): Promise<Response> {
         "x-store-slug": slug,
         host: `${slug}.localhost:3000`,
       },
-      body: JSON.stringify({ email, callbackURL: "/account" }),
+      body: JSON.stringify({ email, name, callbackURL: "/account" }),
     }),
   );
 }
@@ -91,5 +91,22 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("links sent elsewhere with the victim's address as the name do not count against the victim", async () => {
+    const victim = `rl-victim-${stamp}@test.example`;
+    emails.push(victim);
+    for (let i = 0; i < 6; i++) {
+      const attacker = `rl-att-${i}-${stamp}@test.example`;
+      emails.push(attacker);
+      expect((await sendLink(attacker, `10.186.${i}.1`, victim)).status).toBe(200);
+    }
+    const forged = await authPrisma.verification.findFirst({
+      where: { value: { contains: `rl-att-0-${stamp}@` } },
+    });
+    expect(JSON.parse(forged!.value).name).toBeFalsy();
+    expect((await sendLink(victim, "10.187.0.1")).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(sent.filter((message) => message.to === victim)).toHaveLength(1);
   });
 });
