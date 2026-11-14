@@ -1121,6 +1121,9 @@
   flex-wrap: wrap;
   margin-top: 20px;
 }
+.sf-empty .sf-search-suggestions {
+  justify-content: center;
+}
 .sf-search-block {
   margin-top: 32px;
 }
