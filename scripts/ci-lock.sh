@@ -2,6 +2,8 @@
 # The machine-wide local-ci slots, sourced by ci-local.sh. Up to CI_SLOTS suites (default 2) run at once, each
 # holding the lock of its own slot; with every slot held, a run waits. Slot 1's lock is <lock>, slot k's is <lock>-k.
 # Each lock is a directory holding the owner's pid, its start time, and a token only the owner knows.
+# The start time is written twice: started in the local zone, which lanes on branches older than #413 compare,
+# and started-utc, which this version compares.
 # The earlier version let two runs hold the lock at once, three ways:
 # - two waiters could both judge a lock stale, and the slower one then renamed away the lock the faster one had
 #   just taken;
@@ -16,7 +18,8 @@
 ci_lock_try() {
   mkdir "$1" 2>/dev/null || return 1
   printf '%s\n' "$3" > "$1/token"
-  _ci_lock_started "$2" > "$1/started"
+  ps -o lstart= -p "$2" > "$1/started" 2>/dev/null || true
+  _ci_lock_started "$2" > "$1/started-utc"
   printf '%s\n' "$2" > "$1/pid"
 }
 
@@ -38,10 +41,15 @@ _ci_lock_age() { echo $(( $(date +%s) - $(file_mtime "$1" || date +%s) )); }
 ci_lock_stale() {
   local owner started; owner=$(cat "$1/pid" 2>/dev/null || true)
   if [ -n "$owner" ]; then
-    started=$(cat "$1/started" 2>/dev/null || true)
-    # Lanes on branches older than #413 still write the time in their own zone and locale.
-    ! kill -0 "$owner" 2>/dev/null || { [ -n "$started" ] && [ "$(_ci_lock_started "$owner")" != "$started" ] \
-      && [ "$(ps -o lstart= -p "$owner" 2>/dev/null || true)" != "$started" ]; }
+    kill -0 "$owner" 2>/dev/null || return 0
+    if started=$(cat "$1/started-utc" 2>/dev/null); then
+      [ -n "$started" ] && [ "$(_ci_lock_started "$owner")" != "$started" ]
+    else
+      # Lanes on branches older than #413 write only started, in their own zone and locale.
+      started=$(cat "$1/started" 2>/dev/null || true)
+      [ -n "$started" ] && [ "$(_ci_lock_started "$owner")" != "$started" ] \
+        && [ "$(ps -o lstart= -p "$owner" 2>/dev/null || true)" != "$started" ]
+    fi
   else
     [ "$(_ci_lock_age "$1")" -gt "${CI_LOCK_NOPID_SEC:-120}" ]
   fi

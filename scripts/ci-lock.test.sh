@@ -53,7 +53,7 @@ kill -0 "$hung" 2>/dev/null && bad "the hung run is still running" || ok "a hung
 # the program is left running.
 sleep 300 & stranger=$!
 ci_lock_try "$L" "$stranger" old
-echo "Mon Jan  1 00:00:00 2001" > "$L/started"
+echo "Mon Jan  1 00:00:00 2001" | tee "$L/started" > "$L/started-utc"
 CI_LOCK_MAX_AGE_SEC=-1 ci_lock_takeover "$L" 2>/dev/null
 kill -0 "$stranger" 2>/dev/null && ok "a reused pid's program is not stopped" || bad "a reused pid's program was stopped"
 [ -d "$L" ] && bad "a lock with a reused pid stayed" || ok "a lock with a reused pid is freed"
@@ -63,7 +63,7 @@ kill "$stranger" 2>/dev/null; wait "$stranger" 2>/dev/null
 sleep 300 & old=$!
 for started in missing empty; do
   ci_lock_try "$L" "$old" old
-  if [ "$started" = missing ]; then rm "$L/started"; else : > "$L/started"; fi
+  rm "$L/started-utc"; if [ "$started" = missing ]; then rm "$L/started"; else : > "$L/started"; fi
   ci_lock_takeover "$L"
   [ -d "$L" ] && ok "a live owner's lock with $started start time stays" || bad "a live owner's lock with $started start time was taken"
   rm -rf "$L"
@@ -76,10 +76,15 @@ TZ=Asia/Tokyo ci_lock_takeover "$L"
 ci_lock_release "$L" tz
 # A lane on an older branch still writes its start time in local time.
 ci_lock_try "$L" "$$" local
-TZ=Asia/Tokyo ps -o lstart= -p "$$" > "$L/started"
+TZ=Asia/Tokyo ps -o lstart= -p "$$" > "$L/started"; rm "$L/started-utc"
 TZ=Asia/Tokyo ci_lock_takeover "$L"
 [ -d "$L" ] && ok "an older lane's local start time still names its live owner" || bad "an older lane's live lock was taken"
 ci_lock_release "$L" local
+# The other way round: an older lane's waiter compares its own plain ps with the started file.
+TZ=America/Denver ci_lock_try "$L" "$$" newer
+[ "$(TZ=America/Denver ps -o lstart= -p "$$")" = "$(cat "$L/started")" ] \
+  && ok "an older lane's waiter reads a newer lane's live lock as live" || bad "an older lane's waiter would take a newer lane's live lock"
+ci_lock_release "$L" newer
 
 # While one takeover is in progress another backs off.
 mkdir "$L.takeover"
