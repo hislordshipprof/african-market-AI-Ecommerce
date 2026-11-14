@@ -118,7 +118,7 @@ const payoutData = new Map<string, FakePayoutData>();
 const loginLinksCreated: string[] = [];
 let nextPayoutsFailure: string | null = null;
 
-/** Every account has the default fixture until a test sets its own. */
+/** Every account has the default fixture. */
 function payoutsOf(accountId: string): FakePayoutData {
   if (nextPayoutsFailure) {
     const message = nextPayoutsFailure;
@@ -131,10 +131,6 @@ function payoutsOf(accountId: string): FakePayoutData {
     payoutData.set(accountId, data);
   }
   return data;
-}
-
-function setFakePayouts(accountId: string, data: FakePayoutData) {
-  payoutData.set(accountId, data);
 }
 
 function setNextPayoutsFailure(message: string) {
@@ -695,4 +691,4 @@ function storeFundedRefundCents(paymentIntentId: string): number {
   return (refundedPayments.get(paymentIntentId) ?? 0) - (feeRefunded.get(paymentIntentId) ?? 0) - parts;
 }
 
-export { setFakePayouts, setNextPayoutsFailure, loginLinksCreated, FakeStripeError, feeRefundParts, storeFundedRefundCents, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
+export { setNextPayoutsFailure, loginLinksCreated, FakeStripeError, feeRefundParts, storeFundedRefundCents, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
