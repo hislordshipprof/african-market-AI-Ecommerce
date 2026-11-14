@@ -19,13 +19,16 @@ import {
   AUTH_SUBMIT,
   AuthError,
   BackArrow,
+  BackupCodesNotice,
   CopyRow,
   NETWORK_ERROR,
   PasswordInput,
   TOTP_ERRORS,
   authErrorMessage,
   fieldValue,
+  NOT_READY_LABEL,
   focusField,
+  missingField,
   totpDigits,
   useHydrated,
 } from "../auth-form-parts";
@@ -73,9 +76,15 @@ export default function Enroll2FA() {
   const [loading, setLoading] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
 
   async function startEnrollment(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const missing = missingField([[PASSWORD_ID, "Enter your current password."]]);
+    if (missing) {
+      setError(missing);
+      return;
+    }
     const password = fieldValue(e.currentTarget, PASSWORD_ID);
     setEnrolling(true);
     setError("");
@@ -96,6 +105,7 @@ export default function Enroll2FA() {
       const data = result.data;
       if (data && "totpURI" in data) {
         setTotpUri(data.totpURI ?? null);
+        setBackupCodes(data.backupCodes ?? []);
       }
     } catch {
       setError(NETWORK_ERROR);
@@ -107,6 +117,11 @@ export default function Enroll2FA() {
 
   async function verifyCode(e: React.FormEvent) {
     e.preventDefault();
+    if (code.length !== 6) {
+      setError(`${AUTH_CODE_HINT}.`);
+      focusField(CODE_ID);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -117,9 +132,11 @@ export default function Enroll2FA() {
         setError(authErrorMessage(result.error, ENROLL_CODE_ERRORS, "Invalid code"));
         setLoading(false);
         focusField(CODE_ID);
+      } else if (backupCodes.length === 0) {
+        router.push("/admin/stores");
       } else {
         setVerified(true);
-        router.push("/admin/stores");
+        setLoading(false);
       }
     } catch {
       setError(NETWORK_ERROR);
@@ -136,10 +153,12 @@ export default function Enroll2FA() {
     <StorySurface>
       <StoryCard className="gap-5 py-6">
         <CardHeader className="px-6 sm:px-8">
-          <Link id={BACK_ID} href="/admin/sign-in" className={AUTH_BACK}>
-            <BackArrow />
-            Back to sign in
-          </Link>
+          {!verified && (
+            <Link id={BACK_ID} href="/admin/sign-in" className={AUTH_BACK}>
+              <BackArrow />
+              Back to sign in
+            </Link>
+          )}
           <h1 className="font-display text-[1.75rem] leading-tight font-bold text-balance">
             Set up <span className="whitespace-nowrap">two-factor</span>
           </h1>
@@ -152,7 +171,7 @@ export default function Enroll2FA() {
 
         <CardContent className="px-6 sm:px-8">
           {!totpUri && (
-            <form onSubmit={startEnrollment} className="flex flex-col gap-4">
+            <form onSubmit={startEnrollment} noValidate className="flex flex-col gap-4">
               {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={PASSWORD_ID}>Current password</Label>
@@ -164,12 +183,24 @@ export default function Enroll2FA() {
                 />
               </div>
               <Button type="submit" disabled={enrolling || !hydrated} className={AUTH_SUBMIT}>
-                {enrolling ? "Setting up..." : "Begin setup"}
+                {!hydrated ? NOT_READY_LABEL : enrolling ? "Setting up..." : "Begin setup"}
               </Button>
             </form>
           )}
 
-          {totpUri && (
+          {verified && (
+            <div className="flex flex-col gap-4">
+              <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
+                Two-factor is on.
+              </p>
+              <BackupCodesNotice codes={backupCodes} />
+              <Button type="button" onClick={() => router.push("/admin/stores")} className={AUTH_SUBMIT}>
+                I&apos;ve saved them. Continue
+              </Button>
+            </div>
+          )}
+
+          {totpUri && !verified && (
             <div className="flex flex-col gap-5">
               <section className="flex flex-col gap-3">
                 <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
@@ -211,7 +242,7 @@ export default function Enroll2FA() {
                 )}
               </section>
 
-              <form onSubmit={verifyCode} className="flex flex-col gap-3">
+              <form onSubmit={verifyCode} noValidate className="flex flex-col gap-3">
                 <p className="text-base font-medium">
                   2. Enter the 6-digit code the app shows for {AUTHENTICATOR_ENTRY}. You&apos;ll use a new one
                   each time you sign in.
@@ -235,11 +266,7 @@ export default function Enroll2FA() {
                   />
                 </div>
                 <Button type="submit" disabled={loading} className={AUTH_SUBMIT}>
-                  {verified
-                    ? "Two-factor is on"
-                    : loading
-                      ? "Verifying..."
-                      : "Verify and continue"}
+                  {loading ? "Verifying..." : "Verify and continue"}
                 </Button>
               </form>
             </div>
