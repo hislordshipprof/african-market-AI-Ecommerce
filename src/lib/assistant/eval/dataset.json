@@ -7909,7 +7909,14 @@
     ],
     "mustHave": [],
     "mayHave": [],
-    "gaps": [],
+    "gaps": [
+      {
+        "key": "calabash-nutmeg",
+        "mention": [
+          "nutmeg"
+        ]
+      }
+    ],
     "excluded": [
       "calabash-nutmeg"
     ]

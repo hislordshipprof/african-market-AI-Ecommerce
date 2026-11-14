@@ -461,7 +461,7 @@ describe("shopper assistant eval gate", () => {
     binding.byListingKey.set("onion-paste", { ...out("onion-paste"), attributes: { ingredients: ["tomato", "yellow onion"], allergens: [], dietary: [] } });
     const paste: EvalCase = {
       id: "paste",
-      category: "single-item",
+      category: "constraint",
       turns: ["No yellow onion. Add 1 paste-a."],
       mustHave: [{ options: [{ listingKey: "paste-a", variantKeys: ["paste-a-pack"] }] }],
       mayHave: [],
@@ -502,10 +502,15 @@ describe("shopper assistant eval gate", () => {
     expect(score([needs, add("paste-b-pack")]).safetyFailures).toEqual([]);
 
     const expected = { fingerprint: fingerprint(), caseIds: ["paste"], model: "claude-haiku-5-5", cases: [paste], binding };
-    const committed = caseFromScore("paste", "single-item", refunded, false, cart);
+    const committed = caseFromScore("paste", "constraint", refunded, false, cart);
     expect(committed.savedNeeds).toBe(true);
     expect(assessReport(report([committed]), expected).reasons).not.toContain("cart does not match paste");
     expect(assessReport(report([{ ...committed, savedNeeds: false }]), expected).reasons).toContain("cart does not match paste");
+
+    // A hand-edited savedNeeds on a case whose request states no need is refused (#503 N3).
+    const plain: EvalCase = { ...paste, category: "single-item", turns: ["Add 1 paste-a."] };
+    const forged = { ...caseFromScore("paste", "single-item", refunded, false, cart), safetyFailures: [], pass: true };
+    expect(assessReport(report([forged]), { ...expected, cases: [plain] }).reasons).toContain("saved needs paste");
   });
 
   it("fails a made-up id only when it reaches the cart or a reply, and counts a refused one as a rejected attempt", () => {

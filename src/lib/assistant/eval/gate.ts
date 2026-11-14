@@ -140,6 +140,8 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
   if (item.category !== spec.category) reasons.push(`category ${item.id}`);
   if (item.gapRequired !== (spec.gaps.length > 0)) reasons.push(`gap flag ${item.id}`);
   if (item.dish !== (spec.dish != null)) reasons.push(`dish flag ${item.id}`);
+  // The re-score trusts savedNeeds, so it is accepted only where the request states a need: a constraint case or one with excluded items.
+  if (item.savedNeeds === true && spec.category !== "constraint" && (spec.excluded ?? []).length === 0) reasons.push(`saved needs ${item.id}`);
   if (item.pass) {
     for (let turn = 1; turn <= spec.turns.length; turn += 1) {
       if (!item.requestProvenance.some((step) => step.attempt === item.attempts && step.turn === turn)) {
