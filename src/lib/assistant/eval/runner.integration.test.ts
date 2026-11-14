@@ -185,6 +185,46 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(failed?.ungroundedAmountsShown).toEqual([]);
   }, 90_000);
 
+  it("signs a my-usual case in with its own past orders, so get_order_status shows only that customer's lines at store A", async () => {
+    const listings = [
+      listing("garri", "garri-white", "A", 499),
+      listing("beans", "beans-brown", "A", 599),
+      listing("yam", "yam-white-puna", "B", 899),
+    ];
+    const usual = evalCase({
+      id: "my-usual",
+      category: "single-item",
+      turns: ["Add my usual order again."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+      excluded: ["beans"],
+      pastOrders: [
+        { store: "A", customer: "self", lines: [{ listingKey: "garri", variantKey: "garri-pack", qty: 2 }] },
+        { store: "A", customer: "other", lines: [{ listingKey: "beans", variantKey: "beans-pack", qty: 1 }] },
+        { store: "B", customer: "self", lines: [{ listingKey: "yam", variantKey: "yam-pack", qty: 1 }] },
+      ],
+    });
+    const traceDir = mkdtempSync(join(tmpdir(), "eval-trace-"));
+    let ids: Record<string, string> = {};
+    // The script only reads the orders and adds nothing, so the case fails and its trace is kept to inspect.
+    const result = await run([usual], listings, (ctx) => scripted(ctx, (current) => {
+      ids = Object.fromEntries(["garri-pack", "beans-pack", "yam-pack"].map((key) => [key, current.binding.byVariantKey.get(key)?.id ?? ""]));
+      return steps([
+        { kind: "tool", toolName: "get_order_status", toolInput: {} },
+        { kind: "text", text: "Your last order had garri." },
+      ]);
+    }), { traceDir });
+    expect(result.result.cases[0]?.pass).toBe(false);
+    const trace = readFileSync(join(traceDir, "trace-my-usual.json"), "utf8");
+    expect(trace).toContain(ids["garri-pack"]);
+    expect(trace).not.toContain(ids["beans-pack"]);
+    expect(trace).not.toContain(ids["yam-pack"]);
+    expect(trace).not.toContain("sign_in_required");
+    // The fixture stores, their orders and customers are gone.
+    expect(await platformAdmin.store.count({ where: { slug: { in: [result.stores?.slugA ?? "", result.stores?.slugB ?? ""] } } })).toBe(0);
+  }, 90_000);
+
   it("reads evidence as app_runtime and denies another store read and write", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
     const result = await run([evalCase({

@@ -123,15 +123,14 @@ export function acceptanceForTurn(
   };
 }
 
-const RETURNED_LISTING_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes"]);
+const RETURNED_LISTING_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes", "get_order_status"]);
 
 function returnedListingIds(message: ShownMessage): string[] {
   const ids = new Set<string>();
   for (const part of message.parts) {
     const name = toolNameOf(part);
     if (!name || !RETURNED_LISTING_TOOLS.has(name) || !outputOk(part.output)) continue;
-    const body = part.output as { items?: unknown; cards?: unknown };
-    for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+    for (const row of returnedRows(part.output)) {
       const listingId = (row as { listingId?: unknown }).listingId;
       if (typeof listingId === "string") ids.add(listingId);
     }
@@ -149,7 +148,7 @@ export function replyCountsAsEmpty(message: ShownMessage): boolean {
   });
 }
 
-const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products"]);
+const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes", "get_order_status"]);
 const SHOWN_ID_LIMIT = 60;
 
 /**
@@ -163,8 +162,7 @@ export function shownProductIds(messages: readonly ShownMessage[]): string[] {
     for (const part of message.parts) {
       const name = toolNameOf(part);
       if (!name || !SHOWN_ID_TOOLS.has(name) || !outputOk(part.output)) continue;
-      const body = part.output as { items?: unknown; cards?: unknown };
-      for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+      for (const row of returnedRows(part.output)) {
         const product = row as { name?: unknown; packLabel?: unknown; variantId?: unknown; variants?: unknown };
         if (typeof product.name !== "string") continue;
         const variants = Array.isArray(product.variants)
@@ -180,6 +178,13 @@ export function shownProductIds(messages: readonly ShownMessage[]): string[] {
     }
   }
   return [...rows.values()].slice(-SHOWN_ID_LIMIT);
+}
+
+/** Product rows a tool returned: search items, cards, and the lines of past orders ("my usual"). */
+function returnedRows(output: unknown): object[] {
+  const body = output as { items?: unknown; cards?: unknown; orders?: unknown };
+  const lines = arrayOf(body.orders).flatMap((order) => arrayOf((order as { lines?: unknown }).lines));
+  return [...arrayOf(body.items), ...arrayOf(body.cards), ...lines];
 }
 
 function arrayOf(value: unknown): object[] {

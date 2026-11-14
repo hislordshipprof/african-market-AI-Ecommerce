@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 import { storeScoped } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
-import { hasConstraints, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
+import { hasConstraints, haveAtHomeCovers, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
 import type { ShopperNeed } from "../../catalog/attributes";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
@@ -84,7 +84,9 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
   const notCarried: string[] = [];
   const excluded: string[] = [];
   const need = hasConstraints(constraints) ? shopperNeed(constraints) : null;
-  const found = await Promise.all(recipe.ingredients.map(async (ingredient) => ({
+  const atHome = (name: string) => constraints.haveAtHome.some((term) => haveAtHomeCovers(term, name));
+  const haveAtHome = recipe.ingredients.filter((ingredient) => atHome(ingredient.name)).map((ingredient) => ingredient.name);
+  const found = await Promise.all(recipe.ingredients.filter((ingredient) => !atHome(ingredient.name)).map(async (ingredient) => ({
     ingredient,
     fits: await searchFits(storeId, ingredient.name, need),
     master: ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null,
@@ -130,7 +132,13 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
     if (backup) placed.backupVariantId = backup.variantId;
     lowOrOut.push(placed);
   }
-  return { inStock, lowOrOut, notCarried, ...(excluded.length > 0 ? { excluded } : {}) };
+  return {
+    inStock,
+    lowOrOut,
+    notCarried,
+    ...(excluded.length > 0 ? { excluded } : {}),
+    ...(haveAtHome.length > 0 ? { haveAtHome } : {}),
+  };
 }
 
 /** The chat saves only its own steps' cost, so the lookup adds its own to the conversation. */

@@ -14,7 +14,9 @@ import {
   deleteOwnedStores,
   sweepAbandonedEvalStores,
   writeLease,
+  signInEvalShopper,
   type CreatedEvalStores,
+  type EvalShopper,
 } from "./fixture-store";
 import { recordingFetch, type RecordedExchange } from "./recording-fetch";
 import { canonicalJson } from "./canonical";
@@ -356,7 +358,9 @@ async function oneAttempt(
   let steps = 0;
   const provenance: CaseResult["requestProvenance"] = [];
   const observed: TextBlock[] = [];
+  let shopper: EvalShopper | null = null;
   try {
+  if (evalCase.pastOrders) shopper = await signInEvalShopper(stores, evalCase.pastOrders);
   const inner = await options.fetchForAttempt({ caseId: evalCase.id, attempt, binding, stores });
   const fetchImpl = recordingFetch(inner, exchanges);
   const handler = createChatHandler({
@@ -369,7 +373,7 @@ async function oneAttempt(
     const started = exchanges.length;
     const messageId = `e${randomBytes(8).toString("hex")}`;
     const turnStarted = performance.now();
-    const response = await handler(requestFor(stores.slugA, evalCase.turns[turn] ?? "", messageId, ip, cookie));
+    const response = await handler(requestFor(stores.slugA, evalCase.turns[turn] ?? "", messageId, ip, cookie, shopper?.cookie));
     const bodyText = await response.text();
     options.onTurnMs?.(performance.now() - turnStarted);
     await Promise.all(exchanges.slice(started).map((exchange) => exchange.done));
@@ -500,6 +504,8 @@ async function oneAttempt(
       inputTokens: money.inputTokens,
       outputTokens: money.outputTokens,
     };
+  } finally {
+    await shopper?.remove().catch((error) => console.error("[eval] shopper cleanup failed", error));
   }
 }
 
@@ -882,7 +888,8 @@ async function waitStrips(storeId: string, conversationId: string, timeoutMs: nu
   return null;
 }
 
-function requestFor(slug: string, text: string, id: string, ip: string, cookie: string | null): Request {
+function requestFor(slug: string, text: string, id: string, ip: string, cookie: string | null, session?: string): Request {
+  const cookies = [...(cookie ? [`cart_id=${encodeURIComponent(cookie)}`] : []), ...(session ? [session] : [])];
   return new Request("http://golden-eval.test/api/assistant/chat", {
     method: "POST",
     headers: {
@@ -891,7 +898,7 @@ function requestFor(slug: string, text: string, id: string, ip: string, cookie: 
       origin: "http://golden-eval.test",
       "x-store-slug": slug,
       "x-forwarded-for": ip,
-      ...(cookie ? { cookie: `cart_id=${encodeURIComponent(cookie)}` } : {}),
+      ...(cookies.length > 0 ? { cookie: cookies.join("; ") } : {}),
     },
     body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
   });

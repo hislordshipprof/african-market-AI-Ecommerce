@@ -7943,5 +7943,301 @@
         "max": 1
       }
     ]
+  },
+  {
+    "id": "extras-what-is-iru",
+    "category": "helpful-extras",
+    "turns": [
+      "What is iru, and how do I use it?"
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "mention": [
+          "locust bean"
+        ]
+      }
+    ],
+    "excluded": [
+      "dawadawa-dried"
+    ]
+  },
+  {
+    "id": "extras-out-of-stock-swap",
+    "category": "helpful-extras",
+    "turns": [
+      "Add 1 Scotch bonnet pepper for my pepper stew.",
+      "Yes, keep that as the backup."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "pepper-scotch-bonnet",
+            "variantKeys": [
+              "pepper-scotch-bonnet-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKey": "pepper-scotch-bonnet-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "swapRule": {
+      "listingKey": "pepper-scotch-bonnet",
+      "allowed": [
+        "named_substitute"
+      ]
+    }
+  },
+  {
+    "id": "extras-my-usual",
+    "category": "helpful-extras",
+    "turns": [
+      "Add my usual order again."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "listingKey": "egusi-ground",
+            "variantKeys": [
+              "egusi-ground-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 2,
+        "max": 2
+      },
+      {
+        "listingKey": "egusi-ground",
+        "variantKey": "egusi-ground-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "excluded": [
+      "stockfish-cut"
+    ],
+    "pastOrders": [
+      {
+        "store": "A",
+        "customer": "self",
+        "lines": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKey": "rice-ofada-pack",
+            "qty": 2
+          },
+          {
+            "listingKey": "egusi-ground",
+            "variantKey": "egusi-ground-pack",
+            "qty": 1
+          }
+        ]
+      },
+      {
+        "store": "A",
+        "customer": "other",
+        "lines": [
+          {
+            "listingKey": "stockfish-cut",
+            "variantKey": "stockfish-cut-pack",
+            "qty": 1
+          }
+        ]
+      },
+      {
+        "store": "B",
+        "customer": "self",
+        "lines": [
+          {
+            "listingKey": "groundnut-oil",
+            "variantKey": "groundnut-oil-pack",
+            "qty": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "extras-budget",
+    "category": "helpful-extras",
+    "turns": [
+      "Keep my cart under $10. Add 1 Ofada rice and 1 dawadawa."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "rice-ofada",
+            "variantKeys": [
+              "rice-ofada-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "dawadawa-dried",
+        "mention": [
+          "budget",
+          "$10"
+        ]
+      }
+    ],
+    "qty": [
+      {
+        "listingKey": "rice-ofada",
+        "variantKey": "rice-ofada-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "excluded": [
+      "dawadawa-dried"
+    ]
+  },
+  {
+    "id": "extras-already-have",
+    "category": "helpful-extras",
+    "turns": [
+      "I already have rice at home.",
+      "Jollof rice for 6 people.",
+      "Yes, add those."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-gino",
+            "variantKeys": [
+              "tomato-paste-gino-pack"
+            ]
+          },
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [
+      {
+        "listingKey": "pepper-scotch-bonnet",
+        "variantKeys": [
+          "pepper-scotch-bonnet-pack"
+        ]
+      },
+      {
+        "listingKey": "pepper-tatashe",
+        "variantKeys": [
+          "pepper-tatashe-pack"
+        ]
+      },
+      {
+        "listingKey": "ground-hot-pepper",
+        "variantKeys": [
+          "ground-hot-pepper-pack"
+        ]
+      },
+      {
+        "listingKey": "cameroon-pepper",
+        "variantKeys": [
+          "cameroon-pepper-pack"
+        ]
+      },
+      {
+        "listingKey": "thyme-dried",
+        "variantKeys": [
+          "thyme-dried-pack"
+        ]
+      },
+      {
+        "listingKey": "curry-powder-nigerian",
+        "variantKeys": [
+          "curry-powder-nigerian-pack"
+        ]
+      },
+      {
+        "listingKey": "maggi-star-cubes",
+        "variantKeys": [
+          "maggi-star-cubes-pack"
+        ]
+      },
+      {
+        "listingKey": "knorr-chicken-cubes",
+        "variantKeys": [
+          "knorr-chicken-cubes-pack"
+        ]
+      },
+      {
+        "listingKey": "maggi-crayfish-cubes",
+        "variantKeys": [
+          "maggi-crayfish-cubes-pack"
+        ]
+      },
+      {
+        "listingKey": "palm-oil-red",
+        "variantKeys": [
+          "palm-oil-red-pack"
+        ]
+      },
+      {
+        "listingKey": "palm-oil-bleached-ofada",
+        "variantKeys": [
+          "palm-oil-bleached-ofada-pack"
+        ]
+      },
+      {
+        "listingKey": "palm-kernel-oil",
+        "variantKeys": [
+          "palm-kernel-oil-pack"
+        ]
+      },
+      {
+        "listingKey": "gino-pepper-onion-paste",
+        "variantKeys": [
+          "gino-pepper-onion-paste-pack"
+        ]
+      }
+    ],
+    "gaps": [],
+    "addsFromTurn": 3,
+    "excluded": [
+      "rice-parboiled-long-grain",
+      "rice-ofada"
+    ]
   }
 ]

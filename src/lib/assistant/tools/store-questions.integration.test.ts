@@ -146,6 +146,60 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
     expect(JSON.stringify(logged)).not.toContain("sq-token-");
   });
 
+  it("my usual: get_order_status gives the customer's own lines in this store with current variant ids, never another store's or customer's", async () => {
+    const order = (number: number, customerId: string, storeId: string) => ({
+      storeId, number, customerId, status: "COMPLETED", fulfillment: "pickup", subtotalCents: 500, bufferCents: 50,
+      totalAuthorizedCents: 550, totalCents: 500, trackingToken: `sq-usual-${number}-${suffix}`,
+    });
+    const bobA = await storeScoped(storeA).customer.findFirstOrThrow({ where: { userId: bob } });
+    const aliceB = await storeScoped(storeB).customer.findFirstOrThrow({ where: { userId: alice } });
+    const stockfish = await storeScoped(storeA).listing.create({
+      data: { storeId: storeA, customName: "Stockfish", price: 1500, stockMode: "unlimited", variants: { create: { label: "Cut", price: 1500, weightG: 300 } } },
+      include: { variants: true },
+    });
+    const palmB = await storeScoped(storeB).listing.create({
+      data: { storeId: storeB, customName: "Palm oil", price: 700, stockMode: "unlimited", variants: { create: { label: "1 L", price: 700, weightG: 900 } } },
+      include: { variants: true },
+    });
+    const bobOrder = await storeScoped(storeA).order.create({ data: order(1501, bobA.id, storeA) });
+    await storeScoped(storeA).orderLine.create({
+      data: { storeId: storeA, orderId: bobOrder.id, listingVariantId: stockfish.variants[0].id, qtyOrdered: 1, unitPriceCents: 1500 },
+    });
+    const aliceOrderB = await storeScoped(storeB).order.create({ data: order(2501, aliceB.id, storeB) });
+    await storeScoped(storeB).orderLine.create({
+      data: { storeId: storeB, orderId: aliceOrderB.id, listingVariantId: palmB.variants[0].id, qtyOrdered: 3, unitPriceCents: 700 },
+    });
+    const egusi = await storeScoped(storeA).listing.findFirstOrThrow({ where: { customName: "Egusi" }, include: { variants: true } });
+    const aliceCart = async (storeId: string) => {
+      const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "ai", userId: alice } });
+      const talk = await storeScoped(storeId).aiConversation.create({ data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] } });
+      return { storeId, cartId: cart.id, conversationId: talk.id, actorUserId: alice };
+    };
+    const inStoreA = await aliceCart(storeA);
+    const inStoreB = await aliceCart(storeB);
+
+    const usual = await runner({ actorUserId: alice })("get_order_status", {});
+    expect(usual).toMatchObject({
+      ok: true,
+      orders: [{ number: 1001, lines: [{ name: "Egusi", qty: 2, listingId: egusi.id, variantId: egusi.variants[0].id, mayBeUnavailable: false }] }],
+    });
+    const seen = JSON.stringify(usual);
+    expect(seen).not.toContain(stockfish.variants[0].id);
+    expect(seen).not.toContain(palmB.variants[0].id);
+
+    // Reordering adds those lines to this store's cart.
+    const reordered = await runner(inStoreA)("add_to_cart", { items: [{ variant_id: egusi.variants[0].id, qty: 2 }] });
+    expect(reordered, JSON.stringify(reordered)).toMatchObject({ ok: true, added: 2 });
+
+    const inB = await runner(inStoreB)("get_order_status", {});
+    expect(inB).toMatchObject({ ok: true, orders: [{ number: 2501, lines: [{ name: "Palm oil", variantId: palmB.variants[0].id }] }] });
+    expect(JSON.stringify(inB)).not.toContain(egusi.variants[0].id);
+    // Store A's variant cannot reach store B's cart.
+    expect(await runner(inStoreB)("add_to_cart", { items: [{ variant_id: egusi.variants[0].id, qty: 1 }] }))
+      .toMatchObject({ ok: false, code: "variant_not_found" });
+    expect(JSON.stringify(await runner({ actorUserId: bob })("get_order_status", {}))).not.toContain(egusi.variants[0].id);
+  });
+
   it("check_delivery_area compares the geocoded address with the store's radius, signed out", async () => {
     setAddressProvider(fakeAddressBackend());
     const run = runner({ actorUserId: null });

@@ -9,6 +9,7 @@ import {
   type EvalCategory,
   type MustGroup,
   type PackRef,
+  type PastOrder,
 } from "./types";
 
 export const DATASET_PATH = join(process.cwd(), "src/lib/assistant/eval/dataset.json");
@@ -77,6 +78,7 @@ function parseCase(raw: unknown, index: number): EvalCase {
   const swapRule = parseSwap(record.swapRule, id);
   const excluded = parseExcluded(record.excluded, id);
   const dish = parseDish(record.dish, id);
+  const pastOrders = parsePastOrders(record.pastOrders, id);
   if ((record.category === "recipe-to-cart") !== (dish != null)) {
     throw new Error(`Eval case ${id} must be a dish case exactly when it is recipe-to-cart.`);
   }
@@ -102,7 +104,25 @@ function parseCase(raw: unknown, index: number): EvalCase {
     ...(addsFromTurn != null ? { addsFromTurn } : {}),
     ...(excluded.length > 0 ? { excluded } : {}),
     ...(dish ? { dish } : {}),
+    ...(pastOrders.length > 0 ? { pastOrders } : {}),
   };
+}
+
+function parsePastOrders(raw: unknown, id: string): PastOrder[] {
+  if (raw == null) return [];
+  const malformed = () => new Error(`Eval case ${id} has a malformed past order.`);
+  if (!Array.isArray(raw) || raw.length === 0) throw malformed();
+  return raw.map((order) => {
+    const record = (order ?? {}) as Record<string, unknown>;
+    if ((record.store !== "A" && record.store !== "B") || (record.customer !== "self" && record.customer !== "other")
+      || !Array.isArray(record.lines) || record.lines.length === 0) throw malformed();
+    const lines = record.lines.map((line) => {
+      const row = (line ?? {}) as Record<string, unknown>;
+      if (typeof row.listingKey !== "string" || typeof row.variantKey !== "string" || !Number.isInteger(row.qty) || (row.qty as number) < 1) throw malformed();
+      return { listingKey: row.listingKey, variantKey: row.variantKey, qty: row.qty as number };
+    });
+    return { store: record.store, customer: record.customer, lines };
+  });
 }
 
 function parseExcluded(raw: unknown, id: string): string[] {
@@ -230,6 +250,14 @@ function assertKeys(item: EvalCase, fixture: CatalogFixture, allowOverlap: boole
       const listing = known.get(key);
       if (!listing || listing.store !== "A" || !listing.active) throw new Error(`Eval case ${item.id} has core item ${key} that store A does not sell.`);
       if (item.excluded?.includes(key)) throw new Error(`Eval case ${item.id} both requires and excludes ${key}.`);
+    }
+  }
+  for (const order of item.pastOrders ?? []) {
+    for (const line of order.lines) {
+      const listing = known.get(line.listingKey);
+      if (!listing || listing.store !== order.store || !listing.variants.some((variant) => variant.key === line.variantKey)) {
+        throw new Error(`Eval case ${item.id} has a past order line ${line.variantKey} that store ${order.store} does not sell.`);
+      }
     }
   }
   const gapKeys = new Set(item.gaps.flatMap((gap) => (gap.key ? [gap.key] : [])));
