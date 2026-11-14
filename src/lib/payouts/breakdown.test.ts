@@ -39,6 +39,12 @@ describe("payoutBreakdown", () => {
     expect(result.otherCents).toBe(0);
   });
 
+  it("takes the amount from Stripe's payment when the order never recorded its capture", () => {
+    const unrecorded = orders.map((o) => (o.number === 101 ? { ...o, capturedAmountCents: null } : o));
+    const result = payoutBreakdown(first.amountCents, data.transactions.get(first.id)!, unrecorded);
+    expect(result.rows[0]).toMatchObject({ goodsCents: 5000 - 150 - 300, netCents: 4679 - 1000 });
+  });
+
   it("puts activity with no order of this store under other, so the total still matches", () => {
     const txns = [
       ...data.transactions.get(first.id)!,

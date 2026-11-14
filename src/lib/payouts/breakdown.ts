@@ -50,7 +50,8 @@ export function payoutBreakdown(
       goodsCents: 0, tipCents: 0, taxCents: 0, cardFeeCents: 0, refundsCents: 0, netCents: 0,
     };
     if (txn.type === "payment" && !row.paidInPayout) {
-      const captured = order.capturedAmountCents ?? 0;
+      // A destination charge lands at its full captured amount, so it stands in when capture was never recorded.
+      const captured = order.capturedAmountCents ?? txn.amountCents;
       const split = capturedPayout({ ...order, capturedAmountCents: captured });
       // Orders carry no sales tax until Stripe Tax is on (ADR-0008); goods keep a store delivery fee.
       row.paidInPayout = true;
