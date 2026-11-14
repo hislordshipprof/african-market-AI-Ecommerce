@@ -729,26 +729,17 @@ export async function findOrphanedAuthorizedOrders(opts?: {
 }): Promise<Array<{ id: string; storeId: string }>> {
   if (opts?.storeIds && opts.storeIds.length === 0) return [];
   const cutoff = new Date(Date.now() - 60_000);
-  const storeIds = opts?.storeIds;
+  const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
-    const rows = storeIds
-      ? await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-          SELECT id, store_id FROM orders
-          WHERE status = 'AUTHORIZED'
-            AND inngest_event_sent_at IS NULL
-            AND created_at < ${cutoff}
-            AND store_id IN (${Prisma.join(storeIds)})
-          ORDER BY created_at ASC
-          LIMIT 50
-        `
-      : await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-          SELECT id, store_id FROM orders
-          WHERE status = 'AUTHORIZED'
-            AND inngest_event_sent_at IS NULL
-            AND created_at < ${cutoff}
-          ORDER BY created_at ASC
-          LIMIT 50
-        `;
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT id, store_id FROM orders
+      WHERE status = 'AUTHORIZED'
+        AND inngest_event_sent_at IS NULL
+        AND created_at < ${cutoff}
+        ${inStores}
+      ORDER BY created_at ASC
+      LIMIT 50
+    `;
     return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
   });
 }
@@ -852,34 +843,21 @@ export async function findPendingOrderNotifications(opts?: {
   if (opts?.storeIds && opts.storeIds.length === 0) return [];
   const newest = new Date(Date.now() - NOTIFICATION_RESEND_MS);
   const oldest = new Date(Date.now() - NOTIFICATION_EXPIRE_MS);
-  const storeIds = opts?.storeIds;
+  const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
-    const rows = storeIds
-      ? await tx.$queryRaw<Array<{ store_id: string; order_id: string; event: string }>>`
-          SELECT store_id, order_id, event FROM (
-            SELECT store_id, order_id, event, MIN(created_at) AS first_at
-            FROM notification_logs
-            WHERE status IN ('pending', 'sending')
-              AND created_at <= ${newest}
-              AND created_at > ${oldest}
-              AND store_id IN (${Prisma.join(storeIds)})
-            GROUP BY store_id, order_id, event
-          ) pending
-          ORDER BY first_at ASC
-          LIMIT 50
-        `
-      : await tx.$queryRaw<Array<{ store_id: string; order_id: string; event: string }>>`
-          SELECT store_id, order_id, event FROM (
-            SELECT store_id, order_id, event, MIN(created_at) AS first_at
-            FROM notification_logs
-            WHERE status IN ('pending', 'sending')
-              AND created_at <= ${newest}
-              AND created_at > ${oldest}
-            GROUP BY store_id, order_id, event
-          ) pending
-          ORDER BY first_at ASC
-          LIMIT 50
-        `;
+    const rows = await tx.$queryRaw<Array<{ store_id: string; order_id: string; event: string }>>`
+      SELECT store_id, order_id, event FROM (
+        SELECT store_id, order_id, event, MIN(created_at) AS first_at
+        FROM notification_logs
+        WHERE status IN ('pending', 'sending')
+          AND created_at <= ${newest}
+          AND created_at > ${oldest}
+          ${inStores}
+        GROUP BY store_id, order_id, event
+      ) pending
+      ORDER BY first_at ASC
+      LIMIT 50
+    `;
     return rows.map((row) => ({ storeId: row.store_id, orderId: row.order_id, event: row.event }));
   });
 }
@@ -889,22 +867,15 @@ export async function expireStaleOrderNotifications(opts?: {
 }): Promise<number> {
   if (opts?.storeIds && opts.storeIds.length === 0) return 0;
   const cutoff = new Date(Date.now() - NOTIFICATION_EXPIRE_MS);
-  const storeIds = opts?.storeIds;
+  const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
-    const count = storeIds
-      ? await tx.$executeRaw`
-          UPDATE notification_logs
-          SET status = 'failed', reason = 'expired', updated_at = CURRENT_TIMESTAMP
-          WHERE status IN ('pending', 'sending')
-            AND created_at <= ${cutoff}
-            AND store_id IN (${Prisma.join(storeIds)})
-        `
-      : await tx.$executeRaw`
-          UPDATE notification_logs
-          SET status = 'failed', reason = 'expired', updated_at = CURRENT_TIMESTAMP
-          WHERE status IN ('pending', 'sending')
-            AND created_at <= ${cutoff}
-        `;
+    const count = await tx.$executeRaw`
+      UPDATE notification_logs
+      SET status = 'failed', reason = 'expired', updated_at = CURRENT_TIMESTAMP
+      WHERE status IN ('pending', 'sending')
+        AND created_at <= ${cutoff}
+        ${inStores}
+    `;
     return typeof count === "number" ? count : 0;
   });
 }
