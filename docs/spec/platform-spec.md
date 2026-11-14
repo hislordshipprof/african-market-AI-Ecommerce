@@ -169,6 +169,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ## 7. Platform admin console
 - Tenants: create, suspend, plan/billing, settings override.
 - Master catalog: products, synonyms (by language), images, recipes, category tree; merge duplicates proposed by AI.
+  - Built (#540): the product list (`/admin/catalog/products`: catalog search, filters, paging) and editor (fields, status, photo upload to WebP). A product is archived, never deleted; every save is audited and refreshes the storefronts that list it. A save from an editor opened before someone else's save is refused with a reload message.
 - Orders & disputes across tenants; manual refund; courier incident log.
 - Courier config: provider priorities, failover timeout, per-metro settings. As built (#535): `/admin/settings/couriers` sets, platform-wide, the selection mode (cheapest, DoorDash first, Uber first), the assignment timeout (300 to 1200 seconds, default 600), an on/off switch per courier and the courier weight limit (1 to 100 lb). Per-metro overrides wait for #577.
 - AI oversight: conversation sampling and flagged answers at `/admin/ai/conversations` (#544): a daily sample per store, auto-flags, transcript view with an audit row per view, and review labels; eval dashboard later.

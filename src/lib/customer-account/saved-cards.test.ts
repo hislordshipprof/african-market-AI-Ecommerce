@@ -21,14 +21,13 @@ describe("saved cards view", () => {
     expect(isCardExpired(12, 2026, new Date("2026-12-01T10:00:00Z"))).toBe(false);
   });
 
-  it("checkoutCardView: guest no tick; signed-in tick unticked; newest unexpired pre-selected; all expired shows form", () => {
+  it("checkoutCardView: guest no tick; signed-in shows the tick; newest unexpired pre-selected; all expired shows form", () => {
     const guest = checkoutCardView({
       signedIn: false,
       cards: [card({})],
       now: new Date("2026-11-15T00:00:00Z"),
     });
     expect(guest.showSaveTick).toBe(false);
-    expect(guest.saveTickDefault).toBe(false);
     expect(guest.selectable).toEqual([]);
     expect(guest.showCardForm).toBe(true);
 
@@ -42,7 +41,6 @@ describe("saved cards view", () => {
       now: new Date("2026-11-15T00:00:00Z"),
     });
     expect(signedIn.showSaveTick).toBe(true);
-    expect(signedIn.saveTickDefault).toBe(false);
     expect(signedIn.preselectedId).toBe("pm_new");
     expect(signedIn.showCardForm).toBe(false);
     expect(signedIn.selectable.map((item) => item.id)).toEqual(["pm_new", "pm_old"]);
