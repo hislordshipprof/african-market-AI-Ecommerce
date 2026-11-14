@@ -193,14 +193,10 @@ async function runChannel(
   }
   const prepared = channel.prepare(order, event, url, env);
   if (prepared.outcome !== "ready") {
-    if (prepared.outcome === "sent") {
-      await writeResult(storeId, claimed.id, "sent", null, prepared.providerMessageId);
-      return { status: "sent", reason: null };
-    }
     await writeResult(storeId, claimed.id, prepared.outcome, prepared.reason);
     return { status: prepared.outcome, reason: prepared.reason };
   }
-  const result = await channel.send(prepared.message, { idempotencyKey: `notif_${claimed.id}` });
+  const result = await channel.send(prepared.message, { idempotencyKey: `notif_${claimed.id}` }, env);
   await writeResult(
     storeId,
     claimed.id,
@@ -209,6 +205,16 @@ async function runChannel(
     result.outcome === "sent" ? result.providerMessageId : undefined,
   );
   return { status: result.outcome, reason: result.outcome === "sent" ? null : result.reason };
+}
+
+/** Fails the rows still open for an event: one channel's, or every channel's. */
+async function markRetriesExhausted(storeId: string, orderId: string, event: string, channel?: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await tx.notificationLog.updateMany({
+      where: { orderId, event, ...(channel ? { channel } : {}), status: { in: ["pending", "sending"] } },
+      data: { status: "failed", reason: "retries_exhausted" },
+    });
+  });
 }
 
 export async function deliverOrderNotification(
@@ -239,17 +245,7 @@ export async function deliverOrderNotification(
       await step.run(channel.kind, () => runChannel(channel, order, eventName, storeId, env));
     } catch {
       log("notification_step_failed", orderId, channel.kind, "retries_exhausted");
-      await storeScopedTransaction(storeId, async (tx) => {
-        await tx.notificationLog.updateMany({
-          where: {
-            orderId,
-            event: eventName,
-            channel: channel.kind,
-            status: { in: ["pending", "sending"] },
-          },
-          data: { status: "failed", reason: "retries_exhausted" },
-        });
-      });
+      await markRetriesExhausted(storeId, orderId, eventName, channel.kind);
     }
   }
 }
@@ -260,14 +256,5 @@ export async function onNotificationFailure(event: {
 }): Promise<void> {
   const data = event.data?.event?.data;
   if (!data?.storeId || !data.orderId || !data.event) return;
-  await storeScopedTransaction(data.storeId, async (tx) => {
-    await tx.notificationLog.updateMany({
-      where: {
-        orderId: data.orderId,
-        event: data.event,
-        status: { in: ["pending", "sending"] },
-      },
-      data: { status: "failed", reason: "retries_exhausted" },
-    });
-  });
+  await markRetriesExhausted(data.storeId, data.orderId, data.event);
 }
