@@ -1716,6 +1716,13 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   });
 
   it("a file turn offers no cart tools and a scripted add_to_cart writes nothing", async () => {
+    // Every scripted tool id holds a Luhn-valid 16-digit run (4111111111111111), as a random hex id does now
+    // and then. The card scrubber must not rewrite an id into something the API rejects. The counter keeps ids unique.
+    let idCount = 0;
+    vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation((() => {
+      idCount += 1;
+      return `41111111-1111-1111-1111-${String(idCount).padStart(12, "0")}`;
+    }) as typeof globalThis.crypto.randomUUID);
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
     await storeScoped(storeId).cartLine.create({
@@ -2221,7 +2228,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     await raw.rateLimit.deleteMany({ where: { key: { in: [authKey, staleKey] } } });
     const callsAtCap = calls;
     clock = new Date(clock.getTime() + 30 * 60 * 1000);
-    const blocked = await send("quota-blocked-abcd", [photo("list.jpg")], "198.51.100.23");
+    const blocked = await send("quota-blocked-abcd", [photo("list.jpg")], runIp("198.51.100.23"));
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("retry-after")).toBeTruthy();
     expect((await blocked.json()).error.code).toBe("attachment_rate_limited");
