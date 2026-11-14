@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { SlotSchedule } from "../order/slot-schedule";
+import { getAddressProvider } from "../address/provider";
 
 /** The fields a new store row is created with: the admin form and an approved store application (#554). */
 export type NewStoreValues = {
@@ -103,4 +104,58 @@ export async function insertStore(
   });
 
   return s;
+}
+
+export function addressStamp(row: {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}): string {
+  return [row.addressLine1, row.addressLine2, row.city, row.state, row.zip]
+    .map((part) => (part ?? "").trim().toLowerCase())
+    .join("|");
+}
+
+/** Keeps the saved point while the address is unchanged; otherwise geocodes. Only store delivery needs a match. */
+export async function coordinatesForStore(
+  values: {
+    addressLine1: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    addressLine2: string | null;
+    storeDeliveryEnabled: boolean;
+  },
+  previous: {
+    addressLine1: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    lat: number | null;
+    lng: number | null;
+  } | null,
+): Promise<{ lat: number | null; lng: number | null } | { error: string }> {
+  if (
+    previous &&
+    previous.lat != null &&
+    previous.lng != null &&
+    addressStamp(values) === addressStamp(previous)
+  ) {
+    return { lat: previous.lat, lng: previous.lng };
+  }
+  if (!values.addressLine1) return { lat: null, lng: null };
+  const located = await getAddressProvider().locate({
+    line1: values.addressLine1,
+    city: values.city ?? "",
+    state: values.state ?? "",
+    zip: values.zip ?? "",
+  });
+  if (!located.ok) {
+    if (values.storeDeliveryEnabled) return { error: "We couldn't confirm that address" };
+    return { lat: null, lng: null };
+  }
+  return { lat: located.match.lat, lng: located.match.lng };
 }
