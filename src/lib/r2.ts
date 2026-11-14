@@ -155,6 +155,32 @@ export async function deleteOwnerReportPhoto(key: string): Promise<void> {
   await deleteFromProofBucket(key);
 }
 
+const LISTING_PHOTO_KEY_RE = /^listing-photos\/[a-z0-9-]+\/[a-z0-9]+\.jpg$/;
+
+/** A shelf photo for photo-to-listing (#552): private, in the proof bucket, never servable by the catalog route. */
+export function listingPhotoKey(storeId: string, photoId: string): string {
+  return `listing-photos/${storeId}/${photoId}.jpg`;
+}
+
+export function isListingPhotoKey(key: string): boolean {
+  return LISTING_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadListingPhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isListingPhotoKey(key)) throw new Error("not a listing-photo key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
+/** Removes a shelf photo no draft points at, after its insert failed. */
+export async function deleteListingPhoto(key: string): Promise<void> {
+  if (!isListingPhotoKey(key)) throw new Error("not a listing-photo key");
+  await deleteFromProofBucket(key);
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
