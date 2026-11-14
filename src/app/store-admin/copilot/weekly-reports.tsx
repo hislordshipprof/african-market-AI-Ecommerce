@@ -19,7 +19,7 @@ function Report({ report, open }: { report: WeeklyReportView; open: boolean }) {
               <p className="mt-1 text-sm text-muted-foreground">{section.empty}</p>
             ) : (
               <ul className="mt-1 flex flex-col gap-0.5 text-sm text-muted-foreground tabular-nums">
-                {section.lines.map((line) => <li key={line}>{line}</li>)}
+                {section.lines.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}
               </ul>
             )}
           </div>
