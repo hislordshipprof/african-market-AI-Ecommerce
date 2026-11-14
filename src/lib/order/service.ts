@@ -301,6 +301,13 @@ const NAMED_VARIANT = {
 
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
+  deliveries: {
+    where: { status: { not: "cancelled" } },
+    select: { provider: true, status: true, pickupReadyAt: true, courierJson: true },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+  },
   lines: {
     include: {
       substitutedVariant: NAMED_VARIANT,

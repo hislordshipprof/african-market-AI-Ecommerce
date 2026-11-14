@@ -49,6 +49,7 @@ import {
   markOutForDeliveryAction,
   markDeliveredAction,
   cancelOrderAction,
+  pushReadyTimeAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
@@ -59,6 +60,7 @@ import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
+import { CourierTiming } from "./courier-timing";
 
 const STATUS_CONFIG: Record<
   string,
@@ -290,6 +292,20 @@ export function OrderInbox({
     });
   }
 
+  function handlePushReady(orderId: string) {
+    startTransition(async () => {
+      const result = await pushReadyTimeAction(orderId);
+      if (result.ok) {
+        const when = new Date(result.readyEstimateAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The driver already on the way keeps the first time.", none: "" }[result.courier];
+        toast.success(`Ready by ${when}.${courier}`);
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
   function handleMarkReady(orderId: string) {
     startTransition(async () => {
       const result = await markReadyAction(orderId);
@@ -511,6 +527,16 @@ export function OrderInbox({
                 ) : null}
               </CardHeader>
               <CardContent>
+                {selectedOrder.fulfillment === "courier" && (
+                  <CourierTiming
+                    status={selectedOrder.status}
+                    readyEstimateAt={selectedOrder.readyEstimateAt}
+                    readyPushedAt={selectedOrder.readyPushedAt}
+                    courier={selectedOrder.deliveries[0] ?? null}
+                    disabled={isPending}
+                    onPush={() => handlePushReady(selectedOrder.id)}
+                  />
+                )}
                 {selectedOrder.status === "AUTHORIZED" && (
                   <Button
                     className="mb-4 w-full rounded-full"

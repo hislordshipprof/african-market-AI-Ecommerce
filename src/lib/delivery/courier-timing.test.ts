@@ -18,6 +18,7 @@ import {
 } from "./dispatch";
 import { DEFAULT_SECONDS_PER_ITEM, READY_CAP_MINUTES, READY_FLOOR_MINUTES, readyMinutes } from "./ready-estimate";
 import { DeliveryProviderError } from "./provider";
+import { courierLine } from "../order/staff-copy";
 
 const hasDb = !!process.env.DATABASE_URL;
 const MIN = 60_000;
@@ -367,5 +368,18 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
 
     expect((await deliveries(storeId, orderId)).map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"]]);
     expect(dd.fake.calls.filter((c) => c.path.endsWith("/accept"))).toHaveLength(0);
+  });
+});
+
+describe("store's courier line (#562 AC3)", () => {
+  const time = (v: Date | string) => new Date(v).toISOString().slice(11, 16);
+  it("shows the booked time, then the driver's ETA, then the pickup", () => {
+    const base = { provider: "uber", pickupReadyAt: "2026-11-14T15:22:00.000Z", courierJson: null };
+    expect(courierLine(null, time)).toBeNull();
+    expect(courierLine({ ...base, status: "requested" }, time)).toBe("Uber Direct booked for 15:22, finding a driver");
+    expect(courierLine({ ...base, provider: "doordash", pickupReadyAt: null, status: "requested" }, time)).toBe("DoorDash Drive: finding a driver");
+    expect(courierLine({ ...base, status: "courier_assigned", courierJson: { name: "Sam", pickupEta: "2026-11-14T15:19:00.000Z" } }, time)).toBe("Driver Sam arriving about 15:19");
+    expect(courierLine({ ...base, status: "courier_assigned", courierJson: { name: null } }, time)).toBe("Driver on the way");
+    expect(courierLine({ ...base, status: "picked_up" }, time)).toBe("Uber Direct: picked up");
   });
 });

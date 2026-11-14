@@ -350,6 +350,9 @@ export async function dispatchPackingOrder(storeId: string, orderId: string, dep
   return selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId, pickupReadyAt)) }, deps);
 }
 
+export const READY_ALREADY_PUSHED = "The ready time was already pushed once";
+export const READY_NOT_PUSHABLE = "This order has no ready time to push";
+
 export type PushReadyResult =
   | { ok: true; readyEstimateAt: Date; courier: "moved" | "rebooked" | "kept" | "none" }
   | { ok: false; error: string };
@@ -368,14 +371,14 @@ export async function pushReadyTime(storeId: string, orderId: string, deps: Disp
     select: { status: true, fulfillment: true, readyEstimateAt: true, readyPushedAt: true },
   });
   if (!order || order.fulfillment !== "courier") return { ok: false, error: "Order not found" };
-  if (!PACKING_STATUSES.includes(order.status) || !order.readyEstimateAt) return { ok: false, error: "This order has no ready time to push" };
-  if (order.readyPushedAt) return { ok: false, error: "The ready time was already pushed once" };
+  if (!PACKING_STATUSES.includes(order.status) || !order.readyEstimateAt) return { ok: false, error: READY_NOT_PUSHABLE };
+  if (order.readyPushedAt) return { ok: false, error: READY_ALREADY_PUSHED };
   const readyEstimateAt = new Date(Math.max(order.readyEstimateAt.getTime(), now.getTime()) + READY_PUSH_MINUTES * 60_000);
   const { count } = await scoped.order.updateMany({
     where: { id: orderId, status: { in: PACKING_STATUSES }, readyPushedAt: null, readyEstimateAt: order.readyEstimateAt },
     data: { readyEstimateAt, readyPushedAt: now },
   });
-  if (count === 0) return { ok: false, error: "The ready time was already pushed once" };
+  if (count === 0) return { ok: false, error: READY_ALREADY_PUSHED };
 
   const delivery = await liveDelivery(storeId, orderId);
   if (!delivery || !CANCELLABLE_DELIVERY.includes(delivery.status)) return { ok: true, readyEstimateAt, courier: "none" };
