@@ -5,7 +5,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { makeFakeStep } from "../inngest/fake-step";
 import { isRlsRejection } from "../listing/cross-store-write";
-import { copilotWeeklyReport, listWeeklyReports, reportWeek, weeklyFigures } from "./weekly-report";
+import { copilotWeeklyReport, listWeeklyReports, reportWeek, runWeeklyPage, weeklyFigures } from "./weekly-report";
 
 type Handler = (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
 const weeklyHandler = (copilotWeeklyReport as unknown as { fn: Handler }).fn;
@@ -257,6 +257,61 @@ describe.skipIf(!hasDb)("copilot weekly report (lane database)", () => {
     await weeklyHandler({ step: makeFakeStep() });
 
     expect(sentTo(ownerD)).toHaveLength(0);
+  });
+
+  it("a run that dies after claiming is sent by its own retry 45 seconds later, once", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    const storeE = (await raw.store.create({ data: { slug: `weekly-crash-${RUN}`, name: "Weekly Crash", timezone: TZ, digestHour: 8 } })).id;
+    const ownerE = `weekly-ownercrash-${RUN}`;
+    await raw.user.create({ data: { id: ownerE, name: ownerE, email: `${ownerE}@example.com` } });
+    await storeScoped(storeE).storeMembership.create({ data: { storeId: storeE, userId: ownerE, role: "owner" } });
+    const real = new TestSender();
+    let crashed = false;
+    let claimed!: () => void;
+    const claimedSignal = new Promise<void>((resolve) => { claimed = resolve; });
+    setEmailSenderForTests({
+      async send(message) {
+        if (!crashed && message.to === `${ownerE}@example.com`) {
+          crashed = true;
+          claimed();
+          return new Promise(() => {}); // the worker is killed mid-send: no release, no sentAt
+        }
+        return real.send(message);
+      },
+    });
+    const runClock = MONDAY_8AM.toISOString();
+    const allPages = async () => {
+      for (let cursor: string | null = null; ;) {
+        cursor = (await runWeeklyPage(cursor, runClock)).nextCursor;
+        if (cursor === null) return;
+      }
+    };
+    const dying = allPages().then(() => { throw new Error("the first run ended instead of hanging"); });
+    await Promise.race([claimedSignal, dying]);
+
+    vi.setSystemTime(new Date(MONDAY_8AM.getTime() + 45_000));
+    await allPages();
+
+    expect(sentTo(ownerE)).toHaveLength(1);
+    expect((await reportRows(storeE))[0]!.sentAt).not.toBeNull();
+    expect(await listWeeklyReports(storeE)).toHaveLength(1);
+  });
+
+  it("a claim older than 5 minutes is from a dead run and is taken and sent", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    const storeF = (await raw.store.create({ data: { slug: `weekly-stale-${RUN}`, name: "Weekly Stale", timezone: TZ, digestHour: 8 } })).id;
+    const ownerF = `weekly-ownerstale-${RUN}`;
+    await raw.user.create({ data: { id: ownerF, name: ownerF, email: `${ownerF}@example.com` } });
+    await storeScoped(storeF).storeMembership.create({ data: { storeId: storeF, userId: ownerF, role: "owner" } });
+    const figures = await weeklyFigures(storeF, TZ, MONDAY_8AM);
+    await storeScopedTransaction(storeF, (tx) => tx.copilotWeeklyReport.create({
+      data: { storeId: storeF, isoWeek: "2026-W46", weekStart: "2026-11-09", figures: figures as never, claimedAt: new Date(MONDAY_8AM.getTime() - 6 * 60_000) },
+    }));
+
+    await weeklyHandler({ step: makeFakeStep() });
+
+    expect(sentTo(ownerF)).toHaveLength(1);
+    expect((await reportRows(storeF))[0]!.sentAt).not.toBeNull();
   });
 
   it("copilot_weekly_reports: storeScoped(B) reads none of W's rows, cannot insert one for W, and updates nothing", async () => {

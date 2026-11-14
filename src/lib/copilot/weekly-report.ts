@@ -3,9 +3,8 @@ import { CANCEL_REASON_LABELS, customersView, operationsView, productsView, sale
 import type { AnalyticsRange } from "../analytics/range";
 import { Prisma, platform, storeScoped, storeScopedRawQuery, storeScopedTransaction } from "../db";
 import { sendEmail } from "../email/send";
-import { money } from "../format";
+import { escapeHtml, money } from "../format";
 import { inngest } from "../inngest/client";
-import { escapeHtml } from "../format";
 import { isValidTimezone } from "../order/store-hours";
 import { localClock } from "./digest";
 import { inventoryReport, RUNNING_OUT_DAYS, storeWeek } from "./inventory-report";
@@ -211,6 +210,7 @@ const STORE_SELECT = { id: true, name: true, slug: true, timezone: true, digestH
 /**
  * Makes the week's row with its figures, claims it, emails each owner, and marks it sent. A failed send
  * releases the claim and throws; the figures stay, so the retry sends the same body under the same keys.
+ * A retry of the same run (same `now`) retakes a claim left by a crash; the per-owner keys stop a second email.
  */
 async function sendStoreReport(store: ReportStore, timeZone: string, now: Date, env: Record<string, string | undefined>): Promise<boolean> {
   const owners = await storeScoped(store.id).storeMembership.findMany({
@@ -230,13 +230,14 @@ async function sendStoreReport(store: ReportStore, timeZone: string, now: Date, 
     }));
   }
 
-  const claimedAt = new Date();
+  // The claim carries the run's clock, so a retry of a run that died mid-send takes its own claim back.
+  const claimedAt = now;
   const claim = await storeScopedTransaction(store.id, (tx) => tx.copilotWeeklyReport.updateMany({
     where: {
       storeId: store.id,
       isoWeek: week.isoWeek,
       sentAt: null,
-      OR: [{ claimedAt: null }, { claimedAt: { lt: new Date(claimedAt.getTime() - CLAIM_STALE_MS) } }],
+      OR: [{ claimedAt: null }, { claimedAt }, { claimedAt: { lt: new Date(Date.now() - CLAIM_STALE_MS) } }],
     },
     data: { claimedAt },
   }));
