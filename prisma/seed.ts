@@ -528,7 +528,7 @@ function requireSeedAuthEnv() {
  * write uses the id of the user the upsert returned, so a user that already
  * exists under a different id never causes a foreign-key failure.
  */
-async function seedUserWith2FA(opts: SeedUserOptions) {
+export async function seedUserWith2FA(opts: SeedUserOptions) {
   const hashedPassword = await hashPassword(opts.password);
 
   const user = await prisma.user.upsert({
