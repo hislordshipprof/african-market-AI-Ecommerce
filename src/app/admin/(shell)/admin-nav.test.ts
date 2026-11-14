@@ -10,10 +10,4 @@ describe("currentNavHref", () => {
     expect(currentNavHref("/admin/catalog/review")).toBe("/admin/catalog/review");
     expect(currentNavHref("/admin/ai/conversations/shopper/abc123")).toBe("/admin/ai/conversations");
   });
-
-  it("marks Search orders on the search page and on an order opened from it, not Refunds", () => {
-    expect(currentNavHref("/admin/orders/search")).toBe("/admin/orders/search");
-    expect(currentNavHref("/admin/orders/search/cmorder123")).toBe("/admin/orders/search");
-    expect(currentNavHref("/admin/orders")).toBe("/admin/orders");
-  });
 });

@@ -14,7 +14,9 @@ export async function searchOrdersAction(previous: OrderSearchState, formData: F
     const value = fields[name];
     if (typeof value === "string" && name !== "cursor") values[name] = value;
   }
-  const parsed = parseOrderSearch(fields);
+  // A cursor belongs to the search that produced it; changed filters start over at page 1.
+  const sameSearch = ORDER_SEARCH_FIELDS.every((name) => name === "cursor" || (values[name] ?? "") === (previous.values[name] ?? ""));
+  const parsed = parseOrderSearch(sameSearch ? fields : { ...fields, cursor: undefined });
   if (!parsed.ok) return { values, error: parsed.error, rows: null, nextCursor: null, page: 0 };
   const { rows, nextCursor } = await searchOrders(parsed.filters);
   return { values, error: null, rows, nextCursor, page: parsed.filters.cursor ? previous.page + 1 : 1 };

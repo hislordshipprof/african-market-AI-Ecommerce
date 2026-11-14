@@ -80,6 +80,13 @@ describe.skipIf(!hasDb)("searchOrdersAction (lane DB)", () => {
     expect((await searchOrdersAction(second, form({ storeId }))).page).toBe(1);
   });
 
+  it("changed filters with the old page's Next button start over at page 1 instead of reusing its cursor", async () => {
+    const first = await searchOrdersAction(INITIAL_ORDER_SEARCH, form({ storeId }));
+    const edited = await searchOrdersAction(first, form({ storeId, number: "52", cursor: first.nextCursor ?? "" }));
+    expect(edited.rows?.map((row) => row.number)).toEqual([52]);
+    expect(edited.page).toBe(1);
+  });
+
   it("refuses anyone who is not a platform admin before reading", async () => {
     requirePlatformAdmin.mockRejectedValue(new Error("NEXT_REDIRECT /admin/sign-in"));
     await expect(searchOrdersAction(INITIAL_ORDER_SEARCH, form({ storeId }))).rejects.toThrow("NEXT_REDIRECT");
