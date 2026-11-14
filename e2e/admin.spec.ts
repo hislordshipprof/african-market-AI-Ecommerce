@@ -765,7 +765,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Catalog review", "Refunds", "Orders to check", "Messages"];
+  const MENU = ["Home", "Stores", "Products", "Catalog review", "Refunds", "Orders to check", "Messages"];
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -776,6 +776,7 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin", "Home"],
       ["/admin/stores", "Stores"],
       ["/admin/stores/new", "Stores"],
+      ["/admin/catalog/products", "Products"],
       ["/admin/catalog/review", "Catalog review"],
       ["/admin/orders", "Refunds"],
       ["/admin/orders/check", "Orders to check"],

@@ -38,7 +38,7 @@ export default async function MasterProductEditorPage(props: { params: Promise<{
               // eslint-disable-next-line @next/next/no-img-element
               <img src={product.imageUrl} alt={`${product.name} photo`} className="size-full object-cover" />
             ) : (
-              <ImageOff aria-label="No photo yet" className="size-8 text-muted-foreground" />
+              <ImageOff role="img" aria-label="No photo yet" className="size-8 text-muted-foreground" />
             )}
           </div>
           <PhotoForm productId={product.id} />

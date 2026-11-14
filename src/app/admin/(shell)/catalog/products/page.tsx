@@ -87,13 +87,13 @@ export default async function MasterProductsPage(props: { searchParams: Promise<
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={product.imageUrl} alt="" className="size-full object-cover" loading="lazy" />
                   ) : (
-                    <ImageOff aria-label="No photo" className="size-5 text-muted-foreground" />
+                    <ImageOff aria-hidden className="size-5 text-muted-foreground" />
                   )}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-foreground">{product.name}</span>
                   <span className="block truncate text-sm text-muted-foreground">
-                    {[product.categoryName ?? "No category", product.subcategory, product.unit].filter(Boolean).join(", ")}
+                    {[product.categoryName ?? "No category", product.subcategory, product.unit, product.imageUrl ? null : "no photo"].filter(Boolean).join(", ")}
                   </span>
                 </span>
                 <span className="hidden shrink-0 text-sm text-muted-foreground sm:block">
