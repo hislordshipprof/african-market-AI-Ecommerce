@@ -37,6 +37,9 @@ model Store {
   autoRefundLimitCents   Int      @default(2500) @map("auto_refund_limit_cents")
   supportSlaMinutes      Int      @default(30) @map("support_sla_minutes")
   digestHour             Int      @default(20) @map("digest_hour")
+  /// Reorder suggestions (#551): days from order to shelf, and days the order should last after that.
+  reorderLeadDays        Int      @default(7) @map("reorder_lead_days")
+  reorderCoverDays       Int      @default(14) @map("reorder_cover_days")
   stripeAccountId        String?  @unique @map("stripe_account_id")
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
   /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
@@ -87,6 +90,8 @@ model Store {
   ownerReports          OwnerReport[]
   ownerReportItems      OwnerReportItem[]
   listingDrafts         ListingDraft[]
+  reorderLists          ReorderList[]
+  reorderListItems      ReorderListItem[]
   notificationLogs      NotificationLog[]
   deliveryEvents        DeliveryEvent[]
   pushSubscriptions     PushSubscription[]
@@ -148,6 +153,7 @@ model User {
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
   listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
   listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  reorderLists            ReorderList[]            @relation("ReorderListSaver")
 
   @@map("users")
 }
@@ -479,6 +485,7 @@ model Listing {
   ownerReportItems  OwnerReportItem[]
   draftsListedAs    ListingDraft[]           @relation("ListingDraftExisting")
   draftsPublishedAs ListingDraft[]           @relation("ListingDraftPublished")
+  reorderListItems  ReorderListItem[]
   collectionItems   StoreCollectionListing[]
   attributes        ListingAttributes?
   ingredients       ListingIngredient[]
@@ -737,6 +744,42 @@ model OwnerReportItem {
   @@index([reportId])
   @@index([listingId])
   @@map("owner_report_items")
+}
+
+/// The owner's saved reorder list (#551): one draft per store, replaced on each save. Nothing is ordered from it.
+model ReorderList {
+  id        String   @id @default(cuid())
+  storeId   String   @unique @map("store_id")
+  savedById String   @map("saved_by_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store   Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  savedBy User              @relation("ReorderListSaver", fields: [savedById], references: [id], onDelete: Restrict)
+  items   ReorderListItem[]
+
+  @@index([savedById])
+  @@map("reorder_lists")
+}
+
+/// One line of a reorder list. A null quantity is a status listing marked "reorder (no count)".
+model ReorderListItem {
+  id        String  @id @default(cuid())
+  listId    String  @map("list_id")
+  storeId   String  @map("store_id")
+  listingId String  @map("listing_id")
+  name      String
+  quantity  Int?
+  position  Int
+
+  list    ReorderList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  store   Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, listingId])
+  @@index([storeId])
+  @@index([listingId])
+  @@map("reorder_list_items")
 }
 
 /// One item Claude read from a shelf photo (#552), waiting for the owner. Nothing is listed until the

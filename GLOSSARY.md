@@ -103,6 +103,9 @@ Product attributes Claude read from a master product's label photo and descripti
 **Listing draft**:
 One product Claude read from a store's shelf photo, matched to the master catalog (one match, several for the owner to pick, none, or already listed). It becomes a listing only when the owner sets or checks its price and taps Publish. The shelf photo stays private and is never a product image.
 
+**Reorder list**:
+The owner's saved list of what to buy from a wholesaler, started from the copilot's reorder suggestions and edited by the owner. One draft per store; saving replaces it. It orders nothing and changes no stock.
+
 **Stock proposal**:
 A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
 
