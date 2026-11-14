@@ -78,7 +78,7 @@ export function StoreForm({
           required
           defaultValue={sv?.slug ?? store?.slug ?? ""}
           pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
-          className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           placeholder="mama-ngozi"
         />
         {state.fieldErrors?.slug && (
@@ -99,7 +99,7 @@ export function StoreForm({
           type="text"
           required
           defaultValue={sv?.name ?? store?.name ?? ""}
-          className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           placeholder="Mama Ngozi African Market"
         />
         {state.fieldErrors?.name && (
@@ -120,7 +120,7 @@ export function StoreForm({
               id="themePreset"
               name="themePreset"
               defaultValue={sv?.themePreset ?? store?.themePreset ?? "palm-and-shea"}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {PRESETS.map((p) => (
                 <option key={p.value} value={p.value}>
@@ -141,7 +141,7 @@ export function StoreForm({
                 type="text"
                 defaultValue={sv?.brandColor ?? store?.brandColor ?? ""}
                 pattern="#[0-9A-Fa-f]{6}"
-                className="flex-1 rounded-md border border-input px-3 py-2 font-mono text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex-1 rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground font-mono text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 placeholder="#1F5A43"
               />
             </div>
@@ -164,7 +164,7 @@ export function StoreForm({
               name="logoUrl"
               type="text"
               defaultValue={sv?.logoUrl ?? store?.logoUrl ?? ""}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               placeholder="/logos/store-logo.svg"
             />
             {state.fieldErrors?.logoUrl && (
@@ -192,7 +192,7 @@ export function StoreForm({
               defaultValue={
                 sv?.hours ?? (store?.hours ? JSON.stringify(store.hours, null, 2) : "")
               }
-              className="w-full rounded-md border border-input px-3 py-2 font-mono text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground font-mono text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               placeholder='{"mon": "9:00-21:00", "tue": "9:00-21:00"}'
             />
             {state.fieldErrors?.hours && (
@@ -210,7 +210,7 @@ export function StoreForm({
               id="timezone"
               name="timezone"
               defaultValue={sv?.timezone ?? store?.timezone ?? "America/New_York"}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {VALID_US_TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>
@@ -237,7 +237,7 @@ export function StoreForm({
                 min={0}
                 max={480}
                 defaultValue={sv?.prepTimeMinutes ?? store?.prepTimeMinutes ?? 30}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div>
@@ -252,7 +252,7 @@ export function StoreForm({
                 max={15}
                 step={0.5}
                 defaultValue={sv?.deliveryRadiusMi ?? (store ? Number(store.deliveryRadiusMi) : 8)}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               {state.fieldErrors?.deliveryRadiusMi && (
                 <p className="mt-1 text-xs text-destructive">{state.fieldErrors.deliveryRadiusMi}</p>
@@ -270,7 +270,7 @@ export function StoreForm({
                 name="addressLine1"
                 maxLength={120}
                 defaultValue={sv?.addressLine1 ?? store?.addressLine1 ?? ""}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               {state.fieldErrors?.addressLine1 && (
                 <p className="mt-1 text-xs text-destructive">{state.fieldErrors.addressLine1}</p>
@@ -285,7 +285,7 @@ export function StoreForm({
                 name="addressLine2"
                 maxLength={120}
                 defaultValue={sv?.addressLine2 ?? store?.addressLine2 ?? ""}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div>
@@ -295,7 +295,7 @@ export function StoreForm({
                 name="city"
                 maxLength={80}
                 defaultValue={sv?.city ?? store?.city ?? ""}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -306,7 +306,7 @@ export function StoreForm({
                   name="state"
                   maxLength={2}
                   defaultValue={sv?.state ?? store?.state ?? ""}
-                  className="w-full rounded-md border border-input px-3 py-2 text-sm uppercase focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm uppercase focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
                 {state.fieldErrors?.state && (
                   <p className="mt-1 text-xs text-destructive">{state.fieldErrors.state}</p>
@@ -320,7 +320,7 @@ export function StoreForm({
                   inputMode="numeric"
                   maxLength={5}
                   defaultValue={sv?.zip ?? store?.zip ?? ""}
-                  className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
                 {state.fieldErrors?.zip && (
                   <p className="mt-1 text-xs text-destructive">{state.fieldErrors.zip}</p>
@@ -353,7 +353,7 @@ export function StoreForm({
               max={100}
               step={0.01}
               defaultValue={sv?.storeDeliveryFee ?? (store ? store.storeDeliveryFeeCents / 100 : 0)}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
             {state.fieldErrors?.storeDeliveryFee && (
               <p className="mt-1 text-xs text-destructive">{state.fieldErrors.storeDeliveryFee}</p>
@@ -372,7 +372,7 @@ export function StoreForm({
                 min={0}
                 step={0.01}
                 defaultValue={sv?.minimumOrder ?? (store ? store.minimumOrderCents / 100 : 35)}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               {state.fieldErrors?.minimumOrder && (
                 <p className="mt-1 text-xs text-destructive">
@@ -391,7 +391,7 @@ export function StoreForm({
                 min={0}
                 step={0.01}
                 defaultValue={sv?.autoRefundLimit ?? (store ? store.autoRefundLimitCents / 100 : 25)}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               {state.fieldErrors?.autoRefundLimit && (
                 <p className="mt-1 text-xs text-destructive">
@@ -411,7 +411,7 @@ export function StoreForm({
                 max={1440}
                 defaultValue={sv?.supportSlaMinutes ?? store?.supportSlaMinutes ?? 30}
                 aria-describedby="supportSlaMinutes-hint"
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               <p id="supportSlaMinutes-hint" className="mt-1 text-xs text-muted-foreground">
                 An unanswered customer message goes to the platform team after this many open minutes.
@@ -446,7 +446,7 @@ export function StoreForm({
                 id="status"
                 name="status"
                 defaultValue={sv?.status ?? store?.status ?? "active"}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <option value="active">Active</option>
                 <option value="suspended">Suspended</option>

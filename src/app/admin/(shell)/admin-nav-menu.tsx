@@ -80,7 +80,7 @@ export function AdminNav({ email }: { email: string }) {
                       href={href}
                       aria-current={isCurrent ? "page" : undefined}
                       onClick={() => setOpen(false)}
-                      className={`flex min-h-11 items-center gap-3 rounded-lg px-3 text-[15px] ${FOCUS} ${
+                      className={`flex min-h-11 items-center gap-3 rounded-lg px-3 text-base ${FOCUS} ${
                         isCurrent
                           ? "bg-secondary font-semibold text-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"

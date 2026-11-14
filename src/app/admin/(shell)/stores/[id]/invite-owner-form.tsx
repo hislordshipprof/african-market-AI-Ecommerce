@@ -54,7 +54,7 @@ export function InviteOwnerForm({ storeId }: Props) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="owner@example.com"
-          className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          className="flex-1 rounded-md border border-input bg-card px-3 py-2 placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <button
           type="submit"

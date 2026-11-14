@@ -331,7 +331,7 @@ export function ReviewTable({
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold text-foreground">{p.name}</h3>
+                <h2 className="text-sm font-semibold text-foreground">{p.name}</h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {p.categoryName ?? "Uncategorized"}{p.subcategory ? ` / ${p.subcategory}` : ""}
                 </p>

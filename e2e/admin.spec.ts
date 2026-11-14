@@ -728,7 +728,7 @@ test.describe("Catalog review (authenticated)", () => {
 test.describe("2FA enrollment (unenrolled admin)", () => {
   const UNENROLLED_EMAIL = "unenrolled-admin@platform.test";
 
-  test("unenrolled admin is redirected to enroll-2fa, completes enrollment, reaches stores", async ({
+  test("unenrolled admin is redirected to enroll-2fa, completes enrollment, lands on home", async ({
     page,
   }) => {
     await page.goto("/admin/sign-in");
