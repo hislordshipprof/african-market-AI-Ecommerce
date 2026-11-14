@@ -404,7 +404,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
         mayHave: [],
         gaps: [],
         addsFromTurn: 2,
-        dish: { core: [{ label: "rice", options: ["rice"] }], askServings: false },
+        dish: { name: "Jollof", core: [{ label: "rice", options: ["rice"] }], askServings: false },
       }),
       evalCase({
         id: "wrong-backup",

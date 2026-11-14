@@ -18,6 +18,8 @@ const LOOKUP_TURNS = 2;
 
 export interface RecipeRow {
   name: string;
+  /** "curated" for the seeded base, "lookup" for a dish saved from an online lookup. */
+  origin: string;
   servings: number | null;
   sourceUrl: string | null;
   ingredients: Array<{ name: string; masterProductId: string | null; qty: number | null; unit: string | null }>;
@@ -48,6 +50,7 @@ export async function findRecipe(dish: string): Promise<RecipeRow | null> {
   if (!recipe) return null;
   return {
     name: recipe.name,
+    origin: recipe.origin,
     servings: recipe.servings,
     sourceUrl: recipe.sourceUrl,
     ingredients: recipe.ingredients.map((row) => ({

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertAppRuntimeLogin, platform, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../../db";
 import { resolveIngredients } from "../../catalog/ingredients";
-import type { CatalogFixture } from "./types";
+import { findRecipe } from "../recipes";
+import type { CatalogFixture, EvalCase } from "./types";
 import type { MasterCatalogRow } from "./fingerprint";
 
 const LEASE_DIR = join(tmpdir(), "shopper-assistant-eval-leases");
@@ -23,6 +24,29 @@ export interface CreatedEvalStores {
 export async function assertRuntimeRole(): Promise<string> {
   await assertAppRuntimeLogin();
   return "app_runtime";
+}
+
+/**
+ * Dataset dishes the curated recipe base does not answer, and core items its recipe has no ingredient for
+ * (as "dish: core label"). A dish saved from an online lookup is not seeded (#607).
+ */
+export async function unseededDishes(cases: EvalCase[], fixture: CatalogFixture): Promise<string[]> {
+  const masterOf = new Map(fixture.listings.map((listing) => [listing.key, listing.masterProductId]));
+  const names = [...new Set(cases.flatMap((item) => (item.dish ? [item.dish.name] : [])))];
+  const problems: string[] = [];
+  for (const name of names) {
+    const recipe = await findRecipe(name);
+    if (!recipe || recipe.origin !== "curated") {
+      problems.push(name);
+      continue;
+    }
+    const masters = new Set(recipe.ingredients.flatMap((row) => row.masterProductId ?? []));
+    const core = new Map(cases.flatMap((item) => (item.dish?.name === name ? item.dish.core : [])).map((group) => [group.label, group]));
+    for (const group of core.values()) {
+      if (!group.options.some((key) => masters.has(masterOf.get(key) ?? ""))) problems.push(`${name}: ${group.label}`);
+    }
+  }
+  return problems;
 }
 
 export async function createEvalStores(fixture: CatalogFixture): Promise<CreatedEvalStores> {
