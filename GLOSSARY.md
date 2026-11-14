@@ -240,6 +240,10 @@ How a customer gets an order: store delivery, courier delivery, or pickup.
 **Store delivery**:
 Delivery done by the store's own driver, at a fee the store sets.
 
+**Slot**:
+A time window a customer books for pickup or store delivery, set by the store and shown in the store's timezone. Each slot takes a set number of orders; a cancelled order frees its place.
+_Avoid_: Time slot, Delivery window
+
 **Delivery radius**:
 The straight-line distance, in miles, from the store's confirmed coordinates. An address at exactly that distance is inside the area.
 
