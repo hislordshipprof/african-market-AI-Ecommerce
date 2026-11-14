@@ -2,7 +2,8 @@
 
 import { readFormFields } from "../security/parse-input";
 import { requirePlatformAdmin } from "./session";
-import { ORDER_SEARCH_FIELDS, parseOrderSearch, searchOrders, type OrderSearchState } from "./order-search";
+import { ORDER_SEARCH_FIELDS, parseOrderSearch, type OrderSearchState } from "./order-search";
+import { searchOrders } from "./order-search-query";
 
 /** Read only. A POST, so a customer's email or phone never sits in a URL or a request log. */
 export async function searchOrdersAction(previous: OrderSearchState, formData: FormData): Promise<OrderSearchState> {

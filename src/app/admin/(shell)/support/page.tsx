@@ -30,7 +30,7 @@ export default async function SupportQueuePage() {
       ) : (
         <ul className="space-y-4">
           {threads.map((thread) => (
-            <li key={thread.id} className="rounded-lg border border-input bg-card p-4">
+            <li key={thread.id} id={`thread-${thread.id}`} className="scroll-mt-20 rounded-lg border border-input bg-card p-4">
               <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
                 <span className="font-medium text-foreground">{thread.storeName}</span>
                 <span className="text-foreground">Order #{thread.orderNumber}</span>

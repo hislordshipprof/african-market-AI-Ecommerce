@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { orderSearchQuery, parseOrderSearch, searchOrders } from "./order-search";
+import { orderSearchSql } from "../db";
+import { parseOrderSearch } from "./order-search";
+import { searchOrders } from "./order-search-query";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t537p${Date.now()}`;
@@ -87,7 +89,7 @@ describe.skipIf(!hasDb)(`order search on a store with ${ORDERS} orders (lane DB)
 
   it.each(CASES)("%s reads orders and customers through an index", async (_name, input) => {
     const plan = await asPlatformAdmin((tx) =>
-      tx.$queryRaw<Array<{ "QUERY PLAN": string }>>(Prisma.sql`EXPLAIN ${orderSearchQuery(filtersOf(input), 50)}`),
+      tx.$queryRaw<Array<{ "QUERY PLAN": string }>>(Prisma.sql`EXPLAIN ${orderSearchSql(filtersOf(input), 51)}`),
     );
     const text = plan.map((row) => row["QUERY PLAN"]).join("\n");
     expect(text).not.toMatch(/Seq Scan on (orders|customers)/);

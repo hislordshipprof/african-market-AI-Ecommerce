@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { parseOrderSearch, searchOrders, type OrderSearchFilters } from "./order-search";
+import { parseOrderSearch, type OrderSearchFilters } from "./order-search";
+import { searchOrders } from "./order-search-query";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t537s-${Date.now()}`;
