@@ -105,7 +105,7 @@ describe.skipIf(!hasDb)("slot reservation at placeOrder (#565)", () => {
     const delivery = delivering
       ? { enabled: true, feeCents: 500, radiusMi: 8, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor: false }
       : null;
-    const quote = computeQuote(0, [{ price: PRICE, qty: 2 }], CONTACT, fulfillment, ADR_0021_SERVICE_FEE, delivery);
+    const quote = computeQuote(0, [{ price: PRICE, qty: 2, maxPerOrder: null }], CONTACT, fulfillment, ADR_0021_SERVICE_FEE, delivery);
     expect(quote.problems).toEqual([]);
     return {
       cartId: cart.id,
