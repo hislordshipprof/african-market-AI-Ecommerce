@@ -47,6 +47,24 @@ const WABA_A = String(4_000_000_000 + base);
 const WABA_B = String(5_000_000_000 + base);
 const PHONE_X = String(6_000_000_000 + base);
 const PHONE_Y = String(7_000_000_000 + base);
+const PHONE_R = String(8_000_000_000 + base);
+const PHONE_S = String(9_000_000_000 + base);
+const PHONE_T = String(9_100_000_000 + base);
+const PHONE_U = String(9_200_000_000 + base);
+const PHONE_V = String(9_300_000_000 + base);
+const PHONE_W = String(9_400_000_000 + base);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+async function until(check: () => boolean): Promise<void> {
+  for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 10));
+  expect(check()).toBe(true);
+}
 
 let seq = 0;
 function text(body: string): InboundMessage {
@@ -135,6 +153,9 @@ describe.skipIf(!hasDb)("store WhatsApp number (lane database)", () => {
   });
 
   it("a phone number id linked at store A cannot be linked at store B, and A keeps it", async () => {
+    expect(await linkStoreNumber(actor(storeA), {
+      wabaId: WABA_A, phoneNumberId: PHONE_A, displayNumber: "(404) 555-0101", coexistence: true,
+    })).toEqual({ ok: true });
     const taken = await linkStoreNumber(actor(storeB), {
       wabaId: WABA_B, phoneNumberId: PHONE_A, displayNumber: "+14045550102", coexistence: true,
     });
@@ -270,5 +291,115 @@ describe.skipIf(!hasDb)("store WhatsApp number (lane database)", () => {
     setWhatsAppProvider(fakeWhatsAppProvider);
     expect(await linkStoreNumber(actor(first), ids(PHONE_Y))).toEqual({ ok: true });
     expect(await handleStoreInboundMessage(PHONE_Y, text("y"))).toEqual({ kind: "customer", storeId: first });
+  });
+
+  it("an overlapping retry of one link never reports success while the number is unlinked", async () => {
+    const store = await newStore("Efe Market");
+    const ids = { wabaId: WABA_A, phoneNumberId: PHONE_R, displayNumber: "+14045550104", coexistence: true };
+    const calls = [deferred<{ businessToken: string; displayNumber: string }>(), deferred<{ businessToken: string; displayNumber: string }>()];
+    let started = 0;
+    setWhatsAppProvider({ send: fakeWhatsAppProvider.send, connectStoreNumber: () => calls[started++]!.promise });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const first = linkStoreNumber(actor(store), ids);
+    await until(() => started === 1);
+    let secondDone = false;
+    const second = linkStoreNumber(actor(store), ids).finally(() => { secondDone = true; });
+    await until(() => started === 2 || secondDone);
+    calls[0]!.reject(new WhatsAppApiError(100, 400));
+    const firstResult = await first;
+    calls[1]!.resolve({ businessToken: `token-${PHONE_R}`, displayNumber: "+14045550104" });
+    const secondResult = await second;
+
+    const status = (await getStoreNumber(store))?.status;
+    const routed = await handleStoreInboundMessage(PHONE_R, text("r"));
+    for (const result of [firstResult, secondResult]) {
+      if ("ok" in result) {
+        expect(status).toBe("registered");
+        expect(routed).toEqual({ kind: "customer", storeId: store });
+      }
+    }
+  });
+
+  it("a second link while one is in flight gets the already-linked error; the first then links and routes", async () => {
+    const store = await newStore("Funmi Market");
+    const ids = { wabaId: WABA_A, phoneNumberId: PHONE_S, displayNumber: "+14045550105", coexistence: true };
+    const call = deferred<{ businessToken: string; displayNumber: string }>();
+    const connect = vi.fn(fakeWhatsAppProvider.connectStoreNumber).mockImplementationOnce(() => call.promise);
+    setWhatsAppProvider({ send: fakeWhatsAppProvider.send, connectStoreNumber: connect });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const first = linkStoreNumber(actor(store), ids);
+    await until(() => connect.mock.calls.length === 1);
+    expect(await linkStoreNumber(actor(store), ids)).toEqual({ error: ALREADY_LINKED_ERROR });
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    call.resolve({ businessToken: `token-${PHONE_S}`, displayNumber: "+14045550105" });
+    expect(await first).toEqual({ ok: true });
+    expect(await getStoreNumber(store)).toMatchObject({ phoneNumberId: PHONE_S, status: "registered" });
+    expect(await handleStoreInboundMessage(PHONE_S, text("s"))).toEqual({ kind: "customer", storeId: store });
+  });
+
+  it("a retry of a link that already succeeded returns ok with the same linked row and keeps its token, without calling Meta", async () => {
+    const store = await newStore("Gbenga Market");
+    const ids = { wabaId: WABA_A, phoneNumberId: PHONE_T, displayNumber: "+14045550106", coexistence: true };
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    expect(await linkStoreNumber(actor(store), ids)).toEqual({ ok: true });
+    const before = await getStoreNumber(store);
+    const token = (await rawRow(store))?.business_token;
+
+    const connect = vi.fn(() => Promise.reject(new WhatsAppApiError(100, 400)));
+    setWhatsAppProvider({ send: fakeWhatsAppProvider.send, connectStoreNumber: connect });
+    expect(await linkStoreNumber(actor(store), ids)).toEqual({ ok: true });
+    expect(connect).not.toHaveBeenCalled();
+    expect(await getStoreNumber(store)).toEqual(before);
+    expect((await rawRow(store))?.business_token).toBe(token);
+    expect(await handleStoreInboundMessage(PHONE_T, text("t"))).toEqual({ kind: "customer", storeId: store });
+  });
+
+  it("two links started at once on a store with no number: one reaches Meta, the other gets the already-linked error", async () => {
+    const store = await newStore("Halima Market");
+    const ids = { wabaId: WABA_A, phoneNumberId: PHONE_U, displayNumber: "+14045550107", coexistence: true };
+    // The winner stays in flight a moment, so the loser's begin overlaps it.
+    const connect = vi.fn((input: Parameters<typeof fakeWhatsAppProvider.connectStoreNumber>[0]) =>
+      new Promise((r) => setTimeout(r, 300)).then(() => fakeWhatsAppProvider.connectStoreNumber(input)));
+    setWhatsAppProvider({ send: fakeWhatsAppProvider.send, connectStoreNumber: connect });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const results = await Promise.all([linkStoreNumber(actor(store), ids), linkStoreNumber(actor(store), ids)]);
+    expect(results).toContainEqual({ ok: true });
+    expect(results).toContainEqual({ error: ALREADY_LINKED_ERROR });
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(await handleStoreInboundMessage(PHONE_U, text("u"))).toEqual({ kind: "customer", storeId: store });
+  });
+
+  it("a link that completes after the number was disconnected meanwhile reports failure, not success", async () => {
+    const store = await newStore("Jide Market");
+    const call = deferred<{ businessToken: string; displayNumber: string }>();
+    const connect = vi.fn(() => call.promise);
+    setWhatsAppProvider({ send: fakeWhatsAppProvider.send, connectStoreNumber: connect });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const link = linkStoreNumber(actor(store), { wabaId: WABA_A, phoneNumberId: PHONE_W, displayNumber: "+14045550109", coexistence: true });
+    await until(() => connect.mock.calls.length === 1);
+    await disconnectStoreNumber(actor(store));
+    call.resolve({ businessToken: `token-${PHONE_W}`, displayNumber: "+14045550109" });
+    expect(await link).toEqual({ error: LINK_FAILED_ERROR });
+    expect(await getStoreNumber(store)).toMatchObject({ status: "disconnected" });
+    expect(await handleStoreInboundMessage(PHONE_W, text("w"))).toEqual({ kind: "unknown_number" });
+  });
+
+  it("a pending row left by a link that died long ago does not block linking again", async () => {
+    const store = await newStore("Ife Market");
+    await asPlatformAdmin(async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO store_whatsapp_numbers (id, store_id, waba_id, phone_number_id, status, updated_at)
+        VALUES (${crypto.randomUUID()}, ${store}, ${WABA_A}, ${PHONE_V}, 'pending', (now() AT TIME ZONE 'UTC') - interval '10 minutes')`;
+    });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    expect(await linkStoreNumber(actor(store), {
+      wabaId: WABA_A, phoneNumberId: PHONE_V, displayNumber: "+14045550108", coexistence: true,
+    })).toEqual({ ok: true });
+    expect(await getStoreNumber(store)).toMatchObject({ phoneNumberId: PHONE_V, status: "registered" });
   });
 });
