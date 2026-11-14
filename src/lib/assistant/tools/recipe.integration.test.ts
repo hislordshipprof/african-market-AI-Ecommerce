@@ -165,7 +165,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     // Kept for the conversation: a later recipe still leaves it out.
     const again = await getRecipe(ctx, { dish: "Jollof", servings: 10 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
     expect(again.haveAtHome).toEqual(["rice"]);
-    // A have-at-home item is not a need: it never filters search or swaps.
+    // Taken back: the next recipe proposes it again.
     expect(await setShopperNeeds(ctx, { remove: ["rice"] })).toMatchObject({ haveAtHome: ["tomatoes"] });
     const back = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
     expect(back.inStock.map((item) => item.ingredient)).toContain("rice");

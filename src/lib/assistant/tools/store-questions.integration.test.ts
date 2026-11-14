@@ -198,6 +198,12 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
     expect(await runner(inStoreB)("add_to_cart", { items: [{ variant_id: egusi.variants[0].id, qty: 1 }] }))
       .toMatchObject({ ok: false, code: "variant_not_found" });
     expect(JSON.stringify(await runner({ actorUserId: bob })("get_order_status", {}))).not.toContain(egusi.variants[0].id);
+
+    // A line the store no longer sells says so, so a yes does not reorder it.
+    await storeScoped(storeB).listing.update({ where: { id: palmB.id }, data: { active: false } });
+    const gone = await runner(inStoreB)("get_order_status", {}) as unknown as { orders: Array<{ lines: Array<Record<string, unknown>> }> };
+    expect(gone.orders[0].lines[0]).toMatchObject({ variantId: palmB.variants[0].id, unavailable: true });
+    expect(gone.orders[0].lines[0]).not.toHaveProperty("mayBeUnavailable");
   });
 
   it("check_delivery_area compares the geocoded address with the store's radius, signed out", async () => {

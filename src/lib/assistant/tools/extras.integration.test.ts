@@ -83,7 +83,7 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
     });
     const line = (added as unknown as { items: Array<{ lineId?: string }> }).items[0].lineId!;
     expect(await updateCart(ctx, { line_id: line, qty: 2 })).toMatchObject({ ok: false, code: "over_budget" });
-    // A budget is not a dietary need: it never turns the store's swap into a refund.
+    // The refused raise leaves the budget saved.
     expect((await readConstraints(storeA, ctx.conversationId)).budgetCents).toBe(1000);
 
     expect(await setShopperNeeds(ctx, { remove: ["budget"] })).not.toHaveProperty("budgetCents");
