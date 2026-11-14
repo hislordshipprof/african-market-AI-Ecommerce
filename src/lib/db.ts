@@ -131,6 +131,7 @@ export function storeScoped(storeId: string) {
     copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
     ownerReport: wrapDelegate(storeId, prisma.ownerReport),
     ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
+    listingDraft: wrapDelegate(storeId, prisma.listingDraft),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     delivery: wrapDelegate(storeId, prisma.delivery),
     deliveryEvent: wrapDelegate(storeId, prisma.deliveryEvent),
@@ -329,7 +330,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "copilotWeeklyReport" | "ownerReport" | "ownerReportItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "copilotWeeklyReport" | "ownerReport" | "ownerReportItem" | "listingDraft" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -366,6 +367,7 @@ export async function storeScopedTransaction<T>(
       copilotWeeklyReport: tx.copilotWeeklyReport,
       ownerReport: tx.ownerReport,
       ownerReportItem: tx.ownerReportItem,
+      listingDraft: tx.listingDraft,
       notificationLog: tx.notificationLog,
       delivery: tx.delivery,
       deliveryEvent: tx.deliveryEvent,
