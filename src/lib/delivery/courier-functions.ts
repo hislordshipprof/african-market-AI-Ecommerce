@@ -3,6 +3,7 @@ import { sendSkipped, sendWithTimeout } from "../inngest/notify";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
 import { copyCourierProof } from "./proof";
+import { COURIER_REGISTRATION_REQUESTED, findStoresNeedingCourierRegistration, registerStoreCouriers } from "./courier-registration";
 import {
   COURIER_BOTH_FAILED,
   courierFailoverFailed,
@@ -76,5 +77,34 @@ export const courierAssignmentTimeout = inngest.createFunction(
     const { storeId, deliveryId } = event.data as { storeId?: string; deliveryId?: string };
     if (!storeId || !deliveryId) return;
     await runCourierFailover(step, { storeId, deliveryId }, productionDeps());
+  },
+);
+
+/** One run per store at a time, so a repeat request finds the store registered and creates no second Uber organization. */
+export const courierRegistration = inngest.createFunction(
+  {
+    id: "courier/registration",
+    concurrency: { key: "event.data.storeId", limit: 1 },
+    triggers: [{ event: COURIER_REGISTRATION_REQUESTED }],
+  },
+  async ({ event, step }) => {
+    const { storeId } = event.data as { storeId?: string };
+    if (!storeId) return;
+    await step.run("courier-register", () => registerStoreCouriers(storeId));
+  },
+);
+
+const REGISTRATION_RETRY_BATCH = 100;
+
+/** Daily retry of failed registrations, and the backfill of stores created before #526, through the job above. */
+export const courierRegistrationRetry = inngest.createFunction(
+  { id: "courier/registration-retry", singleton: { mode: "skip" }, triggers: [{ cron: "TZ=UTC 41 6 * * *" }] },
+  async ({ step }) => {
+    const stores = await step.run("find-unregistered-stores", () => findStoresNeedingCourierRegistration(REGISTRATION_RETRY_BATCH));
+    if (stores.length === 0) return;
+    await step.sendEvent(
+      "request-courier-registration",
+      stores.map((store) => ({ name: COURIER_REGISTRATION_REQUESTED, data: { storeId: store.id } })),
+    );
   },
 );
