@@ -19,6 +19,7 @@ import {
   type AssistantContext,
 } from "./execute";
 import { acceptanceForTurn } from "../shown";
+import { assistantTools } from "./index";
 import { addToCartInput, offerChoicesInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
 const { headerState, cartCookies } = vi.hoisted(() => ({
@@ -1484,5 +1485,75 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       ],
     });
     expect(JSON.stringify(omitted)).not.toContain(expensive.id);
+  });
+
+  describe("item handles (#597)", () => {
+    async function runTool(tools: ReturnType<typeof assistantTools>, name: "search_catalog" | "add_to_cart" | "show_products", input: unknown) {
+      const tool = tools[name] as unknown as {
+        execute: (input: unknown, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+        toModelOutput: (options: { toolCallId: string; input: unknown; output: unknown }) => Promise<{ type: string; value: unknown }>;
+      };
+      const output = await tool.execute(input, { toolCallId: randomUUID(), messages: [] });
+      const model = await tool.toModelOutput({ toolCallId: "call", input, output });
+      return { output, model: model.value };
+    }
+
+    async function newConversation(storeId: string) {
+      const cartId = (await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } })).id;
+      const conversationId = (await storeScoped(storeId).aiConversation.create({
+        data: { storeId, cartId, model: "claude-haiku-5-5", messages: [] },
+      })).id;
+      return { storeId, cartId, conversationId, actorUserId: null };
+    }
+
+    it("the model sees short handles, never a long id, and an add by handle adds that variant", async () => {
+      const turn = await newConversation(storeA);
+      const tools = assistantTools(turn);
+      const search = await runTool(tools, "search_catalog", { query: "egusi" });
+      expect(JSON.stringify(search.output)).toContain(variantA);
+      expect(JSON.stringify(search.model)).not.toContain(variantA);
+      expect(JSON.stringify(search.model)).not.toContain(listingA);
+      const row = (search.model as { items: Array<{ listingId: string; variantId: string; name: string }> }).items.find((item) => item.name === "Egusi");
+      expect(row).toMatchObject({ listingId: expect.stringMatching(/^i\d+$/), variantId: expect.stringMatching(/^v\d+$/) });
+      const added = await runTool(assistantTools(turn), "add_to_cart", { items: [{ variant_id: row!.variantId, qty: 2 }] });
+      expect(added.output).toMatchObject({ ok: true });
+      expect(JSON.stringify(added.model)).toMatch(/"lineId":"c\d+"/);
+      const lines = await storeScoped(storeA).cartLine.findMany({ where: { cartId: turn.cartId } });
+      expect(lines.map((line) => [line.variantId, line.qty])).toEqual([[variantA, 2]]);
+    });
+
+    it("an unknown handle or a raw id is refused with a clear error and changes nothing", async () => {
+      const turn = await newConversation(storeA);
+      const tools = assistantTools(turn);
+      await runTool(tools, "search_catalog", { query: "egusi" });
+      for (const variant of ["v99", variantA, "v1x"]) {
+        const refused = await runTool(tools, "add_to_cart", { items: [{ variant_id: variant, qty: 1 }] });
+        expect(refused.output).toMatchObject({ ok: false, code: "unknown_handle", handles: [variant] });
+        expect((refused.output as { message: string }).message).toContain(variant);
+      }
+      expect(await storeScoped(storeA).cartLine.count({ where: { cartId: turn.cartId } })).toBe(0);
+      const audit = await storeScoped(storeA).aiAction.findFirst({ where: { conversationId: turn.conversationId, tool: "add_to_cart" } });
+      expect(audit?.ok).toBe(false);
+    });
+
+    it("a handle from another conversation or another store never resolves", async () => {
+      const first = await newConversation(storeA);
+      const search = await runTool(assistantTools(first), "search_catalog", { query: "egusi" });
+      const handle = (search.model as { items: Array<{ variantId: string; name: string }> }).items.find((item) => item.name === "Egusi")!.variantId;
+      const sameStore = await newConversation(storeA);
+      const otherStore = await newConversation(storeB);
+      for (const turn of [sameStore, otherStore]) {
+        const refused = await runTool(assistantTools(turn), "add_to_cart", { items: [{ variant_id: handle, qty: 1 }] });
+        expect(refused.output).toMatchObject({ ok: false, code: "unknown_handle" });
+        expect(await storeScoped(turn.storeId).cartLine.count({ where: { cartId: turn.cartId } })).toBe(0);
+      }
+      // Store B cannot read or change store A's handle map.
+      const leaked = await storeScoped(storeB).aiConversation.findUnique({ where: { id: first.conversationId } });
+      expect(leaked).toBeNull();
+      await expect(storeScoped(storeB).aiConversation.update({
+        where: { id: first.conversationId },
+        data: { itemHandles: { v: [variantB] } },
+      })).rejects.toThrow();
+    });
   });
 });

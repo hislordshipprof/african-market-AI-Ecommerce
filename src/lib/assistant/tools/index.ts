@@ -1,10 +1,12 @@
-import { tool } from "ai";
+import { tool, type Tool } from "ai";
 import { exactAssistantKeys } from "../contract";
+import { itemHandles, type ItemHandles } from "../handles";
 import {
   addToCart,
   checkAvailability,
   getCartSummary,
   offerChoices,
+  recordRead,
   removeFromCart,
   searchCatalog,
   setShopperNeeds,
@@ -42,8 +44,12 @@ import {
 export type { AssistantContext, ToolResult } from "./execute";
 export { toolInputSchemas } from "./schemas";
 
-export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {}) {
-  return exactAssistantKeys({
+export function assistantTools(
+  ctx: AssistantContext,
+  recipeDeps: RecipeDeps = {},
+  handles: ItemHandles = itemHandles(ctx.storeId, ctx.conversationId),
+) {
+  return withItemHandles(ctx, handles, exactAssistantKeys({
     search_catalog: tool({
       description: "Search this store's catalog. query is the product words only, including a brand the customer named. pack is a size or pack the customer named, such as \"400 g tin\" or \"bag\". Match name or match synonym is a fit. Match near is not a fit on an explicit add. Search returns the cheapest variant. When pack does not appear on that variant's label, call show_products and add the variant whose label shows it.",
       inputSchema: searchCatalogInput,
@@ -139,5 +145,30 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       inputSchema: prepareCheckoutInput,
       execute: (input, options) => prepareCheckout({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
+  }));
+}
+
+/** The model passes and sees short item handles; the tools themselves keep working on ids. */
+function withItemHandles<T extends Record<string, Tool>>(ctx: AssistantContext, handles: ItemHandles, tools: T): T {
+  const wrapped = Object.entries(tools).map(([name, item]) => {
+    const execute = item.execute!;
+    return [name, {
+      ...item,
+      execute: async (input: unknown, options: Parameters<typeof execute>[1]) => {
+        const resolved = await handles.resolve(input);
+        if (!resolved.ok) {
+          const list = resolved.handles.join(", ");
+          return recordRead({ ...ctx, toolCallId: options.toolCallId }, name, input, {
+            ok: false,
+            code: "unknown_handle",
+            message: `Not an item handle from this chat: ${list}. Use a handle a tool returned here, such as i3 or v12, or search again.`,
+            handles: resolved.handles,
+          });
+        }
+        return execute(resolved.input, options);
+      },
+      toModelOutput: async ({ output }: { output: unknown }) => ({ type: "json" as const, value: await handles.toModel(output) as never }),
+    }];
   });
+  return Object.fromEntries(wrapped) as T;
 }
