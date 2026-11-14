@@ -27,6 +27,7 @@ import { updateStore } from "./actions";
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
 import { authPrisma, storeScopedTransaction } from "../db";
+import { inngest } from "../inngest/client";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-hrs`;
@@ -129,8 +130,10 @@ describe("store hours schema", () => {
     expect(await readHours(storeId)).toEqual(storedShape);
   });
 
-  it("platform admin turns on store delivery with a confirmed store address", async () => {
+  it("platform admin turns on store delivery with a confirmed store address, which queues courier registration (#526)", async () => {
     setAddressProvider(fakeAddressBackend());
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
     const data = storeForm(storeId, storedShape);
     data.set("addressLine1", "4600 Silver Hill Rd");
     data.set("city", "Washington");
@@ -145,6 +148,8 @@ describe("store hours schema", () => {
     expect(store?.storeDeliveryFeeCents).toBe(500);
     expect(store?.lat).toBeCloseTo(38.845, 2);
     expect(store?.lng).toBeCloseTo(-76.928, 2);
+    expect(send).toHaveBeenCalledWith({ name: "courier/registration.requested", data: { storeId } });
+    send.mockClear();
 
     const bad = storeForm(storeId, storedShape);
     bad.set("addressLine1", "999 Imaginary Road");
@@ -158,6 +163,9 @@ describe("store hours schema", () => {
     const still = await authPrisma.store.findUnique({ where: { id: storeId } });
     expect(still?.addressLine1).toBe("4600 Silver Hill Rd");
     expect(still?.lat).toBeCloseTo(38.845, 2);
+    expect(send).not.toHaveBeenCalled();
+    send.mockRestore();
+    vi.unstubAllEnvs();
     setAddressProvider(null);
   });
 

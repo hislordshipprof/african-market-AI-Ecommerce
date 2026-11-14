@@ -13,6 +13,7 @@ import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
 import { getAddressProvider } from "../address/provider";
 import { setPilot } from "../billing/service";
+import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -355,6 +356,20 @@ function deliveryAudit(row: {
   };
 }
 
+/** Spec §6.1 step 5, run when the platform admin saves a store with its full address. */
+async function queueCourierRegistration(store: {
+  id: string;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  uberLocationId: string | null;
+  doordashStoreId: string | null;
+}): Promise<void> {
+  if (!hasFullAddress(store) || (store.uberLocationId && store.doordashStoreId)) return;
+  await requestCourierRegistration(store.id);
+}
+
 export async function createStore(
   _prev: StoreFormState,
   data: FormData,
@@ -459,6 +474,7 @@ export async function createStore(
   });
 
   revalidateStore(store);
+  await queueCourierRegistration(store);
 
   return {
     success: true,
@@ -614,6 +630,7 @@ export async function updateStore(
   if (before.slug !== store.slug) {
     revalidateStore({ id: before.id, slug: before.slug });
   }
+  await queueCourierRegistration(store);
 
   return {
     success: true,
