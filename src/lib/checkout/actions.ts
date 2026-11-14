@@ -52,7 +52,7 @@ function readDelivery(
   fulfillment: Fulfillment,
   delivery: unknown,
 ): DeliveryRequest | null | { error: string } {
-  if (fulfillment !== "store-delivery") return null;
+  if (fulfillment === "pickup") return null;
   const parsed = parseInput(deliverySchema, delivery);
   if (!parsed.ok) return { error: "We couldn't find that address" };
   return {
@@ -95,10 +95,10 @@ export async function quoteCheckoutAction(
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
-  // A store-delivery visit with no confirmed address is still a quote: the fee
-  // stays visible and Pay can ask the shopper to confirm. Payment and placement
+  // A delivery visit with no confirmed address is still a quote: the fee or the
+  // reason stays visible and Pay can ask the shopper to confirm. Payment and placement
   // keep refusing that payload.
-  const request = input.fulfillment === "store-delivery" && delivery == null
+  const request = input.fulfillment !== "pickup" && delivery == null
     ? null
     : readDelivery(input.fulfillment, delivery);
   if (request && "error" in request) return { ok: false, error: request.error };
@@ -138,6 +138,7 @@ export async function createPaymentIntentAction(
   | { ok: true; orderedToken: string }
   | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number; attemptToken?: string }
   | { ok: false; error: string; code?: "saved_card_unavailable" | "basket_already_ordered" | "RATE_LIMITED" }
+  | { ok: false; error: string; code: "quote_changed"; quote: CheckoutQuote }
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
@@ -178,9 +179,13 @@ export async function createPaymentIntentAction(
       input.contact,
       input.fulfillment,
       request,
+      { recheckCourier: input.fulfillment === "courier" },
     );
     if (quote.problems.length) {
-      return { ok: false, error: quote.problems.map((p) => p.message).join(" ") };
+      const error = quote.problems.map((p) => p.message).join(" ");
+      // The new courier fee goes back to the page, so the shopper sees it before any hold (#527).
+      if (quote.problems.some((p) => p.code === "quote-changed")) return { ok: false, error, code: "quote_changed", quote };
+      return { ok: false, error };
     }
     if (quote.holdCents < 50) {
       return { ok: false, error: "Order total is too low" };

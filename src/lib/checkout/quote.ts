@@ -1,4 +1,5 @@
 import { validPhone } from "../customer-account/phone";
+import { money } from "../format";
 import { serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
 import type { CheckoutQuote, Contact, FlowProblem, Fulfillment } from "../customer-flow/contracts";
 
@@ -24,7 +25,7 @@ export const COURIER_NOT_OFFERED = "This store does not offer courier delivery."
 
 /** The cheapest live courier quote (#140 selection), or why courier delivery is unavailable. */
 export type CourierQuoteInput =
-  | { ok: true; feeCents: number; provider: "Uber Direct" | "DoorDash Drive"; leaveAtDoor: boolean }
+  | { ok: true; feeCents: number; provider: "Uber Direct" | "DoorDash Drive"; leaveAtDoor: boolean; changed?: boolean }
   | { ok: false; problem: FlowProblem };
 
 export function computeQuote(
@@ -86,6 +87,9 @@ export function computeQuote(
       // The provider's quote, no markup (ADR-0006).
       courierFeeCents = courier.feeCents;
       courierProvider = courier.provider;
+      if (courier.changed) {
+        problems.push({ code: "quote-changed", message: `The courier fee is now ${money(courier.feeCents)}. Check your new total, then place your order.` });
+      }
       if (courier.leaveAtDoor && cartLines.some((line) => line.frozen || line.perishable)) {
         problems.push({ code: "ineligible", message: "Frozen and perishable items need a hand-to-hand delivery. Turn off Leave at door." });
       }

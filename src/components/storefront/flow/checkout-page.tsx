@@ -327,7 +327,7 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
-  const delivery = fulfillment === "store-delivery" && confirmed
+  const delivery = fulfillment !== "pickup" && confirmed
     ? {
         line1: confirmed.line1,
         line2: line2 || null,
@@ -341,7 +341,7 @@ function RealCheckoutForm({
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
-    if (confirmed || line1.trim().length < 3 || fulfillment !== "store-delivery") return;
+    if (confirmed || line1.trim().length < 3 || fulfillment === "pickup") return;
     const controller = new AbortController();
     suggestAbort.current = controller;
     const timer = setTimeout(() => {
@@ -425,7 +425,7 @@ function RealCheckoutForm({
       setError("Choose a pickup time within the next six days.");
       return;
     }
-    if (fulfillment === "store-delivery" && !delivery) {
+    if (fulfillment !== "pickup" && !delivery) {
       setError("Confirm your delivery address.");
       return;
     }
@@ -478,6 +478,13 @@ function RealCheckoutForm({
         delivery,
       );
       if (!piResult.ok) {
+        if (piResult.code === "quote_changed") {
+          setQuote(piResult.quote);
+          setQuoteKey(currentKey);
+          setError(piResult.error);
+          setPayState("idle");
+          return;
+        }
         if (piResult.code === "basket_already_ordered") {
           setErrorHref("/account");
           setError(piResult.error);
@@ -672,7 +679,7 @@ function RealCheckoutForm({
       payState={payState}
       frozen={frozen}
       weightG={weightG}
-      courierEligible={false}
+      courierEligible={settings.courierOffered}
       onSubmit={pay}
       signedIn={Boolean(stripeConfig.signedIn)}
       paymentSection={
@@ -907,6 +914,11 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     signedIn = false, identityLocked = false,
   } = props;
 
+  const courierReasons = (quote?.problems ?? [])
+    .filter((problem) => problem.code === "ineligible" || problem.code === "outside-radius")
+    .map((problem) => problem.message);
+  const courierQuoted = Boolean(quote?.courierProvider) && !quotePending;
+
   return (
     <div className={styles.page}>
       <FlowHeading
@@ -953,6 +965,18 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     Courier · {money(699)} demo quote
                   </Chip>
                 )}
+                {isRealPayment && courierEligible && (
+                  <Chip
+                    type="button"
+                    selected={fulfillment === "courier"}
+                    onClick={() => setFulfillment("courier")}
+                  >
+                    <Truck size={18} />
+                    {fulfillment === "courier" && courierQuoted && quote
+                      ? `Courier · ${money(quote.courierFeeCents)}`
+                      : "Courier"}
+                  </Chip>
+                )}
               </div>
               <p className={styles.muted}>
                 Order weight: {(weightG / 453.592).toFixed(1)} lb. Delivery
@@ -964,6 +988,16 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   lb or less; frozen goods also require confirmed insulated
                   packaging. Choose pickup or store delivery.
                 </p>
+              )}
+              {isRealPayment && fulfillment === "courier" && (
+                courierQuoted && quote ? (
+                  <p className={styles.muted} role="status">
+                    Delivered by {quote.courierProvider === "Uber Direct" ? "Uber" : "DoorDash"}. You pay the
+                    courier&rsquo;s own quote, with no markup.
+                  </p>
+                ) : courierReasons.length > 0 ? (
+                  <p className={styles.error} role="status">{courierReasons.join(" ")}</p>
+                ) : null
               )}
               {frozen && (
                 <p className={styles.notice}>
