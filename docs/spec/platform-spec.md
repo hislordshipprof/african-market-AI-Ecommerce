@@ -172,7 +172,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - Orders & disputes across tenants; manual refund; courier incident log.
 - Courier config: provider priorities, failover timeout, per-metro settings.
 - AI oversight: conversation sampling, flagged answers, eval dashboard.
-- Billing: subscriptions (Stripe Billing), platform fees ledger.
+- Billing: subscriptions (Stripe Billing), platform fees ledger. The fee ledger (#546) is `/admin/billing/ledger`, platform admin only, one UTC month at a time with a CSV of the same rows. It is computed from our tables: an order counts in the month it was captured (`ready_at`; a capture first seen at cancel counts at `cancelled_at`, and a capture the order no longer stores is its succeeded refunds), a fee refund in the month the refund succeeded (`refund_requests.succeeded_at`, stamped once by a trigger when the status first becomes succeeded). Net per order = application fee − courier fee − the store's card fee − the platform's card fee share, which is the service fee less that share (ADR-0021 example: $1.49). A refund with `refund_application_fee` returns the fee in proportion, capped at the fee across the order's refunds; a courier issue refund returns its service fee share once that fee refund is made. Stripe keeps its card fee on a refund; the courier part of a returned fee reverses the courier pass-through. A daily reconcile against Stripe's application-fee list is a follow-up; subscription revenue is #547.
 
 ---
 
