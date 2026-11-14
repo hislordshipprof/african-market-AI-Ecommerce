@@ -1,8 +1,10 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { saveCourierSettingsAction, type CourierSettingsFormState } from "@/lib/admin/courier-settings-actions";
-import { ASSIGNMENT_TIMEOUT_SECONDS, COURIER_WEIGHT_LIMIT_LB, type CourierSelectionMode, type CourierSettings } from "@/lib/delivery/courier-settings";
+import type { CourierSelectionMode, CourierSettings } from "@/lib/delivery/courier-settings";
+
+type Range = { min: number; max: number };
 
 const MODES: Array<{ value: CourierSelectionMode; label: string; hint: string }> = [
   { value: "cheapest", label: "Cheapest quote", hint: "Ask both couriers and book the lower fee." },
@@ -25,8 +27,13 @@ function minutes(seconds: number): string {
   return s === 0 ? `${m} min` : `${m} min ${s} s`;
 }
 
-export function CourierSettingsForm({ settings }: { settings: CourierSettings }) {
+/** The ranges come from the page: the settings module reads the database and stays on the server. */
+export function CourierSettingsForm({ settings, limits }: { settings: CourierSettings; limits: { timeout: Range; weight: Range } }) {
   const [state, formAction, pending] = useActionState<CourierSettingsFormState, FormData>(saveCourierSettingsAction, {});
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (state.fieldErrors) formRef.current?.querySelector<HTMLElement>("[aria-invalid=true], [data-invalid=true] input")?.focus();
+  }, [state]);
   const sent = state.submitted;
   const [timeout, setTimeoutSeconds] = useState(sent?.assignmentTimeoutSeconds ?? String(settings.assignmentTimeoutSeconds));
   const [enabled, setEnabled] = useState({ doordashEnabled: settings.doordashEnabled, uberEnabled: settings.uberEnabled });
@@ -34,8 +41,12 @@ export function CourierSettingsForm({ settings }: { settings: CourierSettings })
   const bothOff = !enabled.doordashEnabled && !enabled.uberEnabled;
 
   return (
-    <form action={formAction} className="mt-8 space-y-6">
-      <fieldset className="rounded-lg border border-border bg-card p-5" aria-describedby={errors.selectionMode ? "selectionMode-error" : undefined}>
+    <form ref={formRef} action={formAction} className="mt-8 space-y-6">
+      <fieldset
+        className="rounded-lg border border-border bg-card p-5"
+        data-invalid={errors.selectionMode ? true : undefined}
+        aria-describedby={errors.selectionMode ? "selectionMode-error" : undefined}
+      >
         <legend className="px-1 text-base font-semibold text-foreground">Which courier gets the order</legend>
         <div className="mt-2 space-y-1">
           {MODES.map((mode) => (
@@ -76,11 +87,11 @@ export function CourierSettingsForm({ settings }: { settings: CourierSettings })
                     role="switch"
                     checked={enabled[provider.name]}
                     onChange={(e) => setEnabled((prev) => ({ ...prev, [provider.name]: e.target.checked }))}
-                    className="peer h-7 w-12 cursor-pointer appearance-none rounded-full border border-input bg-muted transition-colors checked:border-primary checked:bg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    className="peer h-7 w-12 cursor-pointer appearance-none rounded-full border border-input bg-muted transition-colors checked:border-primary checked:bg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none"
                   />
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-1 top-1 size-5 rounded-full bg-card shadow-sm transition-transform peer-checked:translate-x-5 motion-reduce:transition-none"
+                    className="pointer-events-none absolute left-1 top-1 size-5 rounded-full bg-muted-foreground transition-transform peer-checked:translate-x-5 peer-checked:bg-primary-foreground motion-reduce:transition-none"
                   />
                 </span>
               </span>
@@ -107,9 +118,10 @@ export function CourierSettingsForm({ settings }: { settings: CourierSettings })
                 name="assignmentTimeoutSeconds"
                 type="number"
                 inputMode="numeric"
+                autoComplete="off"
                 required
-                min={ASSIGNMENT_TIMEOUT_SECONDS.min}
-                max={ASSIGNMENT_TIMEOUT_SECONDS.max}
+                min={limits.timeout.min}
+                max={limits.timeout.max}
                 step={1}
                 value={timeout}
                 onChange={(e) => setTimeoutSeconds(e.target.value)}
@@ -122,7 +134,7 @@ export function CourierSettingsForm({ settings }: { settings: CourierSettings })
             <p id="assignmentTimeoutSeconds-hint" className="mt-1 text-sm text-muted-foreground">
               <span className="text-foreground">{minutes(Number(timeout))}</span>
               {minutes(Number(timeout)) && ". "}
-              No courier by then, the order moves to the other courier. {ASSIGNMENT_TIMEOUT_SECONDS.min} to {ASSIGNMENT_TIMEOUT_SECONDS.max}; default 600.
+              No courier by then, the order moves to the other courier. {limits.timeout.min} to {limits.timeout.max}; default 600.
             </p>
             {errors.assignmentTimeoutSeconds && (
               <p id="assignmentTimeoutSeconds-error" className="mt-1 text-sm text-destructive">{errors.assignmentTimeoutSeconds}</p>
@@ -138,9 +150,10 @@ export function CourierSettingsForm({ settings }: { settings: CourierSettings })
                 name="weightLimitLb"
                 type="number"
                 inputMode="numeric"
+                autoComplete="off"
                 required
-                min={COURIER_WEIGHT_LIMIT_LB.min}
-                max={COURIER_WEIGHT_LIMIT_LB.max}
+                min={limits.weight.min}
+                max={limits.weight.max}
                 step={1}
                 defaultValue={sent?.weightLimitLb ?? settings.weightLimitLb}
                 aria-invalid={errors.weightLimitLb ? true : undefined}
