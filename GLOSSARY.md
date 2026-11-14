@@ -243,7 +243,7 @@ The audit recorded when an unconfirmed card hold is released after capture does 
 The platform-admin page that lists stuck orders and the alert rows nothing else reads. A stuck order has stayed in one state past its limit, such as a capture still retrying after 30 minutes.
 
 **Order search**:
-The platform-admin page that finds any order at any store: by store and order number, exact customer email or phone, status, fulfillment, and a date range read as store days in each store's own time zone. Results are 50 to a page, newest first. It is read only. Opening an order shows its lines, money, timeline, refund requests, deliveries, issue reports and support thread, and writes a `platform.order_view` audit row naming the admin. The tracking link shows only its last four characters.
+The platform-admin page that finds any order at any store: by store and order number, exact customer email or phone, status, fulfillment, and a date range read as store days in each store's own time zone. Results are 50 to a page, newest first. It is read only. Opening an order shows its lines, money, timeline, refund requests, deliveries, issue reports and support thread, and writes a `platform.order_view` audit row naming the admin; going Back or Forward to it writes a new row before the data shows again. Captured shows what Stripe captured and when, also after a refund or cancellation cleared the order's capture. Every thread has a link; Open in Messages appears only for a thread in the Messages queue. The tracking link shows only its last four characters.
 _Avoid_: Order lookup, order explorer
 
 **Refund failed**:
