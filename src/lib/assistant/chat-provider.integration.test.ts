@@ -5,6 +5,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { updateLineQty } from "../cart/service";
 import { appUserQuery, storeScoped } from "../db";
+import { itemHandles } from "./handles";
 import { createFakeAnthropicFetch } from "./messages-api-double";
 import { createAssistantModel } from "./model";
 import { ASSISTANT_STATIC_PROMPT } from "./system-prompt";
@@ -286,6 +287,17 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     return { listingId: row.id, variantId: variant.id };
   }
 
+  // A cart and conversation that already exist, with the items shown to the shopper's model, so a scripted
+  // model can send handles as a real one does after an earlier tool result. Handles come back in item order.
+  async function conversationShowing(storeId: string, items: Array<{ listingId: string; variantId: string }>) {
+    const cartId = (await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } })).id;
+    const conversationId = (await storeScoped(storeId).aiConversation.create({
+      data: { storeId, cartId, model: "claude-haiku-5-5", messages: [] },
+    })).id;
+    const shown = await itemHandles(storeId, conversationId).toModel(items.map(({ listingId, variantId }) => ({ listingId, variantId })));
+    return { cartId, cookie: `cart_id=${encodeURIComponent(cartId)}`, handles: shown as Array<{ listingId: string; variantId: string }> };
+  }
+
   async function settled(storeId: string, cartId: string) {
     const deadline = Date.now() + 8_000;
     while (Date.now() < deadline) {
@@ -322,11 +334,12 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", KEY);
     vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
     const egusi = await listing(storeA, "Egusi", 1099);
+    const open = await conversationShowing(storeA, [egusi]);
     const fake = createFakeAnthropicFetch({
       expectedKey: KEY,
       steps: [
         { kind: "tool", toolName: "search_catalog", toolInput: { query: "Egusi" } },
-        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: egusi.variantId, qty: 2 }] } },
+        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: open.handles[0].variantId, qty: 2 }] } },
         { kind: "text", text: "Added 2 at $10.99 each, $21.98 total." },
         {
           kind: "text",
@@ -337,9 +350,9 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       ],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    const first = await handler(message("egusi-turn-1", "add egusi", undefined, slugA, "203.0.113.181"));
+    const first = await handler(message("egusi-turn-1", "add egusi", open.cookie, slugA, "203.0.113.181"));
     expect(first.status).toBe(200);
-    const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
+    const cookie = open.cookie;
     const turn1 = await first.text();
     expect(turn1).toContain("$10.99");
     expect(turn1).toContain("$21.98");
@@ -479,21 +492,23 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       const egusi = await listing(store.id, "Reprice Egusi", 1099);
       const palm = await listing(store.id, "Reprice Palm", 1099);
       const bark = await listing(store.id, "Reprice Bark", 1499);
+      const open = await conversationShowing(store.id, [egusi, palm, bark]);
+      const [egusiH, palmH, barkH] = open.handles;
       let seen = 0;
       const inner = createFakeAnthropicFetch({
         expectedKey: KEY,
         steps: [
-          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusi.listingId, palm.listingId] } },
+          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusiH.listingId, palmH.listingId] } },
           { kind: "text", text: "Both are $10.99." },
-          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusi.listingId] } },
-          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusi.listingId] } },
+          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusiH.listingId] } },
+          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusiH.listingId] } },
           { kind: "text", text: "Egusi is $8.99. Earlier it was $7.50. Palm is $10.99." },
-          { kind: "tool", toolName: "check_availability", toolInput: { listing_ids: [bark.listingId] } },
-          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [palm.listingId] } },
+          { kind: "tool", toolName: "check_availability", toolInput: { listing_ids: [barkH.listingId] } },
+          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [palmH.listingId] } },
           { kind: "text", text: "Palm is $5.00. Bark is $14.99. The shared price was $10.99." },
-          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [palm.listingId] } },
+          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [palmH.listingId] } },
           { kind: "text", text: "Palm is $7.99. The minimum is $5.00. Invented is $6.66." },
-          { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: egusi.variantId, qty: 1 }] } },
+          { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: egusiH.variantId, qty: 1 }] } },
           { kind: "tool", toolName: "get_cart_summary", toolInput: {} },
           { kind: "text", text: "In the cart." },
           { kind: "text", text: "The summary price is $6.40. Egusi used to be $8.99." },
@@ -519,8 +534,8 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
         return inner.fetch(input, init);
       };
       const handler = createChatHandler({ model: createAssistantModel({ fetch: fetchImpl }) });
-      const opened = await handler(message("reprice-turn-1", "show both", undefined, store.slug, "203.0.113.191"));
-      const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
+      const opened = await handler(message("reprice-turn-1", "show both", open.cookie, store.slug, "203.0.113.191"));
+      const cookie = open.cookie;
       const turn1 = await opened.text();
       expect(turn1).toContain("$10.99");
       const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
@@ -564,25 +579,27 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
     const left = await listing(storeA, "Left Egusi", 1099);
     const right = await listing(storeB, "Right Palm", 2599);
+    const openA = await conversationShowing(storeA, [left]);
+    const openB = await conversationShowing(storeB, [right]);
     const fakeA = createFakeAnthropicFetch({
       expectedKey: KEY,
       steps: [
-        { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [left.listingId] } },
+        { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [openA.handles[0].listingId] } },
         { kind: "text", text: "Ours is $10.99. Theirs is $25.99. The minimum is $10.00. Their minimum is $25.00." },
       ],
     });
     const fakeB = createFakeAnthropicFetch({
       expectedKey: KEY,
       steps: [
-        { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [right.listingId] } },
+        { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [openB.handles[0].listingId] } },
         { kind: "text", text: "Ours is $25.99. Theirs is $10.99. The minimum is $25.00. Their minimum is $10.00." },
       ],
     });
     const handlerA = createChatHandler({ model: createAssistantModel({ fetch: fakeA.fetch }) });
     const handlerB = createChatHandler({ model: createAssistantModel({ fetch: fakeB.fetch }) });
     const [bodyA, bodyB] = await Promise.all([
-      handlerA(message("iso-turn-a1", "price", undefined, slugA, "203.0.113.192")).then((response) => response.text()),
-      handlerB(message("iso-turn-b1", "price", undefined, slugB, "203.0.113.193")).then((response) => response.text()),
+      handlerA(message("iso-turn-a1", "price", openA.cookie, slugA, "203.0.113.192")).then((response) => response.text()),
+      handlerB(message("iso-turn-b1", "price", openB.cookie, slugB, "203.0.113.193")).then((response) => response.text()),
     ]);
     expect(bodyA).toContain("$10.99");
     expect(bodyA).toContain("$10.00");
