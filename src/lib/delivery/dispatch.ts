@@ -53,44 +53,62 @@ export type DispatchResult =
   | { ok: false; reason: "both_failed" };
 
 /** A new id for every quote: DoorDash refuses a delivery id it has quoted before (409). */
-function externalDeliveryId(orderId: string, provider: DeliveryProviderName): string {
-  return `${orderId}-${provider}-${randomUUID().slice(0, 8)}`;
+function externalDeliveryId(referenceId: string, provider: DeliveryProviderName): string {
+  return `${referenceId}-${provider}-${randomUUID().slice(0, 8)}`;
+}
+
+type QuoteInput = { referenceId: string } & Pick<DispatchInput, "request" | "registrations">;
+type Candidate = { provider: DeliveryProvider; req: DeliveryRequest; quote: DeliveryQuote };
+
+function quoteWith(input: QuoteInput, provider: DeliveryProvider): Promise<Candidate> {
+  const req: DeliveryRequest = {
+    ...input.request,
+    pickup: { ...input.request.pickup, ...input.registrations?.[provider.name] },
+    externalDeliveryId: externalDeliveryId(input.referenceId, provider.name),
+  };
+  return provider.quote(req).then((quote) => ({ provider, req, quote }));
 }
 
 /**
- * Quotes every provider at once and books the cheapest live quote. A provider that cannot quote (missing keys,
- * HTTP error) or quotes an expired price is unavailable. A create error moves straight to the next cheapest.
+ * Quotes every provider at once; live quotes come back cheapest first. A provider that cannot quote (missing keys,
+ * HTTP error) or quotes an expired price is unavailable.
  */
-export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
-  const now = deps.now ?? (() => new Date());
-  const quoteWith = async (provider: DeliveryProvider) => {
-    const req: DeliveryRequest = {
-      ...input.request,
-      pickup: { ...input.request.pickup, ...input.registrations?.[provider.name] },
-      externalDeliveryId: externalDeliveryId(input.orderId, provider.name),
-    };
-    return { provider, req, quote: await provider.quote(req) };
-  };
-
+async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], now: () => Date): Promise<Candidate[]> {
   const settled = await Promise.all(
-    deps.providers.map(async (provider) => {
+    providers.map(async (provider) => {
       try {
-        return await quoteWith(provider);
+        return await quoteWith(input, provider);
       } catch (err) {
-        logUnavailable(input.orderId, provider.name, "quote", err);
+        logUnavailable(input.referenceId, provider.name, "quote", err);
         return null;
       }
     }),
   );
-  const candidates = settled
-    .filter((c): c is { provider: DeliveryProvider; req: DeliveryRequest; quote: DeliveryQuote } => c !== null && c.quote.expiresAt > now())
+  return settled
+    .filter((c): c is Candidate => c !== null && c.quote.expiresAt > now())
     .sort((a, b) => a.quote.feeCents - b.quote.feeCents);
+}
+
+export type CheckoutCourierQuote = { provider: DeliveryProviderName; courierProvider: CourierBrand; feeCents: number; expiresAt: Date };
+
+/** The fee checkout shows (#527): the same selection dispatch books from, with nothing booked. */
+export async function quoteCheapestCourier(input: QuoteInput, providers: DeliveryProvider[], now: () => Date = () => new Date()): Promise<CheckoutCourierQuote | null> {
+  const [cheapest] = await liveQuotes(input, providers, now);
+  if (!cheapest) return null;
+  return { provider: cheapest.provider.name, courierProvider: courierBrand(cheapest.provider.name), feeCents: cheapest.quote.feeCents, expiresAt: cheapest.quote.expiresAt };
+}
+
+/** Books the cheapest live quote. A create error moves straight to the next cheapest. */
+export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
+  const now = deps.now ?? (() => new Date());
+  const quoteInput = { ...input, referenceId: input.orderId };
+  const candidates = await liveQuotes(quoteInput, deps.providers, now);
 
   for (const [i, candidate] of candidates.entries()) {
     const { provider } = candidate;
     let booked: { quote: DeliveryQuote; created: CreatedDelivery };
     try {
-      const { req, quote } = candidate.quote.expiresAt > now() ? candidate : await quoteWith(provider);
+      const { req, quote } = candidate.quote.expiresAt > now() ? candidate : await quoteWith(quoteInput, provider);
       booked = { quote, created: await provider.create(quote.quoteId, req) };
     } catch (err) {
       logUnavailable(input.orderId, provider.name, "create", err);
@@ -148,9 +166,9 @@ async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDe
   await emit({ name: COURIER_BOTH_FAILED, data: { storeId, orderId, orderNumber: order.number, options } });
 }
 
-function logUnavailable(orderId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
+function logUnavailable(referenceId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
   const message = err instanceof Error ? err.message : "unknown";
-  console.warn(JSON.stringify({ event: "courier_provider_unavailable", orderId, provider, stage, message }));
+  console.warn(JSON.stringify({ event: "courier_provider_unavailable", referenceId, provider, stage, message }));
 }
 
 /** The courier request for an order, from the store's address and the order's delivery snapshot. */

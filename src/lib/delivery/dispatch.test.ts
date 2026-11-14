@@ -12,6 +12,7 @@ import {
   courierFailoverFailed,
   courierRequest,
   dispatchReadyOrder,
+  quoteCheapestCourier,
   runCourierFailover,
   selectAndDispatch,
   type CourierEvent,
@@ -100,6 +101,31 @@ const request = {
   orderValueCents: 6000,
   tipCents: 0,
 };
+
+describe("checkout courier quote (#527)", () => {
+  it("returns the cheapest live quote with its brand and books nothing", async () => {
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+    const expired = new StubProvider("uber", 500);
+    expired.expiresInMs = -1;
+
+    const quote = await quoteCheapestCourier({ referenceId: "cart-1", request }, [doordash, uber]);
+
+    expect(quote).toMatchObject({ provider: "uber", feeCents: 749, courierProvider: "Uber Direct" });
+    expect(doordash.created.size + uber.created.size).toBe(0);
+    expect(await quoteCheapestCourier({ referenceId: "cart-1", request }, [expired, doordash])).toMatchObject({ feeCents: 899 });
+  });
+
+  it("skips a provider that cannot quote, and returns null when none can", async () => {
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+    uber.failQuote = true;
+
+    expect(await quoteCheapestCourier({ referenceId: "cart-2", request }, [doordash, uber])).toMatchObject({ provider: "doordash", feeCents: 899 });
+    doordash.failQuote = true;
+    expect(await quoteCheapestCourier({ referenceId: "cart-2", request }, [doordash, uber])).toBeNull();
+  });
+});
 
 describe.skipIf(!hasDb)("courier selection and failover", () => {
   let raw: PrismaClient;
