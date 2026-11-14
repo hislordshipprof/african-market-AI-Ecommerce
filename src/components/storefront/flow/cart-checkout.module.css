@@ -452,9 +452,13 @@
     --cart-bar-height: 74px;
     padding-bottom: calc(var(--cart-bar-bottom) + var(--cart-bar-height) + 12px);
   }
+  /* Keyboard focus scrolls clear of the nav and the checkout bar (96 + 120 + 12). */
+  :global(html):has(.mobileAction) {
+    scroll-padding-bottom: calc(228px + env(safe-area-inset-bottom));
+  }
   /* The bar names why Checkout is off, on up to two more lines. */
   .page:has(.mobileAction[data-blocked]) {
-    --cart-bar-height: 112px;
+    --cart-bar-height: 120px;
   }
   .mobileAction {
     position: fixed;

@@ -1673,9 +1673,10 @@
     gap: 6px;
     margin-left: 0;
   }
+  /* 16px keeps iOS from zooming the page when the select takes focus. */
   .sf-filters select {
-    max-width: 135px;
-    font-size: 13px;
+    max-width: 180px;
+    font-size: 16px;
     padding-inline: 10px;
   }
   .sf-page-title {
@@ -1727,6 +1728,13 @@
   /* The footer scrolls clear of the nav and the 74px add bar. */
   .sf-storefront:has(.sf-add-bar) {
     padding-bottom: calc(180px + env(safe-area-inset-bottom));
+  }
+  /* Keyboard focus scrolls clear of the fixed nav, and of the add bar on product pages. */
+  html:has(.sf-storefront) {
+    scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+  html:has(.sf-add-bar) {
+    scroll-padding-bottom: calc(180px + env(safe-area-inset-bottom));
   }
   .sf-collection-hero {
     height: 260px;
@@ -1835,6 +1843,12 @@
 @media (max-width: 359px) {
   .sf-logo-plate {
     max-width: 44px;
+  }
+  .sf-add-bar {
+    gap: 12px;
+  }
+  .sf-add-bar > span {
+    font-size: 13px;
   }
 }
 
