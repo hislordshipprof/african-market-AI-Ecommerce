@@ -46,6 +46,8 @@ export interface CreateVariantInput {
   weightG: number;
   sku?: string | null;
   barcode?: string | null;
+  /** The weight is a stand-in the owner still has to set (no known weight). */
+  weightPlaceholder?: boolean;
 }
 
 /** A variant row on a save. `id` is set when the row already belongs to this listing. */
@@ -93,7 +95,7 @@ async function createVariantRows(
           label: v.label,
           price: v.price,
           weightG: v.weightG,
-          weightPlaceholder: false,
+          weightPlaceholder: v.weightPlaceholder ?? false,
           sku: v.sku ?? null,
           barcode: v.barcode ?? null,
         },
@@ -130,9 +132,16 @@ export interface CreateListingInput {
   maxPerOrder?: number | null;
   variants: CreateVariantInput[];
   actor: Actor;
+  /** Where the listing came from, recorded on its audit row (e.g. `photo_draft`). */
+  source?: string;
 }
 
 export async function createListing(input: CreateListingInput) {
+  return storeScopedTransaction(input.storeId, (tx) => createListingInTransaction(tx, input));
+}
+
+/** The listing, its variants, a recount event and one `listing.create` audit row, inside the caller's transaction. */
+export async function createListingInTransaction(tx: ListingTx, input: CreateListingInput) {
   const stock = resolveStockMode({
     stockMode: input.stockMode,
     hasQtyColumn: input.stockMode === "counted",
@@ -140,59 +149,58 @@ export async function createListing(input: CreateListingInput) {
     status: input.status ?? undefined,
   });
 
-  return storeScopedTransaction(input.storeId, async (tx) => {
-    const listing = await tx.listing.create({
-      data: {
-        storeId: input.storeId,
-        masterProductId: input.masterProductId ?? null,
-        customName: input.customName ?? null,
-        price: input.price,
-        stockMode: stock.stockMode,
-        qty: stock.qty,
-        status: stock.status,
-        frozen: input.frozen,
-        perishable: input.perishable,
-        maxPerOrder: input.maxPerOrder ?? null,
-      },
-    });
-
-    const variants = await createVariantRows(tx, listing.id, input.variants);
-
-    if (stock.stockMode === "counted" && (stock.qty ?? 0) > 0) {
-      await tx.stockEvent.create({
-        data: {
-          storeId: input.storeId,
-          listingId: listing.id,
-          type: "recount",
-          delta: stock.qty!,
-          actorId: input.actor.id,
-        },
-      });
-    }
-
-    await tx.auditLog.create({
-      data: {
-        storeId: input.storeId,
-        actorId: input.actor.id,
-        actorEmail: input.actor.email,
-        action: "listing.create",
-        entityType: "listing",
-        entityId: listing.id,
-        after: {
-          customName: listing.customName,
-          masterProductId: listing.masterProductId,
-          price: listing.price,
-          stockMode: listing.stockMode,
-          qty: listing.qty,
-          status: listing.status,
-          frozen: listing.frozen,
-          perishable: listing.perishable,
-        },
-      },
-    });
-
-    return { ...listing, variants };
+  const listing = await tx.listing.create({
+    data: {
+      storeId: input.storeId,
+      masterProductId: input.masterProductId ?? null,
+      customName: input.customName ?? null,
+      price: input.price,
+      stockMode: stock.stockMode,
+      qty: stock.qty,
+      status: stock.status,
+      frozen: input.frozen,
+      perishable: input.perishable,
+      maxPerOrder: input.maxPerOrder ?? null,
+    },
   });
+
+  const variants = await createVariantRows(tx, listing.id, input.variants);
+
+  if (stock.stockMode === "counted" && (stock.qty ?? 0) > 0) {
+    await tx.stockEvent.create({
+      data: {
+        storeId: input.storeId,
+        listingId: listing.id,
+        type: "recount",
+        delta: stock.qty!,
+        actorId: input.actor.id,
+      },
+    });
+  }
+
+  await tx.auditLog.create({
+    data: {
+      storeId: input.storeId,
+      actorId: input.actor.id,
+      actorEmail: input.actor.email,
+      action: "listing.create",
+      entityType: "listing",
+      entityId: listing.id,
+      after: {
+        customName: listing.customName,
+        masterProductId: listing.masterProductId,
+        price: listing.price,
+        stockMode: listing.stockMode,
+        qty: listing.qty,
+        status: listing.status,
+        frozen: listing.frozen,
+        perishable: listing.perishable,
+        ...(input.source ? { source: input.source } : {}),
+      },
+    },
+  });
+
+  return { ...listing, variants };
 }
 
 export interface UpdateListingInput {
