@@ -23,6 +23,7 @@ import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, type CourierQuoteIn
 import { couponCustomerKey, readCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCheapestCourier } from "../delivery/dispatch";
 import { checkCourierEligibility, readCourierWeightSettings } from "../delivery/eligibility";
+import { courierOffered } from "../delivery/courier-offered";
 import type { DeliveryProvider } from "../delivery/provider";
 import { validPhone } from "../customer-account/phone";
 import { assertSlotOffered, SlotUnavailableError } from "./slots";
@@ -299,14 +300,6 @@ function shownCourier(
     return { ok: false, problem: { code: "ineligible", message: "Confirm your delivery address to see the courier fee." } };
   }
   return { ok: true, feeCents: cart.courierFeeCents, provider: cart.courierProvider as "Uber Direct" | "DoorDash Drive", leaveAtDoor };
-}
-
-/**
- * Courier delivery needs the store registered with a courier, a pickup point to measure the radius from, and a phone:
- * Uber Direct will not book a pickup without one.
- */
-export function courierOffered(store: { uberLocationId: string | null; doordashStoreId: string | null; addressLine1: string | null; city: string | null; state: string | null; zip: string | null; lat: number | null; lng: number | null; phone: string | null }): boolean {
-  return Boolean((store.uberLocationId || store.doordashStoreId) && store.addressLine1 && store.city && store.state && store.zip && store.lat != null && store.lng != null && store.phone);
 }
 
 export { COURIER_NOT_OFFERED, computeQuote, type StoreDeliveryQuote } from "./quote";
