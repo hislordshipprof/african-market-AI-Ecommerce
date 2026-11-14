@@ -76,7 +76,7 @@ async function shoot(page: Page, name: string) {
   mkdirSync(PROOF, { recursive: true });
   for (const scheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: scheme });
-    for (const width of [390, 1280]) {
+    for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       await page.screenshot({ path: `${PROOF}/${name}-${width}-${scheme}.png`, fullPage: true });
