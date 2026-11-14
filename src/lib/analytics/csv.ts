@@ -41,7 +41,7 @@ const salesCells = (t: Totals) => [
 ];
 
 /** One CSV per view, built from the same numbers the page shows. */
-export function analyticsCsv(view: AnalyticsView, data: StoreAnalytics): string {
+export function analyticsCsv(view: AnalyticsView, data: StoreAnalytics, chatUsage: { chats: number; cap: number }): string {
   const range = `${data.range.from} to ${data.range.to}`;
   switch (view) {
     case "sales":
@@ -92,6 +92,8 @@ export function analyticsCsv(view: AnalyticsView, data: StoreAnalytics): string 
       const a = data.assistant;
       return toCsv([
         ["Measure", range],
+        ["Chats this month", chatUsage.chats],
+        ["Plan cap", chatUsage.cap],
         ["Chats", a.chatsInRange],
         ["Chats that added to the cart", a.ledToCart],
         ["Chats that led to an order", a.ledToOrder],

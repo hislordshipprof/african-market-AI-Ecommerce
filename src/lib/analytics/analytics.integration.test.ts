@@ -10,6 +10,7 @@ const hasDb = !!process.env.DATABASE_URL;
 const TZ = "America/Chicago";
 const RANGE: AnalyticsRange = { preset: "custom", from: "2026-11-01", to: "2026-11-07" };
 const at = (iso: string) => new Date(iso);
+const USAGE = { chats: 0, cap: 5000 };
 const minutes = (date: Date, n: number) => new Date(date.getTime() + n * 60_000);
 
 /**
@@ -217,14 +218,14 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
   });
 
   it("each CSV matches the on-screen numbers", () => {
-    const sales = analyticsCsv("sales", data).split("\r\n");
+    const sales = analyticsCsv("sales", data, USAGE).split("\r\n");
     expect(sales).toContain("2026-11-03,2,57.00,28.50,0.00,2.60,8.99,57.40");
     expect(sales).toContain("Courier,1,37.00,37.00,11.00,1.63,8.99,24.37");
     expect(sales).toContain("Total 2026-11-01 to 2026-11-07,3,87.00,29.00,21.00,3.97,8.99,72.40");
-    expect(analyticsCsv("products", data)).toContain("Top seller,Egusi,4,42.00,,,\r\n");
-    expect(analyticsCsv("customers", data)).toContain("Repeat rate %,100\r\n");
-    expect(analyticsCsv("operations", data)).toContain("Cancelled: Out of stock,1\r\n");
-    expect(analyticsCsv("assistant", data)).toContain("Chats that led to an order,1\r\n");
+    expect(analyticsCsv("products", data, USAGE)).toContain("Top seller,Egusi,4,42.00,,,\r\n");
+    expect(analyticsCsv("customers", data, USAGE)).toContain("Repeat rate %,100\r\n");
+    expect(analyticsCsv("operations", data, USAGE)).toContain("Cancelled: Out of stock,1\r\n");
+    expect(analyticsCsv("assistant", data, USAGE)).toContain("Chats that led to an order,1\r\n");
   });
 
   it("caps the fee returned across partial refunds and the courier fee at what was captured", () => {
@@ -235,11 +236,11 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
   });
 
   it("exports a negative amount as a plain number a spreadsheet can sum", () => {
-    const sales = analyticsCsv("sales", edges).split("\r\n");
+    const sales = analyticsCsv("sales", edges, USAGE).split("\r\n");
     expect(sales).toContain("2026-11-02,0,0.00,0.00,5.00,0.00,0.00,-4.71");
     expect(sales).toContain("Total 2026-11-01 to 2026-11-07,1,0.01,0.01,5.00,0.59,9.41,-4.71");
     // Shopper search text that would run as a formula stays guarded.
-    expect(analyticsCsv("products", edges)).toContain("\"Searched, not carried\",'-1+cmd,,,,,1\r\n");
+    expect(analyticsCsv("products", edges, USAGE)).toContain("\"Searched, not carried\",'-1+cmd,,,,,1\r\n");
   });
 
   it("does not count a chat whose order was cancelled before capture as leading to an order", () => {

@@ -1,5 +1,6 @@
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { planAllows, storePlan } from "@/lib/billing/plan";
+import { assistantChatUsage } from "@/lib/billing/assistant-chats";
 import { resolveRange } from "@/lib/analytics/range";
 import { storeAnalytics } from "@/lib/analytics/queries";
 import { ANALYTICS_VIEWS, analyticsCsv, type AnalyticsView } from "@/lib/analytics/csv";
@@ -7,7 +8,8 @@ import { ANALYTICS_VIEWS, analyticsCsv, type AnalyticsView } from "@/lib/analyti
 /** CSV of one analytics view, from the same numbers the page shows (#498). Pro only. */
 export async function GET(request: Request) {
   const { store } = await requireStoreOwner();
-  if (!planAllows(await storePlan(store.id), "analytics-dashboard")) {
+  const plan = await storePlan(store.id);
+  if (!planAllows(plan, "analytics-dashboard")) {
     return new Response("Analytics is a Pro feature.", { status: 403 });
   }
   const params = new URL(request.url).searchParams;
@@ -17,7 +19,8 @@ export async function GET(request: Request) {
     { range: params.get("range") ?? undefined, from: params.get("from") ?? undefined, to: params.get("to") ?? undefined },
     store.timezone,
   );
-  const body = analyticsCsv(view, await storeAnalytics(store.id, store.timezone, range));
+  const [data, usage] = await Promise.all([storeAnalytics(store.id, store.timezone, range), assistantChatUsage(store.id, plan)]);
+  const body = analyticsCsv(view, data, usage);
   return new Response(body, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
