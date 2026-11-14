@@ -53,6 +53,7 @@ async function loadOrder(storeId: string, orderId: string): Promise<NotifyOrder 
       where: { id: orderId },
       include: {
         customer: { select: { name: true, email: true, phone: true } },
+        coupon: { select: { code: true } },
         store: {
           select: {
             name: true,

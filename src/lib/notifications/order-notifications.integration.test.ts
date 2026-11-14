@@ -94,6 +94,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
       await scoped.auditLog.deleteMany({});
       await scoped.orderLine.deleteMany({});
       await scoped.order.deleteMany({});
+      await scoped.storeCoupon.deleteMany({});
       await scoped.cartLine.deleteMany({});
       await scoped.cart.deleteMany({});
       await scoped.stockEvent.deleteMany({});
@@ -277,6 +278,19 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(cancelled).toContain("You were not charged");
     expect(cancelled).not.toMatch(/\$\d/);
     expect(getTestSentSms()).toHaveLength(1);
+  });
+
+  it("#557: the placed email names the promo code and takes the discount off the estimate", async () => {
+    const orderId = await place("pickup");
+    const coupon = await storeScoped(storeId).storeCoupon.create({
+      data: { storeId, code: "SAVE2", kind: "fixed", amountOffCents: 200, startsAt: new Date("2026-01-01T00:00:00Z"), createdById: staffId },
+    });
+    await storeScoped(storeId).order.update({ where: { id: orderId }, data: { couponId: coupon.id, discountCents: 200 } });
+    await run(orderId, "placed");
+    const html = getTestSentEmails().at(-1)!.html!;
+    expect(html).toContain("Promo SAVE2: −$2.00.");
+    // Goods $25.00 − $2.00 + the quoted service fee $0.99.
+    expect(html).toContain("Estimated total $23.99");
   });
 
   it("a duplicate event and a lost provider response still send each message once", async () => {

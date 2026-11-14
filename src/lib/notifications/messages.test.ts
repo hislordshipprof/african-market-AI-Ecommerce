@@ -14,6 +14,8 @@ function order(status: string, capturedAmountCents: number | null = 2500): Notif
     tipCents: 0,
     deliveryFeeCents: 500,
     serviceFeeCents: 0,
+    discountCents: 0,
+    coupon: null,
     totalAuthorizedCents: 2750,
     capturedAmountCents,
     refundId: null,
@@ -57,6 +59,28 @@ describe("store delivery messages", () => {
     const html = renderEmail({ ...order("DELIVERED", 2560), serviceFeeCents: 60 }, "delivered", URL, "orders@example.com").html;
     expect(html).toContain("<p>Service fee $0.60.</p><p>Charged $25.60.</p>");
     expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).not.toContain("Service fee");
+  });
+});
+
+describe("#557: promo discount on receipts", () => {
+  // Goods $20.00 − SAVE10 $2.00 + delivery $5.00 + service fee $0.54 (3% of $18.00) = $23.54.
+  const promo = { ...order("DELIVERED", 2354), serviceFeeCents: 54, discountCents: 200, coupon: { code: "SAVE10" } };
+
+  it("the placed email shows the promo line and an estimate that already subtracts it", () => {
+    const html = renderEmail({ ...promo, status: "AUTHORIZED" }, "placed", URL, "orders@example.com").html;
+    expect(html).toContain("<p>Promo SAVE10: −$2.00.</p><p>Service fee $0.54.</p>");
+    expect(html).toContain("Estimated total $23.54.");
+  });
+
+  it("the charged email shows the promo line before the service fee and charged amount", () => {
+    const html = renderEmail(promo, "delivered", URL, "orders@example.com").html;
+    expect(html).toContain("<p>Promo SAVE10: −$2.00.</p><p>Service fee $0.54.</p><p>Charged $23.54.</p>");
+  });
+
+  it("an order with no discount, or a coupon code that needs escaping, stays safe", () => {
+    expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).not.toContain("Promo");
+    const html = renderEmail({ ...promo, coupon: { code: "<b>X" } }, "delivered", URL, "orders@example.com").html;
+    expect(html).toContain("Promo &lt;b&gt;X: −$2.00.");
   });
 });
 

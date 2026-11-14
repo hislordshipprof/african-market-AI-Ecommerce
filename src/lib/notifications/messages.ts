@@ -29,6 +29,8 @@ export type NotifyOrder = {
   tipCents: number;
   deliveryFeeCents: number;
   serviceFeeCents: number;
+  discountCents: number;
+  coupon: { code: string } | null;
   totalAuthorizedCents: number;
   capturedAmountCents: number | null;
   refundId: string | null;
@@ -160,6 +162,12 @@ function cancelCopy(order: NotifyOrder): string {
 /** Events after capture: the order is picked and the final amount is charged. */
 const CHARGED_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set(["ready", "out_for_delivery", "delivered", "completed"]);
 
+function promoLine(order: NotifyOrder): string {
+  if (order.discountCents <= 0) return "";
+  const label = order.coupon ? `Promo ${order.coupon.code}` : "Promo discount";
+  return `<p>${escapeHtml(label)}: −${escapeHtml(money(order.discountCents))}.</p>`;
+}
+
 function lineRows(order: NotifyOrder, event: OrderNotifyEvent): string {
   const picked = CHARGED_EVENTS.has(event);
   return order.lines.map((line) => {
@@ -211,7 +219,8 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
   if (event !== "cancelled" && event !== "store_replied" && event !== "refunded" && event !== "substitution") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {
-    const estimate = order.subtotalCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;
+    const estimate = order.subtotalCents - order.discountCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;
+    parts.push(promoLine(order));
     if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
     parts.push(`<p>Estimated total ${escapeHtml(money(estimate))}.</p>`);
     parts.push(`<p>Card hold ${escapeHtml(money(order.totalAuthorizedCents))}. You'll be charged the final amount after picking.</p>`);
@@ -226,6 +235,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
         }));
       }
     } else {
+      parts.push(promoLine(order));
       if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
       parts.push(`<p>Charged ${escapeHtml(money(order.capturedAmountCents))}.</p>`);
     }
