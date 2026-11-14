@@ -21,6 +21,10 @@ const unconfiguredStripeProvider: StripeProvider = {
   refundApplicationFeePart: async () => throwUnconfigured(),
   listRefunds: async () => throwUnconfigured(),
   retrieveRefund: async () => throwUnconfigured(),
+  listPayouts: async () => throwUnconfigured(),
+  retrievePayout: async () => throwUnconfigured(),
+  listPayoutTransactions: async () => throwUnconfigured(),
+  createLoginLink: async () => throwUnconfigured(),
 };
 
 export type StripeSelection = "fake" | "real" | "unconfigured";
@@ -45,6 +49,8 @@ export type {
   CaptureResult,
   CancelResult,
   RetrieveResult,
+  Payout,
+  PayoutTransaction,
 } from "./types";
 export { deriveOnboardingStatus } from "./types";
 

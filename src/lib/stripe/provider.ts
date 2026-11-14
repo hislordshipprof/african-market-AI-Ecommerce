@@ -8,6 +8,8 @@ import type {
   CancelResult,
   RetrieveResult,
   RefundResult,
+  Payout,
+  PayoutTransaction,
 } from "./types";
 import { ProviderStateError } from "./types";
 import { billingObjects } from "../billing/webhook-objects";
@@ -64,6 +66,34 @@ function toConnectAccount(account: any): ConnectAccount {
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+function toPayout(payout: Stripe.Payout): Payout {
+  return { id: payout.id, amountCents: payout.amount, arrivalDate: payout.arrival_date, status: payout.status };
+}
+
+/**
+ * The platform PaymentIntent behind a balance transaction on the store's account. A payment is the
+ * transfer's charge (`py_`); a refund points at that charge. Destination charges name the
+ * transfer group `group_<PaymentIntent id>`.
+ */
+function payoutPaymentIntentId(txn: Stripe.BalanceTransaction): string | null {
+  const source = txn.source as (Stripe.Charge & Stripe.Refund) | string | null;
+  if (!source || typeof source === "string") return null;
+  const charge = source.object === "refund" ? source.charge : source;
+  if (!charge || typeof charge === "string") return null;
+  const transfer = charge.source_transfer;
+  if (!transfer || typeof transfer === "string") return null;
+  const platformCharge = transfer.source_transaction;
+  if (platformCharge && typeof platformCharge !== "string" && "payment_intent" in platformCharge) {
+    const intent = platformCharge.payment_intent;
+    if (intent) return typeof intent === "string" ? intent : intent.id;
+  }
+  const group = transfer.transfer_group?.match(/^group_(pi_\w+)$/);
+  return group ? group[1] : null;
+}
+
+// Stripe's autoPagingToArray maximum; a weekly payout is far below it.
+const PAYOUT_TRANSACTION_CAP = 10_000;
 
 export const stripeProvider: StripeProvider = {
   async createConnectAccount({ email, businessName, storeId }) {
@@ -285,6 +315,47 @@ export const stripeProvider: StripeProvider = {
         ? { orderId: refund.metadata.order_id }
         : {}),
     } satisfies RefundResult;
+  },
+
+  async listPayouts(accountId, limit) {
+    const stripe = getStripeClient();
+    const payouts = await stripe.payouts.list({ limit }, { stripeAccount: accountId });
+    return payouts.data.map(toPayout);
+  },
+
+  async retrievePayout(accountId, payoutId) {
+    const stripe = getStripeClient();
+    return toPayout(await stripe.payouts.retrieve(payoutId, {}, { stripeAccount: accountId }));
+  },
+
+  async listPayoutTransactions(accountId, payoutId) {
+    const stripe = getStripeClient();
+    const listed = await stripe.balanceTransactions
+      .list(
+        {
+          payout: payoutId,
+          limit: 100,
+          expand: ["data.source.source_transfer.source_transaction", "data.source.charge.source_transfer"],
+        },
+        { stripeAccount: accountId },
+      )
+      .autoPagingToArray({ limit: PAYOUT_TRANSACTION_CAP });
+    return listed
+      .filter((txn) => txn.type !== "payout")
+      .map((txn) => ({
+        id: txn.id,
+        type: txn.type,
+        amountCents: txn.amount,
+        feeCents: txn.fee,
+        netCents: txn.net,
+        paymentIntentId: payoutPaymentIntentId(txn),
+      })) satisfies PayoutTransaction[];
+  },
+
+  async createLoginLink(accountId) {
+    const stripe = getStripeClient();
+    const link = await stripe.accounts.createLoginLink(accountId);
+    return { url: link.url };
   },
 
   async refundApplicationFeePart(paymentIntentId, amountCents, reservationKey) {

@@ -25,7 +25,7 @@ function cell(value: string | number | null): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-function toCsv(rows: Array<Array<string | number | null>>): string {
+export function toCsv(rows: Array<Array<string | number | null>>): string {
   return rows.map((row) => row.map(cell).join(",")).join("\r\n") + "\r\n";
 }
 
