@@ -214,7 +214,6 @@ describe.skipIf(!hasDb)("reorder suggestions and list (lane database)", () => {
 describe("reorderCsv", () => {
   it("quotes commas and quotes, and neutralises formula-leading cells", () => {
     const csv = reorderCsv({
-      savedAt: NOW,
       items: [
         { listingId: "a", name: 'Beans, "honey"', quantity: 2 },
         { listingId: "b", name: "=HYPERLINK(1)", quantity: 1 },
