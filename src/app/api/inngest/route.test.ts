@@ -12,9 +12,9 @@ async function load(env: Record<string, string | undefined>) {
   return import("./route");
 }
 
-function call(handler: unknown, method: string) {
+function call(handler: unknown, method: string, headers?: HeadersInit) {
   const fn = handler as (request: Request) => Promise<Response>;
-  return fn(new Request("http://localhost/api/inngest", { method, body: method === "GET" ? undefined : "{}" }));
+  return fn(new Request("http://localhost/api/inngest", { method, headers, body: method === "GET" ? undefined : "{}" }));
 }
 
 describe("inngest serve", () => {
@@ -23,12 +23,15 @@ describe("inngest serve", () => {
     vi.resetModules();
   });
 
-  it("unsigned GET/POST/PUT are 401 with a signing key", async () => {
+  it("unsigned GET/POST/PUT and a wrongly signed POST are 401 with a signing key", async () => {
     const route = await load({ VERCEL: "1", INNGEST_SIGNING_KEY: SIGNING_KEY, INNGEST_DEV: "" });
     for (const method of ["GET", "POST", "PUT"] as const) {
       const response = await call(route[method], method);
       expect(response.status, method).toBe(401);
     }
+    const now = Math.floor(Date.now() / 1000);
+    const forged = await call(route.POST, "POST", { "x-inngest-signature": `t=${now}&s=${"0".repeat(64)}` });
+    expect(forged.status).toBe(401);
   });
 
   it("cloud mode without key is 500", async () => {
