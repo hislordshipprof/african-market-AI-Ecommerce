@@ -10,7 +10,7 @@ vi.mock("next/cache", () => ({
 }));
 import { NextRequest } from "next/server";
 import { auth, resolveAuthTrustedOrigins } from "./auth";
-import { GET as authRouteGET } from "@/app/api/auth/[...all]/route";
+import { GET as authRouteGET, POST as authRoutePOST } from "@/app/api/auth/[...all]/route";
 import { authPrisma, storeScoped } from "./db";
 import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
@@ -384,6 +384,19 @@ describe("auth integration (real DB, app_runtime)", () => {
     const stranger = `shop-${suffix}.unregistered.example`;
     expect((await trusted(onHost(stranger))).join(",")).not.toContain(stranger);
     expect(await trusted()).toEqual(resolveAuthTrustedOrigins());
+  });
+
+  it("an unregistered custom domain gets no customer sign-in", async () => {
+    const stranger = `shop-${suffix}.unregistered.example`;
+    const res = await authRoutePOST(
+      new NextRequest(`http://${stranger}/api/auth/sign-in/magic-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-custom-domain": stranger, host: stranger },
+        body: JSON.stringify({ email: customerEmail, callbackURL: "/account" }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(getTestSentEmails()).toHaveLength(0);
   });
 
   it("E5: an expired magic link does not create a session", async () => {

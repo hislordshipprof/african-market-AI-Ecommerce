@@ -2,7 +2,6 @@ import { auth, onCustomDomain, registeredCustomDomain } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { findStoreByDomain } from "@/lib/get-store";
 import { parseInput } from "@/lib/security/parse-input";
 
 const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
@@ -41,8 +40,7 @@ function rejectIfBadCallback(req: NextRequest): NextResponse | null {
 
 async function isStoreHost(req: NextRequest): Promise<boolean> {
   if (req.headers.get("x-store-slug")) return true;
-  const customDomain = req.headers.get("x-custom-domain");
-  return customDomain ? (await findStoreByDomain(customDomain)) !== null : false;
+  return (await registeredCustomDomain(req.headers)) !== null;
 }
 
 async function rejectIfAdminHost(req: NextRequest): Promise<NextResponse | null> {
