@@ -101,6 +101,8 @@ Object.assign(listings[3], { stockMode: "status", status: "out_of_stock" });
 Object.assign(listings[5], { maxPerOrder: 2 });
 for (const [index, product] of decoys.entries()) listings.push(listing(product, 100 + index, "B"));
 listings.push(listing(retired, 200, "A", { active: false }));
+// The rest of the Ethiopian breakfast recipe (#607). Last, so the case pools above are unchanged.
+for (const [index, id] of ["niter-kibbeh", "honey-malab"].entries()) listings.push(listing(take(id), 70 + index, "A"));
 
 const fixture = {
   schemaVersion: 1,

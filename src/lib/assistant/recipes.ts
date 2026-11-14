@@ -6,7 +6,7 @@ import { platform } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { WEB_SEARCH_MICROS, billedSearches, callCostMicros, tokenUsageOf } from "./cost";
 import { assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
-import { dishKey } from "./recipe-base";
+import { dishKey, dishKeys } from "./recipe-base";
 import { recordSpend, utcDay } from "./spend";
 
 /** Web lookups each store may start per UTC day (owner guardrail, #25). */
@@ -42,10 +42,11 @@ export interface LookupResult {
  * A name no row answers is tried again up to its first " with ": "jollof with tomato paste" is still jollof (#607).
  */
 export async function findRecipe(dish: string): Promise<RecipeRow | null> {
-  const key = dishKey(dish);
-  if (!key) return null;
-  const head = key.split(" with ")[0] ?? "";
-  return (await recipeByKey(key)) ?? (head && head !== key ? await recipeByKey(head) : null);
+  for (const key of dishKeys(dish)) {
+    const recipe = await recipeByKey(key);
+    if (recipe) return recipe;
+  }
+  return null;
 }
 
 async function recipeByKey(key: string): Promise<RecipeRow | null> {
