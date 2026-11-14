@@ -23,6 +23,7 @@ import {
   readCatalogImageReferences,
 } from "../src/lib/catalog-prune-reader";
 import { resolveDirectUrl } from "../src/lib/env";
+import { httpStatusOf } from "../src/lib/catalog-photo-audit";
 import type { DatabaseIdentity } from "../src/lib/catalog-prune";
 
 const CATEGORY_SLUG_TO_ID: Record<string, string> = {
@@ -173,7 +174,7 @@ const UPLOAD_CAUSE_LINE_MAX = 200;
 
 function firstCauseLine(value: string): string {
   const line = value
-    .split(/\r?\n/)
+    .split(/[\r\n]+/)
     .map((part) => part.trim())
     .find((part) => part.length > 0) ?? "";
   return line.length > UPLOAD_CAUSE_LINE_MAX ? line.slice(0, UPLOAD_CAUSE_LINE_MAX) : line;
@@ -181,12 +182,12 @@ function firstCauseLine(value: string): string {
 
 function uploadCauseCode(error: Error): string | undefined {
   const code = (error as { code?: unknown }).code;
-  return typeof code === "string" && code.trim() ? code : undefined;
+  return typeof code === "string" ? firstCauseLine(code) || undefined : undefined;
 }
 
 function uploadCauseStatus(error: Error): number | undefined {
-  const status = (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode;
-  return typeof status === "number" && Number.isInteger(status) ? status : undefined;
+  const status = httpStatusOf(error);
+  return Number.isInteger(status) ? status : undefined;
 }
 
 /** One line for an R2 upload failure. Never the error object, its response, or credentials. */
@@ -194,7 +195,7 @@ export function formatR2UploadCause(cause: unknown): string {
   if (typeof cause === "string") return firstCauseLine(cause) || "unknown cause";
   if (!(cause instanceof Error)) return "unknown cause";
 
-  const name = cause.name || "Error";
+  const name = (typeof cause.name === "string" && firstCauseLine(cause.name)) || "Error";
   const status = uploadCauseStatus(cause);
   const statusLabel = status === undefined ? "" : ` (HTTP ${status})`;
   const message = firstCauseLine(typeof cause.message === "string" ? cause.message : "");
