@@ -74,7 +74,7 @@ export default async function RootLayout({
       <body>
         {children}
         <Toaster />
-        <ServiceWorker />
+        {store ? <ServiceWorker /> : null}
       </body>
     </html>
   );
