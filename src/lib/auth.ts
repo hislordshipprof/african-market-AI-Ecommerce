@@ -150,21 +150,58 @@ function requestHeaders(ctx: unknown): Headers | null {
   return null;
 }
 
+// The proxy sets x-custom-domain from the Host; only a domain a store has registered counts.
+export async function registeredCustomDomain(headers: Headers): Promise<string | null> {
+  const customDomain = headers.get("x-custom-domain");
+  if (!customDomain) return null;
+  const store = await platform.store.findUnique({
+    where: { customDomain },
+    select: { customDomain: true },
+  });
+  return store?.customDomain ?? null;
+}
+
+// A custom domain is served on the deployment's scheme: https live, http on a local server.
+function customDomainOrigin(domain: string): string {
+  return `${new URL(baseUrl).protocol}//${domain}`;
+}
+
+async function trustedOriginsForRequest(request?: Request): Promise<string[]> {
+  const origins = resolveAuthTrustedOrigins();
+  const domain = request ? await registeredCustomDomain(request.headers) : null;
+  return domain ? [...origins, customDomainOrigin(domain)] : origins;
+}
+
+// Better Auth builds links and redirects on its fallback base URL for hosts outside
+// allowedHosts, which is static; move those onto the store's custom domain.
+export function onCustomDomain(url: string, domain: string): string {
+  const target = new URL(url, baseUrl);
+  if (target.origin !== new URL(baseUrl).origin) return url;
+  return new URL(`${target.pathname}${target.search}${target.hash}`, customDomainOrigin(domain)).toString();
+}
+
+async function magicLinkUrlForHost(url: string, ctx: unknown): Promise<string> {
+  const headers = requestHeaders(ctx);
+  const domain = headers ? await registeredCustomDomain(headers) : null;
+  return domain ? onCustomDomain(url, domain) : url;
+}
+
 async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
   const headers = requestHeaders(ctx);
   if (!headers) return null;
   const headerSlug = headers.get("x-store-slug")?.toLowerCase() ?? null;
+  const customDomain = headers.get("x-custom-domain");
   const host = headers.get("host");
   const slug =
     headerSlug && isSlugRoutable(headerSlug)
       ? headerSlug
-      : host
+      : !customDomain && host
         ? slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN)
         : null;
-  if (!slug) return null;
+  if (!slug && !customDomain) return null;
   try {
     const store = await platform.store.findUnique({
-      where: { slug },
+      where: slug ? { slug } : { customDomain: customDomain! },
       select: { name: true },
     });
     return store?.name ?? null;
@@ -214,7 +251,7 @@ export const auth = betterAuth({
         const storeName = await storeNameForMagicLink(ctx);
         const message = magicLinkMessage({
           to: normalizedEmail,
-          url: confirmLinkUrl(url),
+          url: confirmLinkUrl(await magicLinkUrlForHost(url, ctx)),
           storeName,
           fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
         });
@@ -303,7 +340,7 @@ export const auth = betterAuth({
       },
     },
   },
-  trustedOrigins: resolveAuthTrustedOrigins(),
+  trustedOrigins: trustedOriginsForRequest,
   advanced: {
     useSecureCookies: baseUrl.startsWith("https://"),
   },

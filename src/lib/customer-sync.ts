@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { headers } from "next/headers";
 import { auth } from "./auth";
-import { findStore } from "./get-store";
+import { findStoreForHeaders } from "./get-store";
 import type { StoreCustomer } from "./customer-auth";
 import { syncCustomerForStore } from "./customer-claim";
 import { isPrivilegedUser } from "./privileged-user";
@@ -20,10 +20,13 @@ export const getRequestSession = cache(async () =>
  * Staff and platform admins are never synced into a store's customers.
  */
 export async function syncCustomerForRequest(): Promise<StoreCustomer | null> {
-  const slug = (await headers()).get("x-store-slug");
-  if (!slug) return null;
+  const reqHeaders = await headers();
+  if (!reqHeaders.get("x-store-slug") && !reqHeaders.get("x-custom-domain")) return null;
 
-  const [session, store] = await Promise.all([getRequestSession(), findStore(slug)]);
+  const [session, store] = await Promise.all([
+    getRequestSession(),
+    findStoreForHeaders(reqHeaders),
+  ]);
   if (!session || !store) return null;
   if (await isPrivilegedUser(session.user.id)) return null;
 
