@@ -17,7 +17,7 @@ import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
 import { copilotDailyDigest } from "../copilot/digest";
-import { courierAssignmentTimeout } from "../delivery/courier-functions";
+import { courierAssignmentTimeout, courierDispatchOnReady, courierProofCopy } from "../delivery/courier-functions";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -431,4 +431,6 @@ export const inngestFunctions = [
   copilotOrderStockAlerts,
   copilotDailyDigest,
   courierAssignmentTimeout,
+  courierDispatchOnReady,
+  courierProofCopy,
 ];

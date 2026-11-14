@@ -9,7 +9,7 @@ import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type OrderLineStatu
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
-import { scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
+import { scheduleCourierDispatch, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { captureCharge } from "./substitution-pricing";
@@ -25,6 +25,9 @@ export type OrderStatus =
   | "CAPTURING"
   | "READY"
   | "AWAITING_PICKUP"
+  | "COURIER_REQUESTED"
+  | "COURIER_ASSIGNED"
+  | "PICKED_UP"
   | "OUT_FOR_DELIVERY"
   | "DELIVERED"
   | "COMPLETED"
@@ -287,6 +290,9 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "CANCELLING",
   "READY",
   "AWAITING_PICKUP",
+  "COURIER_REQUESTED",
+  "COURIER_ASSIGNED",
+  "PICKED_UP",
   "OUT_FOR_DELIVERY",
   "REFUND_FAILED",
 ];
@@ -1110,8 +1116,10 @@ export async function markReady(
   // Phase 3: finalize in transaction (verify still CAPTURING)
   // Persist Stripe's amount_received, not the requested amount (M2)
   let notifyReady = false;
+  let courierReady = false;
   const finalize = await storeScopedTransaction(storeId, async (tx) => {
     notifyReady = false;
+    courierReady = false;
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order || order.status !== "CAPTURING") {
@@ -1137,11 +1145,13 @@ export async function markReady(
     });
     await settleCapturedStock(tx, storeId, orderId);
     notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
+    courierReady = order.fulfillment === "courier";
     return { ok: true as const, capturedAmountCents: captureResult.amountCaptured };
   }, LEDGER_TRANSACTION);
 
   if (!finalize.ok) return finalize;
   if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
+  if (courierReady) scheduleCourierDispatch(storeId, orderId);
 
   return { ok: true, capturedAmountCents: finalize.capturedAmountCents };
 }
@@ -1573,11 +1583,14 @@ async function finalizeCaptureFromSweep(
   const newStatus: OrderStatus = fulfilledStatus(fulfillment);
 
   let notifyReady = false;
+  let finalized = false;
   await storeScopedTransaction(storeId, async (tx) => {
     notifyReady = false;
+    finalized = false;
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status !== "CAPTURING") return;
+    finalized = true;
 
     await tx.order.update({
       where: { id: orderId },
@@ -1594,6 +1607,7 @@ async function finalizeCaptureFromSweep(
     notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
   }, LEDGER_TRANSACTION);
   if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
+  if (finalized && fulfillment === "courier") scheduleCourierDispatch(storeId, orderId);
 
   return { ok: true, action: "finalized_capture" };
 }

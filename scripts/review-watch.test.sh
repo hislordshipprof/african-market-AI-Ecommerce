@@ -8,6 +8,8 @@ fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 export REVIEW_WATCH_POLL_SEC=1
+# A run inside a pipeline session (ship-ticket.sh sets WATCH_WHAT) must not rename the default session label.
+unset WATCH_WHAT
 # running <pid>: still executing. A killed process that nobody has reaped yet (a zombie, seen in containers
 # without an init) is not running.
 running() {

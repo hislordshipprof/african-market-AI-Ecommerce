@@ -1,10 +1,18 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
+import { storeMayUse } from "../billing/plan";
 import { storeScoped } from "../db";
 import { DeliveryProviderError, type CreatedDelivery, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
 
 /** Spec §9, §11.2: no courier assigned this long after the delivery was created → switch provider. */
 export const COURIER_ASSIGNMENT_TIMEOUT_MS = 600_000;
 
+/** Spec §11.3: above this order total, or with any frozen item, the courier checks a PIN at drop-off. */
+export const PIN_ABOVE_TOTAL_CENTS = 15_000;
+
+/** A courier order reached Ready: book its courier. */
+export const COURIER_ORDER_READY = "courier/order.ready";
+/** A delivered webhook carried a proof photo: copy it into the private bucket. */
+export const COURIER_PROOF_RECEIVED = "courier/proof.received";
 /** Starts the assignment timer for one delivery. */
 export const COURIER_DELIVERY_CREATED = "courier/delivery.created";
 /** Domain events for the notification system (#12). */
@@ -20,6 +28,8 @@ export function courierBrand(name: DeliveryProviderName): CourierBrand {
 }
 
 export type CourierEvent =
+  | { name: typeof COURIER_ORDER_READY; data: { storeId: string; orderId: string } }
+  | { name: typeof COURIER_PROOF_RECEIVED; data: { storeId: string; deliveryId: string } }
   | { name: typeof COURIER_DELIVERY_CREATED; data: { storeId: string; deliveryId: string } }
   | { name: typeof COURIER_FAILOVER_TRIGGERED; data: { storeId: string; orderId: string; fromProvider: DeliveryProviderName; reason: "create_failed" | "assignment_timeout" } }
   | { name: typeof COURIER_BOTH_FAILED; data: { storeId: string; orderId: string; orderNumber: number; options: Array<"store-delivery" | "pickup" | "cancel"> } };
@@ -112,6 +122,7 @@ async function recordDelivery(input: DispatchInput, provider: DeliveryProvider, 
         status: "requested",
         quoteFeeCents: booked.quote.feeCents,
         trackingUrl: booked.created.trackingUrl,
+        pin: booked.created.pin ?? null,
       },
     });
   } catch (err) {
@@ -149,7 +160,13 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
     select: {
       subtotalCents: true,
       tipCents: true,
+      totalCents: true,
       leaveAtDoor: true,
+      lines: {
+        where: { OR: [{ listingVariant: { listing: { frozen: true } } }, { substitutedVariant: { listing: { frozen: true } } }] },
+        select: { id: true },
+        take: 1,
+      },
       deliveryLine1: true,
       deliveryLine2: true,
       deliveryCity: true,
@@ -164,6 +181,7 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
   if (!order.deliveryLine1 || !order.deliveryCity || !order.deliveryState || !order.deliveryZip) throw new Error("Order has no delivery address");
   if (!customer.phone) throw new Error("Customer has no phone");
   const [givenName, ...rest] = customer.name.trim().split(/\s+/);
+  const pinRequired = order.lines.length > 0 || order.totalCents > PIN_ABOVE_TOTAL_CENTS;
   // DoorDash registers the store with our store id as both business and store id (doordash-registration.ts).
   // Uber's organization id is not an external_store_id, so Uber gets none.
   const registrations = store.doordashStoreId ? { doordash: { providerBusinessId: storeId, providerStoreId: store.doordashStoreId } } : {};
@@ -181,8 +199,37 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
     },
     orderValueCents: order.subtotalCents,
     tipCents: order.tipCents,
+    dropoffPin: pinRequired ? String(randomInt(0, 10_000)).padStart(4, "0") : null,
   };
   return { request, registrations };
+}
+
+export type ReadyDispatchResult = DispatchResult | { ok: false; reason: "not_ready" | "plan" } | { ok: true; deliveryId: string; existing: true };
+
+/**
+ * Books the courier for an order that reached Ready. Safe to run again: an order with a live delivery only re-sends
+ * its timer event and moves to COURIER_REQUESTED, so a retried step never books a second courier.
+ */
+export async function dispatchReadyOrder(storeId: string, orderId: string, deps: DispatchDeps): Promise<ReadyDispatchResult> {
+  const scoped = storeScoped(storeId);
+  const order = await scoped.order.findUnique({ where: { id: orderId }, select: { status: true, fulfillment: true } });
+  if (order?.fulfillment !== "courier" || !["READY", "COURIER_REQUESTED"].includes(order.status)) return { ok: false, reason: "not_ready" };
+  const markRequested = () => scoped.order.updateMany({ where: { id: orderId, status: "READY" }, data: { status: "COURIER_REQUESTED" } });
+
+  const live = await scoped.delivery.findFirst({ where: { orderId, status: { not: "cancelled" } }, select: { id: true } });
+  if (live) {
+    await deps.emit({ name: COURIER_DELIVERY_CREATED, data: { storeId, deliveryId: live.id } });
+    await markRequested();
+    return { ok: true, deliveryId: live.id, existing: true };
+  }
+  // Plan gate (#494): courier delivery is Pro only. Checked before any quote; failover does not re-check.
+  if (!(await storeMayUse(storeId, "courier-delivery"))) {
+    console.error(JSON.stringify({ event: "courier_plan_blocked", storeId, orderId }));
+    return { ok: false, reason: "plan" };
+  }
+  const result = await selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId)) }, deps);
+  if (result.ok) await markRequested();
+  return result;
 }
 
 type FailoverStep = {

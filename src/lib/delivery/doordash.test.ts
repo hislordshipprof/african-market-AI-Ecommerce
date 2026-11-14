@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DoorDashDriveProvider } from "./doordash";
+import { DoorDashDriveProvider, DoorDashWebhookAuthError } from "./doordash";
 import { fakeDoorDash } from "./doordash-fake";
 import { DeliveryProviderError, type DeliveryProvider, type DeliveryRequest } from "./provider";
 
@@ -61,6 +61,7 @@ describe("DoorDashDriveProvider", () => {
     expect(await provider.create(quote.quoteId, request)).toEqual({
       externalId: "ord_123-1",
       trackingUrl: "https://doordash.com/tracking?id=ord_123-1",
+      pin: null,
     });
     await provider.cancel("ord_123-1");
     await expect(provider.cancel("ord_123-1")).rejects.toMatchObject({ status: 409, code: "cannot_be_cancelled" });
@@ -77,13 +78,28 @@ describe("DoorDashDriveProvider", () => {
     expect(error).toMatchObject({ provider: "doordash", status: 401 });
   });
 
+  it("asks for a photo on a standard drop-off, and for our PIN with no contactless drop-off when one is set", async () => {
+    const { provider, fake } = setup();
+    await provider.quote(request);
+    const pinned = { ...request, externalDeliveryId: "ord_123-2", dropoffPin: "4821" };
+    await provider.quote(pinned);
+    expect(await provider.create("ord_123-2", pinned)).toMatchObject({ pin: "4821" });
+    const [standard, pin] = fake.calls.filter((c) => c.path === "/drive/v2/quotes").map((c) => c.body);
+    expect(standard).toMatchObject({ contactless_dropoff: true, dropoff_options: { proof_of_delivery: "photo_required" } });
+    expect(standard).not.toHaveProperty("dropoff_pin_code_verification_metadata");
+    expect(pin).toMatchObject({
+      contactless_dropoff: false,
+      dropoff_options: { proof_of_delivery: "pin_code" },
+      dropoff_pin_code_verification_metadata: { pin_code_value: "4821" },
+    });
+  });
+
   it("maps DoorDash webhook events to platform delivery events", () => {
-    const { provider } = setup();
-    const event = (body: Record<string, unknown>) =>
-      provider.handleWebhook(
-        JSON.stringify({ external_delivery_id: "ord_123-1", created_at: "2026-11-12T15:10:00Z", ...body }),
-        new Headers(),
-      );
+    const authorization = "Basic d2ViaG9vazpzZWNyZXQ=";
+    const provider = new DoorDashDriveProvider({ env: { ...keys, DOORDASH_WEBHOOK_AUTHORIZATION: authorization } });
+    const raw = (body: Record<string, unknown>) =>
+      JSON.stringify({ external_delivery_id: "ord_123-1", created_at: "2026-11-12T15:10:00Z", ...body });
+    const event = (body: Record<string, unknown>) => provider.handleWebhook(raw(body), new Headers({ authorization }));
 
     const confirmed = event({
       event_name: "DASHER_CONFIRMED",
@@ -102,12 +118,22 @@ describe("DoorDashDriveProvider", () => {
       courier: { name: "John D.", vehicle: "Toyota Corolla", dropoffEta: new Date("2026-11-12T15:40:00Z") },
     });
     expect(event({ event_name: "DASHER_PICKED_UP" }).type).toBe("picked_up");
-    expect(event({ event_name: "DASHER_DROPPED_OFF", fee: 850 })).toMatchObject({ type: "delivered", actualFeeCents: 850 });
+    expect(event({ event_name: "DASHER_DROPPED_OFF", fee: 850, dropoff_verification_image_url: "https://img.doordash.com/p.jpg" })).toMatchObject({
+      type: "delivered",
+      actualFeeCents: 850,
+      proof: { photoUrl: "https://img.doordash.com/p.jpg", pinEntered: null },
+    });
     expect(event({ event_name: "DELIVERY_CANCELLED" }).type).toBe("cancelled");
+    expect(event({ event_name: "DELIVERY_RETURNED" }).type).toBe("returned");
     expect(event({ event_name: "DASHER_CONFIRMED_PICKUP_ARRIVAL" }).type).toBeNull();
 
     expect(event({ event_name: "DASHER_PICKED_UP" }).externalEventId).toBe(event({ event_name: "DASHER_PICKED_UP" }).externalEventId);
     expect(event({ event_name: "DASHER_PICKED_UP" }).externalEventId).not.toBe(event({ event_name: "DASHER_DROPPED_OFF" }).externalEventId);
-    expect(() => provider.handleWebhook(JSON.stringify({ event_name: "DASHER_PICKED_UP" }), new Headers())).toThrow();
+    expect(() => provider.handleWebhook(JSON.stringify({ event_name: "DASHER_PICKED_UP" }), new Headers({ authorization }))).toThrow();
+
+    const body = raw({ event_name: "DASHER_PICKED_UP" });
+    expect(() => provider.handleWebhook(body, new Headers())).toThrow(DoorDashWebhookAuthError);
+    expect(() => provider.handleWebhook(body, new Headers({ authorization: "Basic d3Jvbmc=" }))).toThrow(DoorDashWebhookAuthError);
+    expect(() => new DoorDashDriveProvider({ env: keys }).handleWebhook(body, new Headers({ authorization }))).toThrow(/DOORDASH_WEBHOOK_AUTHORIZATION/);
   });
 });

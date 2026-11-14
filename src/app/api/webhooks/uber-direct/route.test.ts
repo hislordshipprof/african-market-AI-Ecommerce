@@ -65,6 +65,7 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/uber-direct", () 
     else process.env.UBER_DIRECT_WEBHOOK_SIGNING_KEY = previousKey;
     if (storeId) {
       const scoped = storeScoped(storeId);
+      await scoped.notificationLog.deleteMany({});
       await scoped.deliveryEvent.deleteMany({});
       await scoped.delivery.deleteMany({});
       await scoped.order.deleteMany({});
@@ -102,5 +103,28 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/uber-direct", () 
     expect((await post(body, sign(event("canceled")))).status).toBe(401);
     expect((await post("{not json", sign("{not json"))).status).toBe(400);
     expect(await storeScoped(storeId).deliveryEvent.count({ where: { type: { in: ["delivered", "cancelled"] } } })).toBe(0);
+  });
+
+  it("AC6: a PIN delivery is marked delivered only when the PIN Uber reports matches the one stored at creation", async () => {
+    const scoped = storeScoped(storeId);
+    const customer = await scoped.customer.findFirstOrThrow();
+    const order = await scoped.order.create({
+      data: { storeId, customerId: customer.id, status: "PICKED_UP", fulfillment: "courier", subtotalCents: 16000, bufferCents: 0, totalCents: 16000, totalAuthorizedCents: 16000, number: 2 },
+    });
+    const pinExternalId = `${externalId}_pin`;
+    await scoped.delivery.create({ data: { storeId, orderId: order.id, provider: "uber", externalId: pinExternalId, status: "picked_up", quoteFeeCents: 799, pin: "6066" } });
+    const delivered = (id: string, entered: string) =>
+      JSON.stringify({
+        kind: "event.delivery_status", id, delivery_id: pinExternalId, status: "delivered", created: "2026-11-13T15:40:00Z", live_mode: false,
+        data: { id: pinExternalId, status: "delivered", dropoff: { verification: { pin_code: { entered }, picture: { image_url: "https://img.uber.com/p.jpg" } } } },
+      });
+
+    const wrong = delivered(`evt_pin_wrong_${externalId}`, "1111");
+    expect((await post(wrong, sign(wrong))).status).toBe(200);
+    expect((await scoped.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("PICKED_UP");
+
+    const right = delivered(`evt_pin_right_${externalId}`, "6066");
+    expect((await post(right, sign(right))).status).toBe(200);
+    expect((await scoped.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("DELIVERED");
   });
 });
