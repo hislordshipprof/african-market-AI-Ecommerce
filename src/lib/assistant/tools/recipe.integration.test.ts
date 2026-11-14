@@ -164,6 +164,17 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(breakfast).toMatchObject({ ok: true, lookedUp: false, recipe: "Chechebsa (kita firfir)" });
   });
 
+  it("never fills a seeded ingredient with a different product that only has the ingredient's word in its name", async () => {
+    const honeyBeans = await listing(storeA, "beans-honey-oloyin", `Honey beans ${suffix}`);
+    const butterSpice = await listing(storeA, "kibe-qimem-butter-spice", `Spiced-butter spice mix ${suffix}`);
+    const ctx = await conversation(storeA);
+    const result = await getRecipe(ctx, { dish: "Chechebsa", servings: 2 }) as unknown as RecipeOutput;
+    const offered = [...result.inStock, ...result.lowOrOut];
+    expect(offered.map((item) => item.listingId)).not.toContain(honeyBeans.listingId);
+    expect(offered.map((item) => item.listingId)).not.toContain(butterSpice.listingId);
+    expect(result.notCarried).toEqual(expect.arrayContaining(["honey", "niter kibbeh"]));
+  });
+
   it("a dish whose full name the base answers is not cut down to the part before with", async () => {
     const plain = `plantain ${suffix}`;
     await saveLookedUpRecipe(plain, { name: plain, ingredients: ["ripe plantain"], sourceUrl: "https://recipes.example/plantain" });
