@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { money } from "../format";
 import { evaluateOrderRefundStateAfterCommit, remainingCaptureCents, submitRefund } from "./refund-requests";
@@ -11,13 +12,35 @@ export const ISSUE_REFUND_FAILED = "The refund did not go through. The platform 
 export const ISSUE_AMOUNT_ABOVE_ISSUE = "Enter an amount from $0.01 up to the reported amount.";
 export const ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX = "That is more than is left to refund on this order";
 
+/** An issue id from a staff action or the photo route. */
+export const issueIdSchema = z.string().min(1).max(64);
+
 type Actor = { id: string; email: string };
 type ReviewResult = { ok: true } | { ok: false; error: string };
+/** `amountCents` is what was refunded: the reserve caps it at what Stripe still holds. */
+type ApproveResult = { ok: true; amountCents: number } | { ok: false; error: string };
 
-/** The in-review issues for the store's "Problems to review" list, oldest first. */
+/** Longer than any approval or auto-refund takes to reserve its refund request. */
+const STRANDED_AFTER_MS = 15 * 60 * 1000;
+
+/**
+ * In review, or approved or auto-refunded but stranded with no refund request: a crash between the
+ * claim and the reservation leaves that, and nothing else would ever refund it (#465).
+ */
+function reviewable(now = new Date()) {
+  return {
+    refundRequestId: null,
+    OR: [
+      { state: "in_review" },
+      { state: { in: ["approved", "auto_refunded"] }, updatedAt: { lt: new Date(now.getTime() - STRANDED_AFTER_MS) } },
+    ],
+  };
+}
+
+/** The issues for the store's "Problems to review" list, oldest first. */
 export async function issuesToReview(storeId: string) {
   const issues = await storeScoped(storeId).issueReport.findMany({
-    where: { state: "in_review" },
+    where: reviewable(),
     orderBy: { createdAt: "asc" },
     include: {
       order: {
@@ -68,13 +91,15 @@ export type IssueToReview = Awaited<ReturnType<typeof issuesToReview>>[number];
  * A store member approves an in-review issue for its full amount or a partial one, through the
  * refund ledger. The issue row is claimed under the store lock, so a second click refunds nothing.
  */
-export async function approveIssue(storeId: string, issueId: string, actor: Actor, amountCents?: number): Promise<ReviewResult> {
+export async function approveIssue(storeId: string, issueId: string, actor: Actor, amountCents?: number): Promise<ApproveResult> {
   const issue = await storeScoped(storeId).issueReport.findUnique({
     where: { id: issueId },
     include: { order: { select: { paymentIntentId: true } } },
   });
   if (!issue) return { ok: false, error: ISSUE_NOT_FOUND };
-  if (issue.state !== "in_review" || issue.refundRequestId) return { ok: false, error: ISSUE_ALREADY_HANDLED };
+  if (!(await storeScoped(storeId).issueReport.count({ where: { id: issueId, ...reviewable() } }))) {
+    return { ok: false, error: ISSUE_ALREADY_HANDLED };
+  }
   const paymentIntentId = issue.order.paymentIntentId;
   if (!paymentIntentId) return { ok: false, error: ISSUE_REFUND_NOT_STARTED };
   const amount = amountCents ?? issue.amountCents;
@@ -85,7 +110,7 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
   const claimed = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const won = await tx.issueReport.updateMany({
-      where: { id: issueId, state: "in_review", refundRequestId: null },
+      where: { id: issueId, ...reviewable() },
       data: { state: "approved", amountCents: amount },
     });
     if (won.count !== 1) return false;
@@ -97,7 +122,7 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
         action: "issue_approved",
         entityType: "order",
         entityId: issue.orderId,
-        before: { state: "in_review", amountCents: issue.amountCents },
+        before: { state: issue.state, amountCents: issue.amountCents },
         after: { issueReportId: issueId, amountCents: amount },
       },
     });
@@ -139,9 +164,9 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
   }
   await evaluateOrderRefundStateAfterCommit(issue.orderId);
   // Stripe can refuse the create; the evaluation has then marked the issue refund_failed.
-  const settled = await storeScoped(storeId).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true } });
+  const settled = await storeScoped(storeId).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true, amountCents: true } });
   if (settled.state === "refund_failed") return { ok: false, error: ISSUE_REFUND_FAILED };
-  return { ok: true };
+  return { ok: true, amountCents: settled.amountCents };
 }
 
 /** A store member declines an in-review issue with a reason. No money moves and the order is untouched. */
@@ -150,7 +175,7 @@ export async function declineIssue(storeId: string, issueId: string, actor: Acto
     await lockStoreRow(tx, storeId);
     const issue = await tx.issueReport.findUnique({ where: { id: issueId } });
     if (!issue) return { ok: false as const, error: ISSUE_NOT_FOUND };
-    if (issue.state !== "in_review" || issue.refundRequestId) return { ok: false as const, error: ISSUE_ALREADY_HANDLED };
+    if (!(await tx.issueReport.count({ where: { id: issueId, ...reviewable() } }))) return { ok: false as const, error: ISSUE_ALREADY_HANDLED };
     await tx.issueReport.update({ where: { id: issueId }, data: { state: "declined" } });
     await tx.auditLog.create({
       data: {
@@ -160,7 +185,7 @@ export async function declineIssue(storeId: string, issueId: string, actor: Acto
         action: "issue_declined",
         entityType: "order",
         entityId: issue.orderId,
-        before: { state: "in_review" },
+        before: { state: issue.state },
         after: { issueReportId: issueId, reason },
       },
     });

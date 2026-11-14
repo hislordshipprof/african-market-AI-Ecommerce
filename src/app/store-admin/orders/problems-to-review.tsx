@@ -10,37 +10,41 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { money } from "@/lib/format";
+import { formatInZone, money } from "@/lib/format";
 import { approveIssueAction, declineIssueAction } from "@/lib/order/actions";
 import type { IssueToReview } from "@/lib/order/issue-review";
+import type { IssueType } from "@/lib/order/issue-report";
 
-const TYPE_LABEL: Record<string, string> = {
+const TYPE_LABEL: Record<IssueType, string> = {
   missing: "Missing",
   damaged: "Damaged",
   wrong: "Wrong item",
-  poor_freshness: "Not fresh",
+  poor_freshness: "Poor freshness",
 };
 
 type Mode = "idle" | "partial" | "decline";
 
-function ProblemCard({ issue }: { issue: IssueToReview }) {
+function ProblemCard({ issue, timeZone }: { issue: IssueToReview; timeZone: string }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("idle");
   const [dollars, setDollars] = useState("");
   const [reason, setReason] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, done: string) {
+  function run<T extends { ok: boolean; error?: string }>(action: () => Promise<T>, done: (result: T) => string) {
     startTransition(async () => {
       const result = await action();
       if (!result.ok) {
         toast.error(result.error ?? "Something went wrong. Try again.");
         return;
       }
-      toast.success(done);
+      toast.success(done(result));
       router.refresh();
     });
   }
+
+  // The reserve can cap the amount below the one entered, so the toast shows what was refunded.
+  const refunded = (result: Awaited<ReturnType<typeof approveIssueAction>>) => (result.ok ? `Refund of ${money(result.amountCents)} sent` : "");
 
   function submitPartial() {
     const cents = Math.round(Number(dollars) * 100);
@@ -48,7 +52,7 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
       toast.error(`Enter an amount from $0.01 to ${money(issue.amountCents)}.`);
       return;
     }
-    run(() => approveIssueAction(issue.id, cents), `Refund of ${money(cents)} sent`);
+    run(() => approveIssueAction(issue.id, cents), refunded);
   }
 
   const fieldId = `issue-${issue.id}`;
@@ -57,10 +61,10 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base font-bold tabular-nums">#{issue.orderNumber}</CardTitle>
-          <Badge variant="destructive">{TYPE_LABEL[issue.type] ?? issue.type}</Badge>
+          <Badge variant="destructive">{TYPE_LABEL[issue.type as IssueType] ?? issue.type}</Badge>
         </div>
         <p className="text-xs text-muted-foreground">
-          {issue.customerName} · reported {issue.createdAt.toLocaleString()}
+          {issue.customerName} · reported {formatInZone(issue.createdAt, timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -122,7 +126,7 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
               variant="destructive"
               className="w-full rounded-full"
               disabled={isPending || !reason.trim()}
-              onClick={() => run(() => declineIssueAction(issue.id, reason), "Problem declined")}
+              onClick={() => run(() => declineIssueAction(issue.id, reason), () => "Problem declined")}
             >
               Decline
             </Button>
@@ -133,7 +137,7 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
           <Button
             className="rounded-full"
             disabled={isPending}
-            onClick={() => run(() => approveIssueAction(issue.id), `Refund of ${money(issue.amountCents)} sent`)}
+            onClick={() => run(() => approveIssueAction(issue.id), refunded)}
           >
             <Check className="mr-2 size-4" /> Approve {money(issue.amountCents)}
           </Button>
@@ -150,7 +154,7 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
 }
 
 /** In-review customer reports. Any store member can approve, refund part, or decline. */
-export function ProblemsToReview({ issues }: { issues: IssueToReview[] }) {
+export function ProblemsToReview({ issues, timeZone }: { issues: IssueToReview[]; timeZone: string }) {
   if (issues.length === 0) return null;
   return (
     <section id="problems" aria-labelledby="problems-heading" className="mb-6 space-y-3">
@@ -160,7 +164,7 @@ export function ProblemsToReview({ issues }: { issues: IssueToReview[] }) {
         <Badge variant="secondary">{issues.length}</Badge>
       </h2>
       {issues.map((issue) => (
-        <ProblemCard key={issue.id} issue={issue} />
+        <ProblemCard key={issue.id} issue={issue} timeZone={timeZone} />
       ))}
     </section>
   );
