@@ -180,10 +180,10 @@ describe.skipIf(!hasDb)("support thread", () => {
     ]);
     expect((await listStoreThreads(storeA))[0].unread).toBe(0);
     const rows = () => storeScoped(storeA).notificationLog.findMany({ where: { orderId: placed.id, event: "store_replied" } });
-    expect((await rows()).map((r) => r.channel).sort()).toEqual(["email", "sms"]);
+    expect((await rows()).map((r) => r.channel).sort()).toEqual(["email", "push", "sms"]);
 
     expect(await replyToThreadAction({ threadId: threads[0].id, body: "Ready soon" })).toEqual({ ok: true });
-    expect(await rows()).toHaveLength(2);
+    expect(await rows()).toHaveLength(3);
   });
 
   it("a token is refused on another store's host and cannot name another order's thread", async () => {
