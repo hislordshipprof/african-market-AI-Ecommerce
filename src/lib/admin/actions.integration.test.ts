@@ -23,10 +23,10 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { updateStore } from "./actions";
+import { retryCourierRegistrationAction, updateStore } from "./actions";
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
-import { authPrisma, storeScopedTransaction } from "../db";
+import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
 import { inngest } from "../inngest/client";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -196,5 +196,20 @@ describe("store hours schema", () => {
     expect(enabled?.storeDeliveryEnabled).toBe(true);
     expect(enabled?.lat).toBeCloseTo(38.996, 2);
     setAddressProvider(null);
+  });
+
+  it("platform admin retries courier registration: the job is queued and the retry is audited (#526)", async () => {
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
+    const data = new FormData();
+    data.set("storeId", storeId);
+
+    await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=queued`);
+
+    expect(send).toHaveBeenCalledWith({ name: "courier/registration.requested", data: { storeId } });
+    const audit = await platformAdmin.auditLog.findFirst({ where: { entityId: storeId, action: "store.courier_registration_retry" } });
+    expect(audit?.actorId).toBe(userId);
+    send.mockRestore();
+    vi.unstubAllEnvs();
   });
 });

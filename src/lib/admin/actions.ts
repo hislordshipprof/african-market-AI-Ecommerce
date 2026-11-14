@@ -721,6 +721,31 @@ export async function setPilotAction(formData: FormData): Promise<void> {
   redirect(`/admin/stores/${fields.data.storeId}${query}`);
 }
 
+/** Platform admin queues the courier registration job again for one store (#526). */
+export async function retryCourierRegistrationAction(formData: FormData): Promise<void> {
+  const session = await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({ storeId: z.string().min(1).max(200) }), readFormFields(formData, ["storeId"]));
+  if (!fields.ok) redirect("/admin/stores");
+  const { storeId } = fields.data;
+  const store = await platformAdmin.store.findUnique({ where: { id: storeId }, select: { id: true } });
+  if (!store) redirect("/admin/stores");
+  await platformAdminTransaction((tx) =>
+    tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "store.courier_registration_retry",
+        entityType: "store",
+        entityId: storeId,
+      },
+    }),
+  );
+  await requestCourierRegistration(storeId);
+  revalidatePath(`/admin/stores/${storeId}`);
+  redirect(`/admin/stores/${storeId}?courierRetry=queued`);
+}
+
 export async function getStoreById(id: string) {
   await requirePlatformAdmin();
   const parsed = parseInput(z.string().min(1).max(200), id);
