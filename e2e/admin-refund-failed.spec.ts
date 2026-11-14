@@ -22,7 +22,7 @@ test("an admin resolves a refund-failed order from the admin orders view", async
     await page.getByLabel("Verification code").waitFor({ state: "visible" });
     await page.getByLabel("Verification code").fill(generateTOTP(SEED_TOTP_SECRET));
     await page.click("button[type='submit']");
-    await page.waitForURL("**/admin/stores");
+    await page.waitForURL("**/admin");
 
     await page.goto("/admin/orders");
     const row = page.getByTestId(`refund-row-${number}`);
