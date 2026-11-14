@@ -29,6 +29,15 @@ function invalid(metadata: Json) {
   return reply(400, { code: "invalid_params", message: "The parameters of your request were invalid.", kind: "error", metadata });
 }
 
+/** pickup_ready_dt: "Must be less than 30 days in the future" (https://developer.uber.com/docs/deliveries/guides/delivery-window). */
+function readyError(value: unknown, now: Date): string | null {
+  if (value === undefined) return null;
+  const at = typeof value === "string" ? new Date(value) : null;
+  if (!at || Number.isNaN(at.getTime())) return "This field is invalid.";
+  if (at.getTime() - now.getTime() >= 30 * 86_400_000) return "Must be less than 30 days in the future.";
+  return null;
+}
+
 function isAddress(value: unknown): boolean {
   if (typeof value !== "string") return false;
   try {
@@ -42,7 +51,7 @@ function isAddress(value: unknown): boolean {
 export function fakeUberDirect(opts: FakeUberDirectOptions) {
   const tokens = new Map<string, { scope: string; expiresAt: number }>();
   const quotes = new Map<string, { expires: Date; body: Json }>();
-  const deliveries = new Map<string, { status: string; quoteId: string }>();
+  const deliveries = new Map<string, { status: string; quoteId: string; pickupReadyDt: string | null }>();
   const organizations: Json[] = [];
   const calls: Array<{ method: string; path: string; body: Json | null }> = [];
   let tokenRequests = 0;
@@ -127,6 +136,8 @@ export function fakeUberDirect(opts: FakeUberDirectOptions) {
       const metadata: Json = {};
       if (!isAddress(body?.pickup_address)) metadata.pickup_address = "This field is required.";
       if (!isAddress(body?.dropoff_address)) metadata.dropoff_address = "This field is required.";
+      const ready = readyError(body?.pickup_ready_dt, opts.now());
+      if (ready) metadata.pickup_ready_dt = ready;
       if (Object.keys(metadata).length) return invalid(metadata);
       const created = opts.now();
       const id = `dqt_${randomUUID().replace(/-/g, "").slice(0, 22)}`;
@@ -156,6 +167,8 @@ export function fakeUberDirect(opts: FakeUberDirectOptions) {
       if (!Array.isArray(items) || items.length === 0 || items.some((item: Json) => !item.name || !Number.isInteger(item.quantity))) {
         metadata.manifest = "Please provide at least one manifest item description";
       }
+      const ready = readyError(body?.pickup_ready_dt, opts.now());
+      if (ready) metadata.pickup_ready_dt = ready;
       if (Object.keys(metadata).length) return invalid(metadata);
       const quoteId = String(body!.quote_id ?? "");
       const quote = quotes.get(quoteId);
@@ -165,10 +178,27 @@ export function fakeUberDirect(opts: FakeUberDirectOptions) {
         return reply(409, { code: "duplicate_delivery", message: "A delivery already exists for this quote.", kind: "error" });
       }
       const id = `del_${randomUUID().replace(/-/g, "").slice(0, 22)}`;
-      deliveries.set(id, { status: "pending", quoteId });
+      deliveries.set(id, { status: "pending", quoteId, pickupReadyDt: typeof body!.pickup_ready_dt === "string" ? body!.pickup_ready_dt : null });
       const pincode = ((body!.dropoff_verification as Json | undefined)?.pincode as Json | undefined)?.enabled === true;
       const created = delivery(id, "pending", quoteId);
       return reply(200, pincode ? { ...created, dropoff: { verification_requirements: { pincode: { enabled: true, value: "6066" } } } } : created);
+    }
+    // Update delivery: the ready and deadline times are editable until pickup is complete (https://developer.uber.com/docs/deliveries/faq).
+    if (method === "POST" && (m = rest.match(/^\/deliveries\/([^/]+)$/))) {
+      const found = deliveries.get(m[1]);
+      if (!found) return reply(404, { code: "delivery_not_found", message: "The requested delivery does not exist.", kind: "error" });
+      if (!["pending", "pickup"].includes(found.status)) {
+        return reply(400, { code: "invalid_params", message: "Delivery can no longer be updated.", kind: "error" });
+      }
+      const ready = readyError(body?.pickup_ready_dt, opts.now());
+      if (ready) return invalid({ pickup_ready_dt: ready });
+      // A moved ready time needs a deadline at least 10 minutes after it (sandbox, 2026-11-14).
+      if (typeof body?.pickup_ready_dt === "string") {
+        const deadline = typeof body.pickup_deadline_dt === "string" ? new Date(body.pickup_deadline_dt).getTime() : NaN;
+        if (!(deadline - new Date(body.pickup_ready_dt).getTime() >= 10 * 60_000)) return invalid({ pickup_deadline_dt: "The pickup window is too small" });
+        found.pickupReadyDt = body.pickup_ready_dt;
+      }
+      return reply(200, delivery(m[1], found.status, found.quoteId));
     }
     if (method === "POST" && (m = rest.match(/^\/deliveries\/([^/]+)\/cancel$/))) {
       const found = deliveries.get(m[1]);
@@ -186,6 +216,7 @@ export function fakeUberDirect(opts: FakeUberDirectOptions) {
     fetch,
     calls,
     organizations,
+    deliveries,
     get tokenRequests() {
       return tokenRequests;
     },
