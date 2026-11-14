@@ -693,7 +693,8 @@ a.primary {
 
   .launcher {
     right: 16px;
-    bottom: calc(84px + env(safe-area-inset-bottom));
+    /* Clears the 73px bottom nav sitting 12px up, with an 8px gap. */
+    bottom: calc(96px + env(safe-area-inset-bottom));
   }
 }
 

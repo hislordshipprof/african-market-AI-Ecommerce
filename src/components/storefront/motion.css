@@ -99,7 +99,7 @@
 .sf-story-facts { flex-wrap:wrap; gap:24px; }
 .sf-story-facts strong { font-size:27px; }
 .sf-story-facts strong span { font:inherit; color:inherit; }
-.sf-counter { display:inline-block; position:relative; font-variant-numeric:tabular-nums; }
+.sf-counter { display:inline-block; position:relative; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .sf-counter-reserve { visibility:hidden; }
 .sf-counter-value { position:absolute; inset:0; }
 .sf-story .sf-hours { grid-column:2; }

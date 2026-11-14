@@ -333,6 +333,13 @@
     }
   }
 }
+/* Five labels need 4px side padding to keep a visible gap at 320px. */
+@media (max-width: 359px) {
+  .navLink,
+  .activeNav {
+    padding-inline: 4px;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .sheet[open],
   .sheet[data-closing="true"] {
