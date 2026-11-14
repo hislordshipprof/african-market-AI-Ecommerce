@@ -30,6 +30,7 @@ async function seedDemoStores() {
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
       listed: true,
       listingBlurb: "Nigerian and West African groceries in Houston since 2009: fresh yam, egusi, palm oil and stockfish.",
+      cuisineTags: ["west-african"],
       stripeAccountId: null,
       stripeOnboardingStatus: "not_started",
       storeDeliveryEnabled: true,
@@ -80,6 +81,7 @@ async function seedDemoStores() {
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
       listed: true,
       listingBlurb: "Nigerian and West African groceries in Houston since 2009: fresh yam, egusi, palm oil and stockfish.",
+      cuisineTags: ["west-african"],
       hours: {
         monday: "9:00 AM - 8:00 PM",
         tuesday: "9:00 AM - 8:00 PM",
