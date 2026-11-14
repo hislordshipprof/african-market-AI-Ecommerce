@@ -1316,30 +1316,6 @@ export interface TransactionalClient {
   ): Promise<T>;
 }
 
-export async function rateLimitUpsert(
-  key: string,
-  now: bigint,
-  windowStart: bigint,
-): Promise<{ count: number; lastRequest: bigint }> {
-  const rows = await prisma.$queryRaw<Array<{ count: number; last_request: bigint }>>`
-    INSERT INTO rate_limits (id, key, count, last_request)
-    VALUES (gen_random_uuid()::text, ${key}, 1, ${now})
-    ON CONFLICT (key) DO UPDATE SET
-      count = CASE
-        WHEN rate_limits.last_request < ${windowStart}
-        THEN 1
-        ELSE rate_limits.count + 1
-      END,
-      last_request = CASE
-        WHEN rate_limits.last_request < ${windowStart}
-        THEN ${now}
-        ELSE rate_limits.last_request
-      END
-    RETURNING count, last_request
-  `;
-  return { count: Number(rows[0].count), lastRequest: BigInt(rows[0].last_request) };
-}
-
 /** One counted file turn inside a rolling hour. The lock makes concurrent requests agree. */
 export async function takeRollingFileTurn(
   key: string,
