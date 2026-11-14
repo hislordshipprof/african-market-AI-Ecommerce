@@ -53,7 +53,7 @@ A card the customer agreed to keep on their account, shown as brand and last fou
 _Avoid_: Wallet, payment profile
 
 **Store directory**:
-The public site listing stores by state and location, linking each to its storefront.
+The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there.
 _Avoid_: Marketplace, combined app
 
 **Directory listing**:
