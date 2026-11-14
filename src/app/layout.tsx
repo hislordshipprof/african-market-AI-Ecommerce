@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Figtree, Geist } from "next/font/google";
 import { headers } from "next/headers";
-import { findStore, findStoreByDomain, type ValidatedStore } from "@/lib/get-store";
+import { findStoreForHeaders } from "@/lib/get-store";
 import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -21,17 +21,8 @@ const figtree = Figtree({
   display: "swap",
 });
 
-async function resolveStoreFromHeaders(): Promise<ValidatedStore | null> {
-  const headerList = await headers();
-  const slug = headerList.get("x-store-slug");
-  if (slug) return findStore(slug);
-  const customDomain = headerList.get("x-custom-domain");
-  if (customDomain) return findStoreByDomain(customDomain);
-  return null;
-}
-
 export async function generateMetadata(): Promise<Metadata> {
-  const store = await resolveStoreFromHeaders();
+  const store = await findStoreForHeaders(await headers());
   return { title: store?.name ?? "Store not found" };
 }
 
@@ -48,15 +39,12 @@ export default async function RootLayout({
 }) {
   let theme: ResolvedTheme | null = null;
 
-  const store = await resolveStoreFromHeaders();
+  const headerList = await headers();
+  const store = await findStoreForHeaders(headerList);
   if (store) {
-    theme = resolveStoreTheme(
-      store.validPreset,
-      store.validBrandColor,
-    );
+    theme = resolveStoreTheme(store.validPreset, store.validBrandColor);
   }
 
-  const headerList = await headers();
   // Read by the story surface, for browsers that send Save-Data without navigator.connection.
   const saveData = headerList.get("save-data")?.toLowerCase() === "on" ? "on" : undefined;
 

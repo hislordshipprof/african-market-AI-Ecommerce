@@ -115,17 +115,18 @@ async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
   const headers = requestHeaders(ctx);
   if (!headers) return null;
   const headerSlug = headers.get("x-store-slug")?.toLowerCase() ?? null;
+  const customDomain = headers.get("x-custom-domain");
   const host = headers.get("host");
   const slug =
     headerSlug && isSlugRoutable(headerSlug)
       ? headerSlug
-      : host
+      : !customDomain && host
         ? slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN)
         : null;
-  if (!slug) return null;
+  if (!slug && !customDomain) return null;
   try {
     const store = await platform.store.findUnique({
-      where: { slug },
+      where: slug ? { slug } : { customDomain: customDomain! },
       select: { name: true },
     });
     return store?.name ?? null;

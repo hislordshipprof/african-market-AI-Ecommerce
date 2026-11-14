@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { findStoreByDomain } from "@/lib/get-store";
 import { parseInput } from "@/lib/security/parse-input";
 
 const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
@@ -38,8 +39,14 @@ function rejectIfBadCallback(req: NextRequest): NextResponse | null {
   return null;
 }
 
-function rejectIfAdminHost(req: NextRequest): NextResponse | null {
-  if (!req.headers.get("x-store-slug")) {
+async function isStoreHost(req: NextRequest): Promise<boolean> {
+  if (req.headers.get("x-store-slug")) return true;
+  const customDomain = req.headers.get("x-custom-domain");
+  return customDomain ? (await findStoreByDomain(customDomain)) !== null : false;
+}
+
+async function rejectIfAdminHost(req: NextRequest): Promise<NextResponse | null> {
+  if (!(await isStoreHost(req))) {
     const url = new URL(req.url);
     const authPath = url.pathname.replace(/^\/api\/auth/, "");
     if (CUSTOMER_ONLY_PATHS.some((p) => authPath.startsWith(p))) {
@@ -53,13 +60,13 @@ function rejectIfAdminHost(req: NextRequest): NextResponse | null {
 }
 
 export async function GET(req: NextRequest) {
-  const bad = rejectIfBadCallback(req) ?? rejectIfAdminHost(req);
+  const bad = rejectIfBadCallback(req) ?? (await rejectIfAdminHost(req));
   if (bad) return bad;
   return rawGET(req);
 }
 
 export async function POST(req: NextRequest) {
-  const bad = rejectIfAdminHost(req);
+  const bad = await rejectIfAdminHost(req);
   if (bad) return bad;
   let body: Record<string, unknown> | null = null;
   try {

@@ -77,6 +77,7 @@ describe("auth integration (real DB, app_runtime)", () => {
   const staffEmail = `integ-staff-${suffix}@test.example`;
   const adminEmail = `integ-admin-${suffix}@test.example`;
   const storeSlug = `integ-store-${suffix}`;
+  const storeDomain = `shop-${suffix}.integ.example`;
   const adaEmail = `ada-claim-${suffix}@example.com`;
   const unprovenEmail = `unproven-claim-${suffix}@example.com`;
 
@@ -116,7 +117,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, 'Integ Test Store', ${storeSlug}, 'active', now())`;
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, custom_domain, status, updated_at) VALUES (${storeId}, 'Integ Test Store', ${storeSlug}, ${storeDomain}, 'active', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeId}, ${staffUserId}, 'staff', now())`;
     });
   });
@@ -330,6 +331,17 @@ describe("auth integration (real DB, app_runtime)", () => {
     expect(message?.html).toContain("Integ Test Store");
     expect(message?.html).not.toContain("African Markets");
     expect(message?.from).toContain("Integ Test Store");
+  });
+
+  it("magic-link email on a store's custom domain uses the store name", async () => {
+    const res = await authPost(
+      "/sign-in/magic-link",
+      { email: customerEmail, callbackURL: "/account" },
+      undefined,
+      { "x-custom-domain": storeDomain, host: storeDomain },
+    );
+    expect(res.status).toBe(200);
+    expect(getTestSentEmails().at(-1)?.subject).toBe("Sign in to Integ Test Store");
   });
 
   it("E5: an expired magic link does not create a session", async () => {

@@ -103,24 +103,21 @@ export function revalidateStore(store: {
   }
 }
 
-export async function getStore(): Promise<ValidatedStore> {
-  const headerList = await headers();
-
+/** The host's store from the proxy's headers: the subdomain slug, else a custom domain. */
+export async function findStoreForHeaders(
+  headerList: Headers,
+): Promise<ValidatedStore | null> {
   const slug = headerList.get("x-store-slug");
-  if (slug) {
-    const store = await findStore(slug);
-    if (!store) notFound();
-    return store;
-  }
-
+  if (slug) return findStore(slug);
   const customDomain = headerList.get("x-custom-domain");
-  if (customDomain) {
-    const store = await findStoreByDomain(customDomain);
-    if (!store) notFound();
-    return store;
-  }
+  if (customDomain) return findStoreByDomain(customDomain);
+  return null;
+}
 
-  notFound();
+export async function getStore(): Promise<ValidatedStore> {
+  const store = await findStoreForHeaders(await headers());
+  if (!store) notFound();
+  return store;
 }
 
 export async function getStoreWithStatus(): Promise<{

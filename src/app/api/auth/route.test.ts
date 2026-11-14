@@ -12,6 +12,11 @@ vi.mock("@/lib/auth", () => ({
   auth: { handler: mockHandler },
 }));
 
+const mockFindStoreByDomain = vi.fn();
+vi.mock("@/lib/get-store", () => ({
+  findStoreByDomain: (domain: string) => mockFindStoreByDomain(domain),
+}));
+
 vi.mock("better-auth/next-js", () => ({
   toNextJsHandler: () => ({
     GET: (req: Request) => mockHandler(req),
@@ -148,6 +153,30 @@ describe("E7: customer endpoints 403 on non-store hosts", () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.error).toMatch(/store hosts/i);
+    expect(mockHandler).not.toHaveBeenCalled();
+  });
+
+  it("POST /sign-in/magic-link passes through on a store's custom domain", async () => {
+    mockFindStoreByDomain.mockResolvedValueOnce({ id: "s1" });
+    const req = new NextRequest("https://shop.mamasmarket.com/api/auth/sign-in/magic-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-custom-domain": "shop.mamasmarket.com" },
+      body: JSON.stringify({ email: "user@example.com" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(mockFindStoreByDomain).toHaveBeenCalledWith("shop.mamasmarket.com");
+  });
+
+  it("POST /sign-in/magic-link returns 403 on a custom domain no store owns", async () => {
+    mockFindStoreByDomain.mockResolvedValueOnce(null);
+    const req = new NextRequest("https://nobody.example.com/api/auth/sign-in/magic-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-custom-domain": "nobody.example.com" },
+      body: JSON.stringify({ email: "user@example.com" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(403);
     expect(mockHandler).not.toHaveBeenCalled();
   });
 
