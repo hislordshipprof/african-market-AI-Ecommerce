@@ -42,8 +42,14 @@ export class ResendSender implements EmailSender {
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Resend API error ${res.status}: ${body}`);
+      let name = "";
+      try {
+        const body = (await res.json()) as { name?: unknown };
+        if (typeof body.name === "string") name = body.name;
+      } catch {
+        // Keep the status code. The body can echo the recipient.
+      }
+      throw new ProviderSendError(res.status, name || `http_${res.status}`);
     }
 
     const data = (await res.json()) as { id: string };
@@ -105,16 +111,15 @@ class UnconfiguredSender implements EmailSender {
   }
 }
 
+/** Build, test and CI send to the in-memory fakes, never a provider. */
+export function providerSinkMode(env: Record<string, string | undefined> = process.env): boolean {
+  return env.NEXT_PHASE === "phase-production-build" || env.NODE_ENV === "test" || env.CI === "true";
+}
+
 export function createSender(
   env: Record<string, string | undefined> = process.env,
 ): EmailSender {
-  if (env.NEXT_PHASE === "phase-production-build") {
-    return new TestSender();
-  }
-
-  if (env.NODE_ENV === "test" || env.CI === "true") {
-    return new TestSender();
-  }
+  if (providerSinkMode(env)) return new TestSender();
 
   const apiKey = env.RESEND_API_KEY;
   const from = env.EMAIL_FROM ?? "onboarding@resend.dev";
