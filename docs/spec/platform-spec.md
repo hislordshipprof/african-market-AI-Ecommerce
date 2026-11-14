@@ -169,7 +169,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ## 7. Platform admin console
 - Tenants: create, suspend, plan/billing, settings override.
 - Master catalog: products, synonyms (by language), images, recipes, category tree; merge duplicates proposed by AI.
-- Orders & disputes across tenants; manual refund; courier incident log.
+- Orders & disputes across tenants; manual refund; courier incident log. Order search and a read-only order detail, audited per view, are built (#537); refunds stay on the Refunds page.
 - Courier config: provider priorities, failover timeout, per-metro settings.
 - AI oversight: conversation sampling, flagged answers, eval dashboard.
 - Billing: subscriptions (Stripe Billing), platform fees ledger.
