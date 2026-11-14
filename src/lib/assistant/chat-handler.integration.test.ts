@@ -894,6 +894,31 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(body).not.toContain("(see card)");
   });
 
+  // A cheap turn writes no turn_cost row: the first test counts exactly two actions.
+  it("records a turn over the oversight cost threshold for review", async () => {
+    const costly = {
+      inputTokens: { total: 300_000, noCache: 300_000, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 10, text: 10, reasoning: 0 },
+    };
+    const { model } = strictModel(() => [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "t" },
+      { type: "text-delta", id: "t", delta: "Here you go." },
+      { type: "text-end", id: "t" },
+      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage: costly },
+    ]);
+    const response = await createChatHandler({ model })(request("long list", { ip: "203.0.113.87" }));
+    const cookie = response.headers.get("set-cookie") ?? "";
+    await response.text();
+    const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
+    const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
+    const rows = await storeScoped(storeId).aiAction.findMany({ where: { conversationId: conversation?.id ?? "", tool: "turn_cost" } });
+    expect(rows).toHaveLength(1);
+    // Haiku 5.5 long-context rates: 300,000 input tokens at $0.50 per million and 10 output tokens at $2.50 per million.
+    const userId = (conversation?.messages as Array<{ id: string; role: string }>).find((message) => message.role === "user")?.id;
+    expect(rows[0]?.output).toEqual({ costMicros: 150_025, turn: userId });
+  });
+
   it("stops at eight steps with the step-limit part", async () => {
     let n = 0;
     const model = new MockLanguageModelV4({
