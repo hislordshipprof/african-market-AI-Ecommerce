@@ -11,6 +11,7 @@ import type {
 import { ProviderStateError } from "./types";
 import { OverRefundError } from "./errors";
 import { billingObjects } from "../billing/webhook-objects";
+import { fakeCheckoutHoldCents } from "./checkout-payments";
 
 const lateRefundKeys = new Set<string>();
 
@@ -353,6 +354,8 @@ const fakeStripeProvider: StripeProvider = {
           status: "succeeded",
         } satisfies CaptureResult;
       }
+      const checkoutHold = fakeCheckoutHoldCents(paymentIntentId);
+      if (checkoutHold !== null) ensureAuthorizedAmount(paymentIntentId, checkoutHold);
       if (!authorizedAmounts.has(paymentIntentId)) {
         throw resourceMissing("payment_intent", paymentIntentId);
       }
