@@ -22,7 +22,7 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { requirePlatformAdmin } from "./session";
+import { requirePlatformAdmin, platformAdminApiDenial } from "./session";
 
 describe("requirePlatformAdmin", () => {
   beforeEach(() => {
@@ -120,5 +120,56 @@ describe("requirePlatformAdmin", () => {
 
     mockGetSession.mockResolvedValueOnce(null);
     await expect(requirePlatformAdmin()).rejects.toThrow("REDIRECT:/admin/sign-in");
+  });
+});
+
+describe("platformAdminApiDenial", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns 401 JSON when no session", async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    const denied = await platformAdminApiDenial();
+    expect(denied?.status).toBe(401);
+    expect(await denied?.json()).toEqual({ error: "Not authenticated" });
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 JSON for non-admin role", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      session: { twoFactorVerified: true },
+      user: { id: "u1", role: "customer", twoFactorEnabled: true },
+    });
+    expect((await platformAdminApiDenial())?.status).toBe(401);
+  });
+
+  it("returns 403 JSON when admin has not enrolled 2FA", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      session: { twoFactorVerified: false },
+      user: { id: "u1", role: "platform_admin", twoFactorEnabled: false },
+    });
+    const denied = await platformAdminApiDenial();
+    expect(denied?.status).toBe(403);
+    expect(await denied?.json()).toEqual({ error: "Two-factor authentication required" });
+  });
+
+  it("returns 403 JSON when 2FA enabled but session not verified", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      session: { twoFactorVerified: false },
+      user: { id: "u1", role: "platform_admin", twoFactorEnabled: true },
+    });
+    expect((await platformAdminApiDenial())?.status).toBe(403);
+  });
+
+  it("returns null for a verified admin, without the cookie cache", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      session: { twoFactorVerified: true },
+      user: { id: "u1", role: "platform_admin", twoFactorEnabled: true },
+    });
+    expect(await platformAdminApiDenial()).toBeNull();
+    expect(mockGetSession).toHaveBeenCalledWith(
+      expect.objectContaining({ query: { disableCookieCache: true } }),
+    );
   });
 });

@@ -32,16 +32,17 @@ ci_scope() {
   echo "$scope"
 }
 
-# rebase_is_safe <old-sha> <new-sha>: true when <new-sha> is <old-sha> replayed onto a newer main, with an
-# identical patch, and main's new commits change nothing that reaches every test. Everything else needs a full run.
-rebase_is_safe() {
+# merge_is_safe <old-sha> <new-sha>: true when <new-sha> is <old-sha> brought up to a newer main (merge-ticket.sh
+# merges main in) and its diff against main is the identical patch, and main's new commits change nothing that
+# reaches every test. Everything else, including a main that already holds part of the PR, needs a full run.
+merge_is_safe() {
   local old="$1" new="$2" old_base new_base a b
   old_base=$(git merge-base origin/main "$old") || return 1
   new_base=$(git merge-base origin/main "$new") || return 1
   a=$(git diff "$old_base" "$old" | git patch-id --stable | cut -d' ' -f1)
   b=$(git diff "$new_base" "$new" | git patch-id --stable | cut -d' ' -f1)
   [ -n "$a" ] && [ "$a" = "$b" ] || return 1
-  # The rebase tier reruns tests related to source files, so a change touching anything else needs a full run.
+  # The merge tier reruns tests related to source files, so a change touching anything else needs a full run.
   changed_paths "$new_base" "$new" | grep -qvE '^(src/.*\.tsx?|e2e/.*|docs/.*|screenshots/.*|.*\.md)$' && return 1
   ! changed_paths "$old_base" "$new_base" \
     | grep -qE '^(prisma/|package\.json$|pnpm-lock\.yaml$|patches/|next\.config\.|playwright\.config\.|vitest\.config\.|tsconfig|\.github/|src/proxy\.ts$|src/app/layout\.tsx$|src/lib/test-setup\.ts$|e2e/global-(setup|teardown)\.ts$)'

@@ -1,7 +1,7 @@
 import "server-only";
 import { headers } from "next/headers";
 import { auth } from "./auth";
-import { findStore } from "./get-store";
+import { findStoreForHeaders } from "./get-store";
 import type { StoreCustomer } from "./customer-auth";
 import { syncCustomerForStore } from "./customer-claim";
 
@@ -15,10 +15,7 @@ export async function syncCustomerForRequest(): Promise<StoreCustomer | null> {
   });
   if (!session) return null;
 
-  const slug = reqHeaders.get("x-store-slug");
-  if (!slug) return null;
-
-  const store = await findStore(slug);
+  const store = await findStoreForHeaders(reqHeaders);
   if (!store) return null;
 
   return syncCustomerForStore(store.id, session.user);

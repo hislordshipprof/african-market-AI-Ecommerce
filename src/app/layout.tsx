@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Figtree, Geist } from "next/font/google";
 import { headers } from "next/headers";
-import { findStore } from "@/lib/get-store";
+import { findStoreForHeaders } from "@/lib/get-store";
 import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -22,10 +22,7 @@ const figtree = Figtree({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
-  const headerList = await headers();
-  const slug = headerList.get("x-store-slug");
-  if (!slug) return { title: "Store not found" };
-  const store = await findStore(slug);
+  const store = await findStoreForHeaders(await headers());
   return { title: store?.name ?? "Store not found" };
 }
 
@@ -43,12 +40,9 @@ export default async function RootLayout({
   let theme: ResolvedTheme | null = null;
 
   const headerList = await headers();
-  const slug = headerList.get("x-store-slug");
-  if (slug) {
-    const store = await findStore(slug);
-    if (store) {
-      theme = resolveStoreTheme(store.validPreset, store.validBrandColor);
-    }
+  const store = await findStoreForHeaders(headerList);
+  if (store) {
+    theme = resolveStoreTheme(store.validPreset, store.validBrandColor);
   }
 
   // Read by the story surface, for browsers that send Save-Data without navigator.connection.

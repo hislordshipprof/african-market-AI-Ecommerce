@@ -547,6 +547,8 @@ test("closing during a held file send drops the preview", async ({ page }) => {
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
   await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
   await page.getByTestId("assistant-composer").fill("old draft");
+  // The Remove button shows on the pending tile; the preview URL is made only once the photo is encoded.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __objectUrls: { created: number } }).__objectUrls.created)).toBeGreaterThan(0);
   const before = await page.evaluate(() => (window as unknown as { __objectUrls: { created: number; revoked: number } }).__objectUrls.created);
   await page.getByTestId("assistant-send").click();
   await page.getByRole("button", { name: "Close Shop with AI" }).click();

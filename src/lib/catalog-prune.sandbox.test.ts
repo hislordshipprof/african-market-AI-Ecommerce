@@ -4,6 +4,7 @@ import { planCatalogPrune } from "./catalog-prune";
 import { deleteCatalogCandidates, listCatalogObjects } from "./catalog-prune-execute";
 import { createFakeR2 } from "./catalog-prune-fake-r2";
 import { cleanupSandboxManifest, pruneSandboxManifest, sandboxRunPrefix } from "./catalog-prune-sandbox";
+import { liveSandbox } from "./test-live-provider";
 
 const sandboxBucket = process.env.R2_SANDBOX_BUCKET;
 const sandboxAccess = process.env.R2_SANDBOX_ACCESS_KEY_ID;
@@ -88,6 +89,10 @@ describe("catalog prune sandbox", () => {
   });
 
   it("real R2 scratch bucket: dry-run lists and bucket-name prune deletes only the unreferenced old object", async (ctx) => {
+    if (!liveSandbox) {
+      ctx.skip("LIVE_SANDBOX=1 is not set.");
+      return;
+    }
     if (!hasSandbox) {
       ctx.skip("R2_SANDBOX_BUCKET, R2_SANDBOX_ACCESS_KEY_ID and R2_SANDBOX_SECRET_ACCESS_KEY are not set. This does not block the build.");
       return;

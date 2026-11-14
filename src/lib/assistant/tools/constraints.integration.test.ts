@@ -4,7 +4,7 @@ import { platformAdmin, storeScoped, storeScopedTransaction } from "../../db";
 import { listingAttributes } from "../../catalog/listing-attributes";
 import { constraintStatuses, listingVerdicts, overallStatus, parseConstraints, readConstraints, updateConstraints } from "../constraints";
 import { acceptanceForTurn, type ShownMessage } from "../shown";
-import { addToCart, offerChoices, searchCatalog, setShopperNeeds, setSwapRule, type AssistantContext } from "./execute";
+import { addToCart, offerChoices, searchCatalog, setShopperNeeds, setSwapRule, suggestSubstitutes, type AssistantContext } from "./execute";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
@@ -69,6 +69,13 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     listing.shaky = await sell(storeA, await master("Paste shaky", { ...known, dietaryClaims: ["halal", "vegan"] }, [tomato.id]), 300, 0.3);
     const unknownMaster = await master("Paste mystery", {});
     listing.unknown = await sell(storeA, unknownMaster);
+    // Owner corrections on top of reviewed master values: the safer value wins, contains-lists by union, claims by intersection.
+    listing.allergenCorrected = await sell(storeA, await master("Sauce allergen corrected", { ...known, allergens: ["peanuts"], dietaryClaims: ["halal"] }));
+    listing.claimCorrected = await sell(storeA, await master("Sauce claim corrected", { ...known, dietaryClaims: ["vegan"] }));
+    await storeScopedTransaction(storeA, async (tx) => {
+      await tx.listingAttributes.create({ data: { listingId: listing.allergenCorrected.listingId, storeId: storeA, allergensStatus: "known", allergens: [] } });
+      await tx.listingAttributes.create({ data: { listingId: listing.claimCorrected.listingId, storeId: storeA, dietaryStatus: "known", dietaryClaims: ["halal"] } });
+    });
     // Store B states the same product is peanut-free; store A must never see that.
     listing.otherStore = await sell(storeB, unknownMaster);
     await storeScopedTransaction(storeB, (tx) => tx.listingAttributes.create({
@@ -95,6 +102,15 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const saved = await readConstraints(storeA, ctx.conversationId);
     expect(saved.avoidAllergens).toEqual(["peanuts"]);
     expect(saved.avoidIngredients).toEqual([{ term: `yellow onion ${suffix}`, ingredientId: onionId }]);
+  });
+
+  it("removes saved needs the customer takes back, and the gate lifts with them (#503 N8)", async () => {
+    const ctx = await conversation(storeA);
+    await setShopperNeeds(ctx, { avoid_allergens: ["peanuts", "sesame"], require_claims: ["halal"], avoid_ingredients: [`yellow onion ${suffix}`, `fresh tomato ${suffix}`] });
+    expect(await addToCart(ctx, { items: [{ variant_id: listing.peanut.variantId, qty: 1 }] })).toMatchObject({ ok: false, code: "excluded" });
+    const result = await setShopperNeeds(ctx, { remove: [" Peanuts", "halal", `yellow onion ${suffix}`, `fresh tomato ${suffix}`] });
+    expect(result).toMatchObject({ ok: true, avoidAllergens: ["sesame"], requireClaims: [], avoidIngredients: [], preferences: [] });
+    expect(await addToCart(ctx, { items: [{ variant_id: listing.peanut.variantId, qty: 1 }] })).toMatchObject({ ok: true, added: 1 });
   });
 
   it("asks about a term that only names a form of a known ingredient: all blocks every form, only that form is a preference", async () => {
@@ -160,6 +176,9 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
       const expected = checkNeed(attributes!, { avoidAllergens: ["peanuts"], requireClaims: ["halal"], avoidIngredientIds: [onionId] });
       expect(verdicts.get(row.listingId)?.status, name).toBe(expected === "cannot_confirm" ? "unknown" : expected);
     }
+    // Both corrections lose to the safer master value (#503 N7).
+    expect(verdicts.get(listing.allergenCorrected.listingId)?.needs).toMatchObject({ "allergen:peanuts": "excluded" });
+    expect(verdicts.get(listing.claimCorrected.listingId)?.needs).toMatchObject({ "claim:halal": "excluded" });
   });
 
   it("keeps store B's attribute correction out of store A", async () => {
@@ -219,9 +238,12 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(confirmed).toMatchObject({ ok: true, added: 1 });
     const saved = await readConstraints(storeA, ctx.conversationId);
     expect(saved.confirmed).toEqual([expect.objectContaining({ listingId: listing.unknown.listingId, messageId: yes.id, needs: ["allergen:peanuts"] })]);
+    // Saving the same need again does not raise the line the customer already confirmed.
+    expect(await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] })).not.toHaveProperty("failsNeeds");
 
     // A need added later was never confirmed for this item: it is asked about again.
-    await setShopperNeeds(ctx, { avoid_allergens: ["sesame"], require_claims: ["halal"], avoid_ingredients: [] });
+    expect(await setShopperNeeds(ctx, { avoid_allergens: ["sesame"], require_claims: ["halal"], avoid_ingredients: [] }))
+      .toMatchObject({ failsNeeds: [{ name: `Paste mystery ${suffix}`, code: "cannot_confirm" }] });
     const more: ShownMessage = { role: "user", id: `u3-${suffix}`, parts: [{ type: "text", text: `I also need halal and no sesame. Add another Paste mystery ${suffix}.` }] };
     const later = [...messages, { role: "assistant", id: `a2-${suffix}`, parts: [{ type: "text", text: "Added." }] } as ShownMessage, more];
     await storeScoped(storeA).aiConversation.update({ where: { id: ctx.conversationId }, data: { messages: later as never } });
@@ -229,6 +251,46 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const again = await addToCart(turn3, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] });
     expect(again).toMatchObject({ ok: false, code: "cannot_confirm", needs: { "allergen:peanuts": "unknown", "allergen:sesame": "unknown", "claim:halal": "unknown" } });
     expect(await storeScoped(storeA).cartLine.findFirst({ where: { cartId: ctx.cartId } })).toMatchObject({ qty: 1 });
+  });
+
+  it("suggests allowed substitutes ranked below many excluded ones (#503 N1)", async () => {
+    const category = await platformAdmin.category.create({ data: { name: `Subs ${suffix}`, slug: `subs-${suffix}`, sortOrder: 999 } });
+    const known = { allergensStatus: "reviewed", dietaryStatus: "reviewed", ingredientsStatus: "reviewed", categoryId: category.id };
+    try {
+      const base = await sell(storeA, await master("Sub base", known));
+      const create = (name: string, allergens: string[], price: number) => Promise.all(Array.from({ length: name === "Sub peanut" ? 40 : 5 }, async (_, index) => {
+        const id = await master(`${name} ${index}`, { ...known, allergens });
+        return storeScoped(storeA).listing.create({ data: { storeId: storeA, masterProductId: id, price, stockMode: "unlimited", frozen: false, perishable: false } });
+      }));
+      await create("Sub peanut", ["peanuts"], 100);
+      const safe = await create("Sub safe", [], 500);
+      const ctx = await conversation(storeA);
+      await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+      const result = await suggestSubstitutes(ctx, { listing_id: base.listingId });
+      expect(items(result).map((item) => item.listingId).sort()).toEqual(safe.map((row) => row.id).sort());
+    } finally {
+      await storeScoped(storeA).listing.deleteMany({ where: { masterProduct: { categoryId: category.id } } });
+      await platformAdmin.masterProduct.deleteMany({ where: { categoryId: category.id } });
+      await platformAdmin.category.delete({ where: { id: category.id } });
+    }
+  });
+
+  it("never counts a reply that names the item without a yes as confirming it (#503 N5)", async () => {
+    const name = `Paste mystery ${suffix}`;
+    const first: ShownMessage = { role: "user", id: `n5u1-${suffix}`, parts: [{ type: "text", text: `I have a peanut allergy. Add 1 ${name}` }] };
+    const ctx = await conversation(storeA, [first]);
+    await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    const turn1 = { ...ctx, turnMessageId: first.id!, acceptance: acceptanceForTurn([first], first.id!, first.parts[0].text!) };
+    expect(await addToCart(turn1, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] })).toMatchObject({ code: "cannot_confirm" });
+
+    const reply: ShownMessage = { role: "assistant", id: `n5a1-${suffix}`, parts: [{ type: "text", text: `I can't confirm ${name} is peanut-free. Add it anyway?` }] };
+    const no: ShownMessage = { role: "user", id: `n5u2-${suffix}`, parts: [{ type: "text", text: `Don't add the ${name}.` }] };
+    const messages = [first, reply, no];
+    await storeScoped(storeA).aiConversation.update({ where: { id: ctx.conversationId }, data: { messages: messages as never } });
+    const turn2 = { ...ctx, turnMessageId: no.id!, acceptance: acceptanceForTurn(messages, no.id!, no.parts[0].text!) };
+    expect(await addToCart(turn2, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] })).toMatchObject({ ok: false, code: "cannot_confirm" });
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: ctx.cartId } })).toBe(0);
+    expect((await readConstraints(storeA, ctx.conversationId)).confirmed).toEqual([]);
   });
 
   it("never leaves a constrained shopper's may-be-unavailable line to the store's unchecked swap", async () => {
@@ -247,12 +309,25 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(await addToCart(kept, { items: [{ variant_id: listing.shaky.variantId, qty: 1, backup_variant_id: listing.plain.variantId }] }))
       .toMatchObject({ ok: true, swapRule: "named_substitute", substituteVariantId: listing.plain.variantId });
 
-    // The store's swap is refused with the reason; a refund is allowed on this line.
+    // The store's swap is refused with the reason; with a backup that passes, a refund is refused too (#503 N4).
     const lineId = (await lineOf(kept)).id;
     const store = await setSwapRule(kept, { line_id: lineId, rule: "store_suggests" });
     expect(store).toMatchObject({ ok: false, code: "unchecked_swap" });
-    expect(await lineOf(kept)).toMatchObject({ swapRule: "named_substitute" });
-    expect(await setSwapRule(kept, { line_id: lineId, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
+    expect(await setSwapRule(kept, { line_id: lineId, rule: "exact_only" })).toMatchObject({ ok: false, code: "backup_required" });
+    expect(await lineOf(kept)).toMatchObject({ swapRule: "named_substitute", substituteVariantId: listing.plain.variantId });
+
+    // A refund is allowed on a line whose named backup fails the needs.
+    const failing = await conversation(storeA);
+    const failingLine = (await addToCart(failing, { items: [{ variant_id: listing.shaky.variantId, qty: 1, backup_variant_id: listing.peanut.variantId }] }) as unknown as { lineId: string }).lineId;
+    await setShopperNeeds(failing, { avoid_allergens: ["peanuts"] });
+    expect(await setSwapRule(failing, { line_id: failingLine, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
+
+    // Another conversation cannot reach that line; a line with no named backup, or one that is not may-be-unavailable, refunds.
+    expect(await setSwapRule(failing, { line_id: lineId, rule: "exact_only" })).toMatchObject({ ok: false, code: "line_not_found" });
+    expect(await setSwapRule(failing, { line_id: failingLine, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
+    const plainLine = (await addToCart(kept, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] }) as unknown as { lineId: string }).lineId;
+    expect(await setSwapRule(kept, { line_id: plainLine, rule: "named_substitute", substitute_variant_id: listing.onion.variantId })).toMatchObject({ ok: true });
+    expect(await setSwapRule(kept, { line_id: plainLine, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
 
     // With no constraints, nothing changes.
     const free = await conversation(storeA);
@@ -278,6 +353,33 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(rule(shaky)).toMatchObject({ swapRule: "exact_only", substituteVariantId: null });
     expect(rule(plain)).toMatchObject({ swapRule: "exact_only", substituteVariantId: null });
     expect(rule(onion)).toMatchObject({ swapRule: "named_substitute", substituteVariantId: listing.plain.variantId });
+  });
+
+  it("names lines already in the cart whose own product fails a new need, and removes none (#503 N2)", async () => {
+    const ctx = await conversation(storeA);
+    const lineId = async (variantId: string) => {
+      const added = await addToCart(ctx, { items: [{ variant_id: variantId, qty: 1 }] });
+      return (added as unknown as { lineId: string }).lineId;
+    };
+    const peanut = await lineId(listing.peanut.variantId);
+    const unknown = await lineId(listing.unknown.variantId);
+    await lineId(listing.plain.variantId);
+
+    const result = await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    expect(result).toMatchObject({
+      ok: true,
+      failsNeeds: [
+        { lineId: peanut, name: `Paste groundnut ${suffix}`, code: "excluded", needs: { "allergen:peanuts": "excluded" } },
+        { lineId: unknown, name: `Paste mystery ${suffix}`, code: "cannot_confirm", needs: { "allergen:peanuts": "unknown" } },
+      ],
+    });
+    expect((result as unknown as { failsNeeds: unknown[] }).failsNeeds).toHaveLength(2);
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: ctx.cartId } })).toBe(3);
+
+    // With nothing in the cart failing, the result carries no failsNeeds.
+    const clean = await conversation(storeA);
+    await addToCart(clean, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] });
+    expect(await setShopperNeeds(clean, { avoid_allergens: ["peanuts"] })).not.toHaveProperty("failsNeeds");
   });
 });
 

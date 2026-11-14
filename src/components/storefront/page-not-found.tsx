@@ -1,12 +1,11 @@
 import { headers } from "next/headers";
 import Link from "next/link";
-import { findStore } from "@/lib/get-store";
+import { findStoreForHeaders } from "@/lib/get-store";
 import { listCategories } from "@/lib/storefront/service";
 import { StorefrontShell } from "./storefront-shell";
 
 export async function PageNotFound() {
-  const slug = (await headers()).get("x-store-slug");
-  const store = slug ? await findStore(slug) : null;
+  const store = await findStoreForHeaders(await headers());
   if (!store) return <main className="sf-storefront"><div className="sf-container sf-not-found"><div className="sf-not-found-number" aria-hidden>404</div><h1 className="sf-page-title">Store not found</h1><p className="sf-page-intro">We could not find a store at this address.</p></div></main>;
   const categories = await listCategories();
   return <StorefrontShell store={store}><section className="sf-container sf-not-found" data-testid="page-not-found">
