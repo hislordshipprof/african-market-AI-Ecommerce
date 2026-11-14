@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { platform } from "@/lib/db";
 import { storeMayUse } from "@/lib/billing/plan";
-import { courierOffered } from "@/lib/checkout/service";
+import { courierOffered } from "@/lib/delivery/courier-offered";
 import { storefrontUrl } from "./links";
 
 // The only Store columns the public directory may read. `stores_read` is open to every
