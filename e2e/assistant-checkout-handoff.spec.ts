@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
+import { handoffTimezone } from "./handoff-timezone";
 import { storeUrl } from "./urls";
 
 async function scoped<T>(prisma: PrismaClient, storeId: string, run: (tx: Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]) => Promise<T>) {
@@ -27,7 +28,7 @@ test("the assistant hands off to normal checkout with the pickup time pre-select
       stripeAccountId: `acct_${slug.replace(/[^a-z0-9]/g, "").slice(0, 20)}`,
       pickupEnabled: true,
       prepTimeMinutes: 30,
-      timezone: "America/Chicago",
+      timezone: handoffTimezone(new Date()),
       minimumOrderCents: 0,
     },
   });
@@ -53,7 +54,7 @@ test("the assistant hands off to normal checkout with the pickup time pre-select
     await expect(review).toBeVisible({ timeout: 20_000 });
     await expect(review).toContainText("2 × Handoff Egusi");
     await expect(review).toContainText("$24.00");
-    await expect(review).toContainText(/Pickup · \d{1,2}:\d{2} [AP]M C[SD]T/);
+    await expect(review).toContainText(/Pickup · \d{1,2}:\d{2} [AP]M [CM][SD]T/);
     const slotLabel = (await review.getByText(/^Pickup · /).textContent())!.replace("Pickup · ", "");
     expect(await scoped(prisma, store.id, (tx) => tx.order.count())).toBe(0);
     const cart = await scoped(prisma, store.id, (tx) => tx.cart.findFirst());
