@@ -23,7 +23,7 @@ import { auth } from "../auth";
 import { authPrisma, customerScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
 import { addAddressAction, accountBookAction, editAddressAction, removeAddressAction, removeCardAction, savePhoneAction, setDefaultAddressAction } from "./actions";
-import { ADDRESS_NOT_FOUND, SIGN_IN_MESSAGE } from "./address-validation";
+import { ADDRESS_MESSAGES, ADDRESS_NOT_FOUND, SIGN_IN_MESSAGE } from "./address-validation";
 import { CARD_NOT_FOUND, CARDS_UNAVAILABLE, SAVED_CARD_PURPOSE, SAVED_CARD_TERMS_VERSION } from "./consent";
 import { ensureStripeCustomer } from "./stripe-customer";
 import { CheckoutProviderError, fakeCheckoutPayments, fakeDetachCalls, getCheckoutPayments, type NormalizedCard } from "../stripe/checkout-payments";
@@ -271,6 +271,8 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
 
     const forged = await asUser(a.cookie, () => addAddressAction({ ...home, injected: true, notes: { bad: true } }));
     expect(forged.ok).toBe(false);
+    const unknownKey = await asUser(a.cookie, () => addAddressAction({ ...home, isDefault: true }));
+    expect(unknownKey).toEqual({ ok: false, error: ADDRESS_MESSAGES.invalid });
     expect(await customerScoped(a.id).customerAddress.count()).toBe(1);
     const savedNote = await asUser(a.cookie, () => editAddressAction(addressId, { ...home, notes: "Leave at door" }));
     expect(savedNote.ok).toBe(true);

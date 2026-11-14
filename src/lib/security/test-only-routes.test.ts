@@ -78,6 +78,19 @@ describe("test-only routes", () => {
       method: "POST",
       body: JSON.stringify({ paymentIntentId: "pi_test" }),
     }))).status).toBe(404);
+    // The route gate allows a preview build; the payments fake does not, so the route must stay shut.
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    expect((await fake.POST(new Request("http://localhost/api/e2e/fake-confirm", {
+      method: "POST",
+      body: JSON.stringify({ paymentIntentId: "pi_test" }),
+    }))).status).toBe(404);
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("E2E_FAKE_STRIPE", "");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "1");
 
     const magic = await import(pathToFileURL(path.join(e2eRoot, "magic-link-token", "route.ts")).href);
     const magicRequest = new NextRequest("http://localhost/api/e2e/magic-link-token?email=a@b.test");

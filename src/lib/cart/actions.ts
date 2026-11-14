@@ -7,6 +7,7 @@ import { auth } from "../auth";
 import { getStore } from "../get-store";
 import { readBrowserId } from "./browser";
 import { getCartIdFromCookie, setCartIdCookie } from "./cookies";
+import { SWAP_RULES } from "./limits";
 import { parseInput } from "../security/parse-input";
 import {
   getOrCreateCart,
@@ -133,7 +134,7 @@ export async function setSwapRule(
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   const parsed = parseInput(z.strictObject({
     lineId: lineIdSchema,
-    swapRule: z.enum(["exact_only", "store_suggests", "named_substitute"]),
+    swapRule: z.enum(SWAP_RULES),
     substituteVariantId: z.string().max(200).nullable(),
   }), { lineId, swapRule, substituteVariantId });
   if (!parsed.ok) return invalidItem();
@@ -238,7 +239,7 @@ export async function migrateLocalCart(
   const parsed = parseInput(z.array(z.strictObject({
     variantId: lineIdSchema,
     qty: qtySchema,
-    swapRule: z.enum(["exact_only", "store_suggests", "named_substitute"]).optional(),
+    swapRule: z.enum(SWAP_RULES).optional(),
     substituteVariantId: z.string().max(200).nullable().optional(),
   })).max(200), localLines);
   if (!parsed.ok) return { ok: false, error: "Invalid item" };

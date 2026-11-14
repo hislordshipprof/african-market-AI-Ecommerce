@@ -36,11 +36,16 @@ export function actionNames(source: string): string[] {
   return [...names];
 }
 
+/** A directive may follow comments and blank lines; Next still treats the file as server actions. */
+export function isServerModule(source: string): boolean {
+  return /^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*["']use server["']/.test(source);
+}
+
 function actions(): Array<{ file: string; name: string; source: string }> {
   const found = [];
   for (const file of walk(path.join(root, "src"))) {
     const source = readFileSync(file, "utf8");
-    if (!source.startsWith('"use server"') && !source.startsWith("'use server'")) continue;
+    if (!isServerModule(source)) continue;
     for (const name of actionNames(source)) {
       found.push({ file: rel(file), name, source });
     }
@@ -165,5 +170,7 @@ describe("endpoint inventory", () => {
     const source = `"use server";\nexport const unauditedAction = async (input: unknown) => input;\n`;
     expect(actionNames(source)).toEqual(["unauditedAction"]);
     expect(takesArguments(source, "unauditedAction")).toBe(true);
+    expect(isServerModule(`// note\n/* block */\n\n'use server';\n`)).toBe(true);
+    expect(isServerModule(`import x from "y";\n"use server";\n`)).toBe(false);
   });
 });

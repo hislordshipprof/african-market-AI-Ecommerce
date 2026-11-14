@@ -237,6 +237,7 @@ model AppRateLimit {
   windowStart BigInt @map("window_start")
   count       Int
 
+  @@index([windowStart])
   @@map("app_rate_limits")
 }
 
