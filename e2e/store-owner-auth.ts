@@ -5,8 +5,9 @@ const OWNER_EMAIL = "owner@mama-ngozi.test";
 const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
 const SEED_TOTP_SECRET = process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP";
 
-export async function storeOwnerSignIn(page: Page): Promise<void> {
-  await page.goto("/store-admin/sign-in?store=mama-ngozi");
+/** `origin` signs in on a given host (a spawned server); default is the lane's baseURL. */
+export async function storeOwnerSignIn(page: Page, origin = ""): Promise<void> {
+  await page.goto(`${origin}/store-admin/sign-in?store=mama-ngozi`);
   await page.getByLabel("Email").fill(OWNER_EMAIL);
   await page.getByLabel("Password").fill(OWNER_PASSWORD);
   await page.click("button[type='submit']");

@@ -476,6 +476,28 @@ export function StoreForm({
         </div>
       </fieldset>
 
+      {mode === "edit" && store && (
+        <fieldset className="rounded-lg border border-input p-4">
+          <legend className="px-2 text-sm font-medium text-foreground">Store directory</legend>
+          <div className="flex items-center gap-2">
+            <input
+              name="listed"
+              type="checkbox"
+              id="listed"
+              defaultChecked={sv ? sv.listed === "on" : store.listed}
+              aria-describedby="listed-hint"
+              className="h-4 w-4 rounded border-input text-primary focus-visible:ring-ring"
+            />
+            <label htmlFor="listed" className="text-sm text-foreground">
+              Listed in the directory
+            </label>
+          </div>
+          <p id="listed-hint" className="mt-1 text-xs text-muted-foreground">
+            The owner sets this in their store admin. Change it here only to override them.
+          </p>
+        </fieldset>
+      )}
+
       <fieldset className="rounded-lg border border-input p-4">
         <legend className="px-2 text-sm font-medium text-foreground">Scheduled slots</legend>
         <p className="mb-4 text-sm text-muted-foreground">
