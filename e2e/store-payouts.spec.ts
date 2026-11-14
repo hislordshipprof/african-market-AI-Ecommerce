@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeOwnerSignIn } from "./store-owner-auth";
@@ -31,8 +31,19 @@ async function withStore<T>(run: (tx: import("@prisma/client").Prisma.Transactio
   }
 }
 
-async function seed() {
-  await withStore(async (tx, storeId) => {
+// The server caches the store row for 5 minutes, so a direct DB write is invisible until its tag is revalidated.
+async function revalidateStore(storeId: string, testInfo: TestInfo) {
+  const secret = process.env.STOREFRONT_REVALIDATION_SECRET ?? "e2e-storefront-revalidate";
+  const res = await fetch(new URL("/api/storefront/revalidate", testInfo.project.use.baseURL), {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+    body: JSON.stringify({ stores: [{ id: storeId, slug: SLUG }] }),
+  });
+  expect(res.status).toBe(200);
+}
+
+async function seed(testInfo: TestInfo) {
+  const storeId = await withStore(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: { in: NUMBERS } } });
     await tx.store.update({ where: { id: storeId }, data: { stripeAccountId: ACCOUNT } });
     const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
@@ -47,14 +58,18 @@ async function seed() {
         },
       });
     }
+    return storeId;
   });
+  await revalidateStore(storeId, testInfo);
 }
 
-async function cleanup() {
-  await withStore(async (tx, storeId) => {
+async function cleanup(testInfo: TestInfo) {
+  const storeId = await withStore(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: { in: NUMBERS } } });
     await tx.store.update({ where: { id: storeId }, data: { stripeAccountId: null } });
+    return storeId;
   });
+  await revalidateStore(storeId, testInfo);
 }
 
 async function shoot(page: Page, name: string) {
@@ -72,8 +87,8 @@ async function shoot(page: Page, name: string) {
 }
 
 test.describe.serial("Store payouts dashboard (#548)", () => {
-  test.beforeAll(seed);
-  test.afterAll(cleanup);
+  test.beforeAll(({}, testInfo) => seed(testInfo));
+  test.afterAll(({}, testInfo) => cleanup(testInfo));
 
   test("owner sees payouts, opens one, downloads its CSV and opens Stripe", async ({ page }) => {
     await storeOwnerSignIn(page);
