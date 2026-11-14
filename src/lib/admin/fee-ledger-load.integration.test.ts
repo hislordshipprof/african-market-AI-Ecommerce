@@ -51,8 +51,8 @@ beforeAll(async () => {
              'succeeded', o.ready_at + interval '1 day', o.ready_at + interval '1 day'
       FROM orders o WHERE o.id LIKE ${`${RUN}-%`} AND o.number % 50 = 1`;
   });
-  await prisma.$executeRawUnsafe("ANALYZE orders");
-  await prisma.$executeRawUnsafe("ANALYZE refund_requests");
+  await prisma.$executeRaw`ANALYZE orders`;
+  await prisma.$executeRaw`ANALYZE refund_requests`;
 }, 180_000);
 
 afterAll(async () => {

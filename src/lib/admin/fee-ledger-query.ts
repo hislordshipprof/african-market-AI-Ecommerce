@@ -1,4 +1,4 @@
-import { Prisma, platformAdminTransaction } from "../db";
+import { Prisma, platformAdminRawQuery } from "../db";
 import { buildFeeLedger, ledgerMonth, type CaptureFacts, type FeeLedger, type LedgerMonth, type RefundFacts } from "./fee-ledger";
 
 const ORDER_FACTS = Prisma.sql`
@@ -50,9 +50,9 @@ export function refundFactsSql(month: LedgerMonth): Prisma.Sql {
 /** One UTC month of the platform fee ledger, across stores. Callers check the platform admin first. */
 export async function platformFeeLedger(monthKey: string): Promise<FeeLedger> {
   const month = ledgerMonth(monthKey);
-  const [captures, refunds] = await platformAdminTransaction(async (tx) => [
-    await tx.$queryRaw<CaptureFacts[]>(captureFactsSql(month)),
-    await tx.$queryRaw<RefundFacts[]>(refundFactsSql(month)),
-  ] as const);
+  const [captures, refunds] = await Promise.all([
+    platformAdminRawQuery<CaptureFacts>(captureFactsSql(month)),
+    platformAdminRawQuery<RefundFacts>(refundFactsSql(month)),
+  ]);
   return buildFeeLedger(month, captures, refunds);
 }
