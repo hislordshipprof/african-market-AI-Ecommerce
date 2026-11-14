@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { generateTOTP } from "../../../e2e/totp";
 
 vi.hoisted(() => {
@@ -106,6 +106,12 @@ describe("store hours schema", () => {
     });
   }, 60_000);
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    setAddressProvider(null);
+  });
+
   afterAll(async () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -164,9 +170,6 @@ describe("store hours schema", () => {
     expect(still?.addressLine1).toBe("4600 Silver Hill Rd");
     expect(still?.lat).toBeCloseTo(38.845, 2);
     expect(send).not.toHaveBeenCalled();
-    send.mockRestore();
-    vi.unstubAllEnvs();
-    setAddressProvider(null);
   });
 
   it("turning on store delivery geocodes again when the saved address has no coordinates", async () => {
@@ -209,7 +212,15 @@ describe("store hours schema", () => {
     expect(send).toHaveBeenCalledWith({ name: "courier/registration.requested", data: { storeId } });
     const audit = await platformAdmin.auditLog.findFirst({ where: { entityId: storeId, action: "store.courier_registration_retry" } });
     expect(audit?.actorId).toBe(userId);
-    send.mockRestore();
-    vi.unstubAllEnvs();
+  });
+
+  it("a courier registration retry whose job could not be queued tells the admin so (#526)", async () => {
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    vi.spyOn(inngest, "send").mockRejectedValue(new Error("inngest down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const data = new FormData();
+    data.set("storeId", storeId);
+
+    await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=failed`);
   });
 });

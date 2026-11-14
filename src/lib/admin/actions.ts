@@ -741,9 +741,9 @@ export async function retryCourierRegistrationAction(formData: FormData): Promis
       },
     }),
   );
-  await requestCourierRegistration(storeId);
+  const queued = await requestCourierRegistration(storeId);
   revalidatePath(`/admin/stores/${storeId}`);
-  redirect(`/admin/stores/${storeId}?courierRetry=queued`);
+  redirect(`/admin/stores/${storeId}?courierRetry=${queued ? "queued" : "failed"}`);
 }
 
 export async function getStoreById(id: string) {

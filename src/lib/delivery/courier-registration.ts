@@ -54,12 +54,17 @@ export function findStoresNeedingCourierRegistration(limit: number): Promise<Arr
   });
 }
 
-/** Queues the registration job. A failed send is logged, never thrown: the daily retry picks the store up. */
-export async function requestCourierRegistration(storeId: string): Promise<void> {
-  if (sendSkipped()) return;
+/**
+ * Queues the registration job and says whether it was queued. A failed send is logged, never thrown: the daily retry
+ * picks the store up.
+ */
+export async function requestCourierRegistration(storeId: string): Promise<boolean> {
+  if (sendSkipped()) return false;
   try {
     await sendWithTimeout({ name: COURIER_REGISTRATION_REQUESTED, data: { storeId } });
+    return true;
   } catch (err) {
     console.error(JSON.stringify({ event: "inngest_send_failed", name: COURIER_REGISTRATION_REQUESTED, storeId, message: err instanceof Error ? err.message : "send failed" }));
+    return false;
   }
 }

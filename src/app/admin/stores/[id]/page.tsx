@@ -78,7 +78,9 @@ export default async function EditStorePage({
             <span role="status" className="text-sm text-[#55625A]">
               {courierRetry === "queued"
                 ? "Registration queued. Refresh in a minute to see the result."
-                : "Registration runs once the store has a full address, and again every day until it succeeds."}
+                : courierRetry === "failed"
+                  ? "Registration could not be queued. Try again, or the daily retry will pick it up."
+                  : "Registration runs once the store has a full address, and again every day until it succeeds."}
             </span>
           </form>
         )}
