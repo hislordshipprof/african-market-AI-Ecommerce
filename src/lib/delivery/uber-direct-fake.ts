@@ -192,7 +192,12 @@ export function fakeUberDirect(opts: FakeUberDirectOptions) {
       }
       const ready = readyError(body?.pickup_ready_dt, opts.now());
       if (ready) return invalid({ pickup_ready_dt: ready });
-      if (typeof body?.pickup_ready_dt === "string") found.pickupReadyDt = body.pickup_ready_dt;
+      // A moved ready time needs a deadline at least 10 minutes after it (sandbox, 2026-11-14).
+      if (typeof body?.pickup_ready_dt === "string") {
+        const deadline = typeof body.pickup_deadline_dt === "string" ? new Date(body.pickup_deadline_dt).getTime() : NaN;
+        if (!(deadline - new Date(body.pickup_ready_dt).getTime() >= 10 * 60_000)) return invalid({ pickup_deadline_dt: "The pickup window is too small" });
+        found.pickupReadyDt = body.pickup_ready_dt;
+      }
       return reply(200, delivery(m[1], found.status, found.quoteId));
     }
     if (method === "POST" && (m = rest.match(/^\/deliveries\/([^/]+)\/cancel$/))) {
