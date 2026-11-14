@@ -64,6 +64,7 @@ model Store {
   carts                 Cart[]
   customers             Customer[]
   orders                Order[]
+  coupons               StoreCoupon[]
   deliveries            Delivery[]
   refundRequests        RefundRequest[]
   issueReports          IssueReport[]
@@ -142,6 +143,7 @@ model User {
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
   listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
   listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  storeCouponsCreated     StoreCoupon[]
 
   @@map("users")
 }
@@ -1136,6 +1138,10 @@ model Order {
   deliveredAt             DateTime? @map("delivered_at")
   deliveryProofKey        String?   @map("delivery_proof_key")
   deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
+  /// The store coupon used (#556). The SQL foreign key is (coupon_id, store_id), so it is always this store's.
+  couponId                String?   @map("coupon_id")
+  /// Goods discount from the coupon, in cents; #557 writes it.
+  discountCents           Int       @default(0) @map("discount_cents")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1149,9 +1155,11 @@ model Order {
   deliveries           Delivery[]
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
+  coupon               StoreCoupon?          @relation(fields: [couponId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
+  @@index([storeId, couponId])
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, sourceCartId, createdAt])
@@ -1542,4 +1550,35 @@ model AssistantChatMonth {
 
   @@id([storeId, month])
   @@map("assistant_chat_months")
+}
+
+/// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.
+model StoreCoupon {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  code            String
+  /// "percent" or "fixed".
+  kind            String
+  percentOff      Int?      @map("percent_off")
+  amountOffCents  Int?      @map("amount_off_cents")
+  minGoodsCents   Int       @default(0) @map("min_goods_cents")
+  startsAt        DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt          DateTime? @map("ends_at") @db.Timestamptz(6)
+  /// Null is no limit.
+  totalUses       Int?      @map("total_uses")
+  usesPerCustomer Int?      @map("uses_per_customer")
+  firstOrderOnly  Boolean   @default(false) @map("first_order_only")
+  active          Boolean   @default(true)
+  createdById     String    @map("created_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  store     Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  orders    Order[]
+
+  @@unique([storeId, code])
+  @@unique([id, storeId])
+  @@index([createdById])
+  @@map("store_coupons")
 }
