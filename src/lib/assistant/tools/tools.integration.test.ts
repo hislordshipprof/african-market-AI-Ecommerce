@@ -1127,20 +1127,21 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
 
     const beforeActions = await substituteActionIds();
     const result = await suggestSubstitutes(ctx(), { listing_id: source.listingId });
+    const pack = { variantId: expect.any(String), packLabel: expect.any(String) };
     expect(result).toEqual({
       ok: true,
       items: [
-        { listingId: premium.listingId, name: "Premium Garri", priceCents: 150, mayBeUnavailable: false },
-        { listingId: tiedOrder[0]?.id, name: tiedOrder[0]?.customName, priceCents: 200, mayBeUnavailable: false },
-        { listingId: tiedOrder[1]?.id, name: tiedOrder[1]?.customName, priceCents: 200, mayBeUnavailable: false },
-        { listingId: pricey.listingId, name: "Pricey Twin", priceCents: 800, mayBeUnavailable: false },
-        { listingId: soft.listingId, name: "Soft Stock", priceCents: 50, mayBeUnavailable: true },
+        { listingId: premium.listingId, name: "Premium Garri", ...pack, priceCents: 150, mayBeUnavailable: false },
+        { listingId: tiedOrder[0]?.id, name: tiedOrder[0]?.customName, ...pack, priceCents: 200, mayBeUnavailable: false },
+        { listingId: tiedOrder[1]?.id, name: tiedOrder[1]?.customName, ...pack, priceCents: 200, mayBeUnavailable: false },
+        { listingId: pricey.listingId, name: "Pricey Twin", ...pack, priceCents: 800, mayBeUnavailable: false },
       ],
     });
 
     await expectOneNewSubstituteAction(beforeActions, source.listingId, result);
     const returnedIds = (result.ok ? result.items as Array<{ listingId: string }> : []).map((item) => item.listingId);
-    for (const excluded of [source.listingId, dropped.listingId, quieter.listingId, inactive.listingId, foreign.listingId]) {
+    // Low stock confidence may be unavailable, and a swap that may be out is no swap (#476).
+    for (const excluded of [source.listingId, soft.listingId, dropped.listingId, quieter.listingId, inactive.listingId, foreign.listingId]) {
       expect(returnedIds).not.toContain(excluded);
     }
   });

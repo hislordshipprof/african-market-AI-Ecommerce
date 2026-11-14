@@ -46,12 +46,12 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => searchCatalog({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     set_shopper_needs: tool({
-      description: "Save what the customer must avoid or needs, from their own words: allergens, dietary claims, and ingredients. Kept for this conversation. Searches, recipes and adds check it. A term that only names a form of a known ingredient returns ask.",
+      description: "Save what the customer must avoid or needs, from their own words: allergens, dietary claims, and ingredients; also a budget and items already at home. Kept for this conversation. Searches, recipes and adds check it. A term that only names a form of a known ingredient returns ask.",
       inputSchema: setShopperNeedsInput,
       execute: (input, options) => setShopperNeeds({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     show_products: tool({
-      description: "Show product cards for listing ids in this store.",
+      description: "Show product cards for listing ids in this store. A card's about and alsoCalled explain what the item is.",
       inputSchema: showProductsInput,
       execute: (input, options) => showProducts({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
@@ -61,7 +61,7 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => checkAvailability({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     suggest_substitutes: tool({
-      description: "Suggest other active products in the same category.",
+      description: "Suggest in-stock products in the same category as a swap, each with a variantId to keep as the named substitute.",
       inputSchema: suggestSubstitutesInput,
       execute: (input, options) => suggestSubstitutes({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
@@ -96,7 +96,7 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => offerChoices({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     get_order_status: tool({
-      description: "Status of the signed-in customer's own orders at this store. Omit order_number for the newest.",
+      description: "Status and lines of the signed-in customer's own orders at this store. Each line's variantId reorders it. Omit order_number for the newest.",
       inputSchema: getOrderStatusInput,
       execute: (input, options) => getOrderStatus({ ...ctx, toolCallId: options.toolCallId }, input),
     }),

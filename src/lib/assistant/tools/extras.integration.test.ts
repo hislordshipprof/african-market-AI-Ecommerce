@@ -24,7 +24,7 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
     return product.id;
   }
 
-  async function sell(storeId: string, masterProductId: string, price: number, stock: Record<string, unknown> = { stockMode: "unlimited" }) {
+  async function sell(storeId: string, masterProductId: string, price: number, stock: { stockMode: string; status?: string; qty?: number } = { stockMode: "unlimited" }) {
     const row = await storeScoped(storeId).listing.create({
       data: { storeId, masterProductId, price, frozen: false, perishable: false, ...stock },
     });
@@ -79,7 +79,7 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
         { ok: false, code: "over_budget", variantId: listing.oil.variantId, budgetCents: 1000 },
       ],
     });
-    const line = (added as { items: Array<{ lineId?: string }> }).items[0].lineId!;
+    const line = (added as unknown as { items: Array<{ lineId?: string }> }).items[0].lineId!;
     expect(await updateCart(ctx, { line_id: line, qty: 2 })).toMatchObject({ ok: false, code: "over_budget" });
     // A budget is not a dietary need: it never turns the store's swap into a refund.
     expect((await readConstraints(storeA, ctx.conversationId)).budgetCents).toBe(1000);
@@ -103,14 +103,14 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
       ],
     });
     // A product with no description says nothing made up.
-    const rice = (shown as { cards: Array<Record<string, unknown>> }).cards[1];
+    const rice = (shown as unknown as { cards: Array<Record<string, unknown>> }).cards[1];
     expect(rice).not.toHaveProperty("about");
     expect(rice).not.toHaveProperty("alsoCalled");
   });
 
   it("suggests only in-stock swaps for an out-of-stock item, ready to keep as its named substitute", async () => {
     const ctx = await conversation(storeA);
-    const suggested = await suggestSubstitutes(ctx, { listing_id: listing.ugu.listingId }) as { ok: boolean; items: Array<Record<string, unknown>> };
+    const suggested = await suggestSubstitutes(ctx, { listing_id: listing.ugu.listingId }) as unknown as { ok: boolean; items: Array<Record<string, unknown>> };
     expect(suggested.ok).toBe(true);
     const ids = suggested.items.map((item) => item.listingId);
     expect(ids).toContain(listing.spinach.listingId);
@@ -122,7 +122,7 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
     // The existing swap rules keep it: ugu stays on the cart with spinach as its named substitute.
     const added = await addToCart(ctx, { items: [{ variant_id: listing.ugu.variantId, qty: 1, backup_variant_id: listing.spinach.variantId }] });
     expect(added).toMatchObject({ ok: true, mayBeUnavailable: true, swapRule: "named_substitute", substituteVariantId: listing.spinach.variantId });
-    const lineId = (added as { lineId: string }).lineId;
+    const lineId = (added as unknown as { lineId: string }).lineId;
     expect(await setSwapRule(ctx, { line_id: lineId, rule: "named_substitute", substitute_variant_id: listing.spinach.variantId })).toMatchObject({ ok: true });
 
     // The suggested variant id is in the chat's copy table, like a search result's.
