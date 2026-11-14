@@ -1,10 +1,8 @@
-import Image from "next/image";
-import type { DirectoryStore } from "@/lib/directory/stores";
-import { storeInitials } from "@/lib/store-initials";
-import { cuisineLabels } from "@/lib/directory/listing-fields";
+import { NearMe, type StateGroup } from "./near-me";
+import { StoreCard, type CardStore } from "./store-card";
 import styles from "./directory.module.css";
 
-export function DirectoryHome({ stores }: { stores: (DirectoryStore & { href: string })[] }) {
+export function DirectoryHome({ stores, states }: { stores: CardStore[]; states: StateGroup[] }) {
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
@@ -17,46 +15,22 @@ export function DirectoryHome({ stores }: { stores: (DirectoryStore & { href: st
             Independent stores across the US. Each runs its own shop: pick one, then order pickup or delivery straight from that store.
           </p>
         </section>
-        <section aria-labelledby="directory-stores">
-          <h2 id="directory-stores" className={styles.count}>
-            {stores.length === 1 ? "1 store" : `${stores.length} stores`}
-          </h2>
-          {stores.length === 0 ? (
-            <p className={styles.empty}>No stores are listed yet. Check back soon.</p>
-          ) : (
-            <ul className={styles.grid}>
-              {stores.map((store) => (
-                <li key={store.slug}>
-                  <a className={styles.card} href={store.href}>
-                    <span className={styles.cardHead}>
-                      {store.logoUrl ? (
-                        <Image className={styles.logo} src={store.logoUrl} alt="" width={48} height={48} unoptimized />
-                      ) : (
-                        <span className={styles.initials} aria-hidden="true">{storeInitials(store.name)}</span>
-                      )}
-                      <span className={styles.heading}>
-                        <span className={styles.name}>{store.name}</span>
-                        <span className={styles.place}>{[store.city, store.state].filter(Boolean).join(", ")}</span>
-                      </span>
-                    </span>
-                    {store.listingBlurb ? <span className={styles.blurb}>{store.listingBlurb}</span> : null}
-                    {store.cuisineTags.length > 0 ? (
-                      <span className={styles.cuisines}>{cuisineLabels(store.cuisineTags).join(" · ")}</span>
-                    ) : null}
-                    {store.ownerName ? <span className={styles.owner}>Run by {store.ownerName}</span> : null}
-                    <span className={styles.foot}>
-                      <span className={styles.flags}>
-                        {store.pickupEnabled ? <span className={styles.flag}>Pickup</span> : null}
-                        {store.storeDeliveryEnabled ? <span className={styles.flag}>Delivery</span> : null}
-                      </span>
-                      <span className={styles.visit} aria-hidden="true">Visit store →</span>
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <NearMe states={states}>
+          <section aria-labelledby="directory-stores">
+            <h2 id="directory-stores" className={styles.count}>
+              {stores.length === 1 ? "1 store" : `${stores.length} stores`}
+            </h2>
+            {stores.length === 0 ? (
+              <p className={styles.empty}>No stores are listed yet. Check back soon.</p>
+            ) : (
+              <ul className={styles.grid}>
+                {stores.map((store) => (
+                  <li key={store.slug}><StoreCard store={store} /></li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </NearMe>
       </main>
     </div>
   );

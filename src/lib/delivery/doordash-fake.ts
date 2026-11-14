@@ -31,6 +31,10 @@ function pinErrors(body: Json | null) {
   ];
 }
 
+function isIsoTime(value: unknown): boolean {
+  return typeof value === "string" && !Number.isNaN(new Date(value).getTime());
+}
+
 export function fakeDoorDash(opts: FakeDoorDashOptions) {
   const quotes = new Map<string, { body: Json; at: Date; accepted: boolean }>();
   const cancelled = new Set<string>();
@@ -95,6 +99,9 @@ export function fakeDoorDash(opts: FakeDoorDashOptions) {
         typeof body?.dropoff_phone_number === "string" && !E164.test(body.dropoff_phone_number) && { field: "dropoff_phone_number", error: "invalid" },
         !Number.isInteger(body?.order_value) && { field: "order_value", error: "invalid" },
         ...pinErrors(body),
+        // "include either the pickup_time or dropoff_time field (but not both)": https://developer.doordash.com/en-US/docs/drive/how_to/schedule_deliveries
+        body?.pickup_time !== undefined && body?.dropoff_time !== undefined && { field: "pickup_time", error: "invalid" },
+        body?.pickup_time !== undefined && !isIsoTime(body.pickup_time) && { field: "pickup_time", error: "invalid" },
       ].filter(Boolean);
       if (fieldErrors.length) return reply(400, { code: "validation_error", message: "Validation Failed", field_errors: fieldErrors });
       if (quotes.has(id)) return reply(409, { code: "duplicate_delivery_id", message: "duplicate" });
@@ -106,6 +113,16 @@ export function fakeDoorDash(opts: FakeDoorDashOptions) {
       if (!quote) return reply(404, { code: "not_found", message: "unknown delivery" });
       if (quote.accepted) return reply(409, { code: "duplicate_delivery_id", message: "already accepted" });
       quote.accepted = true;
+      return reply(200, delivery(m[1], quote.body, "created"));
+    }
+    if (method === "PATCH" && (m = path.match(/^\/drive\/v2\/deliveries\/([^/]+)$/))) {
+      const quote = quotes.get(m[1]);
+      if (!quote?.accepted) return reply(404, { code: "not_found", message: "unknown delivery" });
+      if (cancelled.has(m[1])) return reply(400, { code: "validation_error", message: "Delivery is cancelled" });
+      if (body?.pickup_time !== undefined && !isIsoTime(body.pickup_time)) {
+        return reply(400, { code: "validation_error", message: "Validation Failed", field_errors: [{ field: "pickup_time", error: "invalid" }] });
+      }
+      quote.body = { ...quote.body, ...body };
       return reply(200, delivery(m[1], quote.body, "created"));
     }
     if (method === "PUT" && (m = path.match(/^\/drive\/v2\/deliveries\/([^/]+)\/cancel$/))) {
@@ -145,5 +162,5 @@ export function fakeDoorDash(opts: FakeDoorDashOptions) {
     return reply(404, { code: "not_found", message: `${method} ${path}` });
   };
 
-  return { fetch, calls };
+  return { fetch, calls, quotes };
 }
