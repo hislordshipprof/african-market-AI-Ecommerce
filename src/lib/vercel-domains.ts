@@ -43,6 +43,23 @@ function requireKey(name: string): string {
   return value;
 }
 
+const VERCEL_TIMEOUT_MS = 10_000;
+
+async function vercelFetch(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERCEL_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (e) {
+    if (controller.signal.aborted) {
+      throw new VercelApiError("Vercel API did not respond in time", 504, "timeout");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class RealVercelDomainsAdapter implements VercelDomainsAdapter {
   private getHeaders(): { Authorization: string; "Content-Type": string } {
     const token = requireKey("VERCEL_TOKEN");
@@ -70,7 +87,7 @@ export class RealVercelDomainsAdapter implements VercelDomainsAdapter {
     const maxAttempts = 3;
 
     while (attempts < maxAttempts) {
-      const res = await fetch(
+      const res = await vercelFetch(
         `https://api.vercel.com/v10/projects/${projectId}/domains${teamParam}`,
         {
           method: "POST",
@@ -121,7 +138,7 @@ export class RealVercelDomainsAdapter implements VercelDomainsAdapter {
     const headers = this.getHeaders();
     const teamParam = this.getTeamParam();
 
-    const res = await fetch(
+    const res = await vercelFetch(
       `https://api.vercel.com/v10/projects/${projectId}/domains/${domain}${teamParam}`,
       { headers },
     );
@@ -151,7 +168,7 @@ export class RealVercelDomainsAdapter implements VercelDomainsAdapter {
     const headers = this.getHeaders();
     const teamParam = this.getTeamParam();
 
-    const res = await fetch(
+    const res = await vercelFetch(
       `https://api.vercel.com/v10/projects/${projectId}/domains/${domain}${teamParam}`,
       { method: "DELETE", headers },
     );
