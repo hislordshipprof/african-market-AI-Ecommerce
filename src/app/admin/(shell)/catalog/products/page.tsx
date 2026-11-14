@@ -91,7 +91,7 @@ export default async function MasterProductsPage(props: { searchParams: Promise<
                   )}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium text-foreground">{product.name}</span>
+                  <span className="block break-words font-medium text-foreground">{product.name}</span>
                   <span className="block truncate text-sm text-muted-foreground">
                     {[product.categoryName ?? "No category", product.subcategory, product.unit, product.imageUrl ? null : "no photo"].filter(Boolean).join(", ")}
                   </span>
