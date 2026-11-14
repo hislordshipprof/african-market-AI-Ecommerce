@@ -44,25 +44,20 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
   - the browser maker's service may process the audio, so the mic says "Your browser turns your speech into text" and the privacy policy must cover it;
   - if real shoppers find names like egusi and ogbono too often wrong, the next step is a paid speech service that accepts a store word list. That needs a new vendor and key, so it is the owner's call.
 
-### Checkout and payment (supersedes D15 "cannot submit payment")
+### Checkout and payment (amended 2026-11-14, #247: the assistant hands off to normal checkout)
 
-- The assistant may take the shopper through checkout end to end: summary, fulfillment, contact and address, payment method.
-- **Money moves only on the shopper's tap.** The final step is a confirm card drawn by our server from an immutable checkout snapshot. It shows items, fulfillment, fee, tax, the hold amount and the card. The shopper taps **Place order**.
-  - The tap posts a single-use `checkoutToken` bound to that snapshot straight to the server. The model is not in that path.
-  - The model has no tool that places orders or charges cards.
-  - A typed "yes" never places an order.
-  - If anything changed since the card was drawn (price, stock, fee, slot), the token is rejected and a fresh card is drawn.
-- **Cancellation window:**
-  - after placing, the shopper has **10 minutes** to cancel from the chat, the confirmation page or the tracking page;
-  - the window is a platform setting with an allowed range of 5–10 minutes;
-  - cancelling voids the card hold (manual capture, #64) and cancels the order; nothing is captured;
-  - the store gets the new-order alert when the window closes, so it never picks an order that may be cancelled;
-  - v1 applies the window to orders placed through the assistant; extending it to normal checkout is a later decision.
-- **Card data never touches the model.** Cards are entered in Stripe's Payment Element inside the sheet. The model only learns masked facts such as "card on file: Visa 4242". If a shopper types a card number into the chat, it is removed before the message reaches the model or the transcript.
+The 2026-11-04 design (a confirm card in the sheet, a single-use `checkoutToken`, a second PaymentIntent path and a 10-minute cancel window) was parked on 2026-11-11 and replaced on 2026-11-14 (owner decision, Build Board 2026-11-14-10; PR #359 closed unmerged).
+
+- The assistant fills the cart and picks fulfillment with the shopper, then **hands off to the normal checkout**. Money moves only on that page's Pay button.
+- `get_fulfillment_options` returns today's pickup slots, worked out on the server in the store's timezone: "As soon as it is ready" while the store is open and the order can be ready before closing, then every 30 minutes from the opening plus prep time until closing or local midnight. Overnight hours follow the store-open check. A store closed for the rest of the day, or with pickup off, offers none and says so. Delivery and its address are chosen on the checkout page.
+- `set_fulfillment` saves pickup and an offered slot to a **checkout draft** on the conversation (store-scoped by the conversation's RLS). The checkout page reads the draft for the same session cart and pre-selects the slot if the store still offers it.
+- `prepare_checkout` returns the **Review card**: lines, the pickup slot, subtotal, service fee, tax ($0 until #65), total and hold, from the same pure quote function normal checkout uses, and a "Review and pay" button to `/checkout`. Contact, address and card are entered or chosen only on that page. The card is information, not consent: checkout always shows the current basket.
+- No model tool and no assistant route can reach Stripe, create a PaymentIntent or call `placeOrder`. The import-boundary test walks every assistant module and the assistant API routes and forbids the Stripe provider, the checkout payments adapter, the checkout service and actions, saved-card payment and the account loaders.
+- There is no assistant-only cancel window and no delayed store alert: an order placed through checkout is a normal order. Saved cards work because normal checkout supports them (#248).
+- **Card data never touches the model.** Cards are entered only on the checkout page, in Stripe's Payment Element. If a shopper types a card number into the chat, it is removed before the message reaches the model or the transcript.
 - **Saved cards:** a Stripe Customer on the platform account. "Save this card for next time" is offered on the first order, needs the shopper's tick, and can be listed and removed from the account page. Cards work across stores through the existing destination charges.
 - **Saved addresses:** an address book on the platform customer account (ADR-0002). An address is copied into an order only when used, so a store never sees addresses from other stores' orders. The address book is built in #248 and used at checkout by store delivery (#15). Pickup needs no address.
-- **Guest contact details** are entered in form cards that post to our server, not typed in the conversation, so names, phones and emails stay out of model prompts and transcripts.
-- v1 agentic checkout is **pickup only**, like checkout today. Delivery and courier options appear in the flow when #15, #16 and #17 land. Tax appears when #65 lands.
+- **Guest contact details** are entered on the checkout page, so names, phones and emails stay out of model prompts and transcripts.
 
 ### Safety and grounding
 
@@ -92,7 +87,7 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 ### Records and evaluation
 
 - Conversations and tool calls go in `AiConversation` and `AiAction`, with RLS, and are deleted after **90 days** by a scheduled job.
-- The golden eval (#146) is 200 English text requests, plus 6 shopper-constraint cases added by #485 (amended 2026-11-12). Checkout paths wait for #247. Photo and PDF lists are deferred. There is no multilingual set and no live hosted job.
+- The golden eval (#146) is 200 English text requests, plus 6 shopper-constraint cases added by #485 (amended 2026-11-12). Checkout handoffs are scored as one case per handoff once the eval report is rebuilt (#247). Photo and PDF lists are deferred. There is no multilingual set and no live hosted job.
 - Default `pnpm test` and local-ci never call Anthropic. They check a committed report against the current prompt, tools, step cap, model, dataset, catalog fixture and seeded master-product names, synonyms and categories. A mismatch names the part that changed. The rerun is `ASSISTANT_EVAL_LIVE=1 pnpm eval:shopper-assistant`.
 - A live run is opt-in, Haiku only, on the local `app_runtime` database, with a $2 stop for that run and a $20 stop for the ticket including earlier attempts (raised from $4 by the owner on 2026-11-11, issue #146). An incomplete run, a partial selection, or a failed teardown leaves the previous committed report in place. A request whose connection drops before its usage arrives keeps its reserve in the ticket spend. Its case still counts as complete when a retry succeeds; a request that still fails after its retries leaves the run incomplete (owner, 2026-11-11). Gap misses are reported and do not by themselves fail the gate.
 - A made-up product or line id fails a case only when it reaches the cart or a reply to the shopper. A made-up id that a tool refused, followed by a correct recovery, is counted as a rejected attempt and reported, and does not fail. Another store's id, and an id a tool accepted or silently dropped, still fail (owner, 2026-11-11).
@@ -100,8 +95,7 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 
 ## Consequences
 
-- New work beyond #145 and #146: agentic checkout (confirm card, `checkoutToken`, cancellation window), saved cards, address book, and photo and PDF attachments.
-- Order flow gains a "cancellable until" state and a delayed store alert for assistant orders.
+- New work beyond #145 and #146: the checkout handoff (#247), saved cards, address book, and photo and PDF attachments.
 - PCI scope stays SAQ A: card data only ever goes into Stripe's hosted fields.
 - The $10 cap will be hit quickly if the assistant is opened to real shoppers. Raise it deliberately before launch.
 - Spec D12, D15 and §8.1 are updated to match this ADR.

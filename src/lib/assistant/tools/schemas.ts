@@ -90,6 +90,15 @@ export const checkDeliveryAreaInput = z.object({
 
 export const getStoreInfoInput = z.object({});
 
+export const getFulfillmentOptionsInput = z.object({});
+
+export const setFulfillmentInput = z.object({
+  fulfillment: z.literal("pickup"),
+  slot_id: z.string().min(1).max(40).describe("A slotId that get_fulfillment_options returned: asap or a time."),
+});
+
+export const prepareCheckoutInput = z.object({});
+
 export const forwardToStoreInput = z.object({
   order_number: orderNumber,
   issue: z.string().trim().min(1).max(600),
@@ -119,6 +128,9 @@ export const toolInputSchemas = exactAssistantKeys({
   get_store_info: getStoreInfoInput,
   forward_to_store: forwardToStoreInput,
   get_recipe: getRecipeInput,
+  get_fulfillment_options: getFulfillmentOptionsInput,
+  set_fulfillment: setFulfillmentInput,
+  prepare_checkout: prepareCheckoutInput,
 });
 
 function toolInput(input: unknown): unknown {
