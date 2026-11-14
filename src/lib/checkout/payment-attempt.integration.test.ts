@@ -660,4 +660,23 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
     await markOrphanHoldChecked(other.id, held.cartId, held.paymentIntentId);
     expect((await cartRow(held.cartId))?.orphanCheckedAt).toBeNull();
   });
+
+  it("another store can neither read, change, delete nor forge this store's release row", async () => {
+    const held = await heldCart(61 * 60_000, 61 * 60_000);
+    await sweep();
+    expect((await releaseRow(held.paymentIntentId))?.storeId).toBe(storeId);
+    const other = await platformAdmin.store.create({ data: { slug: `${run}-release-other`, name: "Other market" } });
+    const where = { paymentIntentId: held.paymentIntentId };
+    await storeScopedTransaction(other.id, async (tx) => {
+      expect(await tx.paymentIntentRelease.findUnique({ where })).toBeNull();
+      expect(await tx.paymentIntentRelease.findMany({ where: { storeId } })).toEqual([]);
+      expect((await tx.paymentIntentRelease.updateMany({ where, data: { storeId: other.id } })).count).toBe(0);
+      expect((await tx.paymentIntentRelease.deleteMany({ where })).count).toBe(0);
+    });
+    await expect(storeScopedTransaction(other.id, (tx) =>
+      tx.paymentIntentRelease.create({ data: { paymentIntentId: `pi_forged_${run}`, storeId } }),
+    )).rejects.toThrow(/row-level security/);
+    expect((await releaseRow(held.paymentIntentId))?.storeId).toBe(storeId);
+    expect(await releaseRow(`pi_forged_${run}`)).toBeNull();
+  });
 });
