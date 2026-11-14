@@ -56,9 +56,10 @@ function canRenderDepthScene(): boolean {
       .getContext("webgl2", { failIfMajorPerformanceCaveat: true });
     if (!gl) return false;
     const info = gl.getExtension("WEBGL_debug_renderer_info");
-    const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+    const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : null;
     gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return !SOFTWARE_RENDERER.test(renderer);
+    // A browser that hides the renderer could be a software one: keep the poster.
+    return renderer !== null && !SOFTWARE_RENDERER.test(renderer);
   } catch {
     return false;
   }
@@ -94,7 +95,28 @@ function SceneLoader({ scene }: { scene: StoryScene }) {
   const turnOff = useCallback(() => setPhase("off"), []);
   const goLive = useCallback(() => setPhase("live"), []);
 
-  useEffect(() => whenIdle(() => setPhase(canRenderDepthScene() ? "loading" : "off")), []);
+  useEffect(() => {
+    let live = true;
+    const cancel = whenIdle(() => {
+      if (!canRenderDepthScene()) return setPhase("off");
+      // A missing or corrupt photo or depth map would otherwise throw inside the canvas as
+      // an uncaught error. Decoding first keeps the poster quietly; the scene then reads cache.
+      void Promise.all(
+        [scene.posterWide.src, scene.depth.src].map((src) => {
+          const image = new Image();
+          image.src = src;
+          return image.decode();
+        }),
+      ).then(
+        () => live && setPhase("loading"),
+        () => live && setPhase("off"),
+      );
+    });
+    return () => {
+      live = false;
+      cancel();
+    };
+  }, [scene.posterWide.src, scene.depth.src]);
 
   if (phase === "waiting" || phase === "off") return null;
   return (

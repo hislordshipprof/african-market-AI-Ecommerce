@@ -13,25 +13,9 @@ export function userIsPrivileged(user: {
   return user.memberships.length > 0;
 }
 
-export async function isPrivilegedUser(userId: string): Promise<boolean> {
-  const user = await authPrisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true, twoFactorEnabled: true },
-  });
-  if (!user) return false;
-  const memberships = await platformAdmin.storeMembership.findMany({
-    where: { userId },
-    select: { id: true },
-    take: 1,
-  });
-  return userIsPrivileged({ ...user, memberships });
-}
-
-export async function isPrivilegedEmail(email: string): Promise<boolean> {
-  const user = await authPrisma.user.findFirst({
-    where: { email },
-    select: { id: true, role: true, twoFactorEnabled: true },
-  });
+async function isPrivilegedRecord(
+  user: { id: string; role: string; twoFactorEnabled: boolean } | null,
+): Promise<boolean> {
   if (!user) return false;
   const memberships = await platformAdmin.storeMembership.findMany({
     where: { userId: user.id },
@@ -39,4 +23,18 @@ export async function isPrivilegedEmail(email: string): Promise<boolean> {
     take: 1,
   });
   return userIsPrivileged({ ...user, memberships });
+}
+
+const PRIVILEGE_FIELDS = { id: true, role: true, twoFactorEnabled: true } as const;
+
+export async function isPrivilegedUser(userId: string): Promise<boolean> {
+  return isPrivilegedRecord(
+    await authPrisma.user.findUnique({ where: { id: userId }, select: PRIVILEGE_FIELDS }),
+  );
+}
+
+export async function isPrivilegedEmail(email: string): Promise<boolean> {
+  return isPrivilegedRecord(
+    await authPrisma.user.findFirst({ where: { email }, select: PRIVILEGE_FIELDS }),
+  );
 }

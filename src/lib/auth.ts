@@ -1,10 +1,11 @@
 import { betterAuth, APIError } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
-import { authPrisma, platform } from "./db";
+import { authPrisma, countMagicLinksForEmail, platform } from "./db";
 import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
-import { magicLinkMessage } from "./magic-link-mail";
+import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { isSlugRoutable, slugFromHost } from "./slug";
 
@@ -99,7 +100,37 @@ export function validateAuthSecret(
   }
 }
 
+export const RESEND_SANDBOX_FROM = "onboarding@resend.dev";
+
+/**
+ * Resend's sandbox sender only delivers to the account owner, so magic links never arrive.
+ * Logged, not thrown: production has no EMAIL_FROM yet, and a throw would end every sign-in.
+ */
+export function emailFromProblem(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  if (env.NEXT_PHASE === "phase-production-build") return null;
+  if (env.NODE_ENV !== "production") return null;
+  const from = env.EMAIL_FROM?.trim();
+  if (!from) return "EMAIL_FROM is not set";
+  if (from.includes(RESEND_SANDBOX_FROM)) return "EMAIL_FROM is Resend's sandbox sender";
+  return null;
+}
+
 validateAuthSecret();
+const emailFromIssue = emailFromProblem();
+if (emailFromIssue) {
+  console.error(JSON.stringify({ event: "email_from_misconfigured", message: emailFromIssue }));
+}
+
+// Per-IP limits alone let someone rotating IPs flood one inbox. The row for this send already
+// exists when the sender runs; links live 15 minutes, so expiry after now+5m means created in 10.
+// A blocked send deletes its row, so only mailed links count and a trickle cannot hold the cap.
+const INBOX_CAP = 5;
+
+async function inboxCapReached(email: string): Promise<boolean> {
+  return (await countMagicLinksForEmail(email, new Date(Date.now() + 5 * 60_000))) > INBOX_CAP;
+}
 
 const baseUrl = resolveAuthBaseUrl();
 
@@ -184,6 +215,16 @@ export const auth = betterAuth({
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
+    // Account recovery (ADR-0015): a reset never skips the second step, and ends every session.
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      const message = passwordResetMessage({
+        to: user.email,
+        url,
+        fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
+      });
+      scheduleAfterResponse(() => sendEmail(message), "password_reset_delivery_failed");
+    },
   },
   plugins: [
     twoFactor({
@@ -191,18 +232,22 @@ export const auth = betterAuth({
     }),
     magicLink({
       expiresIn: 900,
-      sendMagicLink: async ({ email, url }, ctx) => {
+      sendMagicLink: async ({ email, url, token }, ctx) => {
         const normalizedEmail = email.trim().toLowerCase();
         const privileged = await isPrivilegedEmail(normalizedEmail);
         if (privileged) return;
+        if (await inboxCapReached(normalizedEmail)) {
+          await authPrisma.verification.deleteMany({ where: { identifier: `magic-link:${token}` } });
+          return;
+        }
         const storeName = await storeNameForMagicLink(ctx);
         const message = magicLinkMessage({
           to: normalizedEmail,
-          url: await magicLinkUrlForHost(url, ctx),
+          url: confirmLinkUrl(await magicLinkUrlForHost(url, ctx)),
           storeName,
-          fromAddress: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+          fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
         });
-        scheduleAfterResponse(() => sendEmail(message));
+        scheduleAfterResponse(() => sendEmail(message), "magic_link_delivery_failed");
       },
       disableSignUp: false,
     }),
@@ -216,7 +261,22 @@ export const auth = betterAuth({
       "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
+      "/request-password-reset": { window: 60, max: relaxedAuth ? 100 : 3 },
+      "/two-factor/verify-backup-code": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
+  },
+  hooks: {
+    // A trusted-device cookie skips the second step but leaves twoFactorVerified false, so guards
+    // would reject that session anyway: never issue one.
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path.startsWith("/two-factor/") && ctx.body?.trustDevice) {
+        return { context: { body: { ...ctx.body, trustDevice: false } } };
+      }
+      // The storefront never sends a name. Blanked, not dropped: hook context merges skip undefined.
+      if (ctx.path === "/sign-in/magic-link" && ctx.body?.name) {
+        return { context: { body: { ...ctx.body, name: "" } } };
+      }
+    }),
   },
   databaseHooks: {
     session: {

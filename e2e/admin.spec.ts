@@ -748,6 +748,10 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     await page.fill("input[inputmode='numeric']", code);
     await page.click("button:has-text('Verify and continue')");
 
+    // The backup codes show once, before the admin moves on (#395).
+    await expect(page.getByRole("heading", { name: "Save your backup codes" })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator("ul li")).toHaveCount(10);
+    await page.getByRole("button", { name: /saved them/ }).click();
     await page.waitForURL("**/admin/stores", { timeout: 15000 });
     await expect(page.locator("h1")).toHaveText("Stores");
   });
