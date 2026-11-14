@@ -9,7 +9,7 @@ import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, ty
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
-import { scheduleCourierDispatch, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
+import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { captureCharge } from "./substitution-pricing";
@@ -130,9 +130,9 @@ async function finalizeCancelledOrder(
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status === "CANCELLED" || !from.includes(current.status as TransitionalStatus)) {
-      return { wrote: false, notify: false };
+      return { wrote: false, notify: false, courier: false };
     }
-    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false };
+    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false, courier: false };
     const existing = await tx.auditLog.findFirst({ where: orderAuditWhere(orderId, action) });
     await tx.order.update({
       where: { id: orderId },
@@ -150,9 +150,11 @@ async function finalizeCancelledOrder(
     }
     await releaseOrderStock(tx, storeId, orderId);
     const notify = await recordOrderNotification(tx, storeId, orderId, "cancelled");
-    return { wrote: true, notify };
+    return { wrote: true, notify, courier: current.fulfillment === "courier" };
   }, LEDGER_TRANSACTION);
   if (outcome.notify) scheduleOrderNotification(storeId, orderId, "cancelled");
+  // A courier booked at packing start (#562) is cancelled with the order.
+  if (outcome.courier) scheduleCourierCancel(storeId, orderId);
   return { wrote: outcome.wrote };
 }
 
@@ -299,6 +301,13 @@ const NAMED_VARIANT = {
 
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
+  deliveries: {
+    where: { status: { not: "cancelled" } },
+    select: { provider: true, status: true, pickupReadyAt: true, courierJson: true },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+  },
   lines: {
     include: {
       substitutedVariant: NAMED_VARIANT,
@@ -383,11 +392,22 @@ export async function acceptOrder(
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
+/** Packing starts with the first line picked or marked short: a courier order books its courier then (#562). */
+function startPackingData(order: { status: string }) {
+  return order.status === "ACCEPTED" ? { pickingStartedAt: new Date() } : {};
+}
+
+function packingStarted(order: { status: string; fulfillment: string }): boolean {
+  return order.status === "ACCEPTED" && order.fulfillment === "courier";
+}
+
 export async function markLinePicked(
   storeId: string,
   lineId: string,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx): Promise<
+    { ok: true; orderStatus: OrderStatus; orderId: string; packing: boolean } | { ok: false; error: string }
+  > => {
     await lockStoreRow(tx, storeId);
 
     const lines = await tx.orderLine.findMany({ where: { id: lineId } });
@@ -411,13 +431,17 @@ export async function markLinePicked(
     if (order.status === "ACCEPTED") {
       await tx.order.update({
         where: { id: order.id },
-        data: { status: "PICKING" },
+        data: { status: "PICKING", ...startPackingData(order) },
       });
     }
 
     // Picking goes on while a customer answers a substitution prompt.
-    return { ok: true, orderStatus: order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING" };
+    const orderStatus = order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING";
+    return { ok: true, orderStatus, orderId: order.id, packing: packingStarted(order) };
   });
+  if (!result.ok) return result;
+  if (result.packing) scheduleCourierPacking(storeId, result.orderId);
+  return { ok: true, orderStatus: result.orderStatus };
 }
 
 /**
@@ -431,7 +455,7 @@ export async function markLineShort(
   qtyFound: number,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
   const result = await storeScopedTransaction(storeId, async (tx): Promise<
-    { ok: true; orderStatus: OrderStatus; orderId: string; request: { id: string; expiresAt: Date }; notify: boolean } | { ok: false; error: string }
+    { ok: true; orderStatus: OrderStatus; orderId: string; request: { id: string; expiresAt: Date }; notify: boolean; packing: boolean } | { ok: false; error: string }
   > => {
     await lockStoreRow(tx, storeId);
 
@@ -455,13 +479,14 @@ export async function markLineShort(
       where: { id: lineId },
       data: { status: "short", qtyPicked: qtyFound },
     });
-    await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING" } });
+    await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING", ...startPackingData(order) } });
     await settleShortLine(tx, storeId, lineId, line.qtyOrdered - qtyFound);
     const notify = await recordSubstitutionPrompt(tx, storeId, order.id);
 
-    return { ok: true, orderStatus: "SUBSTITUTION_PENDING", orderId: order.id, request, notify };
+    return { ok: true, orderStatus: "SUBSTITUTION_PENDING", orderId: order.id, request, notify, packing: packingStarted(order) };
   }, LEDGER_TRANSACTION);
   if (!result.ok) return result;
+  if (result.packing) scheduleCourierPacking(storeId, result.orderId);
   scheduleSubstitutionTimer(storeId, result.orderId, result.request.id, result.request.expiresAt);
   if (result.notify) scheduleOrderNotification(storeId, result.orderId, "substitution", result.request.id);
   return { ok: true, orderStatus: result.orderStatus };

@@ -6,6 +6,7 @@ import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
 import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
+import { EARTH_RADIUS_MI } from "./address/geo";
 import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
 
 /** One TTL for preview cleanup and the import-token claim. */
@@ -78,6 +79,8 @@ export const platform = {
   productSynonym: wrapPlatformDelegate(prisma.productSynonym),
   recipe: wrapPlatformDelegate(prisma.recipe),
   platformSettings: wrapPlatformDelegate(prisma.platformSettings),
+  gazetteerZip: wrapPlatformDelegate(prisma.gazetteerZip),
+  gazetteerPlace: wrapPlatformDelegate(prisma.gazetteerPlace),
 };
 
 function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
@@ -136,6 +139,7 @@ export function storeScoped(storeId: string) {
     ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
     reorderList: wrapDelegate(storeId, prisma.reorderList),
     reorderListItem: wrapDelegate(storeId, prisma.reorderListItem),
+    driverRoute: wrapDelegate(storeId, prisma.driverRoute),
     listingDraft: wrapDelegate(storeId, prisma.listingDraft),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     delivery: wrapDelegate(storeId, prisma.delivery),
@@ -335,7 +339,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "copilotWeeklyReport" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "copilotWeeklyReport" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "driverRoute" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -374,6 +378,7 @@ export async function storeScopedTransaction<T>(
       ownerReportItem: tx.ownerReportItem,
       reorderList: tx.reorderList,
       reorderListItem: tx.reorderListItem,
+      driverRoute: tx.driverRoute,
       listingDraft: tx.listingDraft,
       notificationLog: tx.notificationLog,
       delivery: tx.delivery,
@@ -1948,5 +1953,39 @@ export async function claimAssistantChatWarning(
     UPDATE assistant_chat_months SET warned_at = now()
     WHERE store_id = ${storeId} AND month = ${month}::date AND warned_at IS NULL
     RETURNING store_id`;
+  return rows.length > 0;
+}
+
+/** Great-circle miles from the point to the row's lat/lng columns, in SQL (no PostGIS, ADR-0012). */
+function haversineMilesSql(point: { lat: number; lng: number }, alias: "s" | "z"): Prisma.Sql {
+  const lat = Prisma.raw(`${alias}.lat`);
+  const lng = Prisma.raw(`${alias}.lng`);
+  return Prisma.sql`(2 * ${EARTH_RADIUS_MI}::float8 * asin(sqrt(LEAST(1,
+    power(sin(radians(${lat} - ${point.lat}::float8) / 2), 2)
+    + cos(radians(${point.lat}::float8)) * cos(radians(${lat})) * power(sin(radians(${lng} - ${point.lng}::float8) / 2), 2)))))`;
+}
+
+/** Listed, active, located stores nearest the point first (Store directory near me, #452). */
+export function listedStoresByDistance(
+  point: { lat: number; lng: number },
+  limit: number,
+): Promise<{ slug: string; distance: number }[]> {
+  return appUserQuery((tx) => tx.$queryRaw<{ slug: string; distance: number }[]>`
+    SELECT slug, distance FROM (
+      SELECT s.slug, ${haversineMilesSql(point, "s")} AS distance
+      FROM stores s
+      WHERE s.listed AND s.status = 'active' AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+    ) d
+    ORDER BY distance, slug
+    LIMIT ${limit}`);
+}
+
+/** True when the point is within some Gazetteer ZIP's reach; bandDeg bounds the latitude scan (#452). */
+export async function pointWithinZipReach(point: { lat: number; lng: number }, bandDeg: number): Promise<boolean> {
+  const rows = await appUserQuery((tx) => tx.$queryRaw<{ hit: number }[]>`
+    SELECT 1 AS hit FROM gazetteer_zips z
+    WHERE z.lat BETWEEN ${point.lat - bandDeg}::float8 AND ${point.lat + bandDeg}::float8
+      AND ${haversineMilesSql(point, "z")} <= z.reach_mi
+    LIMIT 1`);
   return rows.length > 0;
 }

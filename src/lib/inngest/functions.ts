@@ -18,7 +18,7 @@ import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
 import { copilotDailyDigest } from "../copilot/digest";
 import { copilotWeeklyReport } from "../copilot/weekly-report";
-import { courierAssignmentTimeout, courierDispatchOnReady, courierProofCopy, courierRegistration, courierRegistrationRetry } from "../delivery/courier-functions";
+import { courierAssignmentTimeout, courierCancelOnOrderCancelled, courierDispatchOnPacking, courierDispatchOnReady, courierProofCopy, courierRegistration, courierRegistrationRetry } from "../delivery/courier-functions";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -432,6 +432,8 @@ export const inngestFunctions = [
   copilotWeeklyReport,
   courierAssignmentTimeout,
   courierDispatchOnReady,
+  courierDispatchOnPacking,
+  courierCancelOnOrderCancelled,
   courierProofCopy,
   courierRegistration,
   courierRegistrationRetry,

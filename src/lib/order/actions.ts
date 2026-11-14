@@ -15,6 +15,8 @@ import {
   cancelOrder,
 } from "./service";
 import { STORE_CANCEL_REASONS } from "./constants";
+import { courierProviders, pushReadyTime, READY_ALREADY_PUSHED, READY_NOT_PUSHABLE } from "../delivery/dispatch";
+import { emitCourierEvent } from "../delivery/courier-functions";
 import {
   DELIVERY_PROOF_MAX_BYTES,
   PROOF_PHOTO_MISSING,
@@ -53,6 +55,8 @@ const ALLOWED_STAFF_ERRORS = new Set([
   "Payment authorization was released — order cancelled; contact the customer",
   "Order status changed during cancellation",
   "Quantity found must be a whole number below the quantity ordered",
+  READY_ALREADY_PUSHED,
+  READY_NOT_PUSHABLE,
   STORE_DELIVERY_ONLY,
   PROOF_PHOTO_MISSING,
   PROOF_PHOTO_NOT_IMAGE,
@@ -175,6 +179,17 @@ export async function markReadyAction(orderId: string) {
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("markReady", id.data, () => markReady(session.store.id, id.data));
+}
+
+/** The store's one "5 more minutes" on a courier order that is packing (#562). */
+export async function pushReadyTimeAction(orderId: string) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("pushReadyTime", id.data, () =>
+    pushReadyTime(session.store.id, id.data, { providers: courierProviders(), emit: emitCourierEvent }),
+  );
 }
 
 export async function completePickupAction(orderId: string) {

@@ -60,6 +60,10 @@ _Avoid_: Marketplace, combined app
 A store's entry in the Store directory: the owner's "Listed in the directory" switch (off by default; a platform admin can override it), a blurb of at most 160 characters, and up to 3 cuisine tags from a fixed list. The street address is never part of it.
 _Avoid_: Profile, store page
 
+**Near me**:
+The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
+_Avoid_: Store locator, geo search
+
 ## Catalog
 
 **Master product**:
@@ -174,6 +178,9 @@ One customer's purchase from exactly one store.
 **Tracking link**:
 The unguessable link in every customer message that opens the order's tracking page without signing in.
 
+**Driver route**:
+One slot's Ready store-delivery orders handed to the store's own driver (#566). The driver gets an SMS with a route link that needs no login: stops in nearest-next order, Navigate, Out for delivery, and Delivered with a delivery proof photo. The link works until midnight at the end of the store day and the store can revoke it.
+
 **Support thread**:
 The one conversation about an order between its customer and the store, opened from the tracking link. A platform admin can join it.
 _Avoid_: Chat (the shopper assistant and store copilot are chats too), ticket
@@ -275,6 +282,9 @@ Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen
 **Courier**:
 A driver from a courier company. Not a user of the platform.
 _Avoid_: Driver (reserve for the store's own driver)
+
+**Ready time**:
+When a courier order's bag will be packed. Set when packing starts (the first line picked or marked short) from the item count and the store's recent packing pace, at least 10 and at most 45 minutes out; the courier is booked for it then. The store can push it once by 5 minutes ("5 more minutes").
 
 ## Relationships
 

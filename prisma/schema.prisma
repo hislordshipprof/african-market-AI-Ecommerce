@@ -109,6 +109,7 @@ model Store {
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  driverRoutes          DriverRoute[]
 
   @@map("stores")
 }
@@ -279,6 +280,31 @@ model AddressGeocode {
   cachedAt         DateTime @map("cached_at")
 
   @@map("address_geocodes")
+}
+
+/// US Census Gazetteer ZCTA centroid, seeded once by migration for the directory's near-me search (#452).
+model GazetteerZip {
+  zip     String @id
+  lat     Float
+  lng     Float
+  /// A point within this many miles of the centroid is taken to be in the ZIP (for "is this point in the US").
+  reachMi Float  @map("reach_mi")
+
+  @@index([lat])
+  @@map("gazetteer_zips")
+}
+
+/// US Census Gazetteer place centroid; nameKey is placeKey(name) (#452).
+model GazetteerPlace {
+  state   String
+  nameKey String @map("name_key")
+  name    String
+  lat     Float
+  lng     Float
+
+  @@id([state, nameKey])
+  @@index([nameKey])
+  @@map("gazetteer_places")
 }
 
 model AuditLog {
@@ -1213,6 +1239,10 @@ model Order {
   prepEstimateMinutes     Int?      @map("prep_estimate_minutes")
   acceptedAt              DateTime? @map("accepted_at")
   readyAt                 DateTime? @map("ready_at")
+  /// Courier orders (#562): when the first line was picked or marked short, the ready time the courier is booked for, and the store's one push.
+  pickingStartedAt        DateTime? @map("picking_started_at")
+  readyEstimateAt         DateTime? @map("ready_estimate_at")
+  readyPushedAt           DateTime? @map("ready_pushed_at")
   completedAt             DateTime? @map("completed_at")
   cancelledAt             DateTime? @map("cancelled_at")
   inngestEventSentAt      DateTime? @map("inngest_event_sent_at")
@@ -1223,6 +1253,8 @@ model Order {
   deliveredAt             DateTime? @map("delivered_at")
   deliveryProofKey        String?   @map("delivery_proof_key")
   deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
+  /// The store's own driver route this order is on (#566).
+  driverRouteId           String?   @map("driver_route_id")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1236,9 +1268,11 @@ model Order {
   deliveries           Delivery[]
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
+  driverRoute          DriverRoute?          @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
+  @@index([storeId, driverRouteId])
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, fulfillment, pickupSlot])
@@ -1339,6 +1373,8 @@ model Delivery {
   courierJson    Json?    @map("courier_json")
   proofUrl       String?  @map("proof_url")
   pin            String?
+  /// The ready time sent to the provider (#562); null books the courier as soon as possible.
+  pickupReadyAt  DateTime? @map("pickup_ready_at")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -1371,6 +1407,30 @@ model DeliveryEvent {
   @@index([storeId])
   @@index([storeId, orderId])
   @@map("delivery_events")
+}
+
+/// A store's own driver for one slot (#566). Only the link token's hash is kept; the link dies at expiresAt or revokedAt.
+model DriverRoute {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  /// The slot start, a UTC ISO instant as on Order.pickupSlot.
+  slot        String
+  driverName  String    @map("driver_name")
+  /// E.164.
+  driverPhone String    @map("driver_phone")
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  /// Set once the SMS is accepted. A route never sent does not hold its orders.
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, slot])
+  @@map("driver_routes")
 }
 
 /// Platform-wide settings, one row with id "platform". Readable by every app user; platform admins write.
