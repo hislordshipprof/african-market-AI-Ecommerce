@@ -995,6 +995,9 @@ model Customer {
   @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, email])
+  /// Admin order search by exact email or phone across stores (#537).
+  @@index([email])
+  @@index([phone])
   @@index([storeId, claimedByCustomerId])
   @@index([userId])
   @@map("customers")
@@ -1221,7 +1224,9 @@ model Order {
   @@index([storeId, status])
   @@index([storeId, fulfillment, pickupSlot])
   @@index([storeId, sourceCartId, createdAt])
-  @@index([storeId, createdAt])
+  /// Keyset pages of the admin order search (#537), per store and across stores.
+  @@index([storeId, createdAt, id])
+  @@index([createdAt, id])
   @@index([customerId])
   @@map("orders")
 }

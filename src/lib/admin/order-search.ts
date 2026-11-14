@@ -120,15 +120,8 @@ const STORE_ZONE = Prisma.sql`(CASE WHEN s.timezone IN (${Prisma.join(VALID_US_T
 /** Local midnight of `day` in the order's store zone, as a UTC timestamp like `orders.created_at`. */
 const storeMidnight = (day: Prisma.Sql) => Prisma.sql`((${day})::timestamp AT TIME ZONE ${STORE_ZONE}) AT TIME ZONE 'UTC'`;
 
-/**
- * One page of orders across stores, newest first, keyset-paged on (created_at, id). Every filter is an exact
- * comparison. Date bounds are store days; the day-wide UTC bounds next to them let the created_at index narrow first.
- */
-export async function searchOrders(
-  filters: OrderSearchFilters,
-  opts?: { pageSize?: number },
-): Promise<{ rows: OrderSearchRow[]; nextCursor: string | null }> {
-  const pageSize = opts?.pageSize ?? ORDER_SEARCH_PAGE_SIZE;
+/** The search's SQL, newest first on (created_at, id); fetches one row past the page to tell if another page exists. */
+export function orderSearchQuery(filters: OrderSearchFilters, pageSize: number): Prisma.Sql {
   const where: Prisma.Sql[] = [];
   if (filters.storeId) where.push(Prisma.sql`o.store_id = ${filters.storeId}`);
   if (filters.number !== null) where.push(Prisma.sql`o.number = ${filters.number}`);
@@ -150,7 +143,26 @@ export async function searchOrders(
     const at = Prisma.sql`(${filters.cursor.createdAt.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
     where.push(Prisma.sql`(o.created_at, o.id) < (${at}, ${filters.cursor.id})`);
   }
+  return Prisma.sql`
+    SELECT o.id, o.number, o.status, o.fulfillment, o.total_authorized_cents, o.captured_amount_cents, o.created_at,
+           s.name AS store_name, s.timezone AS store_timezone
+    FROM orders o
+    JOIN stores s ON s.id = o.store_id
+    WHERE ${where.length > 0 ? Prisma.join(where, " AND ") : Prisma.sql`TRUE`}
+    ORDER BY o.created_at DESC, o.id DESC
+    LIMIT ${pageSize + 1}
+  `;
+}
 
+/**
+ * One page of orders across stores, newest first, keyset-paged on (created_at, id). Every filter is an exact
+ * comparison. Date bounds are store days; the day-wide UTC bounds next to them let the created_at index narrow first.
+ */
+export async function searchOrders(
+  filters: OrderSearchFilters,
+  opts?: { pageSize?: number },
+): Promise<{ rows: OrderSearchRow[]; nextCursor: string | null }> {
+  const pageSize = opts?.pageSize ?? ORDER_SEARCH_PAGE_SIZE;
   const rows = await platformAdminTransaction((tx) => tx.$queryRaw<Array<{
     id: string;
     number: number;
@@ -161,15 +173,7 @@ export async function searchOrders(
     created_at: Date;
     store_name: string;
     store_timezone: string;
-  }>>`
-    SELECT o.id, o.number, o.status, o.fulfillment, o.total_authorized_cents, o.captured_amount_cents, o.created_at,
-           s.name AS store_name, s.timezone AS store_timezone
-    FROM orders o
-    JOIN stores s ON s.id = o.store_id
-    WHERE ${where.length > 0 ? Prisma.join(where, " AND ") : Prisma.sql`TRUE`}
-    ORDER BY o.created_at DESC, o.id DESC
-    LIMIT ${pageSize + 1}
-  `);
+  }>>(orderSearchQuery(filters, pageSize)));
 
   const page = rows.slice(0, pageSize).map((row) => ({
     id: row.id,
