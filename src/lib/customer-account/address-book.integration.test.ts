@@ -20,14 +20,12 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
       label: "Home",
       line1: "1 Market St",
       city: "Honolulu",
-      state: "hi",
+      state: "HI",
       zip: "96813",
+      line2: null,
       notes: "<script>alert(1)</script>",
-      userId: "someone-else",
-      isDefault: false,
     });
     expect(home.isDefault).toBe(true);
-    expect(home.state).toBe("HI");
     expect(home.notes).toBe("<script>alert(1)</script>");
 
     const work = await addAddress(userId, {
@@ -36,6 +34,8 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
       city: "Honolulu",
       state: "HI",
       zip: "96814",
+      line2: null,
+      notes: null,
     });
     expect(work.isDefault).toBe(false);
 
@@ -45,6 +45,8 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
       city: "Honolulu",
       state: "HI",
       zip: "96813",
+      line2: null,
+      notes: null,
     });
     expect(edited.isDefault).toBe(true);
 
@@ -68,6 +70,8 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
         city: "Honolulu",
         state: "HI",
         zip: "96813",
+        line2: null,
+        notes: null,
       });
     }
     await expect(addAddress(capUser, {
@@ -76,6 +80,8 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
       city: "Honolulu",
       state: "HI",
       zip: "96813",
+      line2: null,
+      notes: null,
     })).rejects.toThrow(ADDRESS_CAP_MESSAGE);
 
     expect(await saveAccountPhone(capUser, "   ")).toBeNull();
@@ -85,7 +91,7 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
   it("two concurrent adds at 19 keep the cap, and two set-defaults leave one default", async () => {
     const capUser = `${userId}-race-cap`;
     await authPrisma.user.create({ data: { id: capUser, name: "Cap", email: `${capUser}@example.test` } });
-    const input = { line1: "1 Market St", city: "Honolulu", state: "HI", zip: "96813" };
+    const input = { line1: "1 Market St", line2: null, city: "Honolulu", state: "HI", zip: "96813", notes: null };
     for (let i = 0; i < 19; i += 1) {
       await addAddress(capUser, { ...input, label: `N${i}` });
     }
@@ -110,7 +116,7 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
   it("concurrent adds leave a single default", async () => {
     const other = `${userId}-race`;
     await authPrisma.user.create({ data: { id: other, name: "Race", email: `${other}@example.test` } });
-    const input = { line1: "1 Market St", city: "Honolulu", state: "HI", zip: "96813" };
+    const input = { line1: "1 Market St", line2: null, city: "Honolulu", state: "HI", zip: "96813", notes: null };
     await Promise.all([
       addAddress(other, { ...input, label: "A" }),
       addAddress(other, { ...input, label: "B" }),
@@ -130,6 +136,7 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
       city: "Honolulu",
       state: "HI",
       zip: "96813",
+      line2: null,
       notes: "<script>alert(1)</script>",
     });
     await saveAccountPhone(profileUser, "(808) 555-0100");

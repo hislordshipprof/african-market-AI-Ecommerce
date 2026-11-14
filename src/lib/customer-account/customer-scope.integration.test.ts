@@ -44,6 +44,8 @@ describe.skipIf(!hasDb)("customer scope (lane DB, app_runtime)", () => {
       city: "Honolulu",
       state: "HI",
       zip: "96813",
+      line2: null,
+      notes: null,
     });
 
     expect(await customerScoped(userB).customerAddress.findMany()).toEqual([]);

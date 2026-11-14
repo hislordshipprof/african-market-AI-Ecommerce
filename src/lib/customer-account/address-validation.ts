@@ -36,6 +36,17 @@ function optional(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+export const ADDRESS_MESSAGES = {
+  label: "Enter an address label of 1 to 40 characters.",
+  line1: "Enter a street address of at most 100 characters.",
+  line2: "Address line 2 must be at most 100 characters.",
+  city: "Enter a city of at most 60 characters.",
+  state: "Enter a US state or DC.",
+  zip: "Enter a 5-digit ZIP code.",
+  notes: "Notes must be at most 280 characters.",
+  invalid: "Check the address and try again.",
+} as const;
+
 export function validateAddress(input: unknown): AddressValidation {
   const source = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
   const label = text(source.label);
@@ -47,25 +58,25 @@ export function validateAddress(input: unknown): AddressValidation {
   const notes = optional(source.notes);
 
   if (label.length < 1 || label.length > 40) {
-    return { ok: false, error: "Enter an address label of 1 to 40 characters." };
+    return { ok: false, error: ADDRESS_MESSAGES.label };
   }
   if (line1.length < 1 || line1.length > 100) {
-    return { ok: false, error: "Enter a street address of at most 100 characters." };
+    return { ok: false, error: ADDRESS_MESSAGES.line1 };
   }
   if (line2 && line2.length > 100) {
-    return { ok: false, error: "Address line 2 must be at most 100 characters." };
+    return { ok: false, error: ADDRESS_MESSAGES.line2 };
   }
   if (city.length < 1 || city.length > 60) {
-    return { ok: false, error: "Enter a city of at most 60 characters." };
+    return { ok: false, error: ADDRESS_MESSAGES.city };
   }
   if (!USPS_STATES.has(state)) {
-    return { ok: false, error: "Enter a US state or DC." };
+    return { ok: false, error: ADDRESS_MESSAGES.state };
   }
   if (!ZIP_RE.test(zip)) {
-    return { ok: false, error: "Enter a 5-digit ZIP code." };
+    return { ok: false, error: ADDRESS_MESSAGES.zip };
   }
   if (notes && notes.length > 280) {
-    return { ok: false, error: "Notes must be at most 280 characters." };
+    return { ok: false, error: ADDRESS_MESSAGES.notes };
   }
   return { ok: true, value: { label, line1, line2, city, state, zip, notes } };
 }

@@ -97,6 +97,8 @@ describe.skipIf(!hasDb)("cold production process", () => {
       city: "Honolulu",
       state: "HI",
       zip: "96813",
+      line2: null,
+      notes: null,
     });
     const cardsHref = pathToFileURL(join(process.cwd(), "src/lib/customer-account/saved-cards.ts")).href;
     const paymentsHref = pathToFileURL(join(process.cwd(), "src/lib/stripe/checkout-payments.ts")).href;
