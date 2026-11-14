@@ -1,7 +1,9 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { storeMayUse } from "../billing/plan";
 import { storeScoped } from "../db";
-import { DeliveryProviderError, type CreatedDelivery, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
+import { DoorDashDriveProvider } from "./doordash";
+import { UberDirectProvider } from "./uber-direct";
+import { DeliveryProviderError, type CreatedDelivery, type DeliveryAddress, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
 
 /** Spec §9, §11.2: no courier assigned this long after the delivery was created → switch provider. */
 export const COURIER_ASSIGNMENT_TIMEOUT_MS = 600_000;
@@ -25,6 +27,11 @@ const BRANDS: Record<DeliveryProviderName, CourierBrand> = { uber: "Uber Direct"
 
 export function courierBrand(name: DeliveryProviderName): CourierBrand {
   return BRANDS[name];
+}
+
+/** Both adapters read their keys per call, so a provider without keys fails its quote and is skipped. */
+export function courierProviders(): DeliveryProvider[] {
+  return [new DoorDashDriveProvider(), new UberDirectProvider()];
 }
 
 export type CourierEvent =
@@ -53,44 +60,62 @@ export type DispatchResult =
   | { ok: false; reason: "both_failed" };
 
 /** A new id for every quote: DoorDash refuses a delivery id it has quoted before (409). */
-function externalDeliveryId(orderId: string, provider: DeliveryProviderName): string {
-  return `${orderId}-${provider}-${randomUUID().slice(0, 8)}`;
+function externalDeliveryId(referenceId: string, provider: DeliveryProviderName): string {
+  return `${referenceId}-${provider}-${randomUUID().slice(0, 8)}`;
+}
+
+type QuoteInput = { referenceId: string } & Pick<DispatchInput, "request" | "registrations">;
+type Candidate = { provider: DeliveryProvider; req: DeliveryRequest; quote: DeliveryQuote };
+
+function quoteWith(input: QuoteInput, provider: DeliveryProvider): Promise<Candidate> {
+  const req: DeliveryRequest = {
+    ...input.request,
+    pickup: { ...input.request.pickup, ...input.registrations?.[provider.name] },
+    externalDeliveryId: externalDeliveryId(input.referenceId, provider.name),
+  };
+  return provider.quote(req).then((quote) => ({ provider, req, quote }));
 }
 
 /**
- * Quotes every provider at once and books the cheapest live quote. A provider that cannot quote (missing keys,
- * HTTP error) or quotes an expired price is unavailable. A create error moves straight to the next cheapest.
+ * Quotes every provider at once; live quotes come back cheapest first. A provider that cannot quote (missing keys,
+ * HTTP error) or quotes an expired price is unavailable.
  */
-export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
-  const now = deps.now ?? (() => new Date());
-  const quoteWith = async (provider: DeliveryProvider) => {
-    const req: DeliveryRequest = {
-      ...input.request,
-      pickup: { ...input.request.pickup, ...input.registrations?.[provider.name] },
-      externalDeliveryId: externalDeliveryId(input.orderId, provider.name),
-    };
-    return { provider, req, quote: await provider.quote(req) };
-  };
-
+async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], now: () => Date): Promise<Candidate[]> {
   const settled = await Promise.all(
-    deps.providers.map(async (provider) => {
+    providers.map(async (provider) => {
       try {
-        return await quoteWith(provider);
+        return await quoteWith(input, provider);
       } catch (err) {
-        logUnavailable(input.orderId, provider.name, "quote", err);
+        logUnavailable(input.referenceId, provider.name, "quote", err);
         return null;
       }
     }),
   );
-  const candidates = settled
-    .filter((c): c is { provider: DeliveryProvider; req: DeliveryRequest; quote: DeliveryQuote } => c !== null && c.quote.expiresAt > now())
+  return settled
+    .filter((c): c is Candidate => c !== null && c.quote.expiresAt > now())
     .sort((a, b) => a.quote.feeCents - b.quote.feeCents);
+}
+
+export type CheckoutCourierQuote = { provider: DeliveryProviderName; courierProvider: CourierBrand; feeCents: number; expiresAt: Date };
+
+/** The fee checkout shows (#527): the same selection dispatch books from, with nothing booked. */
+export async function quoteCheapestCourier(input: QuoteInput, providers: DeliveryProvider[], now: () => Date = () => new Date()): Promise<CheckoutCourierQuote | null> {
+  const [cheapest] = await liveQuotes(input, providers, now);
+  if (!cheapest) return null;
+  return { provider: cheapest.provider.name, courierProvider: courierBrand(cheapest.provider.name), feeCents: cheapest.quote.feeCents, expiresAt: cheapest.quote.expiresAt };
+}
+
+/** Books the cheapest live quote. A create error moves straight to the next cheapest. */
+export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
+  const now = deps.now ?? (() => new Date());
+  const quoteInput = { ...input, referenceId: input.orderId };
+  const candidates = await liveQuotes(quoteInput, deps.providers, now);
 
   for (const [i, candidate] of candidates.entries()) {
     const { provider } = candidate;
     let booked: { quote: DeliveryQuote; created: CreatedDelivery };
     try {
-      const { req, quote } = candidate.quote.expiresAt > now() ? candidate : await quoteWith(provider);
+      const { req, quote } = candidate.quote.expiresAt > now() ? candidate : await quoteWith(quoteInput, provider);
       booked = { quote, created: await provider.create(quote.quoteId, req) };
     } catch (err) {
       logUnavailable(input.orderId, provider.name, "create", err);
@@ -148,9 +173,9 @@ async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDe
   await emit({ name: COURIER_BOTH_FAILED, data: { storeId, orderId, orderNumber: order.number, options } });
 }
 
-function logUnavailable(orderId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
+function logUnavailable(referenceId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
   const message = err instanceof Error ? err.message : "unknown";
-  console.warn(JSON.stringify({ event: "courier_provider_unavailable", orderId, provider, stage, message }));
+  console.warn(JSON.stringify({ event: "courier_provider_unavailable", referenceId, provider, stage, message }));
 }
 
 /** The courier request for an order, from the store's address and the order's delivery snapshot. */
@@ -173,15 +198,52 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
       deliveryState: true,
       deliveryZip: true,
       customer: { select: { name: true, phone: true } },
-      store: { select: { name: true, addressLine1: true, addressLine2: true, city: true, state: true, zip: true, doordashStoreId: true } },
+      store: { select: { name: true, addressLine1: true, addressLine2: true, city: true, state: true, zip: true, phone: true, doordashStoreId: true } },
     },
   });
   const { store, customer } = order;
-  if (!store.addressLine1 || !store.city || !store.state || !store.zip) throw new Error("Store has no pickup address");
   if (!order.deliveryLine1 || !order.deliveryCity || !order.deliveryState || !order.deliveryZip) throw new Error("Order has no delivery address");
   if (!customer.phone) throw new Error("Customer has no phone");
-  const [givenName, ...rest] = customer.name.trim().split(/\s+/);
-  const pinRequired = order.lines.length > 0 || order.totalCents > PIN_ABOVE_TOTAL_CENTS;
+  return buildCourierRequest(storeId, store, {
+    address: { line1: order.deliveryLine1, line2: order.deliveryLine2, city: order.deliveryCity, state: order.deliveryState, zip: order.deliveryZip },
+    phone: customer.phone,
+    name: customer.name,
+    contactless: order.leaveAtDoor,
+  }, {
+    orderValueCents: order.subtotalCents,
+    tipCents: order.tipCents,
+    pinRequired: order.lines.length > 0 || order.totalCents > PIN_ABOVE_TOTAL_CENTS,
+  });
+}
+
+type CourierStore = {
+  name: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+  doordashStoreId: string | null;
+};
+
+/** Both couriers take E.164; checkout accepts any 10-digit US format. */
+function e164(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return phone.trim();
+}
+
+/** The courier request from the store's address and the customer's drop-off. Checkout quotes and dispatch books the same request. */
+export function buildCourierRequest(
+  storeId: string,
+  store: CourierStore,
+  dropoff: { address: DeliveryAddress; phone: string; name: string; contactless: boolean },
+  value: { orderValueCents: number; tipCents: number; pinRequired: boolean },
+): Pick<DispatchInput, "request" | "registrations"> {
+  if (!store.addressLine1 || !store.city || !store.state || !store.zip) throw new Error("Store has no pickup address");
+  const [givenName, ...rest] = dropoff.name.trim().split(/\s+/);
   // DoorDash registers the store with our store id as both business and store id (doordash-registration.ts).
   // Uber's organization id is not an external_store_id, so Uber gets none.
   const registrations = store.doordashStoreId ? { doordash: { providerBusinessId: storeId, providerStoreId: store.doordashStoreId } } : {};
@@ -189,17 +251,18 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
     pickup: {
       businessName: store.name,
       address: { line1: store.addressLine1, line2: store.addressLine2, city: store.city, state: store.state, zip: store.zip },
+      phone: store.phone ? e164(store.phone) : undefined,
     },
     dropoff: {
-      address: { line1: order.deliveryLine1, line2: order.deliveryLine2, city: order.deliveryCity, state: order.deliveryState, zip: order.deliveryZip },
-      phone: customer.phone,
+      address: dropoff.address,
+      phone: e164(dropoff.phone),
       givenName,
       familyName: rest.join(" ") || undefined,
-      contactless: order.leaveAtDoor,
+      contactless: dropoff.contactless,
     },
-    orderValueCents: order.subtotalCents,
-    tipCents: order.tipCents,
-    dropoffPin: pinRequired ? String(randomInt(0, 10_000)).padStart(4, "0") : null,
+    orderValueCents: value.orderValueCents,
+    tipCents: value.tipCents,
+    dropoffPin: value.pinRequired ? String(randomInt(0, 10_000)).padStart(4, "0") : null,
   };
   return { request, registrations };
 }

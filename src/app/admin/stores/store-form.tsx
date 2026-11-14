@@ -328,6 +328,23 @@ export function StoreForm({
                 )}
               </div>
             </div>
+            <div>
+              <label htmlFor="phone" className="mb-1 block text-sm font-medium text-foreground">Store phone</label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                autoComplete="tel"
+                maxLength={40}
+                defaultValue={sv?.phone ?? store?.phone ?? ""}
+                aria-describedby="phone-help"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <p id="phone-help" className="mt-1 text-xs text-muted-foreground">Couriers call this number at pickup. Courier delivery needs it.</p>
+              {state.fieldErrors?.phone && (
+                <p className="mt-1 text-xs text-destructive">{state.fieldErrors.phone}</p>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
