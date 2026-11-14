@@ -1,6 +1,7 @@
-import { readSendConfig } from "./config";
+import { randomInt } from "node:crypto";
+import { readSendConfig, readWhatsAppConfig } from "./config";
 import { WhatsAppApiError, WhatsAppNotConfiguredError } from "./errors";
-import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
+import type { ConnectedStoreNumber, ConnectStoreNumberInput, OutboundMessage, SendResult, WhatsAppProvider } from "./types";
 
 /**
  * Graph API version, pinned in one place. v25.0 is the newest release found
@@ -75,6 +76,65 @@ function readSendResult(body: unknown): SendResult | null {
   return { messageId: first.id, waId };
 }
 
+const GRAPH = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+
+/** One Graph call; failures carry the numeric code only (Meta's message can echo the code or token). */
+async function graph(url: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+  } catch {
+    throw new WhatsAppApiError(null, 0);
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok) throw new WhatsAppApiError(graphErrorCode(body), response.status);
+  if (!body || typeof body !== "object") throw new WhatsAppApiError(null, response.status);
+  return body as Record<string, unknown>;
+}
+
+function bearer(token: string, json?: unknown): RequestInit {
+  return {
+    method: json === undefined ? "GET" : "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+  };
+}
+
+/**
+ * Embedded Signup v4, Tech Provider steps: exchange the code for the store's
+ * business token, subscribe our app to its WABA's webhooks, register the
+ * number (skipped under coexistence: the Business app already registered it),
+ * then read the display number. The register PIN is random and not kept; Meta
+ * lets a Tech Provider set a new one. Subscribe and register are idempotent on
+ * Meta's side, so a retried link repeats them safely.
+ */
+async function connectStoreNumber(input: ConnectStoreNumberInput): Promise<ConnectedStoreNumber> {
+  const { appId, appSecret } = readWhatsAppConfig();
+  if (!appId || !appSecret) throw new WhatsAppNotConfiguredError();
+  if (!input.code) throw new WhatsAppApiError(100, 400);
+  const exchange = new URL(`${GRAPH}/oauth/access_token`);
+  exchange.searchParams.set("client_id", appId);
+  exchange.searchParams.set("client_secret", appSecret);
+  exchange.searchParams.set("code", input.code);
+  const token = (await graph(exchange.toString())).access_token;
+  if (typeof token !== "string" || token.length === 0) throw new WhatsAppApiError(null, 200);
+
+  const phone = encodeURIComponent(input.phoneNumberId);
+  await graph(`${GRAPH}/${encodeURIComponent(input.wabaId)}/subscribed_apps`, bearer(token, {}));
+  if (!input.coexistence) {
+    const pin = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    await graph(`${GRAPH}/${phone}/register`, bearer(token, { messaging_product: "whatsapp", pin }));
+  }
+  const number = await graph(`${GRAPH}/${phone}?fields=display_phone_number`, bearer(token));
+  const displayNumber = typeof number.display_phone_number === "string" ? number.display_phone_number : input.phoneNumberId;
+  return { businessToken: token, displayNumber };
+}
+
 /**
  * Cloud API adapter. Keys are read on each send. No automatic retry: the send
  * endpoint has no idempotency key, so a retry could deliver twice.
@@ -109,4 +169,5 @@ export const cloudApiWhatsAppProvider: WhatsAppProvider = {
     if (!result) throw new WhatsAppApiError(null, response.status);
     return result;
   },
+  connectStoreNumber,
 };

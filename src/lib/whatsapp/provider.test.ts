@@ -87,4 +87,63 @@ describe("WhatsApp provider", () => {
       WHATSAPP_PHONE_NUMBER_ID: "1",
     })).toBe("real");
   });
+
+  it("the real Embedded Signup adapter exchanges the code, subscribes the app, registers a new number, and skips register under coexistence", async () => {
+    vi.stubEnv("WHATSAPP_ACCESS_TOKEN", "platform-token");
+    vi.stubEnv("WHATSAPP_PHONE_NUMBER_ID", "1029384756");
+    vi.stubEnv("WHATSAPP_APP_ID", "app-123");
+    vi.stubEnv("WHATSAPP_APP_SECRET", "app-secret");
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/oauth/access_token")) return json({ access_token: "business-token", token_type: "bearer" });
+      if (url.endsWith("/subscribed_apps")) return json({ success: true });
+      if (url.endsWith("/register")) return json({ success: true });
+      return json({ display_phone_number: "+1 404-555-0101", id: "2233445566" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { getWhatsAppProvider } = await import("./index");
+
+    const connected = await getWhatsAppProvider().connectStoreNumber({
+      wabaId: "778899", phoneNumberId: "2233445566", coexistence: false, code: "es-code",
+    });
+    expect(connected).toEqual({ businessToken: "business-token", displayNumber: "+1 404-555-0101" });
+    const calls = fetchMock.mock.calls.map(([url]) => url as string);
+    const exchange = new URL(calls[0]);
+    expect(exchange.pathname).toBe(`/${GRAPH_API_VERSION}/oauth/access_token`);
+    expect(Object.fromEntries(exchange.searchParams)).toEqual({ client_id: "app-123", client_secret: "app-secret", code: "es-code" });
+    expect(calls[1]).toBe(`https://graph.facebook.com/${GRAPH_API_VERSION}/778899/subscribed_apps`);
+    expect(calls[2]).toBe(`https://graph.facebook.com/${GRAPH_API_VERSION}/2233445566/register`);
+    const register = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+    expect((register[1].headers as Record<string, string>).Authorization).toBe("Bearer business-token");
+    const body = JSON.parse(register[1].body as string) as { messaging_product: string; pin: string };
+    expect(body.messaging_product).toBe("whatsapp");
+    expect(body.pin).toMatch(/^\d{6}$/);
+
+    fetchMock.mockClear();
+    await getWhatsAppProvider().connectStoreNumber({
+      wabaId: "778899", phoneNumberId: "2233445566", coexistence: true, code: "es-code-2",
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url as string).some((url) => url.endsWith("/register"))).toBe(false);
+  });
+
+  it("the real Embedded Signup adapter throws at call time without the app id, and maps a Graph error without its message", async () => {
+    vi.stubEnv("WHATSAPP_ACCESS_TOKEN", "platform-token");
+    vi.stubEnv("WHATSAPP_PHONE_NUMBER_ID", "1029384756");
+    vi.stubEnv("WHATSAPP_APP_SECRET", "app-secret");
+    vi.stubEnv("WHATSAPP_APP_ID", "");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { code: 100, message: "Invalid code es-code" } }), { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getWhatsAppProvider } = await import("./index");
+    const { WhatsAppApiError, WhatsAppNotConfiguredError } = await import("./errors");
+    const input = { wabaId: "778899", phoneNumberId: "2233445566", coexistence: true, code: "es-code" };
+
+    await expect(getWhatsAppProvider().connectStoreNumber(input)).rejects.toBeInstanceOf(WhatsAppNotConfiguredError);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.stubEnv("WHATSAPP_APP_ID", "app-123");
+    const error = await getWhatsAppProvider().connectStoreNumber(input).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(WhatsAppApiError);
+    expect((error as Error).message).not.toContain("es-code");
+    expect((error as InstanceType<typeof WhatsAppApiError>).code).toBe(100);
+  });
 });

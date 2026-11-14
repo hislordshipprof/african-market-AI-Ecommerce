@@ -23,6 +23,16 @@ function readKey(env: Record<string, string | undefined>): Buffer {
   return key;
 }
 
+/** True when a token can be sealed: checked before Meta is called, so a linked number never lacks its token. */
+export function hasTokenKey(env: Record<string, string | undefined> = process.env): boolean {
+  try {
+    readKey(env);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function aad(owner: TokenOwner): Buffer {
   return Buffer.from(`${owner.storeId}:${owner.phoneNumberId}`);
 }
