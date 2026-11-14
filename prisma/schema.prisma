@@ -1675,6 +1675,8 @@ model StoreApplication {
   rejectReason   String?   @map("reject_reason")
   decidedAt      DateTime? @map("decided_at")
   decidedByEmail String?   @map("decided_by_email")
+  /// Set once the plain rejection email has gone; a rejected row without it can be sent again.
+  rejectionEmailedAt DateTime? @map("rejection_emailed_at")
   storeId        String?   @unique @map("store_id")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")

@@ -1,6 +1,7 @@
 -- Store applications from the public /sell page (#554). Platform data, not
 -- store-owned: no RLS; only platform-admin code reads it. One pending
--- application per email and per phone.
+-- application per email and per phone. Rejected rows are deleted 12 months
+-- after the decision by a daily job.
 CREATE TABLE "store_applications" (
     "id" TEXT NOT NULL,
     "business_name" TEXT NOT NULL,
@@ -19,11 +20,13 @@ CREATE TABLE "store_applications" (
     "reject_reason" TEXT,
     "decided_at" TIMESTAMP(3),
     "decided_by_email" TEXT,
+    "rejection_emailed_at" TIMESTAMP(3),
     "store_id" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "store_applications_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "store_applications_store_type_check" CHECK ("store_type" IN ('african', 'caribbean', 'other_grocery', 'specialty_food')),
     CONSTRAINT "store_applications_status_check" CHECK ("status" IN ('pending', 'approved', 'rejected')),
     CONSTRAINT "store_applications_phone_check" CHECK ("phone" ~ '^\+1[0-9]{10}$'),
     CONSTRAINT "store_applications_rejected_reason_check" CHECK ("status" <> 'rejected' OR ("reject_reason" IS NOT NULL AND "decided_at" IS NOT NULL))
