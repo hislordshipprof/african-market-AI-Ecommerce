@@ -281,6 +281,31 @@ model AddressGeocode {
   @@map("address_geocodes")
 }
 
+/// US Census Gazetteer ZCTA centroid, seeded once by migration for the directory's near-me search (#452).
+model GazetteerZip {
+  zip     String @id
+  lat     Float
+  lng     Float
+  /// A point within this many miles of the centroid is taken to be in the ZIP (for "is this point in the US").
+  reachMi Float  @map("reach_mi")
+
+  @@index([lat])
+  @@map("gazetteer_zips")
+}
+
+/// US Census Gazetteer place centroid; nameKey is placeKey(name) (#452).
+model GazetteerPlace {
+  state   String
+  nameKey String @map("name_key")
+  name    String
+  lat     Float
+  lng     Float
+
+  @@id([state, nameKey])
+  @@index([nameKey])
+  @@map("gazetteer_places")
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   storeId    String?  @map("store_id")
