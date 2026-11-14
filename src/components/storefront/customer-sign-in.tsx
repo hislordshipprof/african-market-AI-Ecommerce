@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { authClient } from "@/lib/auth-client";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,67 +11,32 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
+import { sendSignInLinkAction, type SignInLinkState } from "@/lib/customer-sign-in/actions";
 import { Mail, ArrowLeft } from "lucide-react";
 
-type Step = "form" | "sent";
-
 interface Props {
-  callbackUrl?: string;
   storeName: string;
   linkError?: string | null;
 }
 
-export function CustomerSignIn({
-  callbackUrl = "/account",
-  storeName,
-  linkError = null,
-}: Props) {
-  const [email, setEmail] = useState("");
-  const [step, setStep] = useState<Step>("form");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+const INITIAL: SignInLinkState = { status: "idle", email: "" };
 
-  async function handleSend(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const result = await authClient.signIn.magicLink({
-        email: email.trim().toLowerCase(),
-        callbackURL: callbackUrl,
-      });
-      if (result.error) {
-        setError(result.error.message ?? "Failed to send sign-in link");
-        return;
-      }
-      setStep("sent");
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function reset() {
-    setStep("form");
-    setEmail("");
-    setError("");
-  }
-
-  const linkExpired = linkError === "INVALID_TOKEN";
+export function CustomerSignIn({ storeName, linkError = null }: Props) {
+  // A server action, so a submit before hydration (or with no JS) still sends the typed email.
+  const [state, formAction, pending] = useActionState(sendSignInLinkAction, INITIAL);
+  const [dismissed, setDismissed] = useState<SignInLinkState | null>(null);
+  const sent = state.status === "sent" && dismissed !== state;
+  const linkExpired = linkError === "INVALID_TOKEN" && state.status === "idle";
 
   return (
     <StorySurface asMain={false}>
       <StoryCard>
         <CardHeader className="text-center">
           <CardTitle className="text-xl font-display">
-            {step === "sent" ? "Check your email" : "Sign in"}
+            {sent ? "Check your email" : "Sign in"}
           </CardTitle>
-          <CardDescription>
-            {step === "sent"
-              ? `We sent a sign-in link to ${email}`
-              : `Sign in to ${storeName}`}
+          <CardDescription className="[overflow-wrap:anywhere]">
+            {sent ? `We sent a sign-in link to ${state.email}` : `Sign in to ${storeName}`}
           </CardDescription>
         </CardHeader>
 
@@ -86,38 +50,41 @@ export function CustomerSignIn({
               This link has expired. Send a new one.
             </div>
           )}
-          {error && (
+          {state.status === "error" && (
             <div
+              id="customer-sign-in-error"
               className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive"
               role="alert"
               aria-live="assertive"
             >
-              {error}
+              {state.message}
             </div>
           )}
 
-          {step === "form" && (
-            <form onSubmit={handleSend} className="flex flex-col gap-4">
+          {!sent && (
+            <form action={formAction} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="email">Email address</Label>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
                   required
                   autoComplete="email"
                   placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  defaultValue={state.email}
+                  aria-invalid={state.status === "error" ? true : undefined}
+                  aria-describedby={state.status === "error" ? "customer-sign-in-error" : undefined}
                 />
               </div>
 
-              <Button type="submit" disabled={loading} className="w-full min-h-[44px]">
-                {loading ? "Sending..." : "Send sign-in link"}
+              <Button type="submit" disabled={pending} className="w-full min-h-[44px]">
+                {pending ? "Sending..." : "Send sign-in link"}
               </Button>
             </form>
           )}
 
-          {step === "sent" && (
+          {sent && (
             <div className="flex flex-col items-center gap-4 py-2">
               <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
                 <Mail className="size-6" style={{ color: "var(--color-primary-text)" }} />
@@ -128,7 +95,7 @@ export function CustomerSignIn({
               </p>
               <button
                 type="button"
-                onClick={reset}
+                onClick={() => setDismissed(state)}
                 className="flex min-h-[44px] items-center justify-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 <ArrowLeft className="size-3" />

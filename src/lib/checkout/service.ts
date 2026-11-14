@@ -14,16 +14,20 @@ import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
-import { captureSplit, orderServiceFeeSettings, serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
+import { captureSplit, orderServiceFeeSettings } from "../order/platform-fee";
 import { readServiceFeeSettings } from "../order/service-fee-settings";
 import { reserveOrderStock } from "../order/stock-ledger";
-import { validPhone } from "../customer-account/phone";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
+import { COURIER_NOT_OFFERED, computeQuote, type CourierQuoteInput, type StoreDeliveryQuote } from "./quote";
+import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCheapestCourier } from "../delivery/dispatch";
+import { checkCourierEligibility, readCourierWeightSettings } from "../delivery/eligibility";
+import type { DeliveryProvider } from "../delivery/provider";
+import { validPhone } from "../customer-account/phone";
+import { assertSlotOffered, SlotUnavailableError } from "./slots";
 import type {
   CheckoutQuote,
   Contact,
-  FlowProblem,
   Fulfillment,
 } from "../customer-flow/contracts";
 
@@ -111,127 +115,6 @@ async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentInte
   };
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function validEmail(email: string): boolean {
-  return EMAIL_RE.test(email.trim());
-}
-
-export interface StoreDeliveryQuote {
-  enabled: boolean;
-  feeCents: number;
-  radiusMi: number;
-  hasCoordinates: boolean;
-  /** Null until Census has confirmed the address. Distance is not stored here. */
-  confirmed: { withinRadius: boolean } | null;
-  leaveAtDoor: boolean;
-}
-
-/** A Starter store does not offer courier delivery (ADR-0021). */
-export const COURIER_NOT_OFFERED = "This store does not offer courier delivery.";
-
-export function computeQuote(
-  minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean }>,
-  contact: Contact,
-  fulfillment: Fulfillment,
-  serviceFee: ServiceFeeSettings,
-  delivery?: StoreDeliveryQuote | null,
-): CheckoutQuote {
-  const problems: FlowProblem[] = [];
-  let subtotalCents = 0;
-
-  for (const line of cartLines) {
-    if (
-      !Number.isInteger(line.qty) ||
-      line.qty < 1
-    ) {
-      problems.push({ code: "max-quantity", message: "Check item quantity." });
-      continue;
-    }
-    if (line.maxPerOrder !== null && line.qty > line.maxPerOrder) {
-      problems.push({
-        code: "max-quantity",
-        message: `Maximum ${line.maxPerOrder} per order for this item.`,
-      });
-    }
-    subtotalCents += line.price * line.qty;
-  }
-
-  if (!cartLines.length || subtotalCents < minimumOrderCents) {
-    problems.push({
-      code: "minimum-order",
-      message: `Minimum order is $${(minimumOrderCents / 100).toFixed(2)}.`,
-    });
-  }
-
-  if (
-    !contact.name.trim() ||
-    !validEmail(contact.email) ||
-    !validPhone(contact.phone)
-  ) {
-    problems.push({
-      code: "invalid-contact",
-      message: "Name, email, and a valid phone number are required.",
-    });
-  }
-
-  let deliveryFeeCents = 0;
-  if (fulfillment === "courier") {
-    problems.push({
-      code: "ineligible",
-      message: "Only pickup is available for this store.",
-    });
-  } else if (fulfillment === "store-delivery") {
-    // The fee stays in the hold when delivery is switched off or the radius
-    // shrinks, so those refusals are visible as problems rather than a new total.
-    deliveryFeeCents = Math.max(0, delivery?.feeCents ?? 0);
-    if (!delivery || !delivery.enabled || !delivery.hasCoordinates || delivery.radiusMi <= 0) {
-      problems.push({
-        code: "ineligible",
-        message: "Only pickup is available for this store.",
-      });
-    } else if (!delivery.confirmed) {
-      problems.push({
-        code: "ineligible",
-        message: "We couldn't find that address",
-      });
-    } else if (!delivery.confirmed.withinRadius) {
-      problems.push({
-        code: "outside-radius",
-        message: "That address is outside the delivery area",
-      });
-    }
-    if (delivery?.leaveAtDoor && cartLines.some((line) => line.frozen)) {
-      problems.push({
-        code: "ineligible",
-        message: "Frozen items require handoff.",
-      });
-    }
-  }
-
-  const tipCents = 0;
-  const serviceFeeCentsQuoted = serviceFeeCents(subtotalCents, serviceFee);
-  const totalCents = subtotalCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents;
-  const bufferCents = Math.min(Math.round(subtotalCents * 0.1), 2000);
-  const holdCents = totalCents + bufferCents;
-
-  return {
-    id: crypto.randomUUID(),
-    subtotalCents,
-    deliveryFeeCents,
-    courierFeeCents: 0,
-    serviceFeeCents: serviceFeeCentsQuoted,
-    taxCents: 0,
-    tipCents,
-    discountCents: 0,
-    totalCents,
-    bufferCents,
-    holdCents,
-    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-    problems,
-  };
-}
-
 export interface DeliveryRequest {
   line1: string;
   line2?: string | null;
@@ -269,6 +152,13 @@ function deliveryQuoteInput(
   };
 }
 
+export interface QuoteCheckoutOptions {
+  /** Defaults to Uber Direct and DoorDash Drive. */
+  couriers?: DeliveryProvider[];
+  /** Pay: ask the couriers again, and report a fee that differs from the one last shown (#527 AC2). */
+  recheckCourier?: boolean;
+}
+
 export async function quoteCheckout(
   storeId: string,
   minimumOrderCents: number,
@@ -276,6 +166,7 @@ export async function quoteCheckout(
   contact: Contact,
   fulfillment: Fulfillment,
   request?: DeliveryRequest | null,
+  options: QuoteCheckoutOptions = {},
 ): Promise<CheckoutQuote> {
   const [cart, store, serviceFee] = await Promise.all([
     getCartWithLines(storeId, cartId),
@@ -288,10 +179,17 @@ export async function quoteCheckout(
     qty: line.qty,
     maxPerOrder: line.variant.listing.maxPerOrder,
     frozen: line.variant.listing.frozen,
+    perishable: line.variant.listing.perishable,
   }));
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
     const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
+  }
+  if (fulfillment === "courier") {
+    const courier = cart
+      ? await courierQuoteFor(store, cart, contact, request ?? null, options)
+      : null;
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, courier);
   }
   if (fulfillment !== "store-delivery") {
     return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee);
@@ -314,10 +212,95 @@ export async function quoteCheckout(
   );
 }
 
+type CourierStoreRow = NonNullable<Awaited<ReturnType<typeof platform.store.findUnique>>>;
+
+/** Spec D4 and §11.3: a registered store, the weight limit, a confirmed address within the radius, then the #140 quote. */
+async function courierQuoteFor(
+  store: CourierStoreRow,
+  cart: NonNullable<Awaited<ReturnType<typeof getCartWithLines>>>,
+  contact: Contact,
+  request: DeliveryRequest | null,
+  options: QuoteCheckoutOptions,
+): Promise<CourierQuoteInput> {
+  const unavailable = (message: string, code: "ineligible" | "outside-radius" = "ineligible"): CourierQuoteInput => ({ ok: false, problem: { code, message } });
+  if (!courierOffered(store)) return unavailable("This store isn't set up for courier delivery yet.");
+  const weight = await readCourierWeightSettings();
+  const eligibility = checkCourierEligibility(cart.lines.map((line) => ({ weightG: line.variant.weightG, quantity: line.qty })), weight);
+  if (!eligibility.eligible) {
+    const what = eligibility.reason === "item_over_limit" ? "An item in your basket is" : "This order is";
+    return unavailable(`${what} over the ${weight.courierWeightLimitLb} lb courier limit. Choose pickup or store delivery.`);
+  }
+  if (!request) return unavailable("Confirm your delivery address to see the courier fee.");
+  const confirmed = await lookupConfirmed(
+    { line1: request.line1, city: request.city, state: request.state, zip: request.zip },
+    { lat: store.lat as number, lng: store.lng as number, radiusMi: Number(store.deliveryRadiusMi) },
+  );
+  if (!confirmed?.ok) return unavailable("We couldn't find that address");
+  if (!confirmed.withinRadius) return unavailable("That address is outside the delivery area", "outside-radius");
+  if (!validPhone(contact.phone)) return unavailable("Add your phone number to see the courier fee.");
+
+  const address = { line1: confirmed.match.line1, line2: request.line2 ?? null, city: confirmed.match.city, state: confirmed.match.state, zip: confirmed.match.zip };
+  const key = JSON.stringify({ address, subtotalCents: cart.subtotalCents });
+  const leaveAtDoor = request.leaveAtDoor;
+  const saved = await storeScoped(store.id).cart.findUnique({
+    where: { id: cart.id },
+    select: { courierFeeCents: true, courierProvider: true, courierQuoteKey: true, courierQuoteExpiresAt: true },
+  });
+  const shown = saved?.courierQuoteKey === key && saved.courierFeeCents != null ? saved.courierFeeCents : null;
+  if (!options.recheckCourier && shown != null && saved?.courierQuoteExpiresAt && saved.courierQuoteExpiresAt > new Date()) {
+    return { ok: true, feeCents: shown, provider: saved.courierProvider as "Uber Direct" | "DoorDash Drive", leaveAtDoor };
+  }
+
+  const { request: courierRequest, registrations } = buildCourierRequest(store.id, store, {
+    address,
+    phone: contact.phone.trim(),
+    name: contact.name,
+    contactless: leaveAtDoor,
+  }, {
+    orderValueCents: cart.subtotalCents,
+    tipCents: 0,
+    pinRequired: cart.lines.some((line) => line.variant.listing.frozen) || cart.subtotalCents > PIN_ABOVE_TOTAL_CENTS,
+  });
+  const quoted = await quoteCheapestCourier({ referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders());
+  await storeScoped(store.id).cart.update({
+    where: { id: cart.id },
+    data: {
+      courierFeeCents: quoted?.feeCents ?? null,
+      courierProvider: quoted?.courierProvider ?? null,
+      courierQuoteKey: quoted ? key : null,
+      courierQuoteExpiresAt: quoted?.expiresAt ?? null,
+    },
+  });
+  if (!quoted) return unavailable("No courier can take this order right now. Choose pickup or store delivery.");
+  const changed = options.recheckCourier === true && quoted.feeCents !== shown;
+  return { ok: true, feeCents: quoted.feeCents, provider: quoted.courierProvider, leaveAtDoor, changed };
+}
+
+/** Placement charges the courier fee the shopper last saw and the hold was sized on; it never asks the couriers again. */
+function shownCourier(
+  cart: { courierFeeCents: number | null; courierProvider: string | null; deliveryLine1: string | null },
+  leaveAtDoor: boolean,
+): CourierQuoteInput {
+  if (cart.courierFeeCents == null || !cart.courierProvider || !cart.deliveryLine1) {
+    return { ok: false, problem: { code: "ineligible", message: "Confirm your delivery address to see the courier fee." } };
+  }
+  return { ok: true, feeCents: cart.courierFeeCents, provider: cart.courierProvider as "Uber Direct" | "DoorDash Drive", leaveAtDoor };
+}
+
+/**
+ * Courier delivery needs the store registered with a courier, a pickup point to measure the radius from, and a phone:
+ * Uber Direct will not book a pickup without one.
+ */
+export function courierOffered(store: { uberLocationId: string | null; doordashStoreId: string | null; addressLine1: string | null; city: string | null; state: string | null; zip: string | null; lat: number | null; lng: number | null; phone: string | null }): boolean {
+  return Boolean((store.uberLocationId || store.doordashStoreId) && store.addressLine1 && store.city && store.state && store.zip && store.lat != null && store.lng != null && store.phone);
+}
+
+export { COURIER_NOT_OFFERED, computeQuote, type StoreDeliveryQuote } from "./quote";
 export { checkoutTestHooks } from "./test-hooks";
 export { SavedCardUnavailableError } from "./saved-card-payment";
 export { LiveModeBlockedError } from "./live-mode";
 export { StoreNotTakingOrdersError } from "../order/store-queue";
+export { SlotUnavailableError } from "./slots";
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
@@ -568,6 +551,8 @@ export async function recordAuthorizedOrder(
         ? storeAvailability(hours.hours, hours.timezone, now)
         : ({ kind: "unavailable" } as const);
       if (availability.kind === "unavailable") throw new StoreNotTakingOrdersError();
+      // Under the same lock, so two orders cannot both take a slot's last place (#565).
+      await assertSlotOffered(tx, storeId, lockedStore, input.fulfillment, input.pickupSlot, now);
 
       if (input.lines.length === 0) {
         throw new Error("Order lines are required");
@@ -605,6 +590,7 @@ export async function recordAuthorizedOrder(
         substituteVariantId: line.substituteVariantId,
         maxPerOrder: line.variant.listing.maxPerOrder,
         frozen: line.variant.listing.frozen,
+        perishable: line.variant.listing.perishable,
       }));
       if (!sameBasket(current, input.lines)) throw new BasketChangedError();
       const point = cart.deliveryLat != null && cart.deliveryLng != null
@@ -612,6 +598,9 @@ export async function recordAuthorizedOrder(
         : null;
       const delivery = input.fulfillment === "store-delivery"
         ? deliveryQuoteInput(lockedStore, point, cart.leaveAtDoor || input.leaveAtDoor === true)
+        : null;
+      const courier = input.fulfillment === "courier"
+        ? shownCourier(cart, cart.leaveAtDoor || input.leaveAtDoor === true)
         : null;
       const serviceFee = await readServiceFeeSettings(tx);
       const currentQuote = computeQuote(
@@ -621,6 +610,7 @@ export async function recordAuthorizedOrder(
         input.fulfillment,
         serviceFee,
         delivery,
+        courier,
       );
       if (
         currentQuote.problems.length > 0
@@ -628,7 +618,7 @@ export async function recordAuthorizedOrder(
       ) {
         throw new BasketChangedError();
       }
-      const delivering = input.fulfillment === "store-delivery" && point != null;
+      const delivering = (input.fulfillment === "store-delivery" || input.fulfillment === "courier") && point != null;
       const distanceMi = delivering && lockedStore.lat != null && lockedStore.lng != null
         ? assessRadius(point, {
             lat: lockedStore.lat,
@@ -691,7 +681,8 @@ export async function recordAuthorizedOrder(
           tipCents: currentQuote.tipCents,
           bufferCents: currentQuote.bufferCents,
           totalAuthorizedCents: currentQuote.holdCents,
-          deliveryFeeCents: currentQuote.deliveryFeeCents,
+          // A courier order keeps the courier fee here; courierFeeCents() reads it back (#495).
+          deliveryFeeCents: currentQuote.deliveryFeeCents + currentQuote.courierFeeCents,
           totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
@@ -702,7 +693,7 @@ export async function recordAuthorizedOrder(
           platformFeeCents: captureSplit({
             capturedCents: currentQuote.totalCents,
             serviceFeeCents: currentQuote.serviceFeeCents,
-            courierFeeCents: 0,
+            courierFeeCents: currentQuote.courierFeeCents,
           }).platformFeeCents,
           notes: input.notes || null,
           deliveryLine1: delivering ? cart.deliveryLine1 : null,
@@ -741,6 +732,8 @@ export async function recordAuthorizedOrder(
         lockedStock,
       );
       await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
+      // The assistant's pickup time was for this order; the next basket starts fresh (#247).
+      await tx.aiConversation.updateMany({ where: { cartId: input.cartId }, data: { checkoutDraft: Prisma.DbNull } });
       await tx.cart.update({
         where: { id: input.cartId },
         data: {
@@ -773,6 +766,7 @@ function cartLinesToOrderLines(
   substituteVariantId: string | null;
   maxPerOrder: number | null;
   frozen: boolean;
+  perishable: boolean;
 }> {
   return cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -783,6 +777,7 @@ function cartLinesToOrderLines(
     substituteVariantId: l.substituteVariantId,
     maxPerOrder: l.variant.listing.maxPerOrder,
     frozen: l.variant.listing.frozen,
+    perishable: l.variant.listing.perishable,
   }));
 }
 
@@ -994,10 +989,6 @@ export async function placeOrder(
   assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
 
-  if (fulfillment === "courier") {
-    throw new Error("Only pickup fulfillment is supported");
-  }
-
   const pi = await retrieveCheckoutIntent(paymentIntentId);
 
   if (pi.status === "canceled") {
@@ -1095,6 +1086,7 @@ export async function placeOrder(
     qty: l.qty,
     maxPerOrder: l.maxPerOrder,
     frozen: l.frozen,
+    perishable: l.perishable,
   }));
   const [storeRow, serviceFee] = await Promise.all([
     platform.store.findUnique({ where: { id: storeId } }),
@@ -1107,7 +1099,16 @@ export async function placeOrder(
   const delivery = fulfillment === "store-delivery"
     ? deliveryQuoteInput(storeRow, point, cart.delivery.leaveAtDoor || leaveAtDoor)
     : null;
-  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery);
+  const courier = fulfillment === "courier"
+    ? shownCourier(
+        await storeScoped(storeId).cart.findUniqueOrThrow({
+          where: { id: cartId },
+          select: { courierFeeCents: true, courierProvider: true, deliveryLine1: true },
+        }),
+        cart.delivery.leaveAtDoor || leaveAtDoor,
+      )
+    : null;
+  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier);
 
   const contactOnly = quote.problems.length > 0
     && quote.problems.every((problem) => problem.code === "invalid-contact");
@@ -1182,7 +1183,11 @@ export async function placeOrder(
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw new Error("Cart is empty");
     }
-    if (error instanceof BasketChangedError || error instanceof StoreNotTakingOrdersError) {
+    if (
+      error instanceof BasketChangedError
+      || error instanceof StoreNotTakingOrdersError
+      || error instanceof SlotUnavailableError
+    ) {
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw error;
     }

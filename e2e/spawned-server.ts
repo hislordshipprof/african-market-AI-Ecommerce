@@ -84,55 +84,32 @@ function windowsListeners(port: number): Promise<number[]> {
     `$rows = Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue`,
     "$rows | Where-Object { $_.RemotePort -eq 0 -and $_.OwningProcess -gt 0 } | Select-Object -ExpandProperty OwningProcess",
   ].join("; ");
-  return new Promise((resolve) => {
-    execFile(
-      "powershell",
-      ["-NoProfile", "-Command", script],
-      { windowsHide: true, encoding: "utf8", timeout: 20_000 },
-      (error, stdout) => {
-        if (error || typeof stdout !== "string") {
-          resolve([]);
-          return;
-        }
-        resolve(pidsFromLines(stdout));
-      },
-    );
-  });
+  return run("powershell", ["-NoProfile", "-Command", script], 20_000).then(({ ok, stdout }) =>
+    ok ? pidsFromLines(stdout) : [],
+  );
 }
 
-// macOS has no `ss`.
+// macOS has no `ss`. lsof exits 1 when nothing listens; stdout is then empty.
 function lsofListeners(port: number): Promise<number[]> {
-  return new Promise((resolve) => {
-    execFile(
-      "lsof",
-      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
-      { encoding: "utf8", timeout: 5_000 },
-      (error, stdout) => {
-        // lsof exits 1 when nothing listens; stdout is then empty.
-        resolve(typeof stdout === "string" ? pidsFromLines(stdout) : []);
-      },
-    );
-  });
+  return run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], 5_000).then(({ stdout }) => pidsFromLines(stdout));
 }
 
 function ssListeners(port: number): Promise<number[]> {
+  return run("ss", ["-H", "-ltnp", `sport = :${port}`], 5_000).then(({ ok, stdout }) => {
+    if (!ok) return [];
+    const pids = new Set<number>();
+    for (const match of stdout.matchAll(/pid=(\d+)/g)) {
+      const pid = Number(match[1]);
+      if (pid > 0) pids.add(pid);
+    }
+    return [...pids];
+  });
+}
+
+function run(file: string, args: string[], timeout: number): Promise<{ ok: boolean; stdout: string }> {
   return new Promise((resolve) => {
-    execFile(
-      "ss",
-      ["-H", "-ltnp", `sport = :${port}`],
-      { encoding: "utf8", timeout: 5_000 },
-      (error, stdout) => {
-        if (error || typeof stdout !== "string") {
-          resolve([]);
-          return;
-        }
-        const pids = new Set<number>();
-        for (const match of stdout.matchAll(/pid=(\d+)/g)) {
-          const pid = Number(match[1]);
-          if (pid > 0) pids.add(pid);
-        }
-        resolve([...pids]);
-      },
+    execFile(file, args, { windowsHide: true, encoding: "utf8", timeout }, (error, stdout) =>
+      resolve({ ok: !error, stdout: typeof stdout === "string" ? stdout : "" }),
     );
   });
 }

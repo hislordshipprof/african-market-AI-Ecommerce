@@ -11,7 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
-import { AlertCircle, Camera, ChartColumn, Gem, Info, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare, MessagesSquare } from "lucide-react";
+import { AlertCircle, Camera, ChartColumn, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -179,6 +179,46 @@ export function StoreAdminDashboard({
                         <Badge variant={STATUS_LABELS[stripeOnboardingStatus]?.variant ?? "outline"}>
                           {STATUS_LABELS[stripeOnboardingStatus]?.label ?? stripeOnboardingStatus}
                         </Badge>
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && (
+            <Link href={`/store-admin/whatsapp?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <MessageCircle className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">WhatsApp</CardTitle>
+                      <CardDescription>
+                        Link your number for the Store copilot
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && (
+            <Link href={`/store-admin/directory?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <MapPin className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Directory listing</CardTitle>
+                      <CardDescription>
+                        Show your store to shoppers nearby
                       </CardDescription>
                     </div>
                   </div>

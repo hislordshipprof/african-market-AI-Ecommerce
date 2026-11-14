@@ -10,6 +10,7 @@ export type PlanFeature =
   | "own-domain"
   | "courier-delivery"
   | "copilot-reports"
+  | "reorder-suggestions"
   | "whatsapp"
   | "analytics-dashboard";
 
@@ -17,6 +18,7 @@ export const PRO_FEATURES: readonly PlanFeature[] = [
   "own-domain",
   "courier-delivery",
   "copilot-reports",
+  "reorder-suggestions",
   "whatsapp",
   "analytics-dashboard",
 ];
@@ -25,6 +27,7 @@ export const FEATURE_LABELS: Record<PlanFeature, string> = {
   "own-domain": "Your own domain",
   "courier-delivery": "Courier delivery",
   "copilot-reports": "Voice and photo stock reports",
+  "reorder-suggestions": "Reorder suggestions",
   whatsapp: "WhatsApp for copilot and alerts",
   "analytics-dashboard": "Analytics dashboard",
 };
