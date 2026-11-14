@@ -160,7 +160,7 @@ function factsOf(listing: StockFacts): StockFacts {
   };
 }
 
-function listingName(listing: { customName: string | null; masterProduct?: { name: string } | null }): string {
+export function listingName(listing: { customName: string | null; masterProduct?: { name: string } | null }): string {
   return listing.customName || listing.masterProduct?.name || "Unnamed";
 }
 
@@ -768,7 +768,7 @@ function describedAdd(applied: AppliedAddLine) {
   return {
     variantId: applied.variant.id,
     listingId: applied.listing.id,
-    name: applied.listing.customName || master?.name || "Unnamed",
+    name: listingName({ customName: applied.listing.customName, masterProduct: master }),
     packLabel: applied.variant.label,
     imageUrl: photo ?? null,
   };
