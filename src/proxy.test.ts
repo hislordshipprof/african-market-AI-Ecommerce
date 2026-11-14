@@ -296,6 +296,30 @@ describe("security headers on the proxy", () => {
     expect(configured.map((entry: { source: string }) => entry.source)).toContain("/_next/static/:path*");
   });
 
+  it("an SVG path gets a no-script, sandboxed policy (#124)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const path of [
+      "/logos/mama-ngozi-logo.svg",
+      "/api/catalog-image/catalog/logo.svg",
+      "/logos/mama-ngozi-logo%2Esvg",
+      "/logos/mama-ngozi-logo%2esvg",
+      "/logos/mama-ngozi-logo.sv%67",
+      "/logos/bad%E0%A4%A.png",
+    ]) {
+      const res = proxy(makeRequest(`http://localhost:3000${path}`));
+      expect(res.headers.get("content-security-policy")).toMatch(/script-src 'none'.*sandbox/);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+  });
+
+  it("every catalog-image path gets the no-script policy, whatever its extension (#124)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const path of ["/api/catalog-image/catalog/x.jpg", "/api/catalog%2Dimage/catalog/x.jpg"]) {
+      const res = proxy(makeRequest(`http://localhost:3000${path}`));
+      expect(res.headers.get("content-security-policy")).toMatch(/script-src 'none'.*sandbox/);
+    }
+  });
+
   it("nonce request equals response and differs per request", () => {
     vi.stubEnv("NODE_ENV", "production");
     const first = proxy(makeRequest("http://localhost:3000/shop"));
