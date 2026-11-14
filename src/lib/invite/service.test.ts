@@ -8,6 +8,7 @@ import {
   acceptInvite,
   removeStoreMember,
   _hashTokenForTesting,
+  STAFF_LIMIT_MESSAGE,
 } from "./service";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
 
@@ -112,6 +113,21 @@ describe.skipIf(!hasDb)("Invite service", () => {
   }
 
   describe("createInvite", () => {
+    it("Starter refuses a third staff invite; Pro allows it", async () => {
+      await createInvite(baseInput({ email: "staff-1@example.com" }));
+      await createInvite(baseInput({ email: "staff-2@example.com" }));
+      await expect(createInvite(baseInput({ email: "staff-3@example.com" }))).rejects.toThrow(STAFF_LIMIT_MESSAGE);
+      // Re-sending to an invited address is not a new seat.
+      await expect(createInvite(baseInput({ email: "staff-2@example.com" }))).resolves.toBeTruthy();
+
+      await platformAdmin.storeSubscription.create({ data: { storeId: storeAId, plan: "pro", status: "active" } });
+      try {
+        await expect(createInvite(baseInput({ email: "staff-3@example.com" }))).resolves.toBeTruthy();
+      } finally {
+        await platformAdmin.storeSubscription.delete({ where: { storeId: storeAId } });
+      }
+    });
+
     it("creates invite with valid token, correct fields", async () => {
       const result = await createInvite(baseInput());
 

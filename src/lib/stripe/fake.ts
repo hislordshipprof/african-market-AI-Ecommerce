@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import { ProviderStateError } from "./types";
 import { OverRefundError } from "./errors";
+import { billingObjects } from "../billing/webhook-objects";
 
 const lateRefundKeys = new Set<string>();
 
@@ -281,6 +282,7 @@ const fakeStripeProvider: StripeProvider = {
     const parsed = JSON.parse(payload) as {
       id?: string;
       type?: string;
+      created?: number;
       accountId?: string;
       data?: {
         object?: {
@@ -314,8 +316,10 @@ const fakeStripeProvider: StripeProvider = {
       type: parsed.type as string,
       accountId: (parsed.accountId ?? obj?.id ?? "") as string,
       ...(parsed.id ? { eventId: parsed.id } : {}),
+      ...(typeof parsed.created === "number" ? { created: parsed.created } : {}),
       ...(refund ? { refund } : {}),
       ...(paymentIntent ? { paymentIntent } : {}),
+      ...billingObjects(obj),
     } satisfies WebhookEvent;
   },
 

@@ -45,6 +45,7 @@ import { callCostMicros, tokenUsageOf } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
 import { groundingTransform, keyedUnitPricesFromHistory } from "./grounding";
 import { assistantSpendState, claimCapAlert, utcDay } from "./spend";
+import { ASSISTANT_CAP_MESSAGE, claimAssistantChat } from "../billing/assistant-chats";
 import { ASSISTANT_STATIC_PROMPT, storeContextMessage } from "./system-prompt";
 import { assistantTools } from "./tools";
 
@@ -207,6 +208,18 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     };
     const prior = asMessages(turn.messages);
     const alreadyThere = prior.some((message) => message.role === "user" && message.id === parsed.id);
+    if (!alreadyThere) {
+      let chat;
+      try {
+        chat = await claimAssistantChat(store.id, at);
+      } catch {
+        chat = null;
+      }
+      if (!chat?.ok) {
+        await releaseLease(store.id, turn.id);
+        return jsonError(503, "assistant_unavailable", ASSISTANT_CAP_MESSAGE);
+      }
+    }
     const withUser = alreadyThere ? prior : [...prior, userMessage];
     try {
       await storeScoped(store.id).aiConversation.update({

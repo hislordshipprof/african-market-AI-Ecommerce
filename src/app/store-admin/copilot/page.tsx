@@ -9,14 +9,17 @@ import { AlertsPanel } from "./alerts-panel";
 import { CopilotPanel } from "./copilot-panel";
 import { DigestSetting } from "./digest-setting";
 import { OwnerReportPanel } from "./owner-report-panel";
+import { PlanLocked } from "@/components/store-admin/plan-locked";
+import { storeMayUse } from "@/lib/billing/plan";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
-  const [panel, alerts, digestHour, reports] = await Promise.all([
+  const [panel, alerts, digestHour, reports, reportsAllowed] = await Promise.all([
     loadCopilotPanel(session.store.id, session.user.id),
     listOpenAlerts(session.store.id),
     loadDigestHour(session.store.id),
     listPendingOwnerReports(session.store.id),
+    storeMayUse(session.store.id, "copilot-reports"),
   ]);
 
   return (
@@ -42,7 +45,17 @@ export default async function CopilotPage() {
           conversationId={panel.conversationId}
           messages={panel.messages}
           proposals={panel.proposals}
-          voiceAndPhoto={<OwnerReportPanel reports={reports} embedded />}
+          voiceAndPhoto={
+            reportsAllowed ? (
+              <OwnerReportPanel reports={reports} embedded />
+            ) : (
+              <PlanLocked
+                title="Voice and photo stock reports"
+                description="Say what came in, or snap the invoice or shelf, and the copilot drafts the stock changes."
+                storeSlug={session.store.slug}
+              />
+            )
+          }
           voiceAndPhotoWaiting={reports.length}
         />
         <DigestSetting hour={digestHour} />

@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { requireStoreMember } from "../store-admin/session";
+import { READ_ONLY_MESSAGE, requireStoreMember, requireStoreWriter } from "../store-admin/session";
 import { parseInput } from "../security/parse-input";
 import {
   getStoreOrders,
@@ -123,7 +123,8 @@ export async function fetchOrdersAction() {
 }
 
 export async function acceptOrderAction(orderId: string, prepEstimateMinutes: number) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, orderId);
   const prep = parseInput(z.number().int().min(0).max(100_000), prepEstimateMinutes);
   if (!id.ok || !prep.ok) return { ok: false as const, error: "Order not found" };
@@ -133,7 +134,8 @@ export async function acceptOrderAction(orderId: string, prepEstimateMinutes: nu
 }
 
 export async function autoAcceptOrderAction(orderId: string) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   const store = await platform.store.findUnique({
@@ -149,14 +151,16 @@ export async function autoAcceptOrderAction(orderId: string) {
 }
 
 export async function markLinePickedAction(lineId: string) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, lineId);
   if (!id.ok) return { ok: false as const, error: "Order line not found" };
   return runStaffAction("markLinePicked", id.data, () => markLinePicked(session.store.id, id.data));
 }
 
 export async function markLineShortAction(lineId: string, qtyFound: number) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, lineId);
   const found = parseInput(z.number().int().min(0).max(100_000), qtyFound);
   if (!id.ok) return { ok: false as const, error: "Order line not found" };
@@ -165,21 +169,24 @@ export async function markLineShortAction(lineId: string, qtyFound: number) {
 }
 
 export async function markReadyAction(orderId: string) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("markReady", id.data, () => markReady(session.store.id, id.data));
 }
 
 export async function completePickupAction(orderId: string) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("completePickup", id.data, () => completePickup(session.store.id, id.data));
 }
 
 export async function markOutForDeliveryAction(orderId: string) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("markOutForDelivery", id.data, () => markOutForDelivery(session.store.id, id.data));
@@ -187,7 +194,8 @@ export async function markOutForDeliveryAction(orderId: string) {
 
 /** FormData: `orderId` and the `photo` file. The service checks the photo's bytes. */
 export async function markDeliveredAction(form: FormData) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, form.get("orderId"));
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   const photo = form.get("photo");
@@ -205,7 +213,8 @@ const storeCancelSchema = z.object({
 
 /** Before capture only: the core refuses CAPTURING and every later status. */
 export async function cancelOrderAction(orderId: string, input: { reason: string; note?: string | null }) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   const parsed = parseInput(storeCancelSchema, input);
@@ -223,9 +232,10 @@ export async function cancelOrderAction(orderId: string, input: { reason: string
 const issueAmountSchema = z.number().int().min(1).max(10_000_000).optional();
 const declineReasonSchema = z.string().trim().min(1).max(500);
 
-/** Any store member (owner decision 2). No amount refunds the whole issue. */
+/** Any member with write access (owner decision 2). No amount refunds the whole issue. */
 export async function approveIssueAction(issueId: string, amountCents?: number) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, issueId);
   if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
   const amount = parseInput(issueAmountSchema, amountCents);
@@ -236,7 +246,8 @@ export async function approveIssueAction(issueId: string, amountCents?: number) 
 }
 
 export async function declineIssueAction(issueId: string, reason: string) {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, issueId);
   if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
   const parsed = parseInput(declineReasonSchema, reason);

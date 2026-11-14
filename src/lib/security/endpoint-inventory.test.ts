@@ -11,7 +11,7 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/order/issue-actions.ts",
   "src/lib/order/substitution-actions.ts",
 ]);
-const GUARDS = ["requireStoreOwner", "requireStoreMember", "requirePlatformAdmin", "requireUserId"];
+const GUARDS = ["requireStoreOwner", "requireStoreMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
 const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 function walk(dir: string, acc: string[] = []): string[] {

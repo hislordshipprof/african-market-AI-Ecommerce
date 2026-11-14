@@ -4,7 +4,7 @@ Date: 2026-11-12 · Status: **accepted** 2026-11-12 (owner accepted the recommen
 
 ## Where we are today
 The platform earns **$0 per order**.
-- **Store subscription** (spec D3): not built.
+- **Store subscription** (spec D3): built in #494 (Stripe Billing, Checkout and the Customer Portal).
 - **Per-order platform fee:** built, but set to $0 (`PLATFORM_PER_ORDER_FEE_CENTS` in `src/lib/order/platform-fee.ts`).
 - **Delivery:** the customer pays the courier's quote with no markup (ADR-0006), and we pass it through.
 - **Card fee:** the 2.9% + 30¢ we keep from each capture repays Stripe, which debits the card fee from the platform on destination charges. It is cost recovery, not income. Today the store pays it on the **whole** capture, including the delivery fee it never receives.
@@ -41,6 +41,11 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
 - **Locked features:** a Starter store sees each Pro feature locked, with an upgrade link.
 - **Downgrade:** a downgrade never breaks an order in flight. New orders follow the new plan. Staff over the limit keep read-only access until the owner removes them.
 - **Assistant cap:** past the monthly cap, the assistant tells the shopper it is unavailable and the store keeps selling by browsing. The owner is warned at 80%.
+- **Rules as built (#494):**
+  - A store with no subscription counts as Starter.
+  - `past_due` keeps Pro features; taking a store down needs an admin decision.
+  - A chat is one new shopper message, counted per UTC calendar month.
+  - Removing the pilot offer during the free months ends the trial and charges the store now. Once a store has had its free months it keeps its pilot place.
 - **Not in either plan yet:** multiple locations under one account (a higher tier later, if a store asks).
 
 ### Example order

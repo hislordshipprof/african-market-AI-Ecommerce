@@ -24,6 +24,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createChatHandler } from "./chat-handler";
+import { ASSISTANT_CAP_MESSAGE } from "../billing/assistant-chats";
+import { setEmailSenderForTests, type EmailMessage } from "../email/send";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
 import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
@@ -533,6 +535,55 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     await second.json();
     expect(calls()).toBe(0);
     expect(errors.filter((line) => line.includes("spend cap reached"))).toHaveLength(1);
+  });
+
+  it("Starter cap: the owner is warned at chat 800, and chat 1,001 gets the unavailable message", async () => {
+    const sent: EmailMessage[] = [];
+    setEmailSenderForTests({ send: async (m) => (sent.push(m), { id: `e${sent.length}` }) });
+    const ownerId = `owner-${randomUUID()}`;
+    await raw.user.create({ data: { id: ownerId, name: "Cap Owner", email: `${ownerId}@example.test` } });
+    await platformAdmin.storeMembership.create({ data: { storeId, userId: ownerId, role: "owner" } });
+    const clock = new Date(Date.UTC(2600, randomInt(1200), 15));
+    const month = new Date(`${clock.toISOString().slice(0, 7)}-01T00:00:00Z`);
+    try {
+      await storeScoped(storeId).assistantChatMonth.create({ data: { storeId, month, chats: 799 } });
+      const reply = () => [
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "ok" },
+        { type: "text-end", id: "t" },
+        { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+      ];
+      const { model, calls } = strictModel(reply);
+      const handler = createChatHandler({ model, now: () => clock });
+      const eightHundredth = await handler(request("chat 800", { ip: "203.0.113.60" }));
+      expect(eightHundredth.status).toBe(200);
+      await eightHundredth.text();
+      const warnings = sent.filter((m) => m.to === `${ownerId}@example.test`);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].subject).toContain("800 of 1,000");
+
+      await storeScoped(storeId).assistantChatMonth.update({
+        where: { storeId_month: { storeId, month } },
+        data: { chats: 1000 },
+      });
+      const before = calls();
+      const capped = await handler(request("chat 1001", { ip: "203.0.113.61" }));
+      expect(capped.status).toBe(503);
+      const body = await capped.json();
+      expect(body.error.code).toBe("assistant_unavailable");
+      expect(body.error.message).toBe(ASSISTANT_CAP_MESSAGE);
+      expect(calls()).toBe(before);
+      expect((await storeScoped(storeId).assistantChatMonth.findUniqueOrThrow({
+        where: { storeId_month: { storeId, month } },
+      })).chats).toBe(1000);
+      // Browsing is untouched: the catalog still reads.
+      expect(await storeScoped(storeId).listing.count()).toBeGreaterThan(0);
+    } finally {
+      setEmailSenderForTests(null);
+      await platformAdmin.storeMembership.deleteMany({ where: { storeId, userId: ownerId } });
+      await raw.user.delete({ where: { id: ownerId } });
+    }
   });
 
   it("a concurrent turn on the same cart gets assistant_busy", async () => {

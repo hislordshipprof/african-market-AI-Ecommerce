@@ -9,6 +9,7 @@ import { CANCELLABLE_BEFORE_CAPTURE } from "@/lib/order/constants";
 import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
 import type { RefundResult } from "@/lib/stripe/types";
 import { parseInput } from "@/lib/security/parse-input";
+import { applyBillingEvent, isBillingEvent } from "@/lib/billing/service";
 
 const webhookEventSchema = z.looseObject({
   type: z.string().min(1).max(200),
@@ -20,6 +21,23 @@ const webhookEventSchema = z.looseObject({
     reservationKey: z.string().max(200).optional(),
   }).optional(),
   eventId: z.string().max(200).optional(),
+  created: z.number().int().nonnegative().optional(),
+  subscription: z.looseObject({
+    id: z.string().min(1).max(200),
+    customerId: z.string().max(200),
+    status: z.string().max(40),
+    lookupKey: z.string().max(200).nullable(),
+    storeId: z.string().max(200).nullable(),
+    trialEnd: z.number().int().nullable(),
+    currentPeriodEnd: z.number().int().nullable(),
+    cancelAtPeriodEnd: z.boolean(),
+  }).optional(),
+  invoice: z.looseObject({
+    id: z.string().min(1).max(200),
+    customerId: z.string().max(200),
+    subscriptionId: z.string().max(200).nullable(),
+    storeId: z.string().max(200).nullable(),
+  }).optional(),
   paymentIntent: z.looseObject({
     id: z.string().min(1).max(200),
     status: z.string().min(1).max(40),
@@ -117,6 +135,15 @@ export async function POST(req: NextRequest) {
   ];
   if (accountEventTypes.includes(verified.type) && verified.accountId) {
     await updateStoreOnboardingStatus(verified.accountId);
+  }
+
+  if (isBillingEvent(verified)) {
+    try {
+      await applyBillingEvent(verified);
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ error: "Billing event could not be recorded" }, { status: 500 });
+    }
   }
 
   if (verified.type === "payment_intent.canceled" && verified.paymentIntent) {

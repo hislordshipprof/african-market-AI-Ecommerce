@@ -10,6 +10,7 @@ import type {
   RefundResult,
 } from "./types";
 import { ProviderStateError } from "./types";
+import { billingObjects } from "../billing/webhook-objects";
 import { RefundNotCreatedError, WebhookSecretMissingError, mapRefundStatus, overRefundError } from "./errors";
 
 let _stripeClient: Stripe | null = null;
@@ -152,8 +153,10 @@ export const stripeProvider: StripeProvider = {
           type: event.type,
           accountId: obj?.id ?? event.account ?? "",
           eventId: event.id,
+          created: event.created,
           ...(refund ? { refund } : {}),
           ...(paymentIntent ? { paymentIntent } : {}),
+          ...billingObjects(event.data?.object),
         } satisfies WebhookEvent;
       } catch (err) {
         lastError = err;

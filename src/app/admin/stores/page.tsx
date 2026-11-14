@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { listStores } from "@/lib/admin/actions";
 import { SuspendButton } from "./suspend-button";
+import { billingStatusLabel, effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
 
 export default async function StoreListPage() {
   const stores = await listStores();
+  const failed = stores.filter((store) => store.subscription?.paymentFailedAt);
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
@@ -28,6 +30,13 @@ export default async function StoreListPage() {
         </div>
       </div>
 
+      {failed.length > 0 && (
+        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <p className="font-medium">Subscription payment failed for {failed.map((store) => store.name).join(", ")}.</p>
+          <p>Their storefronts stay up. Stripe retries the card; suspend a store only by decision.</p>
+        </div>
+      )}
+
       {stores.length === 0 ? (
         <div className="rounded-lg border border-[#e2e4e9] bg-white p-8 text-center">
           <p className="text-[#55625A]">
@@ -46,7 +55,7 @@ export default async function StoreListPage() {
                 <th className="px-4 py-3 font-medium text-[#55625A]">Name</th>
                 <th className="px-4 py-3 font-medium text-[#55625A]">Slug</th>
                 <th className="px-4 py-3 font-medium text-[#55625A]">Status</th>
-                <th className="px-4 py-3 font-medium text-[#55625A]">Preset</th>
+                <th className="px-4 py-3 font-medium text-[#55625A]">Plan</th>
                 <th className="px-4 py-3 font-medium text-[#55625A]">Actions</th>
               </tr>
             </thead>
@@ -71,7 +80,18 @@ export default async function StoreListPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-[#55625A]">
-                    {store.themePreset}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-medium text-[#15201A]">
+                        {PLAN_NAMES[effectivePlan(store.subscription)]}
+                      </span>
+                      <span>· {billingStatusLabel(store.subscription?.status ?? "none")}</span>
+                      {store.subscription?.pilot && (
+                        <span className="rounded-full bg-[#EBF3EC] px-2 py-0.5 text-xs font-medium text-[#1F5A43]">Pilot</span>
+                      )}
+                      {store.subscription?.paymentFailedAt && (
+                        <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Payment failed</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
