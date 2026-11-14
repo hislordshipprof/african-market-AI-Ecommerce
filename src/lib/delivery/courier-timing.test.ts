@@ -249,6 +249,16 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     expect(await pushReadyTime(storeId, orderId, { providers: [dd.provider], emit, now: later })).toEqual({ ok: false, error: "The ready time was already pushed once" });
   });
 
+  it("AC2: another store cannot push this order's ready time", async () => {
+    const mine = await packingOrder();
+    const other = await packingOrder();
+    const dd = doordash();
+    await dispatchPackingOrder(mine.storeId, mine.orderId, { providers: [dd.provider], emit, now });
+    expect(await pushReadyTime(other.storeId, mine.orderId, { providers: [dd.provider], emit, now })).toEqual({ ok: false, error: "Order not found" });
+    expect(await order(mine.storeId, mine.orderId)).toMatchObject({ readyPushedAt: null });
+    expect(dd.fake.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+  });
+
   it("AC2: a past-due ready time is pushed from now", async () => {
     const { storeId, orderId } = await packingOrder();
     const dd = doordash();
@@ -376,10 +386,10 @@ describe("store's courier line (#562 AC3)", () => {
   it("shows the booked time, then the driver's ETA, then the pickup", () => {
     const base = { provider: "uber", pickupReadyAt: "2026-11-14T15:22:00.000Z", courierJson: null };
     expect(courierLine(null, time)).toBeNull();
-    expect(courierLine({ ...base, status: "requested" }, time)).toBe("Uber Direct booked for 15:22, finding a driver");
-    expect(courierLine({ ...base, provider: "doordash", pickupReadyAt: null, status: "requested" }, time)).toBe("DoorDash Drive: finding a driver");
-    expect(courierLine({ ...base, status: "courier_assigned", courierJson: { name: "Sam", pickupEta: "2026-11-14T15:19:00.000Z" } }, time)).toBe("Driver Sam arriving about 15:19");
-    expect(courierLine({ ...base, status: "courier_assigned", courierJson: { name: null } }, time)).toBe("Driver on the way");
+    expect(courierLine({ ...base, status: "requested" }, time)).toBe("Uber Direct booked for 15:22, finding a courier");
+    expect(courierLine({ ...base, provider: "doordash", pickupReadyAt: null, status: "requested" }, time)).toBe("DoorDash Drive: finding a courier");
+    expect(courierLine({ ...base, status: "courier_assigned", courierJson: { name: "Sam", pickupEta: "2026-11-14T15:19:00.000Z" } }, time)).toBe("Courier Sam arriving about 15:19");
+    expect(courierLine({ ...base, status: "courier_assigned", courierJson: { name: null } }, time)).toBe("Courier on the way");
     expect(courierLine({ ...base, status: "picked_up" }, time)).toBe("Uber Direct: picked up");
   });
 });

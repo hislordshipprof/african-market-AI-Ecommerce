@@ -44,10 +44,10 @@ export function courierLine(courier: StaffCourier | null, time: (value: Date | s
   const brand = COURIER_BRAND[courier.provider] ?? "Courier";
   const driver = (courier.courierJson ?? {}) as { name?: string | null; pickupEta?: string | null };
   if (courier.status === "requested") {
-    return courier.pickupReadyAt ? `${brand} booked for ${time(courier.pickupReadyAt)}, finding a driver` : `${brand}: finding a driver`;
+    return courier.pickupReadyAt ? `${brand} booked for ${time(courier.pickupReadyAt)}, finding a courier` : `${brand}: finding a courier`;
   }
   if (courier.status === "courier_assigned") {
-    const who = driver.name ? `Driver ${driver.name}` : "Driver";
+    const who = driver.name ? `Courier ${driver.name}` : "Courier";
     return driver.pickupEta ? `${who} arriving about ${time(driver.pickupEta)}` : `${who} on the way`;
   }
   if (courier.status === "picked_up") return `${brand}: picked up`;

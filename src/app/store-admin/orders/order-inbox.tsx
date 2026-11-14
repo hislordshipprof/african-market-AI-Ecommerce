@@ -297,7 +297,7 @@ export function OrderInbox({
       const result = await pushReadyTimeAction(orderId);
       if (result.ok) {
         const when = new Date(result.readyEstimateAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-        const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The driver already on the way keeps the first time.", none: "" }[result.courier];
+        const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The courier already on the way keeps the first time.", none: "" }[result.courier];
         toast.success(`Ready by ${when}.${courier}`);
         pollOrders();
       } else {
