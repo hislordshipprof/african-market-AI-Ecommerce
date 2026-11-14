@@ -123,7 +123,7 @@ function EditModal({
       >
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">Edit product</DialogTitle>
-          <DialogDescription className="">
+          <DialogDescription>
             Changes are saved to the master catalog and recorded in the audit log.
           </DialogDescription>
         </DialogHeader>
@@ -179,7 +179,6 @@ function EditModal({
           <Button
             type="button"
             variant="ghost"
-            className=""
             onClick={() => {
               if (open && !isPending && !saveStarted.current) onClose();
             }}
