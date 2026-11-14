@@ -5,7 +5,7 @@ import { Prisma, platform, storeScoped, storeScopedRawQuery, storeScopedTransact
 import { sendEmail } from "../email/send";
 import { money } from "../format";
 import { inngest } from "../inngest/client";
-import { escapeHtml } from "../notifications/messages";
+import { escapeHtml } from "../format";
 import { isValidTimezone } from "../order/store-hours";
 import { localClock } from "./digest";
 import { inventoryReport, RUNNING_OUT_DAYS, storeWeek } from "./inventory-report";
