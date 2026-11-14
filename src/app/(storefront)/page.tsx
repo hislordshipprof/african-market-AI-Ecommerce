@@ -51,7 +51,7 @@ export default async function StorefrontPage() {
     <StorefrontShell store={store}>
       {!checkout.enabled && (
         <div className="sf-container" style={{ paddingBlock: "var(--sf-space-sm)" }}>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+          <div className="rounded-lg border border-line bg-raised px-4 py-3 text-sm text-ink">
             {checkout.message}
           </div>
         </div>

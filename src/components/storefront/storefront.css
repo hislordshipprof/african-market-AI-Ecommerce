@@ -135,12 +135,14 @@
 .sf-skip-link:focus {
   top: 16px;
 }
+/* The header is a neutral ground in both themes; primary is kept for the cart button. */
 .sf-header {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border-bottom: 1px solid var(--color-line);
 }
 .sf-header-main {
   min-height: 88px;
@@ -201,7 +203,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  background: var(--color-raised);
+  border: 1px solid var(--color-line-strong);
   padding: 8px 12px;
   border-radius: 999px;
   min-height: 44px;
@@ -213,6 +216,7 @@
   display: block;
   font-weight: 400;
   font-size: 13px;
+  color: var(--color-muted);
 }
 .sf-fulfillment {
   position: relative;
@@ -251,8 +255,8 @@
   min-width: 180px;
 }
 .sf-header .sf-header-cart {
-  background: var(--color-on-primary);
-  color: var(--color-primary-text);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
   min-width: 72px;
 }
 .sf-category-nav {
@@ -295,8 +299,8 @@
 .sf-search-input {
   height: 46px;
   border-radius: 999px;
-  background: var(--color-surface);
-  border: 1px solid transparent;
+  background: var(--color-bg);
+  border: 1px solid var(--color-line-strong);
   width: 100%;
   padding: 10px 42px;
   font-size: 14px;
@@ -481,7 +485,7 @@
   overflow: hidden;
   padding: 28px;
   color: #fff;
-  background: #15201a;
+  background: rgb(var(--sf-scrim));
 }
 .sf-offer img {
   object-fit: cover;
@@ -542,7 +546,7 @@
   position: relative;
   overflow: hidden;
   border-radius: 12px;
-  background: var(--color-soft);
+  background: var(--color-raised);
 }
 .sf-category-tile:first-child {
   grid-row: span 2;
@@ -1225,7 +1229,8 @@
   justify-content: space-between;
   margin-top: 24px;
   padding: 20px;
-  background: var(--color-soft);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
   border-radius: 12px;
 }
 .sf-add-bar > span {
@@ -1821,9 +1826,6 @@
 .sf-hero-photo {
   margin-bottom: 24px;
 }
-.sf-header-main :is(a, button):focus-visible {
-  outline-color: var(--color-on-primary);
-}
 @media (max-width: 767px) {
   .sf-hero-copy {
     padding-top: 32px;
@@ -1847,38 +1849,8 @@
   font-size: 32px;
 }
 
-/* Dark theme: the header sits on a dark surface so it is not the brightest thing on
-   the screen at night; primary stays on buttons and key accents. Light is unchanged. */
+/* Dark theme: selected chips and the search key. */
 @media (prefers-color-scheme: dark) {
-  .sf-storefront .sf-header {
-    background: var(--color-surface);
-    color: var(--color-ink);
-    border-bottom: 1px solid var(--color-line);
-  }
-  .sf-storefront .sf-header[data-compact="true"] {
-    background: color-mix(in srgb, var(--color-surface) 94%, transparent);
-  }
-  .sf-storefront .sf-header .sf-header-cart {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
-  }
-  .sf-storefront .sf-header-main :is(a, button):focus-visible,
-  .sf-storefront .sf-header :is(a, button, input):focus-visible {
-    outline-color: var(--color-primary);
-  }
-  .sf-window-chip {
-    background: var(--color-raised);
-    border: 1px solid var(--color-line-strong);
-    font-size: 13px;
-  }
-  .sf-window-chip small {
-    font-size: 13px;
-    color: var(--color-muted);
-  }
-  .sf-search-input {
-    background: var(--color-bg);
-    border-color: var(--color-line-strong);
-  }
   .sf-search-key {
     color: var(--color-ink);
     font-size: 13px;
@@ -1902,7 +1874,7 @@
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
   }
 }
-@media (prefers-color-scheme: dark) and (max-width: 767px) {
+@media (max-width: 767px) {
   /* 13px labels only fit the phone header column without the pin and chevron. */
   .sf-window-chip {
     width: 100%;
