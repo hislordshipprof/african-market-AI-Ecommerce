@@ -27,8 +27,8 @@ No Vercel, DNS, or plan setting is changed by this ticket.
 ## Owner steps
 
 1. Open the Vercel project, then Firewall. Hobby allows three custom rules. Use two, and leave the third free.
-2. Rule 1, first in order: path is `/api/webhooks/stripe` OR `/api/stripe/connect`. Log, then Deny once the log is quiet. These two move money or open a connected account, and neither has an application rate limit. Deny stops the request. A later rule does not run.
-3. Rule 2: path starts with `/api/auth` OR is `/api/invite/accept`. Log, then Challenge. Both already have an application limit (Better Auth's window, and `app_rate_limits` for invites). Challenge is the second layer, and a real person can pass it. OR is a custom-rule condition on every plan, so these two paths share one of the three Hobby rules.
+2. Rule 1, first in order: path is `/api/webhooks/stripe` OR `/api/stripe/connect`. Log only. These two move money or open a connected account, and neither has an application rate limit. The path alone also matches every real Stripe delivery and every owner onboarding, so a quiet log is not a reason to Deny. Keep the rule in log mode until an abuse-specific condition (one that real Stripe deliveries and owners never meet) is written into this ADR.
+3. Rule 2: path starts with `/api/auth` OR is `/api/invite/accept`. Log, then Challenge. Better Auth's window limits `/api/auth`. Invite accept has no application limit: only sending an invite is counted in `app_rate_limits`. Accept needs a signed-in, two-factor-verified session and a valid invite token, so Challenge is its only rate layer. For `/api/auth` Challenge is the second layer. A real person can pass it. OR is a custom-rule condition on every plan, so these two paths share one of the three Hobby rules.
 4. Do not add a WAF rate-limit rule or a persistent block on Hobby. Rate limiting is usage-priced. A persistent block is Pro and Enterprise only.
 5. Leave the managed OWASP ruleset off unless the project moves to Enterprise.
 6. Do not turn on the Cloudflare proxy for the app hostname. Image and asset hostnames stay as they are in ADR-0013.
@@ -36,5 +36,5 @@ No Vercel, DNS, or plan setting is changed by this ticket.
 
 ## Consequences
 
-- Application rate limits in `app_rate_limits` stay the source of truth for search, chat, invites, and payment setup. The Vercel rules are a second layer, not a replacement.
+- Application rate limits in `app_rate_limits` stay the source of truth for search, chat, sending invites, and payment setup. The Vercel rules are a second layer, not a replacement.
 - A Cloudflare proxy added later would have to be re-decided, because it would hide the visitor address Vercel writes into `x-forwarded-for`.
