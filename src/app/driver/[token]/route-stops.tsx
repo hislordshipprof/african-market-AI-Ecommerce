@@ -17,7 +17,6 @@ function Stop({ token, stop, index }: { token: string; stop: DriverStop; index: 
   const [photo, setPhoto] = useState<File | null>(null);
   const [isPending, startTransition] = useTransition();
   const delivered = stop.status === "DELIVERED";
-  const photoId = `photo-${stop.orderId}`;
 
   function finish(result: { ok: boolean; error?: string }, done: string) {
     if (!result.ok) {
@@ -109,21 +108,17 @@ function Stop({ token, stop, index }: { token: string; stop: DriverStop; index: 
           )}
           {stop.status === "OUT_FOR_DELIVERY" && (
             <>
-              <label
-                htmlFor={photoId}
-                className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-full border border-input px-4 text-sm font-medium"
-              >
+              <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-full border border-input px-4 text-sm font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
                 <Camera className="size-4" aria-hidden />
                 {photo ? "Photo added. Retake" : "Take delivery photo"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="sr-only"
+                  onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+                />
               </label>
-              <input
-                id={photoId}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="sr-only"
-                onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-              />
               <Button className="min-h-11 rounded-full" onClick={markDelivered} disabled={isPending || !photo}>
                 <CheckCircle2 className="size-4" aria-hidden />
                 Delivered

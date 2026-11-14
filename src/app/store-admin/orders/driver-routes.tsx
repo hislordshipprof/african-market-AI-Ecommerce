@@ -53,7 +53,7 @@ function SlotRow({ slot, onChange }: { slot: DriverRouteSlot; onChange: () => vo
             <li key={route.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2">
               <span className="flex items-center gap-2 text-sm text-foreground">
                 <Route className="size-4 text-muted-foreground" aria-hidden />
-                {route.driverName} · ends in {route.phoneLast4} · {deliveries(route.orders)}
+                {route.driverName} · phone ending {route.phoneLast4} · {deliveries(route.orders)}
               </span>
               <Button
                 variant="outline"

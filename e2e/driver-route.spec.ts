@@ -18,7 +18,7 @@ test.describe("Own-driver route link", () => {
       await row.getByLabel("Driver mobile").fill("(713) 555-2468");
       await row.getByRole("button", { name: "Text route link" }).click();
       await expect(page.getByText("Route texted to Kofi")).toBeVisible({ timeout: 15000 });
-      await expect(row.getByText("Kofi · ends in 2468 · 2 deliveries")).toBeVisible();
+      await expect(row.getByText("Kofi · phone ending 2468 · 2 deliveries")).toBeVisible();
       await row.getByRole("button", { name: "Revoke link" }).click();
       await expect(page.getByText("Kofi's link no longer works")).toBeVisible({ timeout: 15000 });
       await expect(row.getByText("2 deliveries waiting for a driver")).toBeVisible();
