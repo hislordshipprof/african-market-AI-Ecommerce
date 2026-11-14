@@ -20,16 +20,16 @@ import { captureSplit, courierFeeCents } from "@/lib/order/platform-fee";
 
 export type LedgerMonth = { key: string; label: string; startsAt: Date; endsAt: Date };
 
-const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
+export const LEDGER_MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
 /** The month to show: a strict YYYY-MM, else the current UTC month. */
 export function parseLedgerMonth(input: string | undefined, now: Date): string {
-  if (input && MONTH_KEY.test(input)) return input;
+  if (input && LEDGER_MONTH.test(input)) return input;
   return now.toISOString().slice(0, 7);
 }
 
 export function ledgerMonth(key: string): LedgerMonth {
-  const match = MONTH_KEY.exec(key);
+  const match = LEDGER_MONTH.exec(key);
   if (!match) throw new Error(`Not a month: ${key}`);
   const year = Number(match[1]);
   const month = Number(match[2]) - 1;
