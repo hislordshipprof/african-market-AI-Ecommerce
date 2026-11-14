@@ -214,4 +214,51 @@ describe.skipIf(!hasDb)("platform fee ledger (lane DB)", () => {
     });
     expect(ledger.total).toMatchObject({ orders: 7, platformNetCents: 225 + 117, feeRefundedCents: -1180 });
   });
+
+  it("never returns more fee than the order paid across its refunds", async () => {
+    // Application fee 185 on 2000: each half refund is round(92.5) = 93 in proportion, so the second is held to 92.
+    await asPlatformAdmin(async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeA, name: "Cap Customer" } });
+      const order = await tx.order.create({
+        data: {
+          storeId: storeA, customerId: customer.id, number: 30, subtotalCents: 1000, bufferCents: 0, totalAuthorizedCents: 3000,
+          fulfillment: "pickup", status: "REFUNDED", capturedAmountCents: 2000, serviceFeeCents: 99, platformFeeCents: 185,
+          readyAt: at("2030-03-02T12:00:00Z"),
+        },
+      });
+      for (const [key, created] of [["cap1", "2030-03-05T10:00:00Z"], ["cap2", "2030-03-06T10:00:00Z"]]) {
+        await tx.refundRequest.create({
+          data: {
+            storeId: storeA, orderId: order.id, paymentIntentId: "pi_cap", key: `${RUN}-${key}`, amountCents: 1000,
+            refundApplicationFee: true, state: "CREATED", providerStatus: "succeeded", createdAt: at(created), succeededAt: at(created),
+          },
+        });
+      }
+    });
+    const march = await platformFeeLedger("2030-03");
+    expect(march.rows.filter((row) => row.storeId === storeA && row.kind === "refund").map((row) => row.feeRefundedCents)).toEqual([-93, -92]);
+  });
+
+  it("stamps a refund's success time once, in UTC, whatever path records it", async () => {
+    const before = Date.now();
+    const id = await asPlatformAdmin(async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeB, name: "Stamp Customer" } });
+      const order = await tx.order.create({
+        data: { storeId: storeB, customerId: customer.id, number: 40, subtotalCents: 1000, bufferCents: 0, totalAuthorizedCents: 1000 },
+      });
+      const row = await tx.refundRequest.create({
+        data: { storeId: storeB, orderId: order.id, paymentIntentId: "pi_stamp", key: `${RUN}-stamp`, amountCents: 500, refundApplicationFee: true, state: "CREATED", providerStatus: "pending" },
+      });
+      expect(row.succeededAt).toBeNull();
+      return row.id;
+    });
+    const succeeded = await asPlatformAdmin(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('TimeZone', 'America/Chicago', true)`;
+      return tx.refundRequest.update({ where: { id }, data: { providerStatus: "succeeded" } });
+    });
+    expect(succeeded.succeededAt!.getTime()).toBeGreaterThanOrEqual(before - 5_000);
+    expect(succeeded.succeededAt!.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+    const later = await asPlatformAdmin((tx) => tx.refundRequest.update({ where: { id }, data: { feeRefundId: "fr_later", providerStatus: "succeeded" } }));
+    expect(later.succeededAt).toEqual(succeeded.succeededAt);
+  });
 });
