@@ -1589,6 +1589,44 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect((await storeScoped(storeId).cartLine.findFirst({ where: { cartId, variantId } }))?.qty).toBe(1);
   });
 
+  it("a tool call the schema refuses is saved with ids, not the handles the model sent (#597)", async () => {
+    const open = await conversationShowing([{ variantId }]);
+    const handle = open.handles[0].variantId!;
+    const { model } = strictModel((call) => {
+      if (call === 1) {
+        return [
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "call-bad-backup",
+            toolName: "add_to_cart",
+            input: JSON.stringify({ items: [{ variant_id: handle, qty: 1, backup_variant_id: null }] }),
+          },
+          { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+        ];
+      }
+      return [
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "text-1" },
+        { type: "text-delta", id: "text-1", delta: "That add failed." },
+        { type: "text-end", id: "text-1" },
+        { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+      ];
+    });
+    const response = await createChatHandler({ model })(request("add the egusi", { ip: "198.51.100.61", cookie: open.cookie }));
+    expect(response.status).toBe(200);
+    const streamed = await response.text();
+    const row = await storeScoped(storeId).aiConversation.findUniqueOrThrow({ where: { id: open.conversationId } });
+    const parts = (row.messages as Array<{ parts?: Array<{ type: string; state?: string; input?: unknown }> }>)
+      .flatMap((message) => message.parts ?? [])
+      .filter((part) => part.type === "tool-add_to_cart");
+    expect(parts.map((part) => part.state)).toEqual(["output-error"]);
+    expect(JSON.stringify(parts[0]?.input)).toContain(variantId);
+    expect(JSON.stringify(parts[0]?.input)).not.toContain(`"${handle}"`);
+    expect(streamed).not.toContain(`"variant_id":"${handle}"`);
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId: open.cartId } })).toBe(0);
+  });
+
   it("a mid-stream retry reaches the script with the failed attempt in history", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
     const seen: unknown[] = [];

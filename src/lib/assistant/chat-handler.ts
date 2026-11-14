@@ -626,11 +626,11 @@ async function handlesInToolCalls(messages: ModelMessage[], handles: ItemHandles
   }));
 }
 
-/** The model's tool input names handles; the stream and the saved transcript keep ids. */
+/** The model's tool input names handles; the stream and the saved transcript keep ids, also for a call the schema refused. */
 async function idsInToolInput(value: unknown, handles: ItemHandles): Promise<unknown> {
   if (!value || typeof value !== "object") return value;
   const part = value as { type?: string; input?: unknown };
-  if (part.type !== "tool-input-available") return value;
+  if (part.type !== "tool-input-available" && part.type !== "tool-input-error") return value;
   return { ...part, input: await handles.toIds(part.input) };
 }
 
