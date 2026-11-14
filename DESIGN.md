@@ -3,18 +3,18 @@ name: African Markets Platform storefronts
 description: Store-branded grocery storefronts. Three theme presets, Palm & Shea by default, each with light and dark themes.
 colors:
   # Default preset: Palm & Shea, light. Other presets and dark themes are in "Colors" below.
-  primary: "#1F5A43"
-  primary-deep: "#123726"
+  primary: "#0B6B3A"
+  primary-deep: "#0A4527"
   on-primary: "#FFFFFF"
   accent-mint: "#A8DDB5"
   on-accent: "#0F2A1B"
-  stone-bg: "#F3F4EF"
+  bg: "#FAFAF7"
   surface: "#FFFFFF"
-  raised: "#E7E9E2"
-  ink: "#15201A"
-  muted: "#55625A"
-  line: "#DCDFD6"
-  soft: "#E1EEE3"
+  raised: "#F1F1EC"
+  ink: "#1A1A18"
+  muted: "#5F5F58"
+  line: "#E4E4DD"
+  soft: "#EAF4EC"
   deal: "#B42335"
   success: "#2E7D4F"
 typography:
@@ -86,13 +86,14 @@ components:
 
 **Creative North Star: "The store you already trust, on your phone"**
 
-Every storefront should feel like the store itself, established and honest, not like a platform. The store's name, logo and brand color lead. The system around them stays quiet: stone backgrounds, deep ink, food photography doing the selling. Density follows the big delivery apps (DoorDash, Instacart, Weee!): square product images, pill buttons, a sticky cart bar, local food names next to English everywhere.
+Every storefront should feel like the store itself, established and honest, not like a platform. The store's name, logo and brand color lead. The system around them stays quiet: warm white or charcoal grounds, deep ink, food photography doing the selling. Colour goes only on actions (owner, 2026-11-13, #528). Density follows the big delivery apps (DoorDash, Instacart, Weee!): square product images, pill buttons, a sticky cart bar, local food names next to English everywhere.
 
 Rejected: yellow, amber, the AI purple/blue gradient, cream with terracotta, flag colors, Africa-map silhouettes, tribal fonts, patterns as wallpaper.
 
 **Key Characteristics:**
 - The store's brand color is the primary color, and the system keeps it AA-compliant.
-- Neutral, low-chroma grounds, so any store color and any photo sit well.
+- Neutral grounds with no more than a trace of tint: warm white in light, charcoal in dark. The header is neutral too.
+- Primary appears only on actions: buttons, links, selected states and small marks.
 - The accent covers under 5% of a screen.
 - Mobile-first, thumb-reach actions, motion that confirms rather than decorates.
 
@@ -103,53 +104,56 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 ### Palm & Shea (default)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #F3F4EF | #0D1410 |
-| surface | #FFFFFF | #1E2C23 |
-| raised | #E7E9E2 | #2B3F33 |
-| ink | #15201A | #EEF2EC |
-| muted | #55625A | #A3B1A7 |
-| line | #DCDFD6 | #35463B |
-| line-strong | (uses line) | #71907D |
-| primary | #1F5A43 | #6CC08F |
-| primary-deep | #123726 | #1D3A2B |
+| bg | #FAFAF7 | #121211 |
+| surface | #FFFFFF | #21211F |
+| raised | #F1F1EC | #30302D |
+| ink | #1A1A18 | #F2F2EE |
+| muted | #5F5F58 | #A8A8A0 |
+| line | #E4E4DD | #3A3A36 |
+| line-strong | (uses line) | #8A8A82 |
+| primary | #0B6B3A | #5FD08A |
+| primary-deep | #0A4527 | #1D3A2B |
 | accent | #A8DDB5 | #A8DDB5 |
-| soft | #E1EEE3 | #21412E |
+| soft | #EAF4EC | #1F2A23 |
 | deal | #B42335 | #F28793 |
-| success | #2E7D4F | #6CC08F |
+| success | #2E7D4F | #5FD08A |
+| photo-well | #F3F3EF | #ECEBE5 |
 
 ### Cocoa & Bottle Green (heritage)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #EFEDE8 | #120F0D |
-| surface | #FBFAF7 | #2D2621 |
-| raised | #E4E1DA | #403730 |
+| bg | #FAF9F7 | #131211 |
+| surface | #FFFFFF | #22201E |
+| raised | #F1EFEB | #33302D |
 | ink | #2A1D17 | #F1ECE5 |
-| muted | #6A5C53 | #B3A69A |
-| line | #DAD5CC | #48403A |
-| line-strong | (uses line) | #91847A |
+| muted | #675B53 | #B3A69A |
+| line | #E5E2DD | #3D3A36 |
+| line-strong | (uses line) | #8E8A85 |
 | primary | #0E3B2A | #66B791 |
 | primary-deep | #072419 | #1E3A2D |
 | accent | #E6C8BF | #E6C8BF |
-| soft | #E9E3DA | #493526 |
+| soft | #E8EFEA | #1F2A24 |
 | deal | #A1302A | #F0867D |
 | success | #2F6B45 | #66B791 |
+| photo-well | #F3F2EE | #EEEAE3 |
 
 ### Lagoon & Coral (any cuisine)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #F1F3F2 | #0C1314 |
-| surface | #FFFFFF | #1C2C2F |
-| raised | #E4E8E7 | #283E42 |
-| ink | #13252A | #E7F0F1 |
-| muted | #51666C | #9BB0B4 |
-| line | #D6DCDB | #32464A |
-| line-strong | (uses line) | #6D8F95 |
+| bg | #FAFAF9 | #111212 |
+| surface | #FFFFFF | #202121 |
+| raised | #F0F1F0 | #2F3030 |
+| ink | #13252A | #EEF1F1 |
+| muted | #51666C | #A5ABAC |
+| line | #E3E5E4 | #393B3B |
+| line-strong | (uses line) | #878D8E |
 | primary | #0F4A57 | #6FC2CF |
 | primary-deep | #082F38 | #103540 |
 | accent | #C23B52 | #F07F92 |
-| soft | #E0ECEC | #253E48 |
+| soft | #E6EFF0 | #1F2A2B |
 | deal | #C23B52 | #F18799 |
 | success | #0F6B3A | #6FC79A |
+| photo-well | #F3F3F1 | #EBEBE6 |
 
 ### Named Rules
 **The Readable Fill Rule.** Text on any colored fill (`primary`, `primary-deep`, `deal`, `success`) is computed: white or #0B0B0B, whichever has the higher contrast. No component hard-codes text color on a brand fill.
@@ -158,17 +162,19 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 
 **The Quiet Accent Rule.** The accent is a fill for promo bands and highlights only, never text, and under 5% of any screen.
 
-**The Dark Depth Rule.** In dark themes, `bg`, `surface` and `raised` sit at least 1.25:1 apart, ink stays at least 7:1 and muted at least 4.5:1 on each. `line` is the quiet divider; `line-strong` (dark only, at least 3:1 on every surface) edges inputs, selects, textareas, unselected chips and outlined or round buttons. Light themes have no `line-strong` and use `line`. A store's dark primary is nudged against `raised`, the lightest dark layer, so links stay AA on cards.
+**The Dark Depth Rule.** In dark themes, `bg`, `surface` and `raised` are neutral charcoal, adjacent layers at least 1.15:1 apart and `bg` to `raised` at least 1.4:1 (amended 2026-11-13, #528), ink stays at least 7:1 and muted at least 4.5:1 on each. `line` is the quiet divider; `line-strong` (dark only, at least 3:1 on every surface) edges inputs, selects, textareas, unselected chips and outlined or round buttons. Light themes have no `line-strong` and use `line`. A store's dark primary is nudged against `raised`, the lightest dark layer, so links stay AA on cards.
 
-**The Quiet Night Header Rule.** In dark themes the header sits on `surface` with ink text; primary is kept for the cart button and key accents. Header sublabels are at least 13px. Selected chips use the `soft` tint, a 2px primary ring and a check mark, so selection never relies on colour alone.
+**The Neutral Header Rule** (owner, 2026-11-13, #528). In both themes the header sits on `surface` with ink text and a `line` hairline, never a primary slab; primary is kept for the cart button and key accents. The fulfilment chip sits on `raised`, and the search field on `bg`, both edged with `line-strong` (`line` in light). Header sublabels are at least 13px. Selected chips use the `soft` tint, a 2px primary ring and a check mark, so selection never relies on colour alone.
 
 **The Text Primary Rule.** Primary used as text (links, chip labels, step chips) uses `primary-text`, computed from `primary`: it clears 4.5:1 on `bg`, `surface`, `raised` and `soft`, and in dark 5.5:1 on all four, so tinted tiles stay AA. Fills keep `primary`. Light presets already pass, so their `primary-text` equals `primary`.
 
-**The Photo Well Rule** (owner, 2026-11-10). Product images (cards, quick view, product page, aisle tiles) sit on `photo-well`, a neutral ground per preset. Light keeps the soft tint (#EBF3EC Palm & Shea); dark uses a warm off-white (#ECEBE5 Palm & Shea, #EEEAE3 Cocoa, #EBEBE6 Lagoon) with a quiet inset edge, so brown cut-outs keep their edges. Cart, basket and assistant-card thumbnails take the well in dark only; in light they keep their own grounds (`bg` for cart and basket, `raised` for assistant cards). Text on the well uses `on-photo-well`.
+**The Photo Well Rule** (owner, 2026-11-10). Product images (cards, quick view, product page, aisle tiles) sit on `photo-well`, a neutral ground per preset. Light uses a warm off-white a step below `bg` (#F3F3EF Palm & Shea); dark uses a warm off-white (#ECEBE5 Palm & Shea, #EEEAE3 Cocoa, #EBEBE6 Lagoon) with a quiet inset edge, so brown cut-outs keep their edges. Cart, basket and assistant-card thumbnails take the well in dark only; in light they keep their own grounds (`bg` for cart and basket, `raised` for assistant cards). Text on the well uses `on-photo-well`.
 
 **The Scrim Rule.** Shades over photos (hero, collection and category tiles) use `scrim` (#080A09, `--sf-scrim`) at the alpha the text needs, never a hard-coded black.
 
 **The Logo Plate Rule.** The header logo sits on a white plate (#FFFFFF) in both themes, so dark lettering reads in dark mode. Before showing it, the storefront samples the logo: a transparent logo needs a fifth of its marked pixels at 3:1 against the plate; a logo that is nearly all opaque brings its own panel, so its lettering is measured against that panel's main colour. A logo that fails shows the store's initials on `primary-deep` instead. The plate stays hidden until the check answers, so the header never flashes a logo it then replaces.
+
+**The Neutral Grounds Rule** (owner, 2026-11-13, #528). Large areas (page, header, category tiles, the add bar, the market band, maps, notices) use `bg`, `surface` or `raised`. `soft` keeps a trace of primary and is only for selected states, hover rows and small marks. Promo bands, collection cards and the hero may use `primary-deep`.
 
 **The Separate Semantics Rule.** Deal, success and error colors belong to the system, not the brand. Errors always carry an icon and text, never color alone.
 

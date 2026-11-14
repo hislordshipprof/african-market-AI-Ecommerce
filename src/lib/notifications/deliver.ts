@@ -1,10 +1,9 @@
-import { storeScoped, storeScopedTransaction } from "../db";
+import { NOTIFICATION_EXPIRE_MS, NOTIFICATION_REPLAY_MS, storeScoped, storeScopedTransaction } from "../db";
 import { orderTrackingUrl } from "./tracking-url";
 import { notificationChannels, type NotificationChannel } from "./channels";
 import type { NotifyOrder } from "./messages";
 import { isOrderNotifyEvent, type OrderNotifyEvent } from "./record";
 
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const RANK: Record<OrderNotifyEvent, number> = {
   placed: 0,
   accepted: 1,
@@ -64,7 +63,8 @@ async function loadOrder(storeId: string, orderId: string): Promise<NotifyOrder 
             timezone: true,
           },
         },
-        lines: { include: lineInclude },
+        // A fixed order keeps a re-rendered body identical, so a retry replays its idempotency key.
+        lines: { include: lineInclude, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       },
     });
     if (!order) return null;
@@ -105,7 +105,9 @@ async function claim(
       where: { orderId_event_channel: { orderId, event, channel } },
     });
     if (!row || (row.status !== "pending" && row.status !== "sending")) return null;
-    if (row.createdAt.getTime() <= Date.now() - TWO_HOURS_MS) {
+    // A `sending` row may have reached the provider: replay its key rather than expire it.
+    const expireMs = row.status === "pending" ? NOTIFICATION_EXPIRE_MS : NOTIFICATION_REPLAY_MS;
+    if (row.createdAt.getTime() <= Date.now() - expireMs) {
       await tx.notificationLog.update({
         where: { id: row.id },
         data: { status: "failed", reason: "expired" },
@@ -191,14 +193,10 @@ async function runChannel(
   }
   const prepared = channel.prepare(order, event, url, env);
   if (prepared.outcome !== "ready") {
-    if (prepared.outcome === "sent") {
-      await writeResult(storeId, claimed.id, "sent", null, prepared.providerMessageId);
-      return { status: "sent", reason: null };
-    }
     await writeResult(storeId, claimed.id, prepared.outcome, prepared.reason);
     return { status: prepared.outcome, reason: prepared.reason };
   }
-  const result = await channel.send(prepared.message, { idempotencyKey: `notif_${claimed.id}` });
+  const result = await channel.send(prepared.message, { idempotencyKey: `notif_${claimed.id}` }, env);
   await writeResult(
     storeId,
     claimed.id,
@@ -207,6 +205,16 @@ async function runChannel(
     result.outcome === "sent" ? result.providerMessageId : undefined,
   );
   return { status: result.outcome, reason: result.outcome === "sent" ? null : result.reason };
+}
+
+/** Fails the rows still open for an event: one channel's, or every channel's. */
+async function markRetriesExhausted(storeId: string, orderId: string, event: string, channel?: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await tx.notificationLog.updateMany({
+      where: { orderId, event, ...(channel ? { channel } : {}), status: { in: ["pending", "sending"] } },
+      data: { status: "failed", reason: "retries_exhausted" },
+    });
+  });
 }
 
 export async function deliverOrderNotification(
@@ -237,17 +245,7 @@ export async function deliverOrderNotification(
       await step.run(channel.kind, () => runChannel(channel, order, eventName, storeId, env));
     } catch {
       log("notification_step_failed", orderId, channel.kind, "retries_exhausted");
-      await storeScopedTransaction(storeId, async (tx) => {
-        await tx.notificationLog.updateMany({
-          where: {
-            orderId,
-            event: eventName,
-            channel: channel.kind,
-            status: { in: ["pending", "sending"] },
-          },
-          data: { status: "failed", reason: "retries_exhausted" },
-        });
-      });
+      await markRetriesExhausted(storeId, orderId, eventName, channel.kind);
     }
   }
 }
@@ -258,14 +256,5 @@ export async function onNotificationFailure(event: {
 }): Promise<void> {
   const data = event.data?.event?.data;
   if (!data?.storeId || !data.orderId || !data.event) return;
-  await storeScopedTransaction(data.storeId, async (tx) => {
-    await tx.notificationLog.updateMany({
-      where: {
-        orderId: data.orderId,
-        event: data.event,
-        status: { in: ["pending", "sending"] },
-      },
-      data: { status: "failed", reason: "retries_exhausted" },
-    });
-  });
+  await markRetriesExhausted(data.storeId, data.orderId, data.event);
 }

@@ -105,6 +105,10 @@ export function fakeUberDirect(opts: FakeUberDirectOptions) {
       if (hierarchy.parent_organization_id !== opts.customerId) return reply(400, { message: "parent_organization_id is invalid" });
       if (typeof info.name !== "string" || !info.name) return reply(400, { message: "name is invalid" });
       if (info.billing_type !== "BILLING_TYPE_CENTRALIZED") return reply(400, { message: "billing_type is invalid" });
+      // The sandbox refuses a second organization with the same name under one parent (probed 2026-11-14).
+      if (organizations.some((o) => (o.info as Json).name === info.name)) {
+        return reply(409, { code: "already-exists", message: "sibling org unit with this name already exists" });
+      }
       const organization = { organization_id: randomUUID(), info, hierarchy_info: hierarchy };
       organizations.push(organization);
       return reply(200, organization);

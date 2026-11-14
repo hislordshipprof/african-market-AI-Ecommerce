@@ -64,7 +64,7 @@ While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts 
 - **No tests for UI-only changes (owner, 2026-11-07).** Moving, restyling or centering an element, changing a button, copy or layout: write no test and add no snapshot. Check it in the browser and run typecheck, lint and build. Nothing more.
 - **Never build tooling for a test (owner, 2026-11-07).** No stub binaries, compiled files, re-implemented shell tools, parsers or harnesses in the repo to make a test pass or run faster (#351 committed a Rust copy of grep/sed/cat for one slow test). A slow or flaky test is shrunk or deleted with the owner's say. Never spend a fix round on test timing; report it to the coordinator instead.
 - **Reviewers flag test waste.** A review treats a new test outside the list above, or tooling added for a test, as a finding to remove, not a gap to fill. Never ask for a test per edge case.
-- Test doubles enforce the provider's real rules (wrong account, amount above the authorization, already captured or cancelled, signature checks). A fake that accepts anything hides bugs. Each external path also has at least one test against the real sandbox when the keys are in `.env.local`.
+- Test doubles enforce the provider's real rules (wrong account, amount above the authorization, already captured or cancelled, signature checks). A fake that accepts anything hides bugs. Each external path also has at least one test against the real sandbox when the keys are in `.env.local`. Live sandbox tests (`src/lib/**/*sandbox*.test.ts`) run only with `LIVE_SANDBOX=1`: CI sets it in the first `scripts/ci-main.sh` run of each UTC day, never on a branch. Run them by hand with `LIVE_SANDBOX=1 npx vitest run <file>`. A provider's quota or rate-limit refusal (a 429) is skipped with a warning naming the provider, never passed or failed (`providerSandbox` in `src/lib/test-live-provider.ts`, #591).
 
 If something fails and you cannot fix it, report it as failing with the output. Never report a check you did not run.
 
@@ -74,7 +74,7 @@ Don't run the code review on your own code. After you push, `scripts/build-ticke
 ## Finish
 1. Commit in small, meaningful commits. Add no AI attribution: no `Co-Authored-By:` trailer for any AI tool, no `Claude-Session:` link, no "Generated with" line (owner rule; `.githooks/commit-msg` strips them).
 2. Push the branch and open a PR: title = issue title; body = what changed, how each acceptance criterion is verified, anything deferred, `Closes #<n>`. No "Generated with" line or session link.
-3. Never push to `main` (a pre-push hook blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), and never close issues by hand. No agent stage merges, ship included. Only `scripts/merge-ticket.sh` merges, after the review gate and local-ci pass on the PR head.
+3. Never push to `main` (`.githooks/pre-push` blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), and never close issues by hand. No agent stage merges, ship included. Only `scripts/merge-ticket.sh` merges, after the review gate and local-ci pass on the PR head.
 4. Write `.builder/report-<n>.md` in the main checkout (the script tells you its path), and update it as you go so a killed run still leaves a record. It names the commit SHA checked, the QA and code-review verdict lines, every finding code with how it ended (fix commit, or follow-up issue), the PR URL, and open questions. Keep it under 50 lines.
 
 ### Migrations

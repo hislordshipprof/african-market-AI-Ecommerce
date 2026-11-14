@@ -1,21 +1,24 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Stripe from "stripe";
 import { sandboxConnectedAccountId } from "./test-sandbox-account";
+import { liveSandbox, providerSandbox } from "../test-live-provider";
 
 const hasKey = Boolean(process.env.STRIPE_SECRET_KEY);
 
-describe.skipIf(!hasKey)("saved card sandbox", () => {
+const sandbox = providerSandbox("Stripe");
+
+describe.skipIf(!liveSandbox || !hasKey)("saved card sandbox", () => {
   let stripe: Stripe;
   let accountId = "";
   const customers: string[] = [];
   const intents: string[] = [];
 
-  beforeAll(async () => {
+  beforeAll(sandbox.hook(async () => {
     stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
     accountId = await sandboxConnectedAccountId(stripe);
-  }, 120_000);
+  }), 120_000);
 
-  afterAll(async () => {
+  afterAll(sandbox.hook(async () => {
     if (!stripe) return;
     for (const id of intents) {
       try { await stripe.paymentIntents.cancel(id); } catch { /* already closed */ }
@@ -23,9 +26,9 @@ describe.skipIf(!hasKey)("saved card sandbox", () => {
     for (const id of customers) {
       try { await stripe.customers.del(id); } catch { /* already gone */ }
     }
-  }, 60_000);
+  }), 60_000);
 
-  it("an unticked confirm attaches nothing and a ticked confirm attaches visa 4242", async () => {
+  it("an unticked confirm attaches nothing and a ticked confirm attaches visa 4242", sandbox.test(async () => {
     const customer = await stripe.customers.create({ metadata: { user_id: `t248-${Date.now()}` } });
     customers.push(customer.id);
     const shared = {
@@ -56,5 +59,5 @@ describe.skipIf(!hasKey)("saved card sandbox", () => {
     const afterSaved = await stripe.customers.listPaymentMethods(customer.id, { type: "card" });
     expect(afterSaved.data).toHaveLength(1);
     expect(afterSaved.data[0]?.card?.last4).toBe("4242");
-  }, 60_000);
+  }), 60_000);
 });
