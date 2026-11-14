@@ -245,7 +245,7 @@ export interface GateRefusal {
 }
 
 /** Before any model call: the model is configured, the platform spend cap is not reached, and `rateKey` has sends left this hour. */
-export async function copilotGate(rateKey: string): Promise<GateRefusal | null> {
+export async function copilotGate(rateKey: string, perHour = SENDS_PER_HOUR): Promise<GateRefusal | null> {
   if (configMissing()) return { ok: false, code: "copilot_unavailable", message: UNAVAILABLE_MESSAGE };
   try {
     const spend = await assistantSpendState();
@@ -256,7 +256,7 @@ export async function copilotGate(rateKey: string): Promise<GateRefusal | null> 
   } catch {
     return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
   }
-  const limit = await takeRateLimit(rateKey, SENDS_PER_HOUR, HOUR_MS);
+  const limit = await takeRateLimit(rateKey, perHour, HOUR_MS);
   if (!limit.ok) {
     return {
       ok: false,
