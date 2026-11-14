@@ -2,7 +2,9 @@ import { tool } from "ai";
 import { z } from "zod";
 import { storeScoped } from "../db";
 import { listingLabel } from "./cards";
+import { storeMayUse } from "../billing/plan";
 import { MOVEMENT_DAYS, SALES_FLOOR, inventoryReport, type MovementRow } from "./inventory-report";
+import { reorderSuggestions, type ReorderSuggestions } from "./reorder";
 import { searchListingMatches, type ListingSearch } from "./search";
 import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ProposalKind } from "./types";
 
@@ -183,6 +185,22 @@ function reportResult(rows: MovementRow[]) {
   };
 }
 
+function reorderResult(result: ReorderSuggestions) {
+  return {
+    leadDays: result.leadDays,
+    coverDays: result.coverDays,
+    windowDays: result.windowDays,
+    note: "Suggested is units to order so stock lasts lead time plus cover at the last 28 days' pace. noCount means a status item marked low or out that sold; counts are not tracked. Nothing is ordered; the owner saves a list on the copilot page.",
+    total: result.rows.length,
+    listings: result.rows.slice(0, REPORT_ROWS).map((row) => ({
+      name: row.name,
+      onHand: row.onHand,
+      soldLast28Days: row.sold28,
+      suggested: row.suggested ?? "noCount",
+    })),
+  };
+}
+
 /** Records what the model saw, so the reply can be checked against it. */
 function recorded<T>(book: DraftBook, result: T): T {
   book.toolResults.push(JSON.stringify(result));
@@ -219,6 +237,23 @@ export function copilotTools(storeId: string, book: DraftBook) {
         }
         book.report.push(...rows.slice(0, REPORT_ROWS));
         return recorded(book, reportResult(rows));
+      },
+    }),
+    reorder_suggestions: tool({
+      description:
+        "What to reorder: for counted listings, units to order so stock lasts the store's lead time plus cover at the last 28 days' sales; status listings marked low or out that sold get noCount. Read only: orders nothing and changes no stock.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        let result: ReorderSuggestions;
+        try {
+          if (!(await storeMayUse(storeId, "reorder-suggestions"))) {
+            return recorded(book, { locked: true, note: "Reorder suggestions are on the Pro plan. The owner can upgrade on the Plan page." });
+          }
+          result = await reorderSuggestions(storeId);
+        } catch {
+          throw new Error("could not read reorder suggestions");
+        }
+        return recorded(book, reorderResult(result));
       },
     }),
     propose_stock_change: tool({

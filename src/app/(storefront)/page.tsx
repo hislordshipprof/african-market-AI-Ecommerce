@@ -19,8 +19,23 @@ import { SectionReveal } from "@/components/storefront/scroll-motion";
 import { MarketMarquee } from "@/components/storefront/marquee";
 import { ReviewsCarousel } from "@/components/storefront/reviews-carousel";
 import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
+import { headers } from "next/headers";
+import { listDirectoryStores } from "@/lib/directory/stores";
+import { storefrontUrl } from "@/lib/directory/links";
+import { DirectoryHome } from "@/components/directory/directory-home";
 
 export default async function StorefrontPage() {
+  const headerList = await headers();
+  // The proxy marks the root domain and www only when no store matched the request.
+  if (headerList.get("x-platform-root") === "1") {
+    const root = process.env.PLATFORM_ROOT_DOMAIN ?? "";
+    const host = headerList.get("host") ?? root;
+    const stores = (await listDirectoryStores()).flatMap((store) => {
+      const href = storefrontUrl(store.slug, root, host);
+      return href ? [{ ...store, href }] : [];
+    });
+    return <DirectoryHome stores={stores} />;
+  }
   const { store, suspended } = await getStoreWithStatus();
   const checkout = checkCheckoutReady(store.stripeOnboardingStatus);
   if (suspended)

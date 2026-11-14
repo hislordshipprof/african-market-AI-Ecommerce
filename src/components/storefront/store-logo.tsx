@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { storeInitials } from "@/lib/store-initials";
 import { useEffect, useState } from "react";
 import { contrastRatio } from "@/lib/theme";
 
@@ -70,15 +71,6 @@ function readableAgainst(rgba: Uint8ClampedArray, backdrop: string): boolean | n
     if (ratio >= 3) distinct++;
   }
   return marked > 0 ? distinct / marked >= 0.2 : null;
-}
-
-export function storeInitials(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((word) => word.charAt(0).toUpperCase())
-    .join("");
 }
 
 // The logo is decoded only as an image (never inlined or fetched as markup), so an
