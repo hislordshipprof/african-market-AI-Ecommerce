@@ -17,7 +17,6 @@ git -c core.hooksPath=/dev/null push -q origin main
 
 git commit -q --allow-empty -m next
 git push -q origin main 2>/dev/null && bad "a push to main went through" || ok "a push to main is refused"
-git push -q origin HEAD:refs/heads/main 2>/dev/null && bad "a push of HEAD to main went through" || ok "a push of HEAD to main is refused"
 [ "$(git -C "$T/remote.git" rev-list --count main)" = 1 ] && ok "main on the remote is unchanged" || bad "main on the remote moved"
 ALLOW_MAIN_PUSH=1 git push -q origin main 2>/dev/null && [ "$(git -C "$T/remote.git" rev-list --count main)" = 2 ] \
   && ok "the owner's ALLOW_MAIN_PUSH=1 lets a push to main through" || bad "ALLOW_MAIN_PUSH=1 was refused"

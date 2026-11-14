@@ -172,9 +172,8 @@ guard pr -R o/r merge 7 && bad "guard let pr -R merge through" || ok "guard refu
 guard api -X PUT repos/o/r/pulls/7/merge && bad "guard let the merge API through" || ok "guard refuses the merge API"
 guard pr checks 7 && ok "guard passes other gh calls" || bad "guard blocked pr checks"
 # #413 N1: gh takes its repo flag before the command too, so "pr" is not always the first argument.
-guard -R o/r pr merge 7 && bad "guard let -R pr merge through" || ok "guard refuses -R before pr merge"
-guard --repo o/r pr merge 7 && bad "guard let --repo pr merge through" || ok "guard refuses --repo before pr merge"
-guard --repo=o/r pr merge 7 && bad "guard let --repo= pr merge through" || ok "guard refuses --repo= before pr merge"
+guard -R o/r pr merge 7 || guard --repo o/r pr merge 7 || guard --repo=o/r pr merge 7 \
+  && bad "guard let a repo flag before pr merge through" || ok "guard refuses a repo flag before pr merge"
 guard -R o/r api -X PUT repos/o/r/pulls/7/merge && bad "guard let -R api merge through" || ok "guard refuses the merge API after a flag"
 # An alias the session defines expands inside the real gh, past the guard.
 guard alias set m 'pr merge' && bad "guard let an alias be set" || ok "guard refuses gh alias"
