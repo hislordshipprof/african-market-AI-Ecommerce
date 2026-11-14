@@ -85,7 +85,7 @@ describe.skipIf(!hasDb)("store payouts (#548, lane DB)", () => {
     const spy = vi.spyOn(fakeStripeProvider, "listPayouts");
     const result = await storePayouts(storeA);
     expect(spy).toHaveBeenCalledWith(accountA, 12);
-    expect(result.ok && result.payouts.map((p) => [p.amountCents, p.status])).toEqual([[3435, "in_transit"], [5884, "paid"]]);
+    expect(result.ok && result.payouts.map((p) => [p.amountCents, p.status])).toEqual([[3468, "in_transit"], [5884, "paid"]]);
   });
 
   it("breaks a payout into the store's orders, summing to the payout", async () => {

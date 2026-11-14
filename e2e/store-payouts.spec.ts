@@ -80,7 +80,7 @@ test.describe.serial("Store payouts dashboard (#548)", () => {
     await page.goto(`/store-admin/payouts?store=${SLUG}`);
     const list = page.getByTestId("payout-list");
     await expect(list.getByRole("link")).toHaveCount(2);
-    await expect(list).toContainText("$34.35");
+    await expect(list).toContainText("$34.68");
     await expect(list).toContainText("On the way");
     await shoot(page, "payouts-list");
 

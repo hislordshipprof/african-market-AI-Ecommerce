@@ -30,10 +30,10 @@ describe("payoutBreakdown", () => {
     expect(result.rows.reduce((sum, r) => sum + r.netCents, 0)).toBe(first.amountCents);
   });
 
-  it("shows a refund on an order paid in an earlier payout as the refund only", () => {
+  it("shows a refund on an order paid in an earlier payout as the refund only, less the fee Stripe credited back", () => {
     const result = payoutBreakdown(second.amountCents, data.transactions.get(second.id)!, orders);
     const b = result.rows.find((r) => r.number === 102)!;
-    expect(b).toMatchObject({ paidInPayout: false, goodsCents: 0, tipCents: 0, cardFeeCents: 0, refundsCents: 500, netCents: -500 });
+    expect(b).toMatchObject({ paidInPayout: false, goodsCents: 0, tipCents: 0, cardFeeCents: 0, refundsCents: 467, netCents: -467 });
     // Store delivery: the store keeps its delivery fee, so it stays with the goods.
     expect(result.rows.find((r) => r.number === 103)).toMatchObject({ goodsCents: 4200 - 117 - 200, cardFeeCents: 148, netCents: 3935 });
     expect(result.otherCents).toBe(0);

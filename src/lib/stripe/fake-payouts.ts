@@ -17,7 +17,7 @@ export function fakePayoutPaymentIntentId(key: string, accountId: string): strin
   return `pi_fake_payout_${key}_${accountId}`;
 }
 
-/** Two payouts: a paid one with orders a and b and a refund on a, and one in transit with c and a refund on b. */
+/** Two payouts: a paid one with orders a and b and a refund on a, and one in transit with c and a refund on b with its fee refund. */
 export function defaultFakePayouts(accountId: string): FakePayoutData {
   const pi = (key: string) => fakePayoutPaymentIntentId(key, accountId);
   const first = `po_fake_${accountId}_1`;
@@ -28,14 +28,18 @@ export function defaultFakePayouts(accountId: string): FakePayoutData {
   const refund = (id: string, key: string, amount: number): PayoutTransaction => ({
     id, type: "payment_refund", amountCents: -amount, feeCents: 0, netCents: -amount, paymentIntentId: pi(key),
   });
+  // Stripe credits a refunded application fee back to the store as an adjustment on the order's charge.
+  const feeRefund = (id: string, key: string, amount: number): PayoutTransaction => ({
+    id, type: "adjustment", amountCents: amount, feeCents: 0, netCents: amount, paymentIntentId: pi(key),
+  });
   return {
     payouts: [
-      { id: second, amountCents: 3435, arrivalDate: Date.UTC(2026, 10, 13) / 1000, status: "in_transit" },
+      { id: second, amountCents: 3468, arrivalDate: Date.UTC(2026, 10, 13) / 1000, status: "in_transit" },
       { id: first, amountCents: 5884, arrivalDate: Date.UTC(2026, 10, 6) / 1000, status: "paid" },
     ],
     transactions: new Map([
       [first, [payment(`txn_${first}_a`, "a", 5000, 321), payment(`txn_${first}_b`, "b", 3000, 795), refund(`txn_${first}_ra`, "a", 1000)]],
-      [second, [payment(`txn_${second}_c`, "c", 4200, 265), refund(`txn_${second}_rb`, "b", 500)]],
+      [second, [payment(`txn_${second}_c`, "c", 4200, 265), refund(`txn_${second}_rb`, "b", 500), feeRefund(`txn_${second}_fb`, "b", 33)]],
     ]),
   };
 }

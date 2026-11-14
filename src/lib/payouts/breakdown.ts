@@ -29,12 +29,12 @@ export type PayoutOrderRow = {
 
 export type PayoutBreakdown = {
   rows: PayoutOrderRow[];
-  /** Payout activity that is not one of the store's orders (adjustments, disputes). */
+  /** Payout activity that is not one of the store's orders (disputes, untraced adjustments). */
   otherCents: number;
   totalCents: number;
 };
 
-/** The store's orders in one payout, each from its captured split, plus refunds Stripe took in it. */
+/** The store's orders in one payout, each from its captured split, plus refunds (net of fee refunds) Stripe took in it. */
 export function payoutBreakdown(
   payoutAmountCents: number,
   transactions: PayoutTransaction[],
@@ -58,7 +58,8 @@ export function payoutBreakdown(
       row.tipCents = order.tipCents;
       row.cardFeeCents = split.storeCardFeeCents;
       row.netCents += split.storeReceivesCents;
-    } else if (txn.type === "payment_refund" || txn.type === "refund") {
+    } else if (txn.type === "payment_refund" || txn.type === "refund" || txn.type === "adjustment") {
+      // An adjustment on the order's charge is the platform fee Stripe credits back with a refund.
       row.refundsCents -= txn.netCents;
       row.netCents += txn.netCents;
     } else {
