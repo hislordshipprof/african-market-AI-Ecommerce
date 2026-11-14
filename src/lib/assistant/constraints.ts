@@ -23,6 +23,9 @@ export interface ShopperConstraints {
 
 export type ConstraintStatus = "ok" | "excluded" | "unknown";
 
+/** The schema caps one call at 10; this caps the conversation, keeping the newest. */
+const HAVE_AT_HOME_CAP = 50;
+
 const EMPTY: ShopperConstraints = { avoidAllergens: [], requireClaims: [], avoidIngredients: [], preferences: [], asked: {}, confirmed: [], haveAtHome: [] };
 
 function strings(value: unknown): string[] {
@@ -178,7 +181,7 @@ export async function changeConstraints(
       const kept = term.trim().toLowerCase();
       if (kept && !constraints.haveAtHome.includes(kept)) constraints.haveAtHome.push(kept);
     }
-    constraints.haveAtHome = constraints.haveAtHome.filter((term) => !removed.has(term));
+    constraints.haveAtHome = constraints.haveAtHome.filter((term) => !removed.has(term)).slice(-HAVE_AT_HOME_CAP);
     if (input.budgetCents != null) constraints.budgetCents = input.budgetCents;
     if (removed.has("budget")) delete constraints.budgetCents;
   });

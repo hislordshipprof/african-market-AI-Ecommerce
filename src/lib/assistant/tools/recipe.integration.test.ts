@@ -8,6 +8,7 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-ap
 import { createAssistantModel } from "../model";
 import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
 import { WEB_SEARCH_MICROS } from "../cost";
+import { readConstraints } from "../constraints";
 import { RECIPE_LOOKUPS_PER_STORE_DAY, saveLookedUpRecipe, takeLookupSlot } from "../recipes";
 import { failNextSpendWrites } from "../spend";
 import { setShopperNeeds, type AssistantContext } from "./execute";
@@ -169,6 +170,17 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     const back = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
     expect(back.inStock.map((item) => item.ingredient)).toContain("rice");
     expect(back).not.toHaveProperty("haveAtHome");
+  });
+
+  it("keeps only the 50 newest have-at-home items in a conversation", async () => {
+    const ctx = await conversation(storeA);
+    for (let batch = 0; batch < 6; batch++) {
+      await setShopperNeeds(ctx, { have_at_home: Array.from({ length: 10 }, (_, i) => `item ${batch * 10 + i}`) });
+    }
+    const kept = (await readConstraints(storeA, ctx.conversationId)).haveAtHome;
+    expect(kept).toHaveLength(50);
+    expect(kept[0]).toBe("item 10");
+    expect(kept.at(-1)).toBe("item 59");
   });
 
   it("asks for servings when they are unclear, without searching or looking up", async () => {
