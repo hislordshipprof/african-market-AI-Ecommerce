@@ -1,14 +1,6 @@
 import { quotedFrom } from "./email/from";
 import type { EmailMessage } from "./email/send";
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtml } from "./format";
 
 const LINK_PARAMS = ["token", "callbackURL", "errorCallbackURL", "newUserCallbackURL"];
 

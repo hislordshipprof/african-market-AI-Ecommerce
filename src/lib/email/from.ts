@@ -1,5 +1,6 @@
+// Whitespace collapses before control characters go, so a tab or newline between words stays a space.
 export function stripHeaderChars(value: string): string {
-  return value.replace(/["\\]/g, "").replace(/[\u0000-\u001F\u007F]/g, "").trim();
+  return value.replace(/\s+/g, " ").replace(/["\\]/g, "").replace(/[\u0000-\u001F\u007F]/g, "").trim();
 }
 
 /** RFC 5322 quoted display name so a comma or parenthesis is not a second address. */

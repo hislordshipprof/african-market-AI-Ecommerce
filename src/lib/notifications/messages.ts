@@ -1,6 +1,8 @@
 import { customerStatusLabel } from "../customer-account/order-history-view";
 import { quotedFrom, stripHeaderChars } from "../email/from";
-import { presetPrimary } from "../theme";
+import { escapeHtml, money } from "../format";
+import { fulfilledStatus } from "../order/constants";
+import { presetPrimary, readableFillColor } from "../theme";
 import type { OrderNotifyEvent } from "./record";
 
 export type NotifyLine = {
@@ -50,38 +52,14 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 const loggedTimezones = new Set<string>();
 const loggedMissingCapture = new Set<string>();
 
-export function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 export function smsStoreName(name: string): string {
   const mapped = name
     .replace(/[\u2018\u2019\u2032]/g, "'")
     .replace(/[\u201C\u201D\u2033]/g, '"')
-    .replace(/[\u0000-\u001F\u007F]/g, "")
     .replace(/\s+/g, " ")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
     .trim();
   return Array.from(mapped).slice(0, 40).join("");
-}
-
-function money(cents: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
-}
-
-function onFill(hex: string): string {
-  const channel = (start: number) => {
-    const s = parseInt(hex.slice(start, start + 2), 16) / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  const white = 1.05 / (luminance + 0.05);
-  const black = (luminance + 0.05) / 0.05;
-  return white >= black ? "#FFFFFF" : "#0B0B0B";
 }
 
 export function headerColor(store: NotifyOrder["store"]): string {
@@ -99,7 +77,6 @@ export function httpsLogo(url: string | null): string | null {
   }
 }
 
-/** Pickup is Awaiting pickup. Delivery is Ready. Matches fulfilledStatus(). */
 export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied" | "substitution">, fulfillment: string): string {
   switch (event) {
     case "placed":
@@ -107,7 +84,7 @@ export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied" 
     case "accepted":
       return "ACCEPTED";
     case "ready":
-      return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+      return fulfilledStatus(fulfillment);
     case "out_for_delivery":
       return "OUT_FOR_DELIVERY";
     case "delivered":
@@ -216,7 +193,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   const status = headline(order, event);
   const storeName = order.store.name;
   const color = headerColor(order.store);
-  const ink = onFill(color);
+  const ink = readableFillColor(color);
   const logo = httpsLogo(order.store.logoUrl);
   const subject = stripHeaderChars(`${storeName} order #${order.number}: ${status}`);
   const around = event === "accepted" ? readyAround(order) : null;
@@ -260,7 +237,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     parts.push(`<p>The store could not find everything you ordered. You have 10 minutes to choose; after that your swap preference applies.</p>`);
   }
   const linkText = event === "store_replied" ? "Read the reply" : event === "substitution" ? "Choose now" : "Track your order";
-  parts.push(`<p><a href="${escapeHtml(url)}">${linkText}</a></p>`);
+  parts.push(`<p><a href="${escapeHtml(url)}" style="display:inline-block;background:${escapeHtml(color)};color:${ink};padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">${linkText}</a></p>`);
   parts.push(`</div>`);
   parts.push(`<p style="font-size:12px">Powered by the Platform</p>`);
   return {

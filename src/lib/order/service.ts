@@ -5,7 +5,7 @@ import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/error
 import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
-import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
+import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
@@ -54,10 +54,6 @@ function storedCaptureAmount(
 ): { ok: true; capturedAmountCents: number } | { ok: false; error: typeof CAPTURE_STATUS_CHANGED } {
   if (capturedAmountCents == null) return { ok: false, error: CAPTURE_STATUS_CHANGED };
   return { ok: true, capturedAmountCents };
-}
-
-export function fulfilledStatus(fulfillment: string): "AWAITING_PICKUP" | "READY" {
-  return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 }
 
 function orderAuditWhere(entityId: string, action: string) {

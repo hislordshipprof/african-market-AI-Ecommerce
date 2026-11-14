@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderEmail, renderSms, type NotifyOrder } from "./messages";
+import { quotedFrom } from "../email/from";
+import { renderEmail, renderSms, smsStoreName, type NotifyOrder } from "./messages";
 
 const URL = "https://adas.markets.example/order/tok_abc";
 
@@ -56,5 +57,12 @@ describe("store delivery messages", () => {
     const html = renderEmail({ ...order("DELIVERED", 2560), serviceFeeCents: 60 }, "delivered", URL, "orders@example.com").html;
     expect(html).toContain("<p>Service fee $0.60.</p><p>Charged $25.60.</p>");
     expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).not.toContain("Service fee");
+  });
+});
+
+describe("store name in headers and SMS", () => {
+  it("a tab or newline between words becomes one space, not a joined word", () => {
+    expect(smsStoreName('"Best"\tMarket')).toBe('"Best" Market');
+    expect(quotedFrom("Best\nMarket", "orders@example.com")).toBe('"Best Market" <orders@example.com>');
   });
 });

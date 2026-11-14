@@ -28,6 +28,8 @@ async function seedDemoStores() {
       ownerPhotoUrl: null,
       neighborhood: "Parkside, Houston TX",
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
+      listed: true,
+      listingBlurb: "Nigerian and West African groceries in Houston since 2009: fresh yam, egusi, palm oil and stockfish.",
       stripeAccountId: null,
       stripeOnboardingStatus: "not_started",
       storeDeliveryEnabled: true,
@@ -76,6 +78,8 @@ async function seedDemoStores() {
       ownerPhotoUrl: null,
       neighborhood: "Parkside, Houston TX",
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
+      listed: true,
+      listingBlurb: "Nigerian and West African groceries in Houston since 2009: fresh yam, egusi, palm oil and stockfish.",
       hours: {
         monday: "9:00 AM - 8:00 PM",
         tuesday: "9:00 AM - 8:00 PM",
@@ -528,7 +532,7 @@ function requireSeedAuthEnv() {
  * write uses the id of the user the upsert returned, so a user that already
  * exists under a different id never causes a foreign-key failure.
  */
-async function seedUserWith2FA(opts: SeedUserOptions) {
+export async function seedUserWith2FA(opts: SeedUserOptions) {
   const hashedPassword = await hashPassword(opts.password);
 
   const user = await prisma.user.upsert({

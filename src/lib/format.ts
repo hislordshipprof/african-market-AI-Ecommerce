@@ -7,6 +7,15 @@ export function formatPrice(cents: number): string {
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 export const money = (cents: number) => usd.format(cents / 100);
 
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function formatWeight(grams: number): string {
   if (grams >= 1000) return `${(grams / 1000).toFixed(1).replace(/\.0$/, "")} kg`;
   return `${grams} g`;

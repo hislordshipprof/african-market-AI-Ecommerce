@@ -768,6 +768,42 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       }
     });
 
+    it("re-sends pending notifications in one batch, with an id that changes every 15 minutes", async () => {
+      const { sweepOrphanedAuthorized } = await import("./functions");
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+      const order = await createTestOrder();
+      const createdAt = new Date(Date.now() - 10 * 60_000);
+      await storeScoped(storeId).notificationLog.createMany({
+        data: [
+          { storeId, orderId: order.id, event: "placed", channel: "email", status: "pending", createdAt },
+          { storeId, orderId: order.id, event: "accepted", channel: "email", status: "sending", createdAt },
+        ],
+      });
+      const previous = process.env.INNGEST_EVENT_KEY;
+      process.env.INNGEST_EVENT_KEY = "test-key";
+      const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
+      const notifyBatches = () => send.mock.calls
+        .map(([payload]) => (Array.isArray(payload) ? payload : [payload]) as Array<{ id?: string; name: string; data: { orderId?: string } }>)
+        .filter((events) => events.some((event) => event.name === "order/notification.requested" && event.data.orderId === order.id));
+      try {
+        await handler({ step: makeFakeStep() });
+        const [first] = notifyBatches();
+        expect(notifyBatches()).toHaveLength(1);
+        expect(first.filter((event) => event.data.orderId === order.id)).toHaveLength(2);
+        // Inngest ignores a repeated id for 24 hours, so an event it took but never ran must get a new id next round.
+        send.mockClear();
+        await withMockedTime(new Date(Date.now() + 15 * 60_000), () => handler({ step: makeFakeStep() }));
+        const [second] = notifyBatches();
+        const ids = (events: typeof first) => events.filter((event) => event.data.orderId === order.id).map((event) => event.id).sort();
+        expect(ids(second)).toHaveLength(2);
+        expect(ids(second).some((id) => ids(first).includes(id))).toBe(false);
+      } finally {
+        send.mockRestore();
+        if (previous == null) delete process.env.INNGEST_EVENT_KEY;
+        else process.env.INNGEST_EVENT_KEY = previous;
+      }
+    });
+
     it("cancels an ACCEPTED order 24 h after acceptance with pick_timeout; fresh and scheduled orders are untouched", async () => {
       const { sweepOrphanedAuthorized } = await import("./functions");
       const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;

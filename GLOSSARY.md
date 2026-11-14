@@ -103,13 +103,16 @@ Product attributes Claude read from a master product's label photo and descripti
 **Listing draft**:
 One product Claude read from a store's shelf photo, matched to the master catalog (one match, several for the owner to pick, none, or already listed). It becomes a listing only when the owner sets or checks its price and taps Publish. The shelf photo stays private and is never a product image.
 
+**Reorder list**:
+The owner's saved list of what to buy from a wholesaler, started from the copilot's reorder suggestions and edited by the owner. One draft per store; saving replaces it. It orders nothing and changes no stock.
+
 **Stock proposal**:
 A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
 
 ## Assistants
 
 **Shopper assistant**:
-The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: only the customer's tap on a **Confirm card** places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
+The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
 _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 
 **Choice chips**:
@@ -133,11 +136,12 @@ A customer message that starts, as a whole word, with yes, ok, okay, sure, go ah
 **Recipe base**:
 The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog.
 
-**Confirm card**:
-The final card in the Shopper assistant's checkout, drawn by the server from a saved checkout snapshot: items, fulfillment, fees, hold amount and card. Tapping its Place order button is the only way an assistant order is placed.
+**Review card**:
+The last card in a Shopper assistant chat before paying, drawn by the server from the normal checkout quote: items, pickup time, fees, total and card hold. Its "Review and pay" button opens the normal checkout. It is information, not consent: it places nothing, and checkout shows the current basket (#247).
+_Avoid_: Confirm card (the parked 2026-11-04 design; replaced 2026-11-14)
 
 **Cancel window**:
-The 10 minutes after an assistant order is placed during which the customer can cancel it and the card hold is voided. The store is alerted when it ends.
+Not used. The assistant-only 10-minute cancel window was dropped on 2026-11-14 (#247), because assistant orders are placed by normal checkout.
 
 **Store copilot**:
 The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp.
@@ -151,6 +155,9 @@ A stock alert the Store copilot raises for the store owner: sold out, running lo
 
 **Confirm-request**:
 A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
+
+**Linked WhatsApp number**:
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
 
 ## Ordering and fulfillment
 
@@ -235,6 +242,10 @@ How a customer gets an order: store delivery, courier delivery, or pickup.
 
 **Store delivery**:
 Delivery done by the store's own driver, at a fee the store sets.
+
+**Slot**:
+A time window a customer books for pickup or store delivery, set by the store and shown in the store's timezone. Each slot takes a set number of orders; a cancelled order frees its place.
+_Avoid_: Time slot, Delivery window
 
 **Delivery radius**:
 The straight-line distance, in miles, from the store's confirmed coordinates. An address at exactly that distance is inside the area.

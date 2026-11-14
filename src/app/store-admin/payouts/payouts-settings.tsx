@@ -27,6 +27,7 @@ interface Props {
   storeSlug: string;
   stripeOnboardingStatus: string;
   hasStripeAccount: boolean;
+  children?: React.ReactNode;
 }
 
 const STATUS_CONFIG: Record<
@@ -78,6 +79,7 @@ export function PayoutsSettings({
   storeSlug,
   stripeOnboardingStatus,
   hasStripeAccount,
+  children,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -216,6 +218,7 @@ export function PayoutsSettings({
             )}
           </CardContent>
         </Card>
+        {children}
       </main>
     </div>
   );

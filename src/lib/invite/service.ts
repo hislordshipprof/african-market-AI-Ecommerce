@@ -10,6 +10,7 @@ import { sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
 import { effectivePlan, staffLimit } from "../billing/plan";
 import { auth } from "../auth";
+import { escapeHtml } from "../format";
 
 const INVITE_EXPIRY_HOURS = 72;
 const TOKEN_BYTES = 32;
@@ -114,15 +115,6 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
   });
 
   return { id: invite.id, tokenHash: hash };
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function buildInviteHtml(storeName: string, role: string, url: string): string {

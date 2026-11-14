@@ -4,6 +4,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
+import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
 import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
 
 /** One TTL for preview cleanup and the import-token claim. */
@@ -125,12 +127,15 @@ export function storeScoped(storeId: string) {
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
+    ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
     copilotConversation: wrapDelegate(storeId, prisma.copilotConversation),
     copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
     stockProposal: wrapDelegate(storeId, prisma.stockProposal),
     copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
     ownerReport: wrapDelegate(storeId, prisma.ownerReport),
     ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
+    reorderList: wrapDelegate(storeId, prisma.reorderList),
+    reorderListItem: wrapDelegate(storeId, prisma.reorderListItem),
     listingDraft: wrapDelegate(storeId, prisma.listingDraft),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     delivery: wrapDelegate(storeId, prisma.delivery),
@@ -330,7 +335,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -366,6 +371,8 @@ export async function storeScopedTransaction<T>(
       copilotDigest: tx.copilotDigest,
       ownerReport: tx.ownerReport,
       ownerReportItem: tx.ownerReportItem,
+      reorderList: tx.reorderList,
+      reorderListItem: tx.reorderListItem,
       listingDraft: tx.listingDraft,
       notificationLog: tx.notificationLog,
       delivery: tx.delivery,
@@ -432,6 +439,12 @@ export interface LockedStoreRow {
   deliveryRadiusMi: number;
   lat: number | null;
   lng: number | null;
+  hours: unknown;
+  timezone: string;
+  prepTimeMinutes: number;
+  pickupEnabled: boolean;
+  pickupSlotSettings: unknown;
+  storeDeliverySlotSettings: unknown;
 }
 
 export interface GeocodeCacheRow {
@@ -547,8 +560,15 @@ export async function lockStoreRow(
     delivery_radius_mi: unknown;
     lat: number | null;
     lng: number | null;
+    hours: unknown;
+    timezone: string;
+    prep_time_minutes: number;
+    pickup_enabled: boolean;
+    pickup_slot_settings: unknown;
+    store_delivery_slot_settings: unknown;
   }>>`
-    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng
+    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng,
+      hours, timezone, prep_time_minutes, pickup_enabled, pickup_slot_settings, store_delivery_slot_settings
     FROM stores
     WHERE id = ${storeId}
     FOR UPDATE
@@ -561,6 +581,12 @@ export async function lockStoreRow(
     deliveryRadiusMi: Number(row.delivery_radius_mi),
     lat: row.lat,
     lng: row.lng,
+    hours: row.hours,
+    timezone: row.timezone,
+    prepTimeMinutes: row.prep_time_minutes,
+    pickupEnabled: row.pickup_enabled,
+    pickupSlotSettings: row.pickup_slot_settings,
+    storeDeliverySlotSettings: row.store_delivery_slot_settings,
   };
 }
 
@@ -830,7 +856,10 @@ export async function markOrphanHoldChecked(storeId: string, cartId: string, pay
 }
 
 const NOTIFICATION_RESEND_MS = 5 * 60_000;
-const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
+/** A notification not yet sent to the provider is stale after 2 hours. */
+export const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
+/** A `sending` row replays its key until the providers' 24-hour idempotency window closes. */
+export const NOTIFICATION_REPLAY_MS = 24 * 60 * 60_000;
 
 /** Substitution prompts past their 10 minutes whose order still waits: the timer's backstop (#13). */
 export async function findExpiredSubstitutionRequests(limit: number): Promise<Array<{ id: string; storeId: string }>> {
@@ -876,13 +905,14 @@ export async function expireStaleOrderNotifications(opts?: {
 }): Promise<number> {
   if (opts?.storeIds && opts.storeIds.length === 0) return 0;
   const cutoff = new Date(Date.now() - NOTIFICATION_EXPIRE_MS);
+  const replayCutoff = new Date(Date.now() - NOTIFICATION_REPLAY_MS);
   const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
     const count = await tx.$executeRaw`
       UPDATE notification_logs
       SET status = 'failed', reason = 'expired', updated_at = CURRENT_TIMESTAMP
-      WHERE status IN ('pending', 'sending')
-        AND created_at <= ${cutoff}
+      WHERE ((status = 'pending' AND created_at <= ${cutoff})
+          OR (status = 'sending' AND created_at <= ${replayCutoff}))
         ${inStores}
     `;
     return typeof count === "number" ? count : 0;
@@ -1575,6 +1605,294 @@ export async function claimAssistantCapDay(day: string): Promise<boolean> {
     `;
     return rows.length > 0;
   });
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp inbound (#143). Called inside one platformAdminTransaction, so the
+// claim and the verification write commit or roll back together. Each query
+// selects only what the inbound path needs.
+
+type RawTx = Pick<PrismaClient, "$queryRaw" | "$executeRaw">;
+
+const WHATSAPP_INBOUND_RETENTION = Prisma.raw("INTERVAL '8 days'");
+const WHATSAPP_INBOUND_CLEANUP_BATCH = 100;
+
+/** True for the first delivery of a message id; false for a redelivery. */
+export async function claimInboundWhatsAppMessage(tx: RawTx, messageId: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    INSERT INTO whatsapp_inbound_messages (id, received_at)
+    VALUES (${messageId}, (now() AT TIME ZONE 'UTC'))
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id
+  `;
+  if (rows.length === 0) return false;
+  await tx.$executeRaw`
+    DELETE FROM whatsapp_inbound_messages
+    WHERE id IN (
+      SELECT id FROM whatsapp_inbound_messages
+      WHERE received_at < (now() AT TIME ZONE 'UTC') - ${WHATSAPP_INBOUND_RETENTION}
+      LIMIT ${WHATSAPP_INBOUND_CLEANUP_BATCH}
+    )
+  `;
+  return true;
+}
+
+export type OwnerLinkCodeOutcome =
+  | { kind: "no_pending" }
+  | { kind: "wrong_or_expired" }
+  | { kind: "verified"; storeId: string; userId: string; storeName: string };
+
+/**
+ * Tries a 6-digit code against the codes sent to this sender (newest first,
+ * at most five rows, at any store, verified rows included when they are
+ * changing number). The code decides the store. A match moves the pending
+ * number into the link and verifies it in one UPDATE guarded by the database
+ * clock; any other verified link for the same sender is deleted first, with
+ * an audit row on the store that lost it.
+ *
+ * A miss counts an attempt on each candidate and voids a code at the limit,
+ * unless `countMisses` is false. The inbound path passes false when the
+ * sender is already a verified owner: only the holder of the number can send
+ * from it, and the code was delivered to that same account, so a miss there
+ * is ordinary chat, not guessing. Counting it would let one owner's messages
+ * void another store's pending code.
+ */
+export async function verifyOwnerLinkByCode(
+  tx: RawTx,
+  waId: string,
+  code: string,
+  options: { countMisses: boolean } = { countMisses: true },
+): Promise<OwnerLinkCodeOutcome> {
+  const candidates = await tx.$queryRaw<Array<{
+    id: string;
+    store_id: string;
+    user_id: string;
+    verification_code_hash: string | null;
+    live: boolean;
+  }>>`
+    SELECT id, store_id, user_id, verification_code_hash,
+      (verification_expires_at > (now() AT TIME ZONE 'UTC')) AS live
+    FROM owner_whatsapp_links
+    WHERE pending_wa_id = ${waId} AND verification_code_hash IS NOT NULL
+    ORDER BY updated_at DESC, id
+    LIMIT 5
+    FOR UPDATE
+  `;
+  if (candidates.length === 0) return { kind: "no_pending" };
+
+  const matches = candidates.map((row) =>
+    linkCodeMatches({ storeId: row.store_id, userId: row.user_id, codeHash: row.verification_code_hash }, code),
+  );
+  const match = candidates.find((row, index) => matches[index] && row.live === true);
+
+  if (!match) {
+    if (!options.countMisses) return { kind: "wrong_or_expired" };
+    const ids = candidates.map((row) => row.id);
+    await tx.$executeRaw`
+      UPDATE owner_whatsapp_links
+      SET verification_attempts = verification_attempts + 1,
+        verification_code_hash = CASE
+          WHEN verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE verification_code_hash END,
+        verification_expires_at = CASE
+          WHEN verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE verification_expires_at END,
+        pending_phone_number = CASE
+          WHEN verified AND verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE pending_phone_number END,
+        pending_wa_id = CASE
+          WHEN verified AND verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE pending_wa_id END,
+        updated_at = (now() AT TIME ZONE 'UTC')
+      WHERE id IN (${Prisma.join(ids)})
+    `;
+    return { kind: "wrong_or_expired" };
+  }
+
+  const replaced = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+    DELETE FROM owner_whatsapp_links
+    WHERE wa_id = ${waId} AND verified AND id <> ${match.id}
+    RETURNING id, store_id
+  `;
+  const updated = await tx.$queryRaw<Array<{ store_id: string; user_id: string }>>`
+    UPDATE owner_whatsapp_links
+    SET verified = true,
+      verified_at = (now() AT TIME ZONE 'UTC'),
+      phone_number = pending_phone_number,
+      wa_id = pending_wa_id,
+      pending_phone_number = NULL,
+      pending_wa_id = NULL,
+      verification_code_hash = NULL,
+      verification_expires_at = NULL,
+      verification_attempts = 0,
+      updated_at = (now() AT TIME ZONE 'UTC')
+    WHERE id = ${match.id}
+      AND pending_wa_id = ${waId}
+      AND verification_code_hash = ${match.verification_code_hash}
+      AND verification_expires_at > (now() AT TIME ZONE 'UTC')
+    RETURNING store_id, user_id
+  `;
+  const row = updated[0];
+  if (!row) return { kind: "wrong_or_expired" };
+
+  const owner = await tx.$queryRaw<Array<{ email: string; name: string }>>`
+    SELECT u.email, s.name
+    FROM users u, stores s
+    WHERE u.id = ${row.user_id} AND s.id = ${row.store_id}
+  `;
+  await tx.$executeRaw`
+    INSERT INTO audit_logs (id, store_id, actor_id, actor_email, action, entity_type, entity_id, created_at)
+    VALUES (${crypto.randomUUID()}, ${row.store_id}, ${row.user_id}, ${owner[0]?.email ?? SYSTEM_ACTOR_EMAIL},
+      'whatsapp_link.verify', 'owner_whatsapp_link', ${match.id}, (now() AT TIME ZONE 'UTC'))
+  `;
+  for (const lost of replaced) {
+    await tx.$executeRaw`
+      INSERT INTO audit_logs (id, store_id, actor_id, actor_email, action, entity_type, entity_id, created_at)
+      VALUES (${crypto.randomUUID()}, ${lost.store_id}, ${SYSTEM_ACTOR_ID}, ${SYSTEM_ACTOR_EMAIL},
+        'whatsapp_link.replaced', 'owner_whatsapp_link', ${lost.id}, (now() AT TIME ZONE 'UTC'))
+    `;
+  }
+  return { kind: "verified", storeId: row.store_id, userId: row.user_id, storeName: owner[0]?.name ?? "" };
+}
+
+/**
+ * The verified link for a sender whose membership is still `owner`. Matches
+ * Meta's wa_id, or the E.164 number the owner entered.
+ */
+export async function findVerifiedOwnerLink(
+  tx: RawTx,
+  waId: string,
+): Promise<{ storeId: string; userId: string; role: string; storeName: string } | null> {
+  const e164 = `+${waId}`;
+  const rows = await tx.$queryRaw<Array<{ store_id: string; user_id: string; role: string; name: string }>>`
+    SELECT l.store_id, l.user_id, m.role, s.name
+    FROM owner_whatsapp_links l
+    JOIN store_memberships m ON m.store_id = l.store_id AND m.user_id = l.user_id
+    JOIN stores s ON s.id = l.store_id
+    WHERE l.verified AND (l.wa_id = ${waId} OR l.phone_number = ${e164}) AND m.role = 'owner'
+    ORDER BY l.verified_at DESC
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return { storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name };
+}
+
+/**
+ * Starts a code for `phoneNumber`: sets the pending number and a fresh code
+ * hash expiring on the database clock, plus an audit row. A verified link
+ * keeps its number and stays verified until the new code is answered; a row
+ * that was never verified shows the new number. Returns the row id.
+ */
+export async function upsertPendingOwnerLink(input: {
+  storeId: string;
+  userId: string;
+  actorEmail: string;
+  phoneNumber: string;
+  waId: string;
+  codeHash: string;
+  ttlMinutes: number;
+  auditAfter: Prisma.InputJsonValue;
+}): Promise<string> {
+  if (!Number.isInteger(input.ttlMinutes) || input.ttlMinutes <= 0) {
+    throw new Error("Link code TTL must be a positive integer.");
+  }
+  // Integer is validated above. Prisma.raw does not bind it as a parameter.
+  const ttl = Prisma.raw(`INTERVAL '${input.ttlMinutes} minutes'`);
+  return storeScopedTransaction(input.storeId, async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      INSERT INTO owner_whatsapp_links (
+        id, store_id, user_id, phone_number, wa_id, pending_phone_number, pending_wa_id, verified, verified_at,
+        verification_code_hash, verification_expires_at, verification_attempts, created_at, updated_at
+      ) VALUES (
+        ${crypto.randomUUID()}, ${input.storeId}, ${input.userId}, ${input.phoneNumber}, ${input.waId},
+        ${input.phoneNumber}, ${input.waId}, false, NULL,
+        ${input.codeHash}, (now() AT TIME ZONE 'UTC') + ${ttl}, 0, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
+      )
+      ON CONFLICT (store_id, user_id) DO UPDATE SET
+        phone_number = CASE WHEN owner_whatsapp_links.verified
+          THEN owner_whatsapp_links.phone_number ELSE EXCLUDED.phone_number END,
+        wa_id = CASE WHEN owner_whatsapp_links.verified
+          THEN owner_whatsapp_links.wa_id ELSE EXCLUDED.wa_id END,
+        pending_phone_number = EXCLUDED.pending_phone_number,
+        pending_wa_id = EXCLUDED.pending_wa_id,
+        verification_code_hash = EXCLUDED.verification_code_hash,
+        verification_expires_at = EXCLUDED.verification_expires_at,
+        verification_attempts = 0,
+        updated_at = EXCLUDED.updated_at
+      RETURNING id
+    `;
+    const id = rows[0]?.id;
+    if (!id) throw new Error("owner link upsert returned no row");
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.userId,
+        actorEmail: input.actorEmail,
+        action: "whatsapp_link.start",
+        entityType: "owner_whatsapp_link",
+        entityId: id,
+        after: input.auditAfter,
+      },
+    });
+    return id;
+  });
+}
+
+/** Deletes the member's link, with an audit row when one existed. */
+export async function deleteOwnerLinkForMember(storeId: string, userId: string, actorEmail: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    const removed = await tx.$queryRaw<Array<{ id: string }>>`
+      DELETE FROM owner_whatsapp_links
+      WHERE store_id = ${storeId} AND user_id = ${userId}
+      RETURNING id
+    `;
+    if (!removed[0]) return;
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: userId,
+        actorEmail,
+        action: "whatsapp_link.remove",
+        entityType: "owner_whatsapp_link",
+        entityId: removed[0].id,
+      },
+    });
+  });
+}
+
+/** The member's link for the store admin page; `code_live` is judged on the database clock. */
+export async function readOwnerLink(storeId: string, userId: string): Promise<{
+  phoneNumber: string;
+  pendingPhoneNumber: string | null;
+  verified: boolean;
+  verifiedAt: Date | null;
+  codeLive: boolean;
+} | null> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.$queryRaw<Array<{
+      phone_number: string;
+      pending_phone_number: string | null;
+      verified: boolean;
+      verified_at: Date | null;
+      code_live: boolean;
+    }>>`
+      SELECT phone_number, pending_phone_number, verified, verified_at,
+        (verification_code_hash IS NOT NULL
+          AND verification_expires_at > (now() AT TIME ZONE 'UTC')) AS code_live
+      FROM owner_whatsapp_links
+      WHERE store_id = ${storeId} AND user_id = ${userId}
+    `,
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    phoneNumber: row.phone_number,
+    pendingPhoneNumber: row.pending_phone_number,
+    verified: row.verified,
+    verifiedAt: row.verified_at,
+    codeLive: row.code_live === true,
+  };
 }
 
 /** Creates the store's billing row if missing and locks it for this transaction (#494). */
