@@ -21,12 +21,16 @@ cp "$ROOT/.env.local" "$WT/.env.local"
 cd "$WT" || exit 1
 # CI_MAIN_LAST_FILE: ci-local.sh reads it once it holds the lock. If a later ci-main.sh has written a newer commit
 # there by then, this run stops without running the suite, so main runs no longer pile up in the queue.
-if CI_SCOPE=full CI_DB=main E2E_PORT="${CI_MAIN_PORT:-3400}" CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" \
-  CI_MAIN_LAST_FILE="$ROOT/.builder/ci-main-last" bash "$ROOT/scripts/ci-local.sh" > "$LOG" 2>&1; then
+# The exit status, not the log, says it was skipped: a failing test's output can contain the word.
+. "$ROOT/scripts/ci-scope.sh"
+rc=0
+CI_SCOPE=full CI_DB=main E2E_PORT="${CI_MAIN_PORT:-3400}" CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" \
+  CI_MAIN_LAST_FILE="$ROOT/.builder/ci-main-last" bash "$ROOT/scripts/ci-local.sh" > "$LOG" 2>&1 || rc=$?
+if [ "$rc" = 0 ]; then
   echo "ci-main PASSED on $SHA"
   exit 0
 fi
-if grep -q "local-ci SUPERSEDED" "$LOG"; then
+if [ "$rc" = "$CI_SUPERSEDED" ]; then
   echo "ci-main skipped $SHA: a newer run on main is queued"
   exit 0
 fi
