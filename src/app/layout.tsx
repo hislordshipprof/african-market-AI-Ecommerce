@@ -1,8 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Figtree, Geist } from "next/font/google";
 import { headers } from "next/headers";
 import { findStore } from "@/lib/get-store";
 import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
+import { pwaMetadata, themeColor } from "@/lib/pwa/manifest";
+import { ServiceWorker } from "@/components/pwa/service-worker";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 import { cn } from "@/lib/utils";
@@ -26,7 +28,14 @@ export async function generateMetadata(): Promise<Metadata> {
   const slug = headerList.get("x-store-slug");
   if (!slug) return { title: "Store not found" };
   const store = await findStore(slug);
-  return { title: store?.name ?? "Store not found" };
+  if (!store) return { title: "Store not found" };
+  return { title: store.name, ...pwaMetadata(store, "storefront") };
+}
+
+export async function generateViewport(): Promise<Viewport> {
+  const slug = (await headers()).get("x-store-slug");
+  const store = slug ? await findStore(slug) : null;
+  return store ? { themeColor: themeColor(store) } : {};
 }
 
 function themeToCss(vars: Record<string, string>): string {
@@ -72,6 +81,7 @@ export default async function RootLayout({
       <body>
         {children}
         <Toaster />
+        <ServiceWorker />
       </body>
     </html>
   );
