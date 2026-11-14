@@ -17,8 +17,8 @@ import { money } from "@/lib/format";
 export const metadata = { title: "Fee ledger — Platform Admin" };
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
-const TH = "px-3 py-3 font-medium text-muted-foreground";
-const NUM = "px-3 py-3 text-right tabular-nums whitespace-nowrap";
+const TH = "px-2.5 py-3 font-medium text-muted-foreground";
+const NUM = "px-2.5 py-3 text-right tabular-nums whitespace-nowrap";
 
 const utcDay = (at: Date) => at.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -92,7 +92,7 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
 
       <h2 className="mb-3 mt-8 text-sm font-semibold text-muted-foreground">Totals by store</h2>
       <div className="overflow-x-auto rounded-xl border border-border bg-card">
-        <table className="w-full min-w-[64rem] text-left text-sm" data-testid="ledger-store-totals">
+        <table className="w-full min-w-[60rem] text-left text-sm" data-testid="ledger-store-totals">
           <thead className="border-b border-border bg-muted">
             <tr>
               <th scope="col" className={TH}>Store</th>
@@ -110,7 +110,7 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
             ) : (
               ledger.stores.map((store) => (
                 <tr key={store.storeId} className="border-b border-border last:border-0">
-                  <th scope="row" className="px-3 py-3 font-medium text-foreground">{store.storeName}</th>
+                  <th scope="row" className="px-2.5 py-3 font-medium text-foreground">{store.storeName}</th>
                   <td className={NUM}>{store.orders}</td>
                   <AmountCells values={store} />
                 </tr>
@@ -119,7 +119,7 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
           </tbody>
           <tfoot className="border-t border-border bg-muted font-semibold">
             <tr data-testid="ledger-month-total">
-              <th scope="row" className="px-3 py-3 text-foreground">All stores</th>
+              <th scope="row" className="px-2.5 py-3 text-foreground">All stores</th>
               <td className={NUM}>{ledger.total.orders}</td>
               <AmountCells values={ledger.total} />
             </tr>
@@ -141,7 +141,7 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
-          <table className="w-full min-w-[72rem] text-left text-sm" data-testid="ledger-rows">
+          <table className="w-full min-w-[60rem] text-left text-sm" data-testid="ledger-rows">
             <thead className="border-b border-border bg-muted">
               <tr>
                 <th scope="col" className={TH}>Date (UTC)</th>
@@ -154,10 +154,10 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
             <tbody>
               {rows.map((row) => (
                 <tr key={`${row.kind}-${row.id}`} className="border-b border-border last:border-0">
-                  <td className="whitespace-nowrap px-3 py-3 tabular-nums text-muted-foreground">{utcDate(row.at)}</td>
-                  <td className="px-3 py-3 text-foreground">{row.storeName}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-foreground">#{row.orderNumber}</td>
-                  <td className="px-3 py-3 text-foreground">{ROW_LABELS[row.kind]}</td>
+                  <td className="whitespace-nowrap px-2.5 py-3 tabular-nums text-muted-foreground">{utcDate(row.at)}</td>
+                  <td className="px-2.5 py-3 text-foreground">{row.storeName}</td>
+                  <td className="whitespace-nowrap px-2.5 py-3 text-foreground">#{row.orderNumber}</td>
+                  <td className="px-2.5 py-3 text-foreground">{ROW_LABELS[row.kind]}</td>
                   <AmountCells values={row} />
                 </tr>
               ))}
