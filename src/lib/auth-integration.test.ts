@@ -355,6 +355,10 @@ describe("auth integration (real DB, app_runtime)", () => {
   it("a shopper on a store's custom domain can sign in by magic link", async () => {
     const origin = `http://${storeDomain}`;
     const onDomain = { "x-custom-domain": storeDomain, host: storeDomain, origin };
+    // Earlier tests mailed this inbox past its cap of 5 links in 10 minutes.
+    await authPrisma.$executeRaw`DELETE FROM verifications
+      WHERE CASE WHEN left(identifier, 11) = 'magic-link:'
+        THEN value::jsonb->>'email' = ${customerEmail} ELSE false END`;
     const res = await authPost(
       "/sign-in/magic-link",
       { email: customerEmail, callbackURL: "/account" },
