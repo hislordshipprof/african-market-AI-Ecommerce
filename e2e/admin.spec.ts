@@ -765,7 +765,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Catalog review", "Refunds", "Orders to check", "Messages"];
+  const MENU = ["Home", "Stores", "Applications", "Catalog review", "Refunds", "Orders to check", "Messages"];
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -776,6 +776,7 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin", "Home"],
       ["/admin/stores", "Stores"],
       ["/admin/stores/new", "Stores"],
+      ["/admin/applications", "Applications"],
       ["/admin/catalog/review", "Catalog review"],
       ["/admin/orders", "Refunds"],
       ["/admin/orders/check", "Orders to check"],
@@ -786,7 +787,7 @@ test.describe("Admin shell (authenticated)", () => {
       const menu = page.getByRole("navigation", { name: "Admin" });
       await expect(menu.getByRole("link")).toHaveText(MENU);
       await expect(menu.locator("[aria-current='page']")).toHaveText(current);
-      await expect(page.getByText("admin@platform.test")).toBeVisible();
+      await expect(page.getByText("admin@platform.test", { exact: true })).toBeVisible();
     }
   });
 
