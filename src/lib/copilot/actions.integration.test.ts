@@ -308,6 +308,22 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect(await storeScoped(storeAId).stockProposal.count({ where: { clientMessageId: messageId } })).toBe(1);
   }, 60_000);
 
+  it("stores each turn's cost on the reply and adds it to the conversation, for AI oversight (#544)", async () => {
+    script([{ kind: "text", text: "Nothing to change.", inputTokens: 1000, outputTokens: 100 }]);
+    const sent = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "how is the shop" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    const row = await storeScoped(storeAId).copilotConversation.findUniqueOrThrow({ where: { id: sent.conversationId } });
+    const stored = row.messages as Array<{ role: string; costMicros?: number }>;
+    // Haiku 5.5: 1,000 input tokens at $0.10 per million and 100 output tokens at $0.50 per million.
+    expect(stored.at(-1)).toMatchObject({ role: "assistant", costMicros: 150 });
+    expect(stored.at(-2)?.costMicros).toBeUndefined();
+    const previous = stored.slice(0, -2).filter((message) => message.role === "assistant");
+    expect(previous.every((message) => typeof message.costMicros === "number")).toBe(true);
+    expect(Number(row.costMicros)).toBeGreaterThanOrEqual(150);
+    expect(row.tokensIn).toBeGreaterThanOrEqual(1000);
+  }, 60_000);
+
   it("a model failure after a drafted proposal writes nothing", async () => {
     const messageId = crypto.randomUUID();
     const beforeAudit = await storeScoped(storeAId).auditLog.count({

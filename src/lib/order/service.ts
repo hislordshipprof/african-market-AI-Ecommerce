@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type Order, type OrderLine } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
@@ -9,7 +9,7 @@ import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, ty
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
-import { scheduleCourierDispatch, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
+import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { captureCharge } from "./substitution-pricing";
@@ -46,7 +46,7 @@ type TransitionalStatus = "CAPTURING" | "CANCELLING";
 const CAPTURE_STATUS_CHANGED = "Order status changed during capture";
 
 /** Stock writes wait on listing locks, so these transactions cannot use Prisma's 5-second default. */
-const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
+export const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
 
 /** A capture result may report this amount only when the order row already stored it. */
 function storedCaptureAmount(
@@ -130,9 +130,9 @@ async function finalizeCancelledOrder(
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status === "CANCELLED" || !from.includes(current.status as TransitionalStatus)) {
-      return { wrote: false, notify: false };
+      return { wrote: false, notify: false, courier: false };
     }
-    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false };
+    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false, courier: false };
     const existing = await tx.auditLog.findFirst({ where: orderAuditWhere(orderId, action) });
     await tx.order.update({
       where: { id: orderId },
@@ -150,9 +150,11 @@ async function finalizeCancelledOrder(
     }
     await releaseOrderStock(tx, storeId, orderId);
     const notify = await recordOrderNotification(tx, storeId, orderId, "cancelled");
-    return { wrote: true, notify };
+    return { wrote: true, notify, courier: current.fulfillment === "courier" };
   }, LEDGER_TRANSACTION);
   if (outcome.notify) scheduleOrderNotification(storeId, orderId, "cancelled");
+  // A courier booked at packing start (#562) is cancelled with the order.
+  if (outcome.courier) scheduleCourierCancel(storeId, orderId);
   return { wrote: outcome.wrote };
 }
 
@@ -275,7 +277,7 @@ function isTerminalRefundStatus(status: string): boolean {
 }
 
 /** Statuses a picker can tick or short lines in. */
-const PICKABLE_STATUSES: string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
+export const PICKABLE_STATUSES: string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
 
 const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
@@ -299,6 +301,13 @@ const NAMED_VARIANT = {
 
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
+  deliveries: {
+    where: { status: { not: "cancelled" } },
+    select: { provider: true, status: true, pickupReadyAt: true, courierJson: true },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+  },
   lines: {
     include: {
       substitutedVariant: NAMED_VARIANT,
@@ -383,15 +392,86 @@ export async function acceptOrder(
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
+/** Packing starts with the first line picked or marked short: a courier order books its courier then (#562). */
+function startPackingData(order: { status: string }) {
+  return order.status === "ACCEPTED" ? { pickingStartedAt: new Date() } : {};
+}
+
+function packingStarted(order: { status: string; fulfillment: string }): boolean {
+  return order.status === "ACCEPTED" && order.fulfillment === "courier";
+}
+
+/** What a pick or short sets off once its transaction commits. */
+export type PickEffects = {
+  orderId: string;
+  packing: boolean;
+  substitution?: { request: { id: string; expiresAt: Date }; notify: boolean };
+};
+
+type PickTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
+
+/** A batched order (#564) is picked from its batch only; a separate pick would race the combined list. */
+export const ORDER_IN_BATCH = "This order is in a batch. Pick it from the batch screen";
+
+/** Ticks one whole line in the caller's transaction, which holds the store lock. */
+export async function pickLineInTx(tx: PickTx, line: OrderLine, order: Order): Promise<{ orderStatus: OrderStatus; effects: PickEffects }> {
+  await tx.orderLine.update({
+    where: { id: line.id },
+    data: { status: "picked", qtyPicked: line.qtyOrdered },
+  });
+  if (order.status === "ACCEPTED") {
+    await tx.order.update({
+      where: { id: order.id },
+      data: { status: "PICKING", ...startPackingData(order) },
+    });
+  }
+  // Picking goes on while a customer answers a substitution prompt.
+  const orderStatus = order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING";
+  return { orderStatus, effects: { orderId: order.id, packing: packingStarted(order) } };
+}
+
+/** Marks one line short in the caller's transaction and opens its #13 prompt. */
+export async function shortLineInTx(
+  tx: PickTx,
+  storeId: string,
+  line: OrderLine,
+  order: Order,
+  qtyFound: number,
+): Promise<{ orderStatus: OrderStatus; effects: PickEffects }> {
+  const request = await openSubstitutionRequest(tx, storeId, line, qtyFound, order);
+  await tx.orderLine.update({
+    where: { id: line.id },
+    data: { status: "short", qtyPicked: qtyFound },
+  });
+  await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING", ...startPackingData(order) } });
+  await settleShortLine(tx, storeId, line.id, line.qtyOrdered - qtyFound);
+  const notify = await recordSubstitutionPrompt(tx, storeId, order.id);
+  return {
+    orderStatus: "SUBSTITUTION_PENDING",
+    effects: { orderId: order.id, packing: packingStarted(order), substitution: { request, notify } },
+  };
+}
+
+export function runPickEffects(storeId: string, effects: PickEffects[]): void {
+  for (const effect of effects) {
+    if (effect.packing) scheduleCourierPacking(storeId, effect.orderId);
+    if (!effect.substitution) continue;
+    const { request, notify } = effect.substitution;
+    scheduleSubstitutionTimer(storeId, effect.orderId, request.id, request.expiresAt);
+    if (notify) scheduleOrderNotification(storeId, effect.orderId, "substitution", request.id);
+  }
+}
+
 export async function markLinePicked(
   storeId: string,
   lineId: string,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx): Promise<
+    { ok: true; orderStatus: OrderStatus; effects: PickEffects } | { ok: false; error: string }
+  > => {
     await lockStoreRow(tx, storeId);
 
-    const lines = await tx.orderLine.findMany({ where: { id: lineId } });
-    const line = lines[0];
+    const line = await tx.orderLine.findUnique({ where: { id: lineId } });
     if (!line) return { ok: false, error: "Order line not found" };
     if (line.status !== "pending") {
       return { ok: false, error: `Line already resolved (${line.status})` };
@@ -402,22 +482,13 @@ export async function markLinePicked(
     if (!PICKABLE_STATUSES.includes(order.status)) {
       return { ok: false, error: `Cannot pick lines for order in status ${order.status}` };
     }
+    if (order.pickBatchId) return { ok: false, error: ORDER_IN_BATCH };
 
-    await tx.orderLine.update({
-      where: { id: lineId },
-      data: { status: "picked", qtyPicked: line.qtyOrdered },
-    });
-
-    if (order.status === "ACCEPTED") {
-      await tx.order.update({
-        where: { id: order.id },
-        data: { status: "PICKING" },
-      });
-    }
-
-    // Picking goes on while a customer answers a substitution prompt.
-    return { ok: true, orderStatus: order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING" };
+    return { ok: true, ...(await pickLineInTx(tx, line, order)) };
   });
+  if (!result.ok) return result;
+  runPickEffects(storeId, [result.effects]);
+  return { ok: true, orderStatus: result.orderStatus };
 }
 
 /**
@@ -431,7 +502,7 @@ export async function markLineShort(
   qtyFound: number,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
   const result = await storeScopedTransaction(storeId, async (tx): Promise<
-    { ok: true; orderStatus: OrderStatus; orderId: string; request: { id: string; expiresAt: Date }; notify: boolean } | { ok: false; error: string }
+    { ok: true; orderStatus: OrderStatus; effects: PickEffects } | { ok: false; error: string }
   > => {
     await lockStoreRow(tx, storeId);
 
@@ -449,21 +520,12 @@ export async function markLineShort(
     if (!PICKABLE_STATUSES.includes(order.status)) {
       return { ok: false, error: `Cannot mark lines short for order in status ${order.status}` };
     }
+    if (order.pickBatchId) return { ok: false, error: ORDER_IN_BATCH };
 
-    const request = await openSubstitutionRequest(tx, storeId, line, qtyFound, order);
-    await tx.orderLine.update({
-      where: { id: lineId },
-      data: { status: "short", qtyPicked: qtyFound },
-    });
-    await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING" } });
-    await settleShortLine(tx, storeId, lineId, line.qtyOrdered - qtyFound);
-    const notify = await recordSubstitutionPrompt(tx, storeId, order.id);
-
-    return { ok: true, orderStatus: "SUBSTITUTION_PENDING", orderId: order.id, request, notify };
+    return { ok: true, ...(await shortLineInTx(tx, storeId, line, order, qtyFound)) };
   }, LEDGER_TRANSACTION);
   if (!result.ok) return result;
-  scheduleSubstitutionTimer(storeId, result.orderId, result.request.id, result.request.expiresAt);
-  if (result.notify) scheduleOrderNotification(storeId, result.orderId, "substitution", result.request.id);
+  runPickEffects(storeId, [result.effects]);
   return { ok: true, orderStatus: result.orderStatus };
 }
 
