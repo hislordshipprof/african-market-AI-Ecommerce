@@ -90,6 +90,7 @@ model Store {
   guestBrowserCarts     GuestBrowserCart[]
   paymentIntentReleases PaymentIntentRelease[]
   copilotConversations  CopilotConversation[]
+  aiReviewFlags         AiReviewFlag[]
   copilotClientMessages CopilotClientMessage[]
   stockProposals        StockProposal[]
   copilotAlerts         CopilotAlert[]
@@ -108,6 +109,8 @@ model Store {
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  driverRoutes          DriverRoute[]
+  pickBatches           PickBatch[]
 
   @@map("stores")
 }
@@ -154,6 +157,7 @@ model User {
   pushSubscriptions       PushSubscription[]
   supportMessages         SupportMessage[]
   copilotConversations    CopilotConversation[]
+  aiReviewFlags           AiReviewFlag[]
   stockProposalDecisions  StockProposal[]          @relation("StockProposalDecision")
   copilotAlertResolutions CopilotAlert[]           @relation("CopilotAlertResolution")
   ownerReports            OwnerReport[]            @relation("OwnerReportActor")
@@ -624,7 +628,9 @@ model CopilotConversation {
   user      User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   proposals StockProposal[]
   receipts  CopilotClientMessage[]
+  flags     AiReviewFlag[]
 
+  @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, userId, lastMessageAt])
   @@map("copilot_conversations")
@@ -1048,14 +1054,41 @@ model AiConversation {
   cart     Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
   customer Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
   actions  AiAction[]
+  flags    AiReviewFlag[]
 
   @@unique([storeId, cartId])
+  @@unique([id, storeId])
   @@index([cartId])
   @@index([storeId])
   @@index([storeId, createdAt])
   @@index([createdAt])
   @@index([customerId])
   @@map("ai_conversations")
+}
+
+/// Platform admin review label on one shopper or copilot conversation (#544). Store-owned with RLS.
+/// Deleted with its conversation, and after 90 days by the assistant retention job.
+model AiReviewFlag {
+  id                    String   @id @default(cuid())
+  storeId               String   @map("store_id")
+  aiConversationId      String?  @map("ai_conversation_id")
+  copilotConversationId String?  @map("copilot_conversation_id")
+  label                 String
+  note                  String   @default("")
+  createdById           String   @map("created_by_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  store               Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  aiConversation      AiConversation?      @relation(fields: [aiConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  copilotConversation CopilotConversation? @relation(fields: [copilotConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  createdBy           User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([aiConversationId])
+  @@index([copilotConversationId])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("ai_review_flags")
 }
 
 model AiAction {
@@ -1230,6 +1263,10 @@ model Order {
   deliveredAt             DateTime? @map("delivered_at")
   deliveryProofKey        String?   @map("delivery_proof_key")
   deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
+  /// The store's own driver route this order is on (#566).
+  driverRouteId           String?   @map("driver_route_id")
+  /// The open pick batch this order is in (#564); cleared when staff leave the batch.
+  pickBatchId             String?   @map("pick_batch_id")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1243,9 +1280,13 @@ model Order {
   deliveries           Delivery[]
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
+  driverRoute          DriverRoute?          @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
+  pickBatch            PickBatch?            @relation(fields: [pickBatchId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
+  @@index([storeId, driverRouteId])
+  @@index([storeId, pickBatchId])
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, fulfillment, pickupSlot])
@@ -1380,6 +1421,30 @@ model DeliveryEvent {
   @@index([storeId])
   @@index([storeId, orderId])
   @@map("delivery_events")
+}
+
+/// A store's own driver for one slot (#566). Only the link token's hash is kept; the link dies at expiresAt or revokedAt.
+model DriverRoute {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  /// The slot start, a UTC ISO instant as on Order.pickupSlot.
+  slot        String
+  driverName  String    @map("driver_name")
+  /// E.164.
+  driverPhone String    @map("driver_phone")
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  /// Set once the SMS is accepted. A route never sent does not hold its orders.
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, slot])
+  @@map("driver_routes")
 }
 
 /// Platform-wide settings, one row with id "platform". Readable by every app user; platform admins write.
@@ -1678,4 +1743,19 @@ model AssistantChatMonth {
 
   @@id([storeId, month])
   @@map("assistant_chat_months")
+}
+
+/// Staff picking 2-4 Accepted orders together (#564). Orders point at it while it is open; closedAt is set when staff leave.
+model PickBatch {
+  id        String    @id @default(cuid())
+  storeId   String    @map("store_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+  closedAt  DateTime? @map("closed_at")
+
+  store  Store   @relation(fields: [storeId], references: [id])
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, closedAt])
+  @@map("pick_batches")
 }
