@@ -13,6 +13,7 @@ import { fingerprintFromParts } from "./fingerprint";
 import { assessReport } from "./gate";
 import { runEval, type AttemptContext } from "./runner";
 import { storeContextMessage } from "../system-prompt";
+import { itemHandles } from "../handles";
 import { bindingFromFixture, scoreCase, type CatalogBinding } from "./score";
 import type { CatalogFixture, EvalCase, FixtureListing } from "./types";
 
@@ -80,6 +81,36 @@ async function scripted(ctx: AttemptContext, script: FakeAnthropicStep[] | ((ctx
   return fake.fetch;
 }
 
+/**
+ * Scripts name store A items by id, as if the model had seen them (#597). The conversation that sent the request gives each
+ * such id in a scripted reply a handle and the reply sends that; any other id stays as written and is refused.
+ */
+function withShownHandles(ctx: AttemptContext, inner: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    const response = await inner(input, init);
+    let text = await response.text();
+    const ids = [...ctx.binding.aListingIds, ...ctx.binding.aVariantIds].filter((id) => text.includes(id));
+    if (ids.length > 0) {
+      // Tool results come back as user messages too, so match the customer's words anywhere in the request.
+      const sent = typeof init?.body === "string" ? init.body : "";
+      const live = await storeScoped(ctx.stores.storeAId).aiConversation.findMany({
+        orderBy: { lastMessageAt: "desc" },
+        select: { id: true, messages: true },
+      });
+      const conversation = live.find((row) => (row.messages as Array<{ role: string; parts?: Array<{ text?: string }> }>)
+        .some((message) => message.role === "user" && message.parts?.some((part) => part.text && sent.includes(JSON.stringify(part.text).slice(1, -1)))));
+      if (!conversation) throw new Error("No conversation for this scripted reply.");
+      const handles = itemHandles(ctx.stores.storeAId, conversation.id);
+      for (const id of ids) {
+        const key = ctx.binding.aListingIds.has(id) ? "listingId" : "variantId";
+        const shown = await handles.toModel({ [key]: id }) as Record<string, string>;
+        text = text.replaceAll(id, shown[key]!);
+      }
+    }
+    return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
+  };
+}
+
 describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
   const leftover: CreatedEvalStores[] = [];
 
@@ -123,7 +154,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       priorTicketMicros: BigInt(0),
       ticketCapMicros: BigInt(4000000),
       full: false,
-      fetchForAttempt,
+      fetchForAttempt: async (ctx) => withShownHandles(ctx, await fetchForAttempt(ctx)),
       settleTimeoutMs: 8_000,
       stripTimeoutMs: 8_000,
       retryDelayMs: () => 0,
@@ -262,9 +293,9 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(fields.has("line_id")).toBe(true);
     expect(fields.has("substitute_variant_id")).toBe(true);
     expect(scored?.rejectedAttempts.some((item) => item.id === "schema-invalid-id")).toBe(true);
-    // Refused ids are rejected attempts; another store's id and a backup the tool silently dropped are harm.
-    expect(scored?.hallucinated.map((item) => item.crossStore ? "cross-store" : item.id).sort()).toEqual(["cross-store", "missing-backup"]);
-    expect(scored?.rejectedAttempts.map((item) => item.id).sort()).toEqual(["missing-line", "missing-listing", "missing-named", "missing-option", "missing-option-variant", "missing-sub", "schema-invalid-id"]);
+    // Refused ids are rejected attempts; another store's id is harm. An unknown backup handle refuses the whole add (#597).
+    expect(scored?.hallucinated.map((item) => item.crossStore ? "cross-store" : item.id).sort()).toEqual(["cross-store"]);
+    expect(scored?.rejectedAttempts.map((item) => item.id).sort()).toEqual(["missing-backup", "missing-line", "missing-listing", "missing-named", "missing-option", "missing-option-variant", "missing-sub", "schema-invalid-id"]);
     expect(scored?.pass).toBe(false);
     expect(invalidWasAudited).toBe(false);
   }, 90_000);
