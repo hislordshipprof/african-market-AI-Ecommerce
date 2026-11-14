@@ -175,6 +175,9 @@ One customer's purchase from exactly one store.
 **Tracking link**:
 The unguessable link in every customer message that opens the order's tracking page without signing in.
 
+**Driver route**:
+One slot's Ready store-delivery orders handed to the store's own driver (#566). The driver gets an SMS with a route link that needs no login: stops in nearest-next order, Navigate, Out for delivery, and Delivered with a delivery proof photo. The link works until midnight at the end of the store day and the store can revoke it.
+
 **Support thread**:
 The one conversation about an order between its customer and the store, opened from the tracking link. A platform admin can join it.
 _Avoid_: Chat (the shopper assistant and store copilot are chats too), ticket
