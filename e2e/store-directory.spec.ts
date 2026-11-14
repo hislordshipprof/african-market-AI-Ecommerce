@@ -270,3 +270,190 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await running.stop();
   }
 });
+
+async function rootServer(port: number, extra: Record<string, string> = {}) {
+  return startSpawnedServer({
+    command: `pnpm exec next start -p ${port}`,
+    shell: true,
+    cwd: process.cwd(),
+    port,
+    env: {
+      ...process.env,
+      CI: "true",
+      VERCEL: "",
+      VERCEL_ENV: "",
+      E2E_STORE_OVERRIDE: "",
+      STRIPE_SECRET_KEY: "",
+      PLATFORM_ROOT_DOMAIN: "localhost",
+      BETTER_AUTH_URL: `http://localhost:${port}`,
+      BETTER_AUTH_TRUSTED_ORIGINS: `http://localhost:${port}`,
+      ...extra,
+    },
+    healthUrl: `http://127.0.0.1:${port}/api/health`,
+    healthOk: (status) => status === 200 || status === 503,
+  });
+}
+
+// State and city pages (#451) on a root-domain server. Mama Ngozi is the seeded listed store, in Houston, TX.
+test("state and city pages: cached, GroceryStore JSON-LD, sitemap and robots, 404 for an empty city, LCP on slow 4G", async ({ page, browser, request }) => {
+  test.setTimeout(240_000);
+  const port = await reservePort(laneSmokePort());
+  const root = `http://localhost:${port}`;
+  const running = await rootServer(port);
+  try {
+    await page.goto(`${root}/stores/texas`);
+    await expect(page.getByRole("heading", { level: 1, name: "African grocery stores in Texas" })).toBeVisible();
+    await expect(page).toHaveTitle("African grocery stores in Texas · African Markets");
+    await expect(page.getByRole("link", { name: /Mama Ngozi African Market/ })).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/`);
+    await page.getByRole("link", { name: /^Houston/ }).click();
+    await expect(page).toHaveURL(`${root}/stores/texas/houston`);
+    await expect(page.getByRole("heading", { level: 1, name: "African grocery stores in Houston, TX" })).toBeVisible();
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `${root}/stores/texas/houston`);
+
+    const ld = await page.locator('script[type="application/ld+json"]').allTextContents();
+    expect(ld.map((text) => JSON.parse(text))).toEqual([{
+      "@context": "https://schema.org",
+      "@type": "GroceryStore",
+      name: "Mama Ngozi African Market",
+      url: `http://mama-ngozi.localhost:${port}/`,
+      image: `http://mama-ngozi.localhost:${port}/logos/mama-ngozi-logo.svg`,
+      description: SEEDED.listingBlurb,
+      address: { "@type": "PostalAddress", addressLocality: "Houston", addressRegion: "TX", addressCountry: "US" },
+    }]);
+    await shoot(page, "451-city", "African grocery stores in Houston, TX");
+    await page.goto(`${root}/stores/texas`);
+    await shoot(page, "451-state", "African grocery stores in Texas");
+
+    // The second request is served from the ISR cache, not rendered again.
+    expect((await request.get(`${root}/stores/texas/houston`)).headers()["x-nextjs-cache"]).toBe("HIT");
+
+    for (const path of ["/stores/texas/austin", "/stores/ohio", "/stores/tx", "/stores/texas/houston-tx"]) {
+      expect((await request.get(`${root}${path}`)).status(), path).toBe(404);
+    }
+    await page.goto(`${root}/stores/texas/austin`);
+    await expect(page.getByRole("heading", { name: "No stores listed here yet" })).toBeVisible();
+
+    const sitemap = await request.get(`${root}/sitemap.xml`);
+    expect(sitemap.status()).toBe(200);
+    const xml = await sitemap.text();
+    for (const url of [`${root}/`, `${root}/stores/texas`, `${root}/stores/texas/houston`]) expect(xml).toContain(`<loc>${url}</loc>`);
+    expect(xml).not.toContain("mama-ngozi.localhost");
+    const robots = await request.get(`${root}/robots.txt`);
+    expect(await robots.text()).toContain(`Sitemap: ${root}/sitemap.xml`);
+
+    // Store hosts never serve the directory's pages, sitemap or robots.txt.
+    for (const path of ["/stores/texas", "/stores/texas/houston", "/sitemap.xml", "/robots.txt"]) {
+      expect((await request.get(`http://mama-ngozi.localhost:${port}${path}`)).status(), path).toBe(404);
+    }
+
+    // Lighthouse's mobile slow 4G as DevTools applies it: 562.5 ms latency, 1.47 Mbps down, 4x CPU slowdown, cold cache.
+    const slow = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const phone = await slow.newPage();
+    const cdp = await slow.newCDPSession(phone);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 562.5, downloadThroughput: (1474.56 * 1024) / 8, uploadThroughput: (607.5 * 1024) / 8 });
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+    await phone.goto(`${root}/stores/texas/houston`, { waitUntil: "load" });
+    const lcp = await phone.evaluate(() => new Promise<number>((resolve) => {
+      new PerformanceObserver((list) => resolve(list.getEntries().at(-1)!.startTime)).observe({ type: "largest-contentful-paint", buffered: true });
+    }));
+    console.log(`LCP on slow 4G: ${Math.round(lcp)} ms`);
+    expect(lcp).toBeLessThan(2500);
+    await slow.close();
+  } finally {
+    await running.stop();
+  }
+});
+
+// The listing switch clears the cached state and city pages on the next request (#451).
+test("unlisting the only Houston store turns its city page into a 404 at once, and listing it brings the page back", async ({ page, request }) => {
+  test.setTimeout(240_000);
+  const port = await reservePort(laneSmokePort());
+  const store = `http://mama-ngozi.localhost:${port}`;
+  const root = `http://localhost:${port}`;
+  const running = await rootServer(port, { BETTER_AUTH_URL: store, BETTER_AUTH_TRUSTED_ORIGINS: `${store},${root}` });
+  const city = `${root}/stores/texas/houston`;
+  try {
+    expect((await request.get(city)).status()).toBe(200);
+    expect((await request.get(city)).headers()["x-nextjs-cache"]).toBe("HIT");
+
+    await storeOwnerSignIn(page, store);
+    await page.goto(`${store}/store-admin/directory?store=mama-ngozi`);
+    const listed = page.getByRole("switch", { name: "Listed in the directory" });
+    await expect(listed).toBeChecked();
+    await listed.click();
+    await page.getByRole("button", { name: "Save listing" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    expect((await request.get(city)).status()).toBe(404);
+    expect((await request.get(`${root}/stores/texas`)).status()).toBe(404);
+    expect(await (await request.get(`${root}/sitemap.xml`)).text()).not.toContain("/stores/texas");
+
+    await listed.click();
+    await page.getByRole("button", { name: "Save listing" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    expect((await request.get(city)).status()).toBe(200);
+    // Also refreshes the cached state page, so the next server does not start from its 404.
+    expect((await request.get(`${root}/stores/texas`)).status()).toBe(200);
+    expect(await (await request.get(`${root}/sitemap.xml`)).text()).toContain(`<loc>${city}</loc>`);
+    await page.goto(city);
+    await expect(page.getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
+  } finally {
+    await restoreSeed();
+    await running.stop();
+  }
+});
+
+// Store cards (#453). Mama Ngozi is seeded in Houston (America/Chicago) with pickup, its own delivery within 8 miles
+// and an owner story; ZIP 77002 is about 5 miles away. The browser clock is fixed, so open and closed never depend on the hour.
+test("store cards: open now or opens at from the browser clock, distance, pickup and delivers to you, the owner's face and story", async ({ browser }) => {
+  test.setTimeout(240_000);
+  const port = await reservePort(laneSmokePort());
+  const root = `http://localhost:${port}`;
+  const running = await rootServer(port);
+  try {
+    const context = await browser.newContext({ timezoneId: "America/Chicago" });
+    const page = await context.newPage();
+    // Monday 16 Nov 2026, 10:00 in Houston.
+    await page.clock.setFixedTime(new Date("2026-11-16T16:00:00Z"));
+    await page.goto(`${root}/`);
+    const card = page.getByRole("link", { name: /Mama Ngozi African Market/ });
+    await expect(card).toContainText("Open now");
+    await expect(card).toContainText("Pickup");
+    await expect(card).toContainText("Delivery");
+    await expect(card).not.toContainText("Delivers to you");
+    await expect(card).toContainText("Run by Ngozi Okafor");
+    await expect(card).toContainText("bringing the flavors of home");
+    await expect(card).toContainText("West African");
+
+    await page.getByLabel("ZIP code or city").fill("77002");
+    await page.getByRole("button", { name: "Find stores" }).click();
+    await expect(page.getByRole("heading", { name: "Stores near 77002" })).toBeVisible();
+    const near = page.getByRole("region", { name: "Stores near 77002" }).getByRole("link", { name: /Mama Ngozi African Market/ });
+    await expect(near).toContainText(/\d\.\d mi away/);
+    await expect(near).toContainText("Delivers to you");
+    await shoot(page, "453-card-near-open", "Stores near 77002");
+    await context.close();
+
+    // The cached city page, read at 08:30 on a Monday in Houston: the hours come from the browser, not the cache.
+    const early = await browser.newContext({ timezoneId: "America/Chicago" });
+    const city = await early.newPage();
+    await city.clock.setFixedTime(new Date("2026-11-16T14:30:00Z"));
+    await city.goto(`${root}/stores/texas/houston`);
+    const closed = city.getByRole("link", { name: /Mama Ngozi African Market/ });
+    await expect(closed).toContainText("Closed");
+    await expect(closed).toContainText("Opens 9 AM");
+    await expect(closed).not.toContainText("Open now");
+    await shoot(city, "453-card-city-closed", "African grocery stores in Houston, TX");
+    await early.close();
+
+    // A shopper in New York sees the store's own clock, with its zone named.
+    const east = await browser.newContext({ timezoneId: "America/New_York" });
+    const away = await east.newPage();
+    await away.clock.setFixedTime(new Date("2026-11-16T14:30:00Z"));
+    await away.goto(`${root}/stores/texas`);
+    await expect(away.getByRole("link", { name: /Mama Ngozi African Market/ })).toContainText("Opens 9 AM CST");
+    await east.close();
+  } finally {
+    await running.stop();
+  }
+});
