@@ -4,6 +4,7 @@ import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
 import {
   COURIER_BOTH_FAILED,
+  courierFailoverFailed,
   COURIER_DELIVERY_CREATED,
   courierRequest,
   runCourierFailover,
@@ -25,13 +26,17 @@ function eventId(event: CourierEvent): string {
   return `courier-failover-${event.data.orderId}-${event.data.fromProvider}`;
 }
 
-/** A failed send is logged, never thrown: the delivery is already booked or the failover already ran. */
+/**
+ * A failed timer send throws, so a retried step sends it again; without it a booked courier has no failover.
+ * A failed notification send is logged, never thrown: the delivery is already booked or the failover already ran.
+ */
 export async function emitCourierEvent(event: CourierEvent): Promise<void> {
   if (sendSkipped()) return;
   try {
     await sendWithTimeout({ id: eventId(event), name: event.name, data: event.data });
   } catch (err) {
     console.error(JSON.stringify({ event: "inngest_send_failed", name: event.name, message: err instanceof Error ? err.message : "send failed" }));
+    if (event.name === COURIER_DELIVERY_CREATED) throw err;
   }
 }
 
@@ -46,6 +51,10 @@ export const courierAssignmentTimeout = inngest.createFunction(
     id: "courier/assignment-timeout",
     idempotency: "event.data.deliveryId",
     triggers: [{ event: COURIER_DELIVERY_CREATED }],
+    onFailure: async ({ event }) => {
+      const { storeId, deliveryId } = event.data.event.data as { storeId?: string; deliveryId?: string };
+      if (storeId && deliveryId) await courierFailoverFailed({ storeId, deliveryId }, productionDeps());
+    },
   },
   async ({ event, step }) => {
     const { storeId, deliveryId } = event.data as { storeId?: string; deliveryId?: string };

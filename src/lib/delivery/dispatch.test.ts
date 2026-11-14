@@ -9,6 +9,7 @@ import {
   COURIER_BOTH_FAILED,
   COURIER_DELIVERY_CREATED,
   COURIER_FAILOVER_TRIGGERED,
+  courierFailoverFailed,
   courierRequest,
   runCourierFailover,
   selectAndDispatch,
@@ -32,7 +33,10 @@ const hasDb = !!process.env.DATABASE_URL;
  */
 class StubProvider implements DeliveryProvider {
   readonly quotes = new Map<string, { externalDeliveryId: string; expiresAt: Date }>();
-  readonly created = new Map<string, "active" | "cancelled">();
+  readonly created = new Map<string, "active" | "picked_up" | "cancelled">();
+  /** Thrown by the next cancel calls, in order, before the stub's own rules. */
+  cancelErrors: Error[] = [];
+  cancelCalls = 0;
   readonly requests: DeliveryRequest[] = [];
   quoteCalls = 0;
   externalId?: string;
@@ -71,9 +75,12 @@ class StubProvider implements DeliveryProvider {
   }
 
   async cancel(externalId: string): Promise<void> {
+    this.cancelCalls++;
+    const err = this.cancelErrors.shift();
+    if (err) throw err;
     const state = this.created.get(externalId);
     if (!state) throw new DeliveryProviderError(this.name, 404, "not_found", "unknown delivery");
-    if (state === "cancelled") throw new DeliveryProviderError(this.name, 409, "cannot_be_cancelled", "already cancelled");
+    if (state !== "active") throw new DeliveryProviderError(this.name, 409, "cannot_be_cancelled", `delivery is ${state}`);
     this.created.set(externalId, "cancelled");
   }
 
@@ -288,11 +295,11 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     expect(events.map((e) => e.name)).toEqual([COURIER_BOTH_FAILED]);
   });
 
-  it("a cancel the provider refuses keeps the delivery and books no second courier", async () => {
+  it("a cancel the provider refuses because a courier has the order keeps the delivery and books no second courier", async () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
     const { storeId, deliveryId } = await dispatched(uber, doordash);
-    uber.created.set([...uber.created.keys()][0], "cancelled");
+    uber.created.set([...uber.created.keys()][0], "picked_up");
 
     await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit });
 
@@ -454,6 +461,86 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
 
     expect(doordash.created.size).toBe(1);
     expect(await storeScoped(storeId).delivery.count({ where: { orderId } })).toBe(2);
+    // The replay re-sends the timer event for the same delivery; its event id makes Inngest drop the repeat.
+    expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_DELIVERY_CREATED, COURIER_DELIVERY_CREATED]);
+    expect(events[1].data).toEqual(events[2].data);
+  });
+  it("R2-B1: a transient cancel error is retried and the failover completes", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId } = await courierOrder();
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    if (!first.ok) throw new Error("dispatch failed");
+    events = [];
+    uber.cancelErrors.push(new DeliveryProviderError("uber", 503, "service_unavailable", "down"));
+
+    await runCourierFailover(makeFakeStep({ attempts: 3 }), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit });
+
+    expect(uber.cancelCalls).toBe(2);
+    expect([...uber.created.values()]).toEqual(["cancelled"]);
+    const rows = await storeScoped(storeId).delivery.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
+    expect(rows.map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"], ["doordash", "requested"]]);
     expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_DELIVERY_CREATED]);
+  });
+
+  it("R2-B1: a cancel that keeps failing throws for Inngest, and the failure handler tells the store", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId } = await courierOrder();
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    if (!first.ok) throw new Error("dispatch failed");
+    events = [];
+    const down = () => new DeliveryProviderError("uber", 503, "service_unavailable", "down");
+    uber.cancelErrors.push(down(), down(), down());
+    const deps = { providers: [uber, doordash], emit };
+
+    await expect(runCourierFailover(makeFakeStep({ attempts: 3 }), { storeId, deliveryId: first.deliveryId }, deps)).rejects.toThrow("down");
+    await courierFailoverFailed({ storeId, deliveryId: first.deliveryId }, deps);
+
+    expect(doordash.created.size).toBe(0);
+    expect(events.map((e) => e.name)).toEqual([COURIER_BOTH_FAILED]);
+    expect(events[0].data).toMatchObject({ orderId, options: ["pickup", "cancel"] });
+  });
+
+  it("R2-N1: a delivery the provider already cancelled itself fails over", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId } = await courierOrder();
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    if (!first.ok) throw new Error("dispatch failed");
+    events = [];
+    uber.created.set([...uber.created.keys()][0], "cancelled");
+    await storeScoped(storeId).deliveryEvent.create({
+      data: { storeId, orderId, deliveryId: first.deliveryId, externalEventId: "uber-evt-cancel", type: "cancelled" },
+    });
+
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit });
+
+    const rows = await storeScoped(storeId).delivery.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
+    expect(rows.map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"], ["doordash", "requested"]]);
+    expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_DELIVERY_CREATED]);
+  });
+
+  it("R2-N3: a lost timer event for the alternate is sent again when Inngest retries the redispatch step", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId } = await courierOrder();
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    if (!first.ok) throw new Error("dispatch failed");
+    events = [];
+    let lost = false;
+    const flaky = async (event: CourierEvent) => {
+      if (event.name === COURIER_DELIVERY_CREATED && !lost) {
+        lost = true;
+        throw new Error("inngest send timed out");
+      }
+      events.push(event);
+    };
+
+    await runCourierFailover(makeFakeStep({ attempts: 2 }), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit: flaky });
+
+    const alternate = await storeScoped(storeId).delivery.findFirstOrThrow({ where: { orderId, provider: "doordash" } });
+    expect(doordash.created.size).toBe(1);
+    expect(events.filter((e) => e.name === COURIER_DELIVERY_CREATED).map((e) => e.data)).toEqual([{ storeId, deliveryId: alternate.id }]);
   });
 });

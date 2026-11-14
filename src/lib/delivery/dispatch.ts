@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { storeScoped } from "../db";
-import type { CreatedDelivery, DeliveryProvider, DeliveryProviderName, DeliveryQuote, DeliveryRequest } from "./provider";
+import { DeliveryProviderError, type CreatedDelivery, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
 
 /** Spec §9, §11.2: no courier assigned this long after the delivery was created → switch provider. */
 export const COURIER_ASSIGNMENT_TIMEOUT_MS = 600_000;
@@ -226,20 +226,30 @@ export async function runCourierFailover(
     try {
       if (!current) throw new Error(`No adapter for ${delivery.provider}`);
       await current.cancel(delivery.externalId);
+      return true;
     } catch (err) {
-      // A provider that refuses the cancel may already have a courier on the way: keep this delivery, book no other.
+      // Anything but a definite refusal (5xx, timeout, auth, no adapter) throws, so Inngest retries the step.
+      if (!refusedCancel(err)) throw err;
+      // A provider that cancelled the delivery itself refuses a second cancel: its webhook already recorded it.
+      const providerCancelled = await storeScoped(storeId).deliveryEvent.count({ where: { deliveryId, type: "cancelled" } });
+      if (providerCancelled > 0) return true;
+      // Otherwise a courier may already be on the way: keep this delivery, book no other.
       console.error(JSON.stringify({ event: "courier_failover_cancel_failed", deliveryId, provider: delivery.provider, message: err instanceof Error ? err.message : "unknown" }));
       await storeScoped(storeId).delivery.updateMany({ where: { id: deliveryId, status: "cancelled" }, data: { status: "requested" } });
       return false;
     }
-    return true;
   })) as boolean;
   if (!cancelled) return;
 
   await step.run("courier-redispatch", async () => {
-    const used = await storeScoped(storeId).delivery.findMany({ where: { orderId: delivery.orderId }, select: { provider: true, status: true } });
-    // A replay of this step after it booked the alternate must not book again or report a failure.
-    if (used.some((u) => u.status !== "cancelled")) return;
+    const used = await storeScoped(storeId).delivery.findMany({ where: { orderId: delivery.orderId }, select: { id: true, provider: true, status: true } });
+    // A replay of this step after it booked the alternate must not book again or report a failure. It sends the
+    // timer event again (the event id drops a repeat), in case that send is what failed.
+    const live = used.find((u) => u.status !== "cancelled");
+    if (live) {
+      await deps.emit({ name: COURIER_DELIVERY_CREATED, data: { storeId, deliveryId: live.id } });
+      return;
+    }
     const alternates = deps.providers.filter((p) => !used.some((u) => u.provider === p.name));
     if (alternates.length > 0) {
       const fromProvider = delivery.provider as DeliveryProviderName;
@@ -247,4 +257,19 @@ export async function runCourierFailover(
     }
     await selectAndDispatch({ storeId, orderId: delivery.orderId, ...(await courierRequest(storeId, delivery.orderId)) }, { ...deps, providers: alternates });
   });
+}
+
+/** A 4xx that says the provider will not cancel this delivery. Auth, timeout and rate-limit errors can pass on a retry. */
+function refusedCancel(err: unknown): boolean {
+  return err instanceof DeliveryProviderError && err.status >= 400 && err.status < 500 && ![401, 403, 408, 429].includes(err.status);
+}
+
+/** Inngest's onFailure for the timer: once retries run out, an order left with no live courier goes to the both-fail path. */
+export async function courierFailoverFailed(target: { storeId: string; deliveryId: string }, deps: DispatchDeps): Promise<void> {
+  const { storeId, deliveryId } = target;
+  console.error(JSON.stringify({ event: "courier_failover_failed", storeId, deliveryId }));
+  const delivery = await storeScoped(storeId).delivery.findUnique({ where: { id: deliveryId }, select: { orderId: true } });
+  if (!delivery) return;
+  const live = await storeScoped(storeId).delivery.count({ where: { orderId: delivery.orderId, status: { not: "cancelled" } } });
+  if (live === 0) await emitBothFailed(storeId, delivery.orderId, deps.emit);
 }
