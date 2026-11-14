@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { auth, onCustomDomain, registeredCustomDomain } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -59,10 +59,20 @@ async function rejectIfAdminHost(req: NextRequest): Promise<NextResponse | null>
   return null;
 }
 
+async function keepOnCustomDomain(req: NextRequest, res: Response): Promise<Response> {
+  const location = res.headers.get("location");
+  if (!location) return res;
+  const domain = await registeredCustomDomain(req.headers);
+  if (!domain) return res;
+  const headers = new Headers(res.headers);
+  headers.set("location", onCustomDomain(location, domain));
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 export async function GET(req: NextRequest) {
   const bad = rejectIfBadCallback(req) ?? (await rejectIfAdminHost(req));
   if (bad) return bad;
-  return rawGET(req);
+  return keepOnCustomDomain(req, await rawGET(req));
 }
 
 export async function POST(req: NextRequest) {

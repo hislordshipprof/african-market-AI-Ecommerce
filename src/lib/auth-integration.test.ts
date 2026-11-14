@@ -3,7 +3,14 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
 });
-import { auth } from "./auth";
+
+vi.mock("next/cache", () => ({
+  unstable_cache: (fn: () => unknown) => () => fn(),
+  revalidateTag: () => {},
+}));
+import { NextRequest } from "next/server";
+import { auth, resolveAuthTrustedOrigins } from "./auth";
+import { GET as authRouteGET } from "@/app/api/auth/[...all]/route";
 import { authPrisma, storeScoped } from "./db";
 import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
@@ -342,6 +349,41 @@ describe("auth integration (real DB, app_runtime)", () => {
     );
     expect(res.status).toBe(200);
     expect(getTestSentEmails().at(-1)?.subject).toBe("Sign in to Integ Test Store");
+  });
+
+  it("a shopper on a store's custom domain can sign in by magic link", async () => {
+    const origin = `http://${storeDomain}`;
+    const onDomain = { "x-custom-domain": storeDomain, host: storeDomain, origin };
+    const res = await authPost(
+      "/sign-in/magic-link",
+      { email: customerEmail, callbackURL: "/account" },
+      undefined,
+      onDomain,
+    );
+    expect(res.status).toBe(200);
+
+    const link = new URL(extractVerifyUrl());
+    expect(link.origin).toBe(origin);
+    expect(link.pathname).toBe("/api/auth/magic-link/verify");
+
+    const verifyRes = await authRouteGET(
+      new NextRequest(link, { headers: onDomain, redirect: "manual" }),
+    );
+    expect(collectCookies(verifyRes)).toContain("session_token");
+    const location = verifyRes.headers.get("location") ?? "";
+    expect(new URL(location, origin).origin).toBe(origin);
+  });
+
+  it("trusts a registered store's custom-domain origin and no other domain", async () => {
+    const trusted = auth.options.trustedOrigins as (request?: Request) => Promise<string[]>;
+    const onHost = (domain: string) =>
+      new Request(`http://${domain}/api/auth/sign-in/magic-link`, {
+        headers: { "x-custom-domain": domain },
+      });
+    expect(await trusted(onHost(storeDomain))).toContain(`http://${storeDomain}`);
+    const stranger = `shop-${suffix}.unregistered.example`;
+    expect((await trusted(onHost(stranger))).join(",")).not.toContain(stranger);
+    expect(await trusted()).toEqual(resolveAuthTrustedOrigins());
   });
 
   it("E5: an expired magic link does not create a session", async () => {
