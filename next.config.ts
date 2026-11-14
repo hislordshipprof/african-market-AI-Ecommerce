@@ -20,13 +20,11 @@ const nextConfig: NextConfig = {
       { source: "/:path*", headers },
       { source: "/", headers },
       { source: "/_next/static/:path*", headers },
-      // The driver's route link (#566): the token is the key, so it is never indexed, cached or sent on as a referrer.
+      // The driver's route link (#566): the token is the key, so the page is never indexed or cached.
       {
         source: "/driver/:path*",
         headers: [
-          ...headers.filter((header) => header.key !== "Referrer-Policy"),
           { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
-          { key: "Referrer-Policy", value: "no-referrer" },
           { key: "Cache-Control", value: "private, no-store" },
         ],
       },
