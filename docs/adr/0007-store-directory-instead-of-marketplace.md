@@ -12,3 +12,4 @@ Stores never share a cart or checkout. Instead of the planned combined marketpla
 - ZIP and city lookups use static US Census Gazetteer tables in Postgres, with no new runtime provider (ADR-0017). The Census geocoder resolves only full street addresses.
 - The directory is served on `PLATFORM_ROOT_DOMAIN`. Choosing the platform name blocks only DNS, so it is demoed on the vercel.app host.
 - The build steps are D1–D7 in spec §17, Phase 2.
+- Built in D2 (#450): the owner sets the switch, the blurb (at most 160 characters) and up to 3 cuisine tags from a fixed list (ADR-0004) on the store-admin "Directory listing" page; staff cannot open it. The platform admin's store form overrides the switch. Every change writes an audit row and clears the directory cache tag.
