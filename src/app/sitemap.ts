@@ -1,14 +1,14 @@
 import type { MetadataRoute } from "next";
 import { directoryOrigin } from "@/lib/directory/links";
 import { statePages } from "@/lib/directory/places";
-import { listDirectoryStores } from "@/lib/directory/stores";
+import { queryDirectoryStores } from "@/lib/directory/stores";
 
-// Root domain only (the proxy 404s it on store hosts). Read per request: the root domain is runtime config (#451).
+// Root domain only (the proxy 404s it on store hosts). Read per request from the database: crawled rarely, never stale (#451).
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const origin = directoryOrigin();
-  const states = statePages(await listDirectoryStores());
+  const states = statePages(await queryDirectoryStores());
   return [
     { url: `${origin}/` },
     ...states.flatMap((state) => [

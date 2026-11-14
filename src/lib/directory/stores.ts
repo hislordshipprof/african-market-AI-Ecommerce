@@ -29,20 +29,17 @@ export type DirectoryStore = Prisma.StoreGetPayload<{ select: typeof DIRECTORY_S
 /** Cleared by every store save (revalidateStore), so a listing change shows at once (#450). */
 export const DIRECTORY_CACHE_TAG = "store-directory";
 
-/** Listed, active stores with a map point, by state, city and name. */
+/** Listed, active stores with a map point, by state, city and name. Uncached: the sitemap reads it per request. */
+export function queryDirectoryStores(): Promise<DirectoryStore[]> {
+  return platform.store.findMany({
+    where: { listed: true, status: "active", lat: { not: null }, lng: { not: null } },
+    select: DIRECTORY_STORE_FIELDS,
+    orderBy: [{ state: "asc" }, { city: "asc" }, { name: "asc" }],
+  });
+}
+
 export function listDirectoryStores(): Promise<DirectoryStore[]> {
-  return unstable_cache(
-    async () => {
-      const stores = await platform.store.findMany({
-        where: { listed: true, status: "active", lat: { not: null }, lng: { not: null } },
-        select: DIRECTORY_STORE_FIELDS,
-        orderBy: [{ state: "asc" }, { city: "asc" }, { name: "asc" }],
-      });
-      return stores;
-    },
-    ["store-directory"],
-    { revalidate: 300, tags: [DIRECTORY_CACHE_TAG] },
-  )();
+  return unstable_cache(queryDirectoryStores, ["store-directory"], { revalidate: 300, tags: [DIRECTORY_CACHE_TAG] })();
 }
 
 /** Listed stores with their storefront links, for pages cached for every request (no request host). */

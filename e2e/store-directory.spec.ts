@@ -392,6 +392,9 @@ test("unlisting the only Houston store turns its city page into a 404 at once, a
     await page.getByRole("button", { name: "Save listing" }).click();
     await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
     expect((await request.get(city)).status()).toBe(200);
+    // Also refreshes the cached state page, so the next server does not start from its 404.
+    expect((await request.get(`${root}/stores/texas`)).status()).toBe(200);
+    expect(await (await request.get(`${root}/sitemap.xml`)).text()).toContain(`<loc>${city}</loc>`);
     await page.goto(city);
     await expect(page.getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
   } finally {
