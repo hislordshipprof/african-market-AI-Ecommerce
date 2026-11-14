@@ -818,6 +818,17 @@ test.describe("Admin shell (authenticated)", () => {
     await expect(menu).toBeHidden();
   });
 
+  test("store edit cards follow the dark theme", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/admin/stores");
+    await page.locator(`tr:has-text("tante-marie") a:has-text("Edit")`).click();
+    const background = (id: string) =>
+      page.locator(`section[aria-labelledby='${id}']`).evaluate((el) => getComputedStyle(el).backgroundColor);
+    const billing = await background("billing");
+    expect(billing).not.toBe("rgb(255, 255, 255)");
+    expect(await background("couriers")).toBe(billing);
+  });
+
   test("sign-out ends the session and returns to sign-in", async ({ page }) => {
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.waitForURL("**/admin/sign-in", { timeout: 15000 });

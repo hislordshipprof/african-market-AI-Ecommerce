@@ -58,24 +58,24 @@ export default async function EditStorePage({
           <p role="alert" className="mt-2 text-sm text-destructive">{pilotError}</p>
         )}
       </section>
-      <section aria-labelledby="couriers" className="mb-8 rounded-lg border border-[#e2e4e9] bg-white p-5">
-        <h2 id="couriers" className="text-base font-semibold text-[#15201A]">Courier registration</h2>
+      <section aria-labelledby="couriers" className="mb-8 rounded-lg border border-border bg-card p-5">
+        <h2 id="couriers" className="text-base font-semibold text-foreground">Courier registration</h2>
         <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-          <dt className="font-medium text-[#15201A]">Uber Direct</dt>
-          <dd className="break-words text-[#55625A]">{courierState(store.uberLocationId, store.uberRegistrationError)}</dd>
-          <dt className="font-medium text-[#15201A]">DoorDash</dt>
-          <dd className="break-words text-[#55625A]">{courierState(store.doordashStoreId, store.doordashRegistrationError)}</dd>
+          <dt className="font-medium text-foreground">Uber Direct</dt>
+          <dd className="break-words text-muted-foreground">{courierState(store.uberLocationId, store.uberRegistrationError)}</dd>
+          <dt className="font-medium text-foreground">DoorDash</dt>
+          <dd className="break-words text-muted-foreground">{courierState(store.doordashStoreId, store.doordashRegistrationError)}</dd>
         </dl>
         {(!store.uberLocationId || !store.doordashStoreId) && (
           <form action={retryCourierRegistrationAction} className="mt-4 flex flex-wrap items-center gap-3">
             <input type="hidden" name="storeId" value={store.id} />
             <button
               type="submit"
-              className="min-h-11 rounded-full border border-[#1F5A43] px-5 text-sm font-medium text-[#1F5A43] hover:bg-[#EBF3EC]"
+              className="min-h-11 rounded-full border border-primary px-5 text-sm font-medium text-primary hover:bg-secondary"
             >
               Retry registration
             </button>
-            <span role="status" className="text-sm text-[#55625A]">
+            <span role="status" className="text-sm text-muted-foreground">
               {courierRetry === "queued"
                 ? "Registration queued. Refresh in a minute to see the result."
                 : courierRetry === "failed"
