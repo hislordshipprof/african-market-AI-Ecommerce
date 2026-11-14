@@ -70,7 +70,7 @@ test.describe("Master catalog products", () => {
     await page.getByLabel("Search").fill(RUN);
     await page.getByRole("button", { name: "Show products" }).click();
     const results = page.getByRole("main").getByRole("listitem");
-    await expect(results.filter({ hasText: RUN })).toHaveCount(2);
+    await expect(results.filter({ hasText: RUN })).toHaveCount(3);
 
     await page.getByLabel("Status").selectOption("archived");
     await page.getByLabel("Photo").selectOption("missing");
