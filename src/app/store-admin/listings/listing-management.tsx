@@ -59,6 +59,7 @@ import {
   X,
   Upload,
   ListChecks,
+  Camera,
 } from "lucide-react";
 
 interface Variant {
@@ -570,6 +571,11 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
           <Link href={`/store-admin/listings/import?store=${storeParam}`}>
             <Button size="sm" variant="outline">
               <Upload className="size-4" /> Import CSV
+            </Button>
+          </Link>
+          <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
+            <Button size="sm" variant="outline">
+              <Camera className="size-4" /> From photos
             </Button>
           </Link>
           <Button size="sm" onClick={openCreate}>
