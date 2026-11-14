@@ -71,7 +71,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - **Shared vs tenant data:**
   - Shared: master product catalog (canonical African products, synonyms, images, recipes), customer identity.
   - Per tenant: listings (price, stock, availability), orders, staff, settings, payouts, store analytics, marketing lists.
-- **Phase 2 marketplace view:** a combined app at `platform.com` that searches across nearby tenants. Cart stays **single-store per order** (no multi-store carts in v1/v2 — avoids split dispatch).
+- **Phase 2 Store directory:** a public platform site that lists stores by state, city or near me and links each to its own storefront. It has no cart and no cross-store product or price search ([ADR-0007](../adr/0007-store-directory-instead-of-marketplace.md)). Cart stays **single-store per order** (no multi-store carts — avoids split dispatch).
 
 ---
 
@@ -533,10 +533,21 @@ Repo, multi-tenant schema + RLS, auth, tenant routing/branding, Stripe Connect o
 - No coupons, loyalty points or store credit in Phase 1 (refunds go back to the card); promotions are a Phase 2 candidate.
 
 ### Phase 2: Multi-store launch (weeks 9–14)
+Phase 2 started on 2026-11-14, alongside the Phase 1 tail (Build Board decision 2026-11-14-02).
+
 - Onboard 4 more markets; AI photo-to-listing onboarding.
 - Store copilot, rest of it: weekly reports, sales trends, inventory movement, reorder suggestions.
 - WhatsApp ordering for customers on the store's own number (ADR-0010).
-- Store directory (search stores by state / near me → storefront; ADR-0007); WhatsApp notifications.
+- Store directory (search stores by state / near me → storefront; ADR-0007, #447), built in this order:
+  - D0 (#448): amend ADR-0007, ADR-0001 and this spec to the owner decisions of 2026-11-11.
+  - D1 (#449): directory foundation: the root domain, a listed flag on the store, and a public store projection.
+  - D2 (#450): store-owner settings: listing switch, blurb and cuisine tags.
+  - D3 (#451): state and city pages for search engines.
+  - D4 (#452): near me: ZIP, city or browser location, nearest first.
+  - D5 (#453): store cards: open now, distance, pickup and delivery, owner face.
+  - D6 (#454): attribution: stores see orders that came from the directory.
+  - D7 (#455, later): suggest a store, or get notified when one opens nearby.
+- WhatsApp notifications.
 - Promotions: store coupons first.
 - Reports & payouts dashboard; platform admin console.
 
