@@ -900,6 +900,8 @@ model AiConversation {
   messages      Json      @default("[]")
   /// Shopper constraints (#485): what to avoid, what must hold, and unknown items the customer confirmed.
   constraints   Json      @default("{}")
+  /// Assistant checkout draft (#247): fulfillment and pickup slot for the normal checkout page.
+  checkoutDraft Json?     @map("checkout_draft")
   inFlightUntil DateTime? @map("in_flight_until")
   createdAt     DateTime  @default(now()) @map("created_at")
   lastMessageAt DateTime  @default(now()) @map("last_message_at")
