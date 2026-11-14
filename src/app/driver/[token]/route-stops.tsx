@@ -8,7 +8,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import type { DriverStop } from "@/lib/delivery/driver-route";
-import { driverDeliveredAction, driverOutForDeliveryAction } from "./actions";
+import { driverDeliveredAction, driverOutForDeliveryAction } from "@/lib/delivery/driver-link-actions";
 
 const TRY_AGAIN = "That did not go through. Try again";
 
