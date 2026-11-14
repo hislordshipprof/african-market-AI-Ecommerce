@@ -403,3 +403,85 @@
 .stateStore:hover {
   text-decoration: underline;
 }
+
+a.wordmark {
+  color: inherit;
+  text-decoration: none;
+}
+
+.crumbs ol {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--d-muted);
+}
+
+.crumbs li + li::before {
+  content: "/";
+  margin-right: 6px;
+  color: var(--d-line-strong);
+}
+
+.crumbs a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.crumbs a:hover {
+  color: var(--d-ink);
+}
+
+.placeLinks {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.placeLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--d-line-strong);
+  border-radius: 999px;
+  background: var(--d-surface);
+  color: var(--d-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.placeLink:hover {
+  border-color: var(--d-ink);
+}
+
+.crumbs a:focus-visible,
+a.wordmark:focus-visible,
+.placeLink:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 2px;
+}
+
+.placeCount {
+  font-size: 13px;
+  color: var(--d-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stateName a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.stateName a:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 2px;
+}

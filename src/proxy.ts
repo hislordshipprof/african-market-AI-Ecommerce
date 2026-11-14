@@ -65,6 +65,13 @@ export function proxy(request: NextRequest) {
     headers.set("x-store-slug", slug);
   }
 
+  // State and city pages are cached for every host, so only the root domain may reach them (#451).
+  if (isDirectoryOnlyPath(request.nextUrl.pathname) && headers.get("x-platform-root") !== "1") {
+    const response = NextResponse.rewrite(new URL("/_directory-not-here", request.url));
+    stampSecurity(headers, response);
+    return response;
+  }
+
   const browserId = browserIdentity(request);
   headers.set("x-shop-browser", browserId);
   const policy = reportOnlyPolicy(newCspNonce(), process.env);
@@ -79,6 +86,10 @@ export function proxy(request: NextRequest) {
   }
   rememberBrowser(request, response, browserId);
   return response;
+}
+
+function isDirectoryOnlyPath(pathname: string): boolean {
+  return pathname === "/sitemap.xml" || pathname === "/robots.txt" || pathname.startsWith("/stores/");
 }
 
 function stampSecurity(requestHeaders: Headers, response: NextResponse) {
