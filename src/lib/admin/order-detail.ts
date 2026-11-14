@@ -1,5 +1,6 @@
 import { platformAdminTransaction } from "../db";
 import { capturedApplicationFee } from "../order/platform-fee";
+import { PLATFORM_QUEUE_WHERE } from "../support/thread";
 import { requirePlatformAdmin } from "./session";
 
 export const ORDER_VIEW_ACTION = "platform.order_view";
@@ -7,6 +8,8 @@ export const ORDER_VIEW_ACTION = "platform.order_view";
 export type OrderTimelineEntry = { at: Date; label: string; actorEmail: string | null };
 
 export type OrderDetail = {
+  /** This view's audit row. */
+  viewId: string;
   id: string;
   number: number;
   status: string;
@@ -70,7 +73,7 @@ export type OrderDetail = {
     topic: string;
     state: string;
     escalatedAt: Date | null;
-    /** Escalated and not resolved: the thread is in the Messages queue, where the platform can reply. */
+    /** In the platform's Messages queue (the queue's own predicate), where the platform can reply. */
     inPlatformQueue: boolean;
     messages: Array<{ id: string; sender: string; body: string; createdAt: Date }>;
   } | null;
@@ -103,8 +106,9 @@ async function readOrderDetail(orderId: string, admin: { id: string; email: stri
   return platformAdminTransaction(async (tx) => {
     const found = await tx.order.findUnique({ where: { id: orderId }, select: { storeId: true } });
     if (!found) return null;
-    await tx.auditLog.create({
+    const view = await tx.auditLog.create({
       data: { storeId: found.storeId, actorId: admin.id, actorEmail: admin.email, action: ORDER_VIEW_ACTION, entityType: "order", entityId: orderId },
+      select: { id: true },
     });
 
     const order = await tx.order.findUniqueOrThrow({
@@ -137,11 +141,13 @@ async function readOrderDetail(orderId: string, admin: { id: string; email: stri
     ].sort((a, b) => a.at.getTime() - b.at.getTime());
 
     const thread = order.supportThreads[0] ?? null;
+    const inPlatformQueue = thread !== null && (await tx.supportThread.count({ where: { ...PLATFORM_QUEUE_WHERE, id: thread.id } })) > 0;
     const address = [order.deliveryLine1, order.deliveryLine2, order.deliveryCity, order.deliveryState, order.deliveryZip]
       .filter(Boolean)
       .join(", ");
 
     return {
+      viewId: view.id,
       id: order.id,
       number: order.number,
       status: order.status,
@@ -211,7 +217,7 @@ async function readOrderDetail(orderId: string, admin: { id: string; email: stri
         topic: thread.topic,
         state: thread.state,
         escalatedAt: thread.escalatedAt,
-        inPlatformQueue: thread.escalatedAt !== null && thread.state !== "resolved",
+        inPlatformQueue,
         messages: thread.messages.map((message) => ({ id: message.id, sender: message.sender, body: message.body, createdAt: message.createdAt })),
       },
     };
