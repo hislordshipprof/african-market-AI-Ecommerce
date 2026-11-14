@@ -328,7 +328,8 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
     round=$((prior + 1))
     CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
     # Own checkout, e2e port and database, so it never collides with the reviewer working in $WT on the lane's
-    # port and database. One runner checkout serves every lane: the machine-wide lock runs one suite at a time.
+    # port and database. ci-local.sh runs up to CI_SLOTS suites at once, each slot with its own runner checkout,
+    # database and port derived from these.
     (cd "$WT" && E2E_PORT="$((LANE_PORT + 50))" CI_DB=ci CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" \
       bash "$CI_LOCAL" > "$CI_LOG" 2>&1) &
     ci_pid=$!
@@ -336,8 +337,8 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
     verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
     echo "Independent review $round: $verdict"
     count=$(ticket_review_count "$ROOT/.builder/logs" "$N")
-    # A blocked review means this commit will not merge, so a run still queued for the machine-wide lock only
-    # makes every other lane wait longer: cancel it. A run that already holds the lock finishes, because its
+    # A blocked review means this commit will not merge, so a run still queued for a local-ci slot only
+    # makes every other lane wait longer: cancel it. A run that already holds a slot finishes, because its
     # failures go into this fix round.
     # The last round is never cancelled: the coordinator may accept its findings, and then needs the CI result.
     if [ "$last" != yes ] && [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then
