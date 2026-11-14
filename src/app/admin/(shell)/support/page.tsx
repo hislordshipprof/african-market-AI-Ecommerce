@@ -15,8 +15,9 @@ function age(minutes: number): string {
   return hours < 48 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-export default async function SupportQueuePage() {
-  const { threads, hidden } = await listEscalatedThreads();
+export default async function SupportQueuePage({ searchParams }: { searchParams: Promise<{ thread?: string | string[] }> }) {
+  const { thread: selected } = await searchParams;
+  const { threads, hidden } = await listEscalatedThreads(typeof selected === "string" ? selected : undefined);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">

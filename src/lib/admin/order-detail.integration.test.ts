@@ -108,6 +108,13 @@ beforeAll(async () => {
       });
       ids[key] = row.id;
     }
+
+    // An ordinary store conversation and a resolved one: neither is in the platform's Messages queue.
+    for (const [key, state, escalatedAt] of [["openThread", "open", null], ["resolvedThread", "resolved", new Date("2026-03-12T09:00:00Z")]] as const) {
+      const thread = await tx.supportThread.create({ data: { storeId, orderId: ids[key === "openThread" ? "repaid" : "cancelled"], state, escalatedAt } });
+      ids[key] = thread.id;
+      await tx.supportMessage.create({ data: { storeId, threadId: thread.id, sender: "customer", body: `Hello from ${key}` } });
+    }
     await tx.refundRequest.create({ data: { storeId, orderId: sibling.id, paymentIntentId: `pi_${RUN}_b`, key: `${RUN}-r3`, amountCents: 111, refundApplicationFee: false, state: "CREATED", providerStatus: "succeeded" } });
     await tx.auditLog.create({ data: { storeId, actorId: SYSTEM_ACTOR_ID, actorEmail: SYSTEM_ACTOR_EMAIL, action: "auto_cancel", entityType: "order", entityId: sibling.id } });
   });
@@ -178,6 +185,15 @@ describe.skipIf(!hasDb)("order detail for platform admins (lane DB)", () => {
     const detail = await viewOrderDetail(ids[key]);
     expect(detail?.status).toBe("CANCELLED");
     expect(detail?.payment).toMatchObject({ capturedCents: captured, capturedAt: new Date("2026-03-11T14:30:00Z"), applicationFeeCents: 201 });
+  });
+
+  it.each([
+    ["an ordinary store conversation", "repaid", "openThread"],
+    ["a resolved conversation", "cancelled", "resolvedThread"],
+  ])("shows %s with its messages, outside the platform's Messages queue", async (_case, orderKey, threadKey) => {
+    const detail = await viewOrderDetail(ids[orderKey]);
+    expect(detail?.supportThread).toMatchObject({ id: ids[threadKey], inPlatformQueue: false });
+    expect(detail?.supportThread?.messages.map((m) => m.body)).toEqual([`Hello from ${threadKey}`]);
   });
 
   it("shows an order that never reached capture as not captured", async () => {
