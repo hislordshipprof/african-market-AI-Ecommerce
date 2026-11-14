@@ -192,24 +192,26 @@ describe.skipIf(!hasDb)("store coupons at checkout (lane DB, app_runtime)", () =
   });
 
   it("limits wrong codes to 10 an hour per cart and 30 an hour per IP, and a right code is refused once limited", async () => {
+    // The limiter drops windows by the real clock, so this test counts from now, not from NOW.
+    const t0 = new Date();
     const storeId = await makeStore("limit");
     await makeCoupon(storeId, "SAVE20");
     const ip = `198.51.100.${Math.floor(Math.random() * 200) + 1}-${RUN}`;
     const { cart } = await makeCart(storeId);
     for (let i = 0; i < 10; i++) {
-      expect(await applyCartCoupon(storeId, cart.id, `WRONG${i}`, { ip, userId: null, now: NOW })).toEqual({ ok: false, error: COUPON_INVALID });
+      expect(await applyCartCoupon(storeId, cart.id, `WRONG${i}`, { ip, userId: null, now: t0 })).toEqual({ ok: false, error: COUPON_INVALID });
     }
-    expect(await applyCartCoupon(storeId, cart.id, "SAVE20", { ip, userId: null, now: NOW })).toEqual({ ok: false, error: COUPON_TOO_MANY_TRIES });
+    expect(await applyCartCoupon(storeId, cart.id, "SAVE20", { ip, userId: null, now: t0 })).toEqual({ ok: false, error: COUPON_TOO_MANY_TRIES });
     // An hour later the cart may try again.
-    const later = new Date(NOW.getTime() + 60 * 60_000 + 1);
+    const later = new Date(t0.getTime() + 60 * 60_000 + 1);
     expect(await applyCartCoupon(storeId, cart.id, "SAVE20", { ip, userId: null, now: later })).toEqual({ ok: true });
 
     // The IP limit spans carts: 20 more wrong tries from two fresh carts reach 30.
     for (let c = 0; c < 2; c++) {
       const fresh = await makeCart(storeId);
-      for (let i = 0; i < 10; i++) await applyCartCoupon(storeId, fresh.cart.id, `NOPE${i}`, { ip, userId: null, now: NOW });
+      for (let i = 0; i < 10; i++) await applyCartCoupon(storeId, fresh.cart.id, `NOPE${i}`, { ip, userId: null, now: t0 });
     }
     const third = await makeCart(storeId);
-    expect(await applyCartCoupon(storeId, third.cart.id, "SAVE20", { ip, userId: null, now: NOW })).toEqual({ ok: false, error: COUPON_TOO_MANY_TRIES });
+    expect(await applyCartCoupon(storeId, third.cart.id, "SAVE20", { ip, userId: null, now: t0 })).toEqual({ ok: false, error: COUPON_TOO_MANY_TRIES });
   });
 });
