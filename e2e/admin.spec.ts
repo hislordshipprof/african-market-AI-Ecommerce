@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Request } from "@playwright/test";
 import { resolveDirectUrl } from "../src/lib/env";
 import { storeUrl } from "./urls";
 import { generateTOTP } from "./totp";
@@ -317,6 +317,15 @@ function reviewRow(page: Page, name: string) {
   return page.locator("table tbody tr").filter({ hasText: name });
 }
 
+function isActionPost(request: Request): boolean {
+  return request.method() === "POST" && !!request.headers()["next-action"];
+}
+
+async function reloadReview(page: Page): Promise<void> {
+  await page.reload();
+  await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+}
+
 type ClosingTarget = { kind: "save" } | { kind: "edit"; name: string };
 
 /** Click Cancel, then click `target` in the same turn `data-closed` appears. */
@@ -414,8 +423,7 @@ test.describe("Catalog review (authenticated)", () => {
       await dialog.getByRole("button", { name: "Save" }).click();
       await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
-      await page.reload();
-      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await reloadReview(page);
 
       const editedRow = reviewRow(page, editedName);
       await expect(editedRow).toBeVisible({ timeout: 10000 });
@@ -520,8 +528,7 @@ test.describe("Catalog review (authenticated)", () => {
       await dialog.getByRole("button", { name: "Save" }).click();
       await expect(dialog).toBeHidden({ timeout: 5000 });
 
-      await page.reload();
-      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await reloadReview(page);
       await expect(reviewRow(page, savedB)).toBeVisible({ timeout: 10000 });
       await expect(reviewRow(page, nameA)).toBeVisible();
 
@@ -555,8 +562,7 @@ test.describe("Catalog review (authenticated)", () => {
       await dialog.getByRole("button", { name: "Save" }).click();
       await expect(dialog).toBeHidden({ timeout: 5000 });
 
-      await page.reload();
-      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await reloadReview(page);
       await expect(reviewRow(page, savedB)).toBeVisible({ timeout: 10000 });
       await expect(reviewRow(page, nameA)).toBeVisible();
       await expect(reviewRow(page, typed)).toHaveCount(0);
@@ -587,15 +593,14 @@ test.describe("Catalog review (authenticated)", () => {
 
       await page.route("**/*", async (route) => {
         const request = route.request();
-        if (request.method() === "POST" && request.headers()["next-action"]) actionPosts += 1;
+        if (isActionPost(request)) actionPosts += 1;
         await route.continue();
       });
       await clickWhileDialogCloses(page, { kind: "save" });
       await expect(page.locator("[data-slot=dialog-content]")).toHaveCount(0);
       expect(actionPosts).toBe(0);
 
-      await page.reload();
-      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await reloadReview(page);
       await expect(reviewRow(page, nameA)).toBeVisible({ timeout: 10000 });
       await expect(reviewRow(page, typed)).toHaveCount(0);
     } finally {
@@ -604,7 +609,7 @@ test.describe("Catalog review (authenticated)", () => {
     }
   });
 
-  test("a pending save cannot be dismissed", async ({ page }) => {
+  test("a pending save cannot be dismissed, even by Cancel in the same turn", async ({ page }) => {
     test.setTimeout(90_000);
     const nameA = reviewProductName("pending");
     const saved = reviewProductName("pending-saved");
@@ -623,7 +628,7 @@ test.describe("Catalog review (authenticated)", () => {
 
       await page.route("**/*", async (route) => {
         const request = route.request();
-        if (!held && request.method() === "POST" && request.headers()["next-action"]) {
+        if (!held && isActionPost(request)) {
           held = true;
           await gate;
         }
@@ -638,9 +643,18 @@ test.describe("Catalog review (authenticated)", () => {
         dialog.getByRole("button", { name }).evaluate((button) => {
           if (button instanceof HTMLElement) button.click();
         });
-      await clickControl("Save");
+      // Cancel in the same turn as Save, before isPending is true.
+      await dialog.getByRole("button", { name: "Save" }).evaluate((save) => {
+        const cancel = [...(save.parentElement?.querySelectorAll("button") ?? [])].find(
+          (button) => button.textContent?.trim() === "Cancel",
+        );
+        if (!(save instanceof HTMLElement) || !(cancel instanceof HTMLElement)) throw new Error("Save or Cancel is missing");
+        save.click();
+        cancel.click();
+      });
       await expect.poll(() => held, { timeout: 10000 }).toBe(true);
       await expect(dialog.getByRole("button", { name: "Saving…" })).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
 
       await page.keyboard.press("Escape");
       await expect(dialog).toBeVisible();
@@ -655,8 +669,7 @@ test.describe("Catalog review (authenticated)", () => {
 
       release();
       await expect(dialog).toBeHidden({ timeout: 10000 });
-      await page.reload();
-      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await reloadReview(page);
       await expect(reviewRow(page, saved)).toBeVisible({ timeout: 10000 });
     } finally {
       release();
@@ -680,7 +693,7 @@ test.describe("Catalog review (authenticated)", () => {
 
       await page.route("**/*", async (route) => {
         const request = route.request();
-        if (request.method() === "POST" && request.headers()["next-action"]) actionPosts += 1;
+        if (isActionPost(request)) actionPosts += 1;
         await route.continue();
       });
       await dialog.getByRole("button", { name: "Save" }).evaluate((button) => {
@@ -696,8 +709,7 @@ test.describe("Catalog review (authenticated)", () => {
       expect(actionPosts).toBe(1);
       expect(audits).toBe(1);
 
-      await page.reload();
-      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await reloadReview(page);
       await expect(reviewRow(page, saved)).toBeVisible({ timeout: 10000 });
     } finally {
       await page.unroute("**/*").catch(() => {});

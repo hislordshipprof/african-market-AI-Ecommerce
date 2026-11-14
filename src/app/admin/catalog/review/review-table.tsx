@@ -112,20 +112,14 @@ function EditModal({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && !isPending) onClose();
+        if (!next && !isPending && !saveStarted.current) onClose();
       }}
     >
       <DialogContent
         className="sm:max-w-lg"
         showCloseButton={false}
         aria-modal="true"
-        onKeyDown={(event) => {
-          if (!open && event.key === "Enter") {
-            event.preventDefault();
-            return;
-          }
-          wrapTabFocus(event);
-        }}
+        onKeyDown={wrapTabFocus}
       >
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">Edit product</DialogTitle>
@@ -187,7 +181,7 @@ function EditModal({
             variant="ghost"
             className="dark:text-[#EEF2EC] dark:hover:bg-[#2B3F33]"
             onClick={() => {
-              if (open && !isPending) onClose();
+              if (open && !isPending && !saveStarted.current) onClose();
             }}
             aria-disabled={isPending}
           >

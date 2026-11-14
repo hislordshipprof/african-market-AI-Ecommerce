@@ -1001,3 +1001,17 @@ describe("lane env filter script", () => {
     }
   });
 });
+
+describe("formatR2UploadCause", () => {
+  it("keeps a cause with a newline or carriage return in its name, code or message on one line", async () => {
+    const { formatR2UploadCause } = await import("../../prisma/seed-master-catalog");
+    const cause = Object.assign(new Error("Access\rDenied\r\nsecond line"), {
+      name: "Access\nDenied",
+      code: "Bad\r\nCode",
+      $metadata: { httpStatusCode: 403 },
+    });
+    const line = formatR2UploadCause(cause);
+    expect(line).not.toMatch(/[\r\n]/);
+    expect(line).toBe("Access (HTTP 403): Access (Bad)");
+  });
+});
