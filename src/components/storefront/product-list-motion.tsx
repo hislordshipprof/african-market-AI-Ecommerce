@@ -1,9 +1,9 @@
 "use client";
 
 import { Children, type CSSProperties, type ReactNode } from "react";
-import { AnimatePresence, LazyMotion, m, useReducedMotion } from "motion/react";
+import { AnimatePresence, LazyMotion, MotionConfig, m, useReducedMotion } from "motion/react";
 
-const loadLayout = () => import("./motion-layout-features").then(module => module.default);
+const loadFeatures = () => import("./motion-layout-features").then(module => module.default);
 
 /** Receives server-rendered cards; catalog data and card rendering stay on the server. */
 export function ProductListMotion({
@@ -55,5 +55,5 @@ export function ProductListMotion({
       ))}</AnimatePresence>
     </Container>
   );
-  return contents ? content : <LazyMotion features={loadLayout}>{content}</LazyMotion>;
+  return <LazyMotion features={loadFeatures}><MotionConfig reducedMotion="user">{content}</MotionConfig></LazyMotion>;
 }

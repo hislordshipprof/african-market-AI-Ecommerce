@@ -78,3 +78,17 @@ test.describe("Hero image on a phone (#563 LCP)", () => {
     expect(preloadPriority).toBe("high");
   });
 });
+
+test.describe("First load without the animation library (#563 LCP)", () => {
+  // The scripts the home page's HTML loads. Not every script the browser fetches: after idle, Next prefetches
+  // linked routes (search, aisles), whose bundles do carry motion, so a network-wide check would race that.
+  test("the home page's first-load scripts carry no motion code", async ({ request }) => {
+    const html = await (await request.get(`${BASE}/`)).text();
+    const srcs = [...html.matchAll(/<script[^>]+src="([^"]+)"/g), ...html.matchAll(/<link[^>]+as="script"[^>]+href="([^"]+)"/g)]
+      .map(match => match[1].replaceAll("&amp;", "&"));
+    expect(srcs.length).toBeGreaterThan(5);
+    const bodies = await Promise.all(srcs.map(async src => ({ src, body: await (await request.get(new URL(src, BASE).href)).text() })));
+    // "whileDrag" is in motion's prop list, which every motion bundle carries.
+    expect(bodies.filter(({ body }) => body.includes('"whileDrag"')).map(({ src }) => src)).toEqual([]);
+  });
+});
