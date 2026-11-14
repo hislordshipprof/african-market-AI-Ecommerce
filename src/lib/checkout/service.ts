@@ -24,6 +24,7 @@ import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteChea
 import { checkCourierEligibility, readCourierWeightSettings } from "../delivery/eligibility";
 import type { DeliveryProvider } from "../delivery/provider";
 import { validPhone } from "../customer-account/phone";
+import { assertSlotOffered, SlotUnavailableError } from "./slots";
 import type {
   CheckoutQuote,
   Contact,
@@ -299,6 +300,7 @@ export { checkoutTestHooks } from "./test-hooks";
 export { SavedCardUnavailableError } from "./saved-card-payment";
 export { LiveModeBlockedError } from "./live-mode";
 export { StoreNotTakingOrdersError } from "../order/store-queue";
+export { SlotUnavailableError } from "./slots";
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
@@ -549,6 +551,8 @@ export async function recordAuthorizedOrder(
         ? storeAvailability(hours.hours, hours.timezone, now)
         : ({ kind: "unavailable" } as const);
       if (availability.kind === "unavailable") throw new StoreNotTakingOrdersError();
+      // Under the same lock, so two orders cannot both take a slot's last place (#565).
+      await assertSlotOffered(tx, storeId, lockedStore, input.fulfillment, input.pickupSlot, now);
 
       if (input.lines.length === 0) {
         throw new Error("Order lines are required");
@@ -1179,7 +1183,11 @@ export async function placeOrder(
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw new Error("Cart is empty");
     }
-    if (error instanceof BasketChangedError || error instanceof StoreNotTakingOrdersError) {
+    if (
+      error instanceof BasketChangedError
+      || error instanceof StoreNotTakingOrdersError
+      || error instanceof SlotUnavailableError
+    ) {
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw error;
     }

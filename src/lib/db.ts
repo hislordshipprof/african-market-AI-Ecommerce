@@ -134,6 +134,8 @@ export function storeScoped(storeId: string) {
     copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
     ownerReport: wrapDelegate(storeId, prisma.ownerReport),
     ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
+    reorderList: wrapDelegate(storeId, prisma.reorderList),
+    reorderListItem: wrapDelegate(storeId, prisma.reorderListItem),
     listingDraft: wrapDelegate(storeId, prisma.listingDraft),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     delivery: wrapDelegate(storeId, prisma.delivery),
@@ -333,7 +335,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -369,6 +371,8 @@ export async function storeScopedTransaction<T>(
       copilotDigest: tx.copilotDigest,
       ownerReport: tx.ownerReport,
       ownerReportItem: tx.ownerReportItem,
+      reorderList: tx.reorderList,
+      reorderListItem: tx.reorderListItem,
       listingDraft: tx.listingDraft,
       notificationLog: tx.notificationLog,
       delivery: tx.delivery,
@@ -435,6 +439,12 @@ export interface LockedStoreRow {
   deliveryRadiusMi: number;
   lat: number | null;
   lng: number | null;
+  hours: unknown;
+  timezone: string;
+  prepTimeMinutes: number;
+  pickupEnabled: boolean;
+  pickupSlotSettings: unknown;
+  storeDeliverySlotSettings: unknown;
 }
 
 export interface GeocodeCacheRow {
@@ -550,8 +560,15 @@ export async function lockStoreRow(
     delivery_radius_mi: unknown;
     lat: number | null;
     lng: number | null;
+    hours: unknown;
+    timezone: string;
+    prep_time_minutes: number;
+    pickup_enabled: boolean;
+    pickup_slot_settings: unknown;
+    store_delivery_slot_settings: unknown;
   }>>`
-    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng
+    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng,
+      hours, timezone, prep_time_minutes, pickup_enabled, pickup_slot_settings, store_delivery_slot_settings
     FROM stores
     WHERE id = ${storeId}
     FOR UPDATE
@@ -564,6 +581,12 @@ export async function lockStoreRow(
     deliveryRadiusMi: Number(row.delivery_radius_mi),
     lat: row.lat,
     lng: row.lng,
+    hours: row.hours,
+    timezone: row.timezone,
+    prepTimeMinutes: row.prep_time_minutes,
+    pickupEnabled: row.pickup_enabled,
+    pickupSlotSettings: row.pickup_slot_settings,
+    storeDeliverySlotSettings: row.store_delivery_slot_settings,
   };
 }
 

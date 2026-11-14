@@ -18,6 +18,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { VALID_US_TIMEZONES } from "./timezone";
+import { SLOT_FIELD_NAMES, readSlotForm } from "./slot-form";
+import type { SlotSchedule } from "../order/slot-schedule";
 
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const MAX_CENTS = 2_147_483_647;
@@ -55,7 +57,7 @@ function formText(data: unknown, key: string): string | null {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "phone", "storeDeliveryFee", "storeDeliveryEnabled"]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "phone", "storeDeliveryFee", "storeDeliveryEnabled", ...SLOT_FIELD_NAMES]) {
     const v = formText(data, key);
     if (v != null) raw[key] = v;
   }
@@ -87,6 +89,8 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     phone: string | null;
     storeDeliveryEnabled: boolean;
     storeDeliveryFeeCents: number;
+    pickupSlotSettings: SlotSchedule | null;
+    storeDeliverySlotSettings: SlotSchedule | null;
   };
 } {
   const errors: Record<string, string> = {};
@@ -209,6 +213,11 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     if (deliveryRadiusMi <= 0) errors.deliveryRadiusMi = "Delivery radius must be greater than 0";
   }
 
+  const read = (key: string) => formText(data, key);
+  const pickupSlots = readSlotForm(read, "pickupSlots");
+  const deliverySlots = readSlotForm(read, "deliverySlots");
+  Object.assign(errors, pickupSlots.errors, deliverySlots.errors);
+
   let hours: unknown = null;
   if (hoursRaw) {
     try {
@@ -243,6 +252,8 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
       phone,
       storeDeliveryEnabled,
       storeDeliveryFeeCents,
+      pickupSlotSettings: pickupSlots.schedule,
+      storeDeliverySlotSettings: deliverySlots.schedule,
     },
   };
 }
@@ -253,7 +264,8 @@ const STORE_FORM_FIELDS = [
   "pickupEnabled", "timezone", "storeId",
   "addressLine1", "addressLine2", "city", "state", "zip", "phone",
   "storeDeliveryFee", "storeDeliveryEnabled",
-] as const;
+  ...SLOT_FIELD_NAMES,
+];
 const storeFormSchema = z.strictObject({
   slug: z.string().max(80).nullable(),
   name: z.string().max(200).nullable(),
@@ -278,6 +290,7 @@ const storeFormSchema = z.strictObject({
   phone: z.string().max(40).nullable(),
   storeDeliveryFee: z.string().max(20).nullable(),
   storeDeliveryEnabled: z.string().max(10).nullable(),
+  ...Object.fromEntries(SLOT_FIELD_NAMES.map((name) => [name, z.string().max(400).nullable()])),
 });
 
 function boundStoreForm(data: FormData): boolean {
@@ -451,6 +464,8 @@ export async function createStore(
         lng: coords.lng,
         storeDeliveryEnabled: values.storeDeliveryEnabled,
         storeDeliveryFeeCents: values.storeDeliveryFeeCents,
+        pickupSlotSettings: values.pickupSlotSettings ?? Prisma.JsonNull,
+        storeDeliverySlotSettings: values.storeDeliverySlotSettings ?? Prisma.JsonNull,
       },
     });
 
@@ -582,6 +597,8 @@ export async function updateStore(
         lng: coords.lng,
         storeDeliveryEnabled: values.storeDeliveryEnabled,
         storeDeliveryFeeCents: values.storeDeliveryFeeCents,
+        pickupSlotSettings: values.pickupSlotSettings ?? Prisma.JsonNull,
+        storeDeliverySlotSettings: values.storeDeliverySlotSettings ?? Prisma.JsonNull,
       },
     });
 
