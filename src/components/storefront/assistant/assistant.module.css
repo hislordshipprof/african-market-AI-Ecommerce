@@ -617,6 +617,16 @@ a.primary {
   font: 400 16px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
+/* The ring goes inside the composer edge, so it is never clipped or run over the Add button. */
+.composer .composerRow textarea:focus-visible {
+  outline: none;
+}
+
+.composer:has(textarea:focus-visible) {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+}
+
 .composer textarea::placeholder {
   color: var(--color-muted);
   opacity: 1;
