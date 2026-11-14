@@ -53,7 +53,7 @@ A card the customer agreed to keep on their account, shown as brand and last fou
 _Avoid_: Wallet, payment profile
 
 **Store directory**:
-The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there.
+The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there. Each store card shows open now or when it opens, pickup and delivery, the owner's face and story, and after a near me search the distance and whether the store delivers to you (its own radius only; a courier is only "may be available").
 _Avoid_: Marketplace, combined app
 
 **Directory listing**:
@@ -67,7 +67,8 @@ _Avoid_: Store locator, geo search
 ## Catalog
 
 **Master product**:
-A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms.
+A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected or archived. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
+_Avoid_: Deleting a master product
 
 **Listing**:
 A store's offer of a product: its price, sizes and stock at that store.

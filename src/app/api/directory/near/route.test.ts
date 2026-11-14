@@ -47,8 +47,10 @@ describe.skipIf(!hasDb)("GET /api/directory/near", () => {
   it("never sends a store's own coordinates, which locate its street address", async () => {
     const body = await (await call("?q=77002")).json();
     const mine = body.stores.find((s: { slug: string }) => s.slug === slug);
-    expect(mine).not.toHaveProperty("lat");
-    expect(mine).not.toHaveProperty("lng");
+    for (const key of ["lat", "lng", "id", "deliveryRadiusMi", "addressLine1", "phone", "uberLocationId", "doordashStoreId"]) {
+      expect(mine).not.toHaveProperty(key);
+    }
+    expect(mine).toMatchObject({ deliversToYou: false, courierMayDeliver: false });
     expect(JSON.stringify(body)).not.toContain("29.7858");
   });
 
