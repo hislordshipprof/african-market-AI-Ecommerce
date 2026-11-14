@@ -331,3 +331,33 @@ describe("security headers on the proxy", () => {
     expect(first.headers.get("content-security-policy")).not.toContain("nonce-");
   });
 });
+
+describe("proxy custom domain resolution", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "markets.example");
+  });
+
+  it("forwards a non-platform host as x-custom-domain, not as a slug", () => {
+    const res = proxy(makeRequest("https://Shop.MamasMarket.com/"));
+    expect(res.headers.get("x-middleware-request-x-custom-domain")).toBe("shop.mamasmarket.com");
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+  });
+
+  it("keeps platform subdomains on the slug path", () => {
+    const res = proxy(makeRequest("https://mama-ngozi.markets.example/"));
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
+    expect(res.headers.get("x-middleware-request-x-custom-domain")).toBeNull();
+  });
+
+  it("drops a client-sent x-custom-domain on a platform host", () => {
+    const req = new NextRequest("https://markets.example/", {
+      headers: { host: "markets.example", "x-custom-domain": "victim-store.com" },
+    });
+    const res = proxy(req);
+    expect(res.headers.get("x-middleware-request-x-custom-domain")).toBeNull();
+  });
+});

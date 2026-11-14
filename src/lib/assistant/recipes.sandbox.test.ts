@@ -3,12 +3,15 @@ import { authPrisma } from "../db";
 import { WEB_SEARCH_MICROS } from "./cost";
 import { lookUpDishOnline } from "./recipes";
 import { setSpendClock } from "./spend";
+import { liveSandbox, providerSandbox } from "../test-live-provider";
 
 const DAY = "2099-11-11";
 const live = process.env.ASSISTANT_LIVE_TESTS === "1"
   && !!process.env.DATABASE_URL
   && typeof process.env.ANTHROPIC_API_KEY === "string"
   && process.env.ANTHROPIC_API_KEY.trim() !== "";
+
+const sandbox = providerSandbox("Anthropic");
 
 async function dayCost(): Promise<bigint> {
   const found = await authPrisma.$queryRaw<Array<{ cost_micros: bigint }>>`
@@ -17,11 +20,11 @@ async function dayCost(): Promise<bigint> {
   return found[0]?.cost_micros ?? BigInt(0);
 }
 
-describe.skipIf(!live)("recipe lookup live sandbox", () => {
+describe.skipIf(!liveSandbox || !live)("recipe lookup live sandbox", () => {
   beforeAll(() => setSpendClock(() => new Date(`${DAY}T12:00:00.000Z`)));
   afterAll(() => setSpendClock(null));
 
-  it("looks up a real dish with Anthropic's web search and keeps a source the search returned", async () => {
+  it("looks up a real dish with Anthropic's web search and keeps a source the search returned", sandbox.test(async () => {
     const before = await dayCost();
     const { found, costMicros } = await lookUpDishOnline("kelewele");
     expect(found).not.toBeNull();
@@ -29,5 +32,5 @@ describe.skipIf(!live)("recipe lookup live sandbox", () => {
     expect(found!.sourceUrl).toMatch(/^https?:\/\//);
     expect(costMicros).toBeGreaterThan(WEB_SEARCH_MICROS);
     expect((await dayCost()) - before).toBe(costMicros);
-  }, 120_000);
+  }), 120_000);
 });

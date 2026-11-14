@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { storeScoped } from "../db";
 import { listingLabel } from "./cards";
+import { MOVEMENT_DAYS, SALES_FLOOR, inventoryReport, type MovementRow } from "./inventory-report";
 import { searchListingMatches, type ListingSearch } from "./search";
 import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ProposalKind } from "./types";
 
@@ -37,6 +38,10 @@ export interface DraftBook {
   choices: PendingChoice[];
   searches: ListingSearch[];
   overflow: boolean;
+  /** Every tool result this turn, as JSON: the only numbers the reply may quote besides the owner's. */
+  toolResults: string[];
+  /** Rows `inventory_report` returned this turn, for the fixed reply when a number fails the check. */
+  report: MovementRow[];
   /** Listings already drafted or offered in a choice this turn. */
   listingIds: Set<string>;
   run<T>(fn: () => Promise<T>): Promise<T>;
@@ -48,6 +53,8 @@ export function createDraftBook(): DraftBook {
     choices: [],
     searches: [],
     overflow: false,
+    toolResults: [],
+    report: [],
     listingIds: new Set(),
     run(fn) {
       const next = chain.then(fn, fn);
@@ -126,6 +133,13 @@ const findSchema = z.object({
   query: z.string().max(200),
 });
 
+const reportSchema = z.object({
+  query: z.string().max(200).optional(),
+});
+
+/** At most this many listings go to the model; the page shows them all. */
+const REPORT_ROWS = 20;
+
 const proposeSchema = z.object({
   listingId: z.string().min(1).max(200),
   kind: z.enum(["restock", "counter_sale", "recount", "set_status"]),
@@ -147,6 +161,34 @@ function searchResult(found: ListingSearch) {
   return { outcome: "none" as const, listings: [] };
 }
 
+function reportResult(rows: MovementRow[]) {
+  return {
+    windowDays: MOVEMENT_DAYS,
+    salesFloor: SALES_FLOOR,
+    note: "Sales are online orders plus counter sales the owner reported. Counter sales nobody reported are not counted.",
+    total: rows.length,
+    listings: rows.slice(0, REPORT_ROWS).map((row) => ({
+      name: row.name,
+      stockMode: row.stockMode,
+      qty: row.qty,
+      soldOnlineThisWeek: row.online7,
+      soldOnlineWeekBefore: row.onlinePrior7,
+      counterSalesReported: row.counter7,
+      restocked: row.restocked7,
+      shorts: row.short7,
+      estimate: row.estimate.kind === "estimate"
+        ? { perDay: row.estimate.perDay, daysLeft: row.estimate.daysLeft, outDate: row.estimate.outDate, outDay: row.estimate.outDay }
+        : row.estimate.kind,
+    })),
+  };
+}
+
+/** Records what the model saw, so the reply can be checked against it. */
+function recorded<T>(book: DraftBook, result: T): T {
+  book.toolResults.push(JSON.stringify(result));
+  return result;
+}
+
 export function copilotTools(storeId: string, book: DraftBook) {
   return {
     find_listings: tool({
@@ -161,14 +203,29 @@ export function copilotTools(storeId: string, book: DraftBook) {
           throw new Error("could not search listings");
         }
         book.searches.push(found);
-        return searchResult(found);
+        return recorded(book, searchResult(found));
+      },
+    }),
+    inventory_report: tool({
+      description:
+        "Stock movement for this store's active listings, or the ones matching query: units sold online this week and the week before, counter sales and restocks the owner reported, shorts, and for counted listings with enough sales the average a day, days left and estimated out date. Read only.",
+      inputSchema: reportSchema,
+      execute: async ({ query }) => {
+        let rows: MovementRow[];
+        try {
+          rows = (await inventoryReport(storeId, { query })).rows;
+        } catch {
+          throw new Error("could not read stock movement");
+        }
+        book.report.push(...rows.slice(0, REPORT_ROWS));
+        return recorded(book, reportResult(rows));
       },
     }),
     propose_stock_change: tool({
       description:
         "Draft one stock change for a listing id that find_listings returned in this turn. When the search outcome was several or did_you_mean, the owner picks the item on screen instead. Does not write stock.",
       inputSchema: proposeSchema,
-      execute: (input) => book.run(() => propose(storeId, book, input)),
+      execute: (input) => book.run(async () => recorded(book, await propose(storeId, book, input))),
     }),
   };
 }

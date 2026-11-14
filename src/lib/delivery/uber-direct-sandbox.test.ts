@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { UberDirectProvider } from "./uber-direct";
+import { liveSandbox, providerSandbox } from "../test-live-provider";
 
 const hasKeys = Boolean(process.env.UBER_DIRECT_CLIENT_ID && process.env.UBER_DIRECT_CLIENT_SECRET && process.env.UBER_DIRECT_CUSTOMER_ID);
 
+const sandbox = providerSandbox("Uber Direct");
+
 // Opt-in: runs only with the Uber Direct test keys, and checks the adapter's shapes against the real sandbox.
-describe.skipIf(!hasKeys)("UberDirectProvider against the Uber Direct sandbox", () => {
-  it("gets a token and a real test quote in cents with Uber's expiry", async () => {
+describe.skipIf(!liveSandbox || !hasKeys)("UberDirectProvider against the Uber Direct sandbox", () => {
+  it("gets a token and a real test quote in cents with Uber's expiry", sandbox.test(async () => {
     const quote = await new UberDirectProvider().quote({
       externalDeliveryId: `sandbox-probe-${Date.now().toString(36)}`,
       pickup: {
@@ -23,5 +26,5 @@ describe.skipIf(!hasKeys)("UberDirectProvider against the Uber Direct sandbox", 
     expect(quote.expiresAt.getTime()).toBeGreaterThan(Date.now());
     expect(quote.dropoffEta?.getTime()).toBeGreaterThan(Date.now());
     console.log(JSON.stringify({ event: "uber_direct_sandbox_quote", feeCents: quote.feeCents, expiresAt: quote.expiresAt, pickupEta: quote.pickupEta, dropoffEta: quote.dropoffEta }));
-  }, 30_000);
+  }), 30_000);
 });

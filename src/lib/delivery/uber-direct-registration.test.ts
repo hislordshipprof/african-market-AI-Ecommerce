@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { platform } from "@/lib/db";
+import { platform, platformAdmin } from "@/lib/db";
 import { registerStoreWithUberDirect } from "./uber-direct-registration";
 import { fakeUberDirect } from "./uber-direct-fake";
 
@@ -19,13 +19,14 @@ function setup(clientId: string, api?: () => Promise<Response>) {
 describe.skipIf(!process.env.DATABASE_URL)("registerStoreWithUberDirect", () => {
   let raw: PrismaClient;
   let storeId = "";
+  let slug = "";
 
   beforeAll(async () => {
     raw = testPrismaClient();
-    const stamp = Date.now().toString(36);
+    slug = `uber-reg-${Date.now().toString(36)}`;
     storeId = (await raw.store.create({
       data: {
-        slug: `uber-reg-${stamp}`,
+        slug,
         name: "Mama Ada Market",
         addressLine1: "100 Main St",
         addressLine2: "Unit 4",
@@ -58,6 +59,26 @@ describe.skipIf(!process.env.DATABASE_URL)("registerStoreWithUberDirect", () => 
     errors.mockRestore();
   });
 
+  it("when saving the new organization fails, logs its organization_id so it can be linked by hand", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const real = platformAdmin.store;
+    const update = vi.fn().mockRejectedValueOnce(new Error("db down")).mockResolvedValueOnce({});
+    platformAdmin.store = { update } as unknown as typeof real;
+    const { fake, opts } = setup("client-reg-save-fails");
+    const store = await platform.store.findUniqueOrThrow({ where: { id: storeId } });
+
+    try {
+      const result = await registerStoreWithUberDirect(store, opts);
+
+      expect(result).toMatchObject({ ok: false, error: "db down" });
+      const logged = errors.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(logged).toContain(fake.organizations[0].organization_id);
+    } finally {
+      platformAdmin.store = real;
+      errors.mockRestore();
+    }
+  });
+
   it("registers the store as an Uber Direct organization, stores uberLocationId, clears the flag, and does nothing once registered", async () => {
     const { fake, opts } = setup("client-reg-ok");
     const store = await platform.store.findUniqueOrThrow({ where: { id: storeId } });
@@ -67,7 +88,7 @@ describe.skipIf(!process.env.DATABASE_URL)("registerStoreWithUberDirect", () => 
     expect(result).toEqual({ ok: true, uberLocationId: fake.organizations[0].organization_id });
     expect(fake.organizations[0]).toMatchObject({
       info: {
-        name: "Mama Ada Market",
+        name: `Mama Ada Market (${slug})`,
         billing_type: "BILLING_TYPE_CENTRALIZED",
         address: { street1: "100 Main St", street2: "Unit 4", city: "Silver Spring", state: "MD", zipcode: "20910", country_iso2: "US" },
       },

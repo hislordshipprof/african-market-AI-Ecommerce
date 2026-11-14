@@ -158,6 +158,17 @@ export function scriptStep(messages: unknown): ScriptStep {
     }
     return { kind: "tool", name: "add_to_cart", input: { items: add } };
   }
+  if (last.name === "get_fulfillment_options") {
+    const pickup = isRecord(last.output) && isRecord(last.output.pickup) ? last.output.pickup : {};
+    const slots = Array.isArray(pickup.slots) ? pickup.slots.filter(isRecord) : [];
+    const slot = slots.at(-1);
+    if (typeof slot?.slotId !== "string") return { kind: "tool", name: "prepare_checkout", input: {} };
+    return { kind: "tool", name: "set_fulfillment", input: { fulfillment: "pickup", slot_id: slot.slotId } };
+  }
+  if (last.name === "set_fulfillment") return { kind: "tool", name: "prepare_checkout", input: {} };
+  if (last.name === "prepare_checkout") {
+    return { kind: "text", text: "Here is your order to review. Tap Review and pay to pay on the checkout page." };
+  }
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
   if (last.name === "show_products" || last.name === "add_to_cart") {
@@ -232,6 +243,7 @@ function openingStep(lower: string, raw: string, messages: unknown): ScriptStep 
   if (lower.includes("hold please")) return { kind: "text", text: "Finished waiting.", delayMs: 2500 };
   if (lower.includes("$1.00") || lower.includes("stray price")) return { kind: "text", text: "That is $1.00." };
   if (lower.includes("html please")) return { kind: "text", text: 'See <img onerror="alert(1)"> and [a](http://evil.test).' };
+  if (lower.includes("check out")) return { kind: "tool", name: "get_fulfillment_options", input: {} };
   if (lower.includes("summary") || lower.includes("basket")) return { kind: "tool", name: "get_cart_summary", input: {} };
   if (lower.includes("choices")) return { kind: "tool", name: "search_catalog", input: { query: "yam" } };
   if (lower.includes("egusi") || lower.includes("pictures") || lower.includes("show me")) {

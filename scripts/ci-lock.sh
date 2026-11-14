@@ -2,6 +2,8 @@
 # The machine-wide local-ci slots, sourced by ci-local.sh. Up to CI_SLOTS suites (default 2) run at once, each
 # holding the lock of its own slot; with every slot held, a run waits. Slot 1's lock is <lock>, slot k's is <lock>-k.
 # Each lock is a directory holding the owner's pid, its start time, and a token only the owner knows.
+# The start time is written twice: started in the local zone, which lanes on branches older than #413 compare,
+# and started-utc, which this version compares.
 # The earlier version let two runs hold the lock at once, three ways:
 # - two waiters could both judge a lock stale, and the slower one then renamed away the lock the faster one had
 #   just taken;
@@ -10,17 +12,21 @@
 # Two runs in one slot share its ci-runner checkout and drop each other's database.
 # Tests: bash scripts/ci-lock.test.sh
 
+. "$(dirname "${BASH_SOURCE[0]}")/review-watch.sh"
+
 # ci_lock_try <lock> <pid> <token>: take the lock if it is free.
 ci_lock_try() {
   mkdir "$1" 2>/dev/null || return 1
   printf '%s\n' "$3" > "$1/token"
-  _ci_lock_started "$2" > "$1/started"
+  ps -o lstart= -p "$2" > "$1/started" 2>/dev/null || true
+  _ci_lock_started "$2" > "$1/started-utc"
   printf '%s\n' "$2" > "$1/pid"
 }
 
 # _ci_lock_started <pid>: the process start time. With the pid it names one process, so a pid reused after a
 # reboot is not taken for the owner. Empty where ps has no -o (Git Bash); the pid alone is used there.
-_ci_lock_started() { ps -o lstart= -p "$1" 2>/dev/null || true; }
+# UTC and the C locale, so callers in different time zones or locales read the same time.
+_ci_lock_started() { TZ=UTC LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null || true; }
 
 # ci_lock_release <lock> <token>: remove the lock only when it is still ours.
 ci_lock_release() {
@@ -28,14 +34,22 @@ ci_lock_release() {
   rm -rf "$1"
 }
 
-_ci_lock_age() { echo $(( $(date +%s) - $(stat -c %Y "$1" 2>/dev/null || date +%s) )); }
+_ci_lock_age() { echo $(( $(date +%s) - $(file_mtime "$1" || date +%s) )); }
 
 # ci_lock_stale <lock>: the owner is gone (its pid is dead or now another process), or the lock never got a pid
-# (its owner died between the writes).
+# (its owner died between the writes). A lock with no start time (written before it was recorded) has its pid only.
 ci_lock_stale() {
-  local owner; owner=$(cat "$1/pid" 2>/dev/null || true)
+  local owner started; owner=$(cat "$1/pid" 2>/dev/null || true)
   if [ -n "$owner" ]; then
-    ! kill -0 "$owner" 2>/dev/null || [ "$(_ci_lock_started "$owner")" != "$(cat "$1/started" 2>/dev/null || true)" ]
+    kill -0 "$owner" 2>/dev/null || return 0
+    if started=$(cat "$1/started-utc" 2>/dev/null); then
+      [ -n "$started" ] && [ "$(_ci_lock_started "$owner")" != "$started" ]
+    else
+      # Lanes on branches older than #413 write only started, in their own zone and locale.
+      started=$(cat "$1/started" 2>/dev/null || true)
+      [ -n "$started" ] && [ "$(_ci_lock_started "$owner")" != "$started" ] \
+        && [ "$(ps -o lstart= -p "$owner" 2>/dev/null || true)" != "$started" ]
+    fi
   else
     [ "$(_ci_lock_age "$1")" -gt "${CI_LOCK_NOPID_SEC:-120}" ]
   fi
