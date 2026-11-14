@@ -47,6 +47,7 @@ function ProductPhoto({ src, name, category, sizes, priority }: {
   const [attempt, setAttempt] = useState(0);
   const Glyph = glyphs[category as keyof typeof glyphs] ?? Package;
   const retrySrc = attempt === 0 ? src : productImageRetrySrc(src);
+  // Cutouts are marked by path; if they ever move to R2 this needs a metadata flag instead (#103).
   return <div className="sf-product-image" data-image-kind={src?.startsWith("/images/products/") ? "cutout" : "photo"}>
     {src && attempt < 2 && retrySrc ? <Image
       key={attempt} src={retrySrc} alt={name} fill sizes={sizes} preload={priority}
