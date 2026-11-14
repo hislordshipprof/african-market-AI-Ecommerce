@@ -7,4 +7,8 @@ describe("currentNavHref", () => {
     expect(currentNavHref("/admin/storesX")).toBe("/admin");
     expect(currentNavHref("/admin/orders/checked")).toBe("/admin/orders");
   });
+
+  it("marks the fee ledger for the ledger page", () => {
+    expect(currentNavHref("/admin/billing/ledger")).toBe("/admin/billing/ledger");
+  });
 });

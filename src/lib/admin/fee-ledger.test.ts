@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFeeLedger, feeLedgerCsv, ledgerMonth, parseLedgerMonth, shiftMonth, type CaptureFacts, type RefundFacts } from "./fee-ledger";
+import { buildFeeLedger, feeLedgerCsv, ledgerMonth, ledgerPage, parseLedgerMonth, shiftMonth, type CaptureFacts, type RefundFacts } from "./fee-ledger";
 
 const NOW = new Date("2026-11-14T03:00:00Z");
 
@@ -22,6 +22,15 @@ describe("ledger month", () => {
     });
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
     expect(shiftMonth("2026-01", -1)).toBe("2025-12");
+  });
+});
+
+describe("ledger page", () => {
+  it("shows 100 rows a page and keeps a bad or out-of-range page inside the ledger", () => {
+    expect(ledgerPage(250, undefined)).toEqual({ number: 1, count: 3, from: 0, to: 100 });
+    expect(ledgerPage(250, "3")).toEqual({ number: 3, count: 3, from: 200, to: 250 });
+    for (const bad of ["0", "-1", "1.5", "2x", "9"]) expect(ledgerPage(250, bad).number).toBe(bad === "9" ? 3 : 1);
+    expect(ledgerPage(0, "2")).toEqual({ number: 1, count: 1, from: 0, to: 0 });
   });
 });
 

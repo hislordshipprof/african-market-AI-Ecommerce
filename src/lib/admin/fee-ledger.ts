@@ -214,6 +214,17 @@ export function buildFeeLedger(month: LedgerMonth, captures: CaptureFacts[], ref
   };
 }
 
+export const LEDGER_PAGE_SIZE = 100;
+
+/** Which rows the page shows: a strict positive page number, held to the last page; anything else is page 1. */
+export function ledgerPage(rowCount: number, input: string | undefined) {
+  const count = Math.max(1, Math.ceil(rowCount / LEDGER_PAGE_SIZE));
+  const asked = input && /^[1-9]\d{0,5}$/.test(input) ? Number(input) : 1;
+  const number = Math.min(asked, count);
+  const from = (number - 1) * LEDGER_PAGE_SIZE;
+  return { number, count, from, to: Math.min(rowCount, from + LEDGER_PAGE_SIZE) };
+}
+
 /** Row labels the page and the CSV share. */
 export const ROW_LABELS: Record<LedgerRow["kind"], string> = { capture: "Order", refund: "Refund" };
 
