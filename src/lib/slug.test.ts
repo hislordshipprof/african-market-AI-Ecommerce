@@ -136,14 +136,30 @@ describe("resolveHost", () => {
     });
   });
 
-  it("returns none for apex domain", () => {
-    expect(resolveHost("example.com", "example.com")).toEqual({ kind: "none" });
+  it("returns root for the apex domain, so it serves the directory", () => {
+    expect(resolveHost("example.com", "example.com")).toEqual({ kind: "root" });
   });
 
-  it("returns none for www", () => {
-    expect(resolveHost("www.example.com", "example.com")).toEqual({
-      kind: "none",
+  it("returns root for www", () => {
+    expect(resolveHost("WWW.example.com:443", "example.com")).toEqual({
+      kind: "root",
     });
+  });
+
+  it("returns root for a vercel.app root domain (the directory demo host)", () => {
+    expect(
+      resolveHost("african-markets.vercel.app", "african-markets.vercel.app"),
+    ).toEqual({ kind: "root" });
+  });
+
+  it("returns root for localhost when it is the root domain", () => {
+    expect(resolveHost("localhost:3195", "localhost")).toEqual({ kind: "root" });
+  });
+
+  it("keeps other vercel.app hosts unresolved when the root is a vercel.app host", () => {
+    expect(
+      resolveHost("african-markets-git-main.vercel.app", "african-markets.vercel.app"),
+    ).toEqual({ kind: "none" });
   });
 
   it("returns none for vercel.app", () => {

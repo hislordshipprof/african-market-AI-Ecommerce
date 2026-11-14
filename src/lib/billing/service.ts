@@ -9,7 +9,7 @@ import {
   storeScoped,
 } from "../db";
 import { sendEmail } from "../email/send";
-import { escapeHtml } from "../notifications/messages";
+import { escapeHtml } from "../format";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import type { WebhookEvent } from "../stripe/types";
 import { effectivePlan, type Plan } from "./plan";

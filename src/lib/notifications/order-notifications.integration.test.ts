@@ -327,6 +327,35 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(getTestSentSms()).toHaveLength(1);
   });
 
+  it("a message the provider took is replayed with its key after 2 hours, even when a pick has reordered the lines", async () => {
+    const orderId = await place("pickup");
+    await run(orderId, "placed");
+    expect((await acceptOrder(storeId, orderId, 20)).ok).toBe(true);
+    // The provider took both messages but the result write was lost; the retry comes after 2 hours.
+    await storeScoped(storeId).notificationLog.updateMany({
+      where: { orderId, event: "placed" },
+      data: { status: "sending", createdAt: new Date(Date.now() - 3 * 60 * 60_000) },
+    });
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    expect((await markLinePicked(storeId, lines[0].id)).ok).toBe(true);
+
+    await handler({ event: { data: { storeId, orderId, event: "placed" } }, step: makeFakeStep() });
+    const rows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId, event: "placed" } });
+    expect(rows.map((row) => `${row.status} ${row.reason ?? ""}`).sort()).toEqual(["sent ", "sent ", "skipped no_subscription"]);
+    expect(getTestSentEmails()).toHaveLength(1);
+    expect(getTestSentSms()).toHaveLength(1);
+
+    // A row that never reached the provider still expires at 2 hours.
+    const stale = await place("pickup");
+    await storeScoped(storeId).notificationLog.updateMany({
+      where: { orderId: stale, event: "placed" },
+      data: { createdAt: new Date(Date.now() - 3 * 60 * 60_000) },
+    });
+    await handler({ event: { data: { storeId, orderId: stale, event: "placed" } }, step: makeFakeStep() });
+    const staleRows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: stale, event: "placed" } });
+    expect(staleRows.map((row) => `${row.status} ${row.reason}`)).toEqual(NOTIFICATION_CHANNEL_KINDS.map(() => "failed expired"));
+  });
+
   it("each writer schedules `order-notify-<event>-<orderId>` after its rows are committed", async () => {
     const previous = process.env.INNGEST_EVENT_KEY;
     process.env.INNGEST_EVENT_KEY = "test-key";
