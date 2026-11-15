@@ -161,6 +161,14 @@ describe("price grounding", () => {
     expect(fractional.text).toBe("- A: price not confirmed\n- B: price not confirmed");
     expect(fractional.stripped).toEqual(["1.99 cents", "4.505 cents"]);
 
+    for (const range of ["$10.99-12.99", "$10.99 to 12.99", "$10.99–12.99", "$10.99 - 12.99"]) {
+      expect(groundAmounts(`Egusi runs ${range}.`, usd)).toEqual({ text: PHRASE, stripped: ["12.99"] });
+    }
+    expect(groundAmounts("Egusi runs $10.99-10.99.", usd).stripped).toEqual([]);
+    expect(groundAmounts("- Palm: $10.99-12.99", usd).text).toBe("- Palm: $10.99-price not confirmed");
+    expect(groundAmounts("| Palm | $7.77 |", usd).text).toBe("| Palm | price not confirmed |");
+    expect(groundAmounts("## Egusi $7.77", usd).text).toBe(`## ${PHRASE}`);
+
     const bare = "2 tins, 8 oz, 9:00 PM, 22:00-02:00, exp 12/30";
     expect(groundAmounts(bare, usd)).toEqual({ text: bare, stripped: [] });
 

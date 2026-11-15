@@ -176,10 +176,10 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     return { listingId: listing.id, variantId: variant.id };
   }
 
-  async function freshCart() {
-    const cart = await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } });
-    const talk = await storeScoped(storeA).aiConversation.create({
-      data: { storeId: storeA, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
+  async function freshCart(storeId = storeA) {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const talk = await storeScoped(storeId).aiConversation.create({
+      data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
     });
     return { cartId: cart.id, conversationId: talk.id };
   }
@@ -800,10 +800,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     const wide = await searchCatalog(ctx(), { query: `ata rodo ${suffix}` });
     const cameroonHit = searchItems(wide).find((row) => row.listingId === cameroon.listingId);
     expect(cameroonHit?.match).toBe("near");
-    const cartB = (await storeScoped(storeB).cart.create({ data: { storeId: storeB, source: "manual" } })).id;
-    const conversationB = (await storeScoped(storeB).aiConversation.create({
-      data: { storeId: storeB, cartId: cartB, model: "claude-haiku-5-5", messages: [] },
-    })).id;
+    const { cartId: cartB, conversationId: conversationB } = await freshCart(storeB);
     const otherStore = await searchCatalog(ctx({ storeId: storeB, cartId: cartB, conversationId: conversationB }), { query: `yams ${suffix}` });
     const otherItems = searchItems(otherStore);
     expect(otherItems.some((row) => row.listingId === scotch.listingId || row.name.includes(suffix))).toBe(false);
@@ -987,16 +984,14 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   it("update_cart with quantity zero removes the line", async () => {
     const item = await makeListing(storeA, { name: "Remove By Zero", price: 55 });
     const keeper = await makeListing(storeA, { name: "Keep Yam", price: 40 });
-    const keeperCart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
-    const keeperTalk = (await storeScoped(storeA).aiConversation.create({
-      data: { storeId: storeA, cartId: keeperCart, model: "claude-haiku-5-5", messages: [] },
-    })).id;
+    const { cartId: keeperCart, conversationId: keeperTalk } = await freshCart();
     await addLine(storeA, keeperCart, item.variantId, 2, null);
     await addLine(storeA, keeperCart, keeper.variantId, 1, null);
     const gone = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: item.variantId } });
     const result = await updateCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: gone!.id, qty: 0 });
     expect(result).toMatchObject({ ok: true, removed: true, qty: 0, subtotalCents: 40, serviceFeeCents: 99, totalBeforeDeliveryCents: 139 });
     expect(result).not.toHaveProperty("lineTotalCents");
+    expect(await storeScoped(storeA).cartLine.findUnique({ where: { id: gone!.id } })).toBeNull();
     const kept = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: keeper.variantId } });
     const removed = await removeFromCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: kept!.id });
     expect(removed).toMatchObject({ ok: true, removed: true, subtotalCents: 0, serviceFeeCents: 0, totalBeforeDeliveryCents: 0 });
@@ -1514,11 +1509,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     }
 
     async function newConversation(storeId: string) {
-      const cartId = (await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } })).id;
-      const conversationId = (await storeScoped(storeId).aiConversation.create({
-        data: { storeId, cartId, model: "claude-haiku-5-5", messages: [] },
-      })).id;
-      return { storeId, cartId, conversationId, actorUserId: null };
+      return { storeId, ...(await freshCart(storeId)), actorUserId: null };
     }
 
     it("the model sees short handles, never a long id, and an add by handle adds that variant", async () => {
