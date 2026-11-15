@@ -5,7 +5,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { makeFakeStep } from "../inngest/fake-step";
 import { isRlsRejection } from "../listing/cross-store-write";
-import { copilotWeeklyReport, listWeeklyReports, reportWeek, runWeeklyPage, weeklyFigures } from "./weekly-report";
+import { copilotWeeklyReport, listWeeklyReports, reportWeek, retryFailedReports, runWeeklyPage, weeklyFigures } from "./weekly-report";
 
 type Handler = (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
 const weeklyHandler = (copilotWeeklyReport as unknown as { fn: Handler }).fn;
@@ -363,6 +363,78 @@ describe.skipIf(!hasDb)("copilot weekly report (lane database)", () => {
 
     expect(sentTo(ownerF)).toHaveLength(1);
     expect((await reportRows(storeF))[0]!.sentAt).not.toBeNull();
+  });
+
+  it("a store suspended after its send failed is not sent by the run's retry step", async () => {
+    const storeS = (await raw.store.create({ data: { slug: `weekly-retry-susp-${RUN}`, name: "Weekly Retry Suspended", timezone: TZ, digestHour: 8 } })).id;
+    const ownerS = `weekly-ownerretrysusp-${RUN}`;
+    await raw.user.create({ data: { id: ownerS, name: ownerS, email: `${ownerS}@example.com` } });
+    await storeScoped(storeS).storeMembership.create({ data: { storeId: storeS, userId: ownerS, role: "owner" } });
+    const real = new TestSender();
+    let failing = true;
+    setEmailSenderForTests({
+      async send(message) {
+        if (failing && message.to === `${ownerS}@example.com`) throw new Error("Resend API error 503");
+        return real.send(message);
+      },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const runClock = MONDAY_8AM.toISOString();
+    const failedStoreIds: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await runWeeklyPage(cursor, runClock);
+      failedStoreIds.push(...page.failedStoreIds);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(failedStoreIds).toContain(storeS);
+
+    await raw.store.update({ where: { id: storeS }, data: { status: "suspended" } });
+    failing = false;
+    await retryFailedReports(failedStoreIds, runClock);
+
+    expect(sentTo(ownerS)).toHaveLength(0);
+    expect((await reportRows(storeS))[0]!.sentAt).toBeNull();
+  });
+
+  it("issue refunds count as refunded only once Stripe says the refund succeeded, at the ledger amount", async () => {
+    const storeR = (await raw.store.create({ data: { slug: `weekly-refunds-${RUN}`, name: "Weekly Refunds", timezone: TZ, digestHour: 21 } })).id;
+    await asStore(storeR, async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeR, name: "Chi" } });
+      const issue = async (n: number, providerStatus: string | null, type: string) => {
+        const order = await tx.order.create({
+          data: {
+            storeId: storeR, number: n, customerId: customer.id, status: "COMPLETED", subtotalCents: 0, bufferCents: 0,
+            totalAuthorizedCents: 0, capturedAmountCents: 3000, platformFeeCents: 0, createdAt: at("2026-11-10T18:00:00Z"),
+          },
+        });
+        const refund = await tx.refundRequest.create({
+          data: {
+            storeId: storeR, orderId: order.id, paymentIntentId: `pi_${RUN}_r${n}`, key: `${RUN}-rr${n}`, amountCents: 799,
+            refundApplicationFee: false, state: "CREATED", providerStatus, createdAt: at("2026-11-11T18:00:00Z"),
+          },
+        });
+        await tx.issueReport.create({
+          data: { storeId: storeR, orderId: order.id, type, lines: [], amountCents: 900, state: "auto_refunded", refundRequestId: refund.id, createdAt: at("2026-11-11T17:00:00Z") },
+        });
+      };
+      // The issue says 900 and the ledger 799, so the figure shows which amount it uses.
+      // Damaged: one refund succeeded, one still pending at Stripe. Missing: pending only. Wrong: Stripe failed it.
+      await issue(1, "succeeded", "damaged");
+      await issue(2, "pending", "damaged");
+      await issue(3, "pending", "missing");
+      await issue(4, "failed", "wrong");
+    });
+
+    const figures = await weeklyFigures(storeR, TZ, MONDAY_8AM);
+
+    expect(figures.issues).toEqual([
+      { reason: "Damaged", reports: 2, refundedCents: 799 },
+      { reason: "Missing", reports: 1, refundedCents: 0 },
+      { reason: "Wrong item", reports: 1, refundedCents: 0 },
+    ]);
+    expect(figures.sales.refundsCents).toBe(799);
   });
 
   it("an owner with a valid 254-character email gets the report", async () => {
