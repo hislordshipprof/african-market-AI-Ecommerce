@@ -132,6 +132,7 @@ export function storeScoped(storeId: string) {
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
     ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
+    whatsAppOptOut: wrapDelegate(storeId, prisma.whatsAppOptOut),
     copilotConversation: wrapDelegate(storeId, prisma.copilotConversation),
     copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
     stockProposal: wrapDelegate(storeId, prisma.stockProposal),
@@ -2152,6 +2153,47 @@ export async function findStoreByWhatsAppPhoneNumberId(
     WHERE phone_number_id = ${phoneNumberId} AND status = 'registered'
   `;
   return rows[0] ? { storeId: rows[0].store_id } : null;
+}
+
+/** The store's registered number and its sealed token, for sending from it (#560). Only src/lib/whatsapp opens the token. */
+export async function readStoreWhatsAppSender(
+  storeId: string,
+): Promise<{ phoneNumberId: string; sealedToken: string } | null> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.$queryRaw<Array<{ phone_number_id: string; business_token: string | null }>>`
+      SELECT phone_number_id, business_token FROM store_whatsapp_numbers
+      WHERE store_id = ${storeId} AND status = 'registered'
+    `,
+  );
+  const row = rows[0];
+  return row?.business_token ? { phoneNumberId: row.phone_number_id, sealedToken: row.business_token } : null;
+}
+
+/** True when the store has a registered number, so checkout offers WhatsApp updates (#560). Pass the order's transaction to read under it. */
+export async function storeHasWhatsAppNumber(storeId: string, tx?: Pick<PrismaClient, "$queryRaw">): Promise<boolean> {
+  const read = (client: Pick<PrismaClient, "$queryRaw">) => client.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM store_whatsapp_numbers WHERE store_id = ${storeId} AND status = 'registered'
+  `;
+  const rows = tx ? await read(tx) : await storeScopedTransaction(storeId, read);
+  return rows.length > 0;
+}
+
+/** A customer sent STOP to this store's number (#560). A repeat is a no-op. */
+export async function recordWhatsAppOptOut(storeId: string, waId: string): Promise<void> {
+  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+    INSERT INTO whatsapp_opt_outs (id, store_id, wa_id, created_at)
+    VALUES (${crypto.randomUUID()}, ${storeId}, ${waId}, (now() AT TIME ZONE 'UTC'))
+    ON CONFLICT (store_id, wa_id) DO NOTHING
+  `);
+}
+
+/** Exact wa_id match at this store only. */
+export async function isWhatsAppOptedOut(storeId: string, waId: string): Promise<boolean> {
+  const row = await storeScoped(storeId).whatsAppOptOut.findUnique({
+    where: { storeId_waId: { storeId, waId } },
+    select: { id: true },
+  });
+  return row !== null;
 }
 
 /** Creates the store's billing row if missing and locks it for this transaction (#494). */
