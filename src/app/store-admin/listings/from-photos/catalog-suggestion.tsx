@@ -54,7 +54,7 @@ export function SuggestionFields({
         <Input id={id("name")} className={INPUT} value={value.name} maxLength={200} required onChange={(event) => onChange({ name: event.target.value })} />
       </label>
       <label htmlFor={id("local")} className="grid gap-1 text-xs font-semibold text-[var(--color-muted)]">
-        Local name <span className="font-normal">(optional)</span>
+        <span>Local name <span className="font-normal">(optional)</span></span>
         <Input id={id("local")} className={INPUT} value={value.localName} maxLength={100} placeholder="e.g. ogiri igbo" onChange={(event) => onChange({ localName: event.target.value })} />
       </label>
       <label htmlFor={id("size")} className="grid gap-1 text-xs font-semibold text-[var(--color-muted)]">
