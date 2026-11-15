@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { findSeededRecipe, readRecipeAdminChanges, withoutAdminChanges } from "../../../prisma/master-catalog-upsert";
 
 // No app database client here: prisma/seed.ts imports this file.
 
@@ -53,6 +54,7 @@ export async function seedRecipeBase(prisma: PrismaClient, recipes: SeedRecipe[]
   const known = new Set(found.map((row) => row.id));
   const missing = ids.filter((id) => !known.has(id));
   if (missing.length > 0) throw new Error(`Recipe base names unknown master products: ${missing.join(", ")}`);
+  let kept = 0;
   for (const recipe of recipes) {
     const key = dishKey(recipe.name);
     const data = {
@@ -63,20 +65,31 @@ export async function seedRecipeBase(prisma: PrismaClient, recipes: SeedRecipe[]
       sourceUrl: null,
       origin: "curated",
     };
-    await prisma.$transaction(async (tx) => {
-      const row = await tx.recipe.upsert({ where: { key }, create: { key, ...data }, update: data });
-      await tx.recipeIngredient.deleteMany({ where: { recipeId: row.id } });
-      await tx.recipeIngredient.createMany({
-        data: recipe.ingredients.map((ingredient, position) => ({
-          recipeId: row.id,
-          position,
-          name: ingredient.name,
-          masterProductId: ingredient.masterProductId ?? null,
-          qty: ingredient.qty,
-          unit: ingredient.unit,
-        })),
-      });
+    const ingredients = recipe.ingredients.map((ingredient, position) => ({
+      position,
+      name: ingredient.name,
+      masterProductId: ingredient.masterProductId ?? null,
+      qty: ingredient.qty,
+      unit: ingredient.unit,
+    }));
+    // A re-seed keeps the fields a platform admin edited on a curated dish, also after a rename moved its key (#675).
+    const keptAdminChanges = await prisma.$transaction(async (tx) => {
+      const existing = await findSeededRecipe(tx, key);
+      if (!existing) {
+        await tx.recipe.create({ data: { key, ...data, ingredients: { createMany: { data: ingredients } } } });
+        return false;
+      }
+      await tx.$queryRaw`SELECT 1 FROM recipes WHERE id = ${existing.id} FOR UPDATE`;
+      const changes = await readRecipeAdminChanges(tx, existing.id);
+      await tx.recipe.update({ where: { id: existing.id }, data: withoutAdminChanges(data, changes) });
+      if (!changes.fields.has("ingredients")) {
+        await tx.recipeIngredient.deleteMany({ where: { recipeId: existing.id } });
+        await tx.recipeIngredient.createMany({ data: ingredients.map((row) => ({ recipeId: existing.id, ...row })) });
+      }
+      return changes.fields.size > 0;
     });
+    if (keptAdminChanges) kept++;
   }
+  log(`Kept admin changes on ${kept} ${kept === 1 ? "recipe" : "recipes"} (the fields an admin edited)`);
   return recipes.length;
 }
