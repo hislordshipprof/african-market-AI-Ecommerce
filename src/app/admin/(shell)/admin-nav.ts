@@ -11,6 +11,7 @@ export const ADMIN_NAV = [
   { href: "/admin/support", label: "Messages" },
   { href: "/admin/ai/conversations", label: "AI conversations" },
   { href: "/admin/ai/eval-spend", label: "AI eval and spend" },
+  { href: "/admin/billing/ledger", label: "Fee ledger" },
 ] as const;
 
 export type AdminNavHref = (typeof ADMIN_NAV)[number]["href"];
