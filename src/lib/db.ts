@@ -2362,6 +2362,7 @@ export async function findCourierIncidentRows(
       LEFT JOIN deliveries d ON d.id = e.delivery_id AND d.store_id = e.store_id
       CROSS JOIN (SELECT courier_assignment_timeout_s FROM platform_settings WHERE id = 'platform') ps
       WHERE e.type IN ('failover_triggered', 'both_failed', 'cancelled', 'returned', 'courier_assigned', 'delivered')
+        AND o.fulfillment = 'courier'
         ${eventScope[0]} ${eventScope[1]}
     ),
     incidents AS (

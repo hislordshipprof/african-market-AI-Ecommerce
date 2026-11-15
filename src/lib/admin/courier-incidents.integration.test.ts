@@ -47,7 +47,7 @@ async function newStore(name: string) {
   return {
     storeId,
     deliveryIds,
-    async order(spec: { status?: string; deliveries?: DeliverySpec[]; orderEvents?: EventSpec[] }): Promise<{ orderId: string; number: number }> {
+    async order(spec: { status?: string; fulfillment?: string; deliveries?: DeliverySpec[]; orderEvents?: EventSpec[] }): Promise<{ orderId: string; number: number }> {
       const orderNumber = number++;
       const orderId = await asPlatformAdmin(async (tx) => {
         const order = await tx.order.create({
@@ -56,7 +56,7 @@ async function newStore(name: string) {
             customerId,
             number: orderNumber,
             status: spec.status ?? "DELIVERED",
-            fulfillment: "courier",
+            fulfillment: spec.fulfillment ?? "courier",
             subtotalCents: 4000,
             bufferCents: 0,
             totalCents: 4000,
@@ -158,6 +158,11 @@ describe.skipIf(!hasDb)("courier incident log (#536)", () => {
     await store.order({ deliveries: [{ provider: "uber", status: "delivered", minutes: 0, proofUrl: "https://proof.example/3.jpg", events: [{ type: "courier_assigned", minutes: 2 }, { type: "delivered", minutes: 30 }] }] });
     await store.order({ deliveries: [{ provider: "uber", status: "delivered", minutes: 0, pin: "1234", events: [{ type: "courier_assigned", minutes: 2 }, { type: "delivered", minutes: 30 }] }] });
     await store.order({ status: "CANCELLED", deliveries: [{ provider: "uber", status: "cancelled", minutes: 0, events: [{ type: "cancelled", minutes: 4 }] }] });
+    // A store's own driver writes "delivered" with no delivery row; its photo lives on the order (review 536 Blocking 1).
+    await store.order({
+      fulfillment: "store-delivery",
+      orderEvents: [{ type: "out_for_delivery", minutes: 10 }, { type: "delivered", minutes: 20, payload: { proofKey: "proofs/x.jpg" } }],
+    });
 
     const { rows, nextCursor } = await list({ storeId: store.storeId });
 
