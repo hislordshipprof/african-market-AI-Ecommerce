@@ -16,7 +16,7 @@ const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visi
 const OUTLINE_BUTTON = `inline-flex min-h-11 items-center rounded-full border border-input px-5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-60 ${FOCUS}`;
 
 const VERDICT_LABELS = { same: "Claude: same product", different: "Claude: different products", unsure: "Claude: unsure" } as const;
-const STATUS_LABELS: Record<string, string> = { unknown: "not known", known: "from a store owner", reviewed: "reviewed" };
+const STATUS_LABELS: Record<string, string> = { known: "from a store owner", reviewed: "reviewed" };
 
 function AttributeLine({ label, status, values }: { label: string; status: string; values: string[] }) {
   const shown = status === "unknown" ? "" : values.length === 0 ? "none" : values.map((value) => value.replaceAll("_", " ")).join(", ");
@@ -24,8 +24,7 @@ function AttributeLine({ label, status, values }: { label: string; status: strin
     <div>
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="break-words text-foreground">
-        {shown ? `${shown} ` : ""}
-        <span className="text-muted-foreground">({STATUS_LABELS[status] ?? status})</span>
+        {shown ? <>{shown} <span className="text-muted-foreground">({STATUS_LABELS[status] ?? status})</span></> : "Not known"}
       </dd>
     </div>
   );
