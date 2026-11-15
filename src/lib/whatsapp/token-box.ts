@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 
 /** WHATSAPP_TOKEN_KEY is unset or not 32 bytes of base64. Thrown at call time, never at import. */
 export class TokenKeyMissingError extends Error {
@@ -63,4 +63,23 @@ export function openBusinessToken(
   decipher.setAAD(aad(owner));
   decipher.setAuthTag(Buffer.from(tag, "base64"));
   return Buffer.concat([decipher.update(Buffer.from(body, "base64")), decipher.final()]).toString("utf8");
+}
+
+/**
+ * The key a customer's WhatsApp cart is stored under at one store (#559): an
+ * HMAC of the store and the sender's wa_id under WHATSAPP_TOKEN_KEY, so the
+ * number cannot be read back from it. Null without the key.
+ */
+export function shopperSenderKey(
+  storeId: string,
+  waId: string,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  let key: Buffer;
+  try {
+    key = readKey(env);
+  } catch {
+    return null;
+  }
+  return createHmac("sha256", key).update(`whatsapp-shopper:${storeId}:${waId}`).digest("hex");
 }

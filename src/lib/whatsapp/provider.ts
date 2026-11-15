@@ -35,6 +35,16 @@ export function toGraphPayload(message: OutboundMessage): Record<string, unknown
           },
         },
       };
+    case "list":
+      return {
+        ...base,
+        type: "interactive",
+        interactive: {
+          type: "list",
+          body: { text: message.body },
+          action: { button: message.button, sections: [{ title: "Choices", rows: message.rows }] },
+        },
+      };
     case "template":
       return {
         ...base,

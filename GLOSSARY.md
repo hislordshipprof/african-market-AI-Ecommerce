@@ -136,7 +136,7 @@ A pending owner report the Store copilot drafted and has not applied. Stock chan
 ## Assistants
 
 **Shopper assistant**:
-The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
+The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront, and on the store's own WhatsApp number (#559), where it replies only inside Meta's 24-hour window and checks out through a **WhatsApp checkout link**. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
 _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 
 **Choice chips**:
@@ -185,6 +185,9 @@ A Copilot alert asking the owner to confirm a listing whose confidence fell belo
 
 **Linked WhatsApp number**:
 The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
+**WhatsApp checkout link**:
+The link the Shopper assistant sends on WhatsApp when a customer is ready to check out. It opens the store's normal checkout with the cart the chat filled, works once and for 60 minutes, and places nothing: the customer pays on that page, as a guest or signed in. A used or expired link shows "This checkout link has expired".
 
 **WhatsApp order updates**:
 Order status messages a customer gets on WhatsApp from the Store WhatsApp number instead of SMS, after ticking "Get order updates on WhatsApp" at checkout (default off, offered only when the store's number is Live). Email is unchanged. If a WhatsApp message cannot go, that update goes by SMS once. Replying STOP turns them off for that store.

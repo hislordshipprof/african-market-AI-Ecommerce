@@ -93,6 +93,8 @@ describe("WhatsApp webhook route", () => {
       fromUserId: null,
       type: "text",
       text: "À bọnọ\n",
+      timestamp: 1762700000,
+      replyId: null,
     });
 
     vi.stubEnv("WHATSAPP_APP_SECRET", "");
@@ -149,6 +151,8 @@ describe("WhatsApp webhook route", () => {
       fromUserId: null,
       type: "text",
       text: "hi",
+      timestamp: 1762700000,
+      replyId: null,
     });
   });
 

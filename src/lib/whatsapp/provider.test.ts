@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cloudApiWhatsAppProvider, GRAPH_API_VERSION } from "./provider";
+import { cloudApiWhatsAppProvider, GRAPH_API_VERSION, toGraphPayload } from "./provider";
 import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage, ownerLinkCodeMessage } from "./templates";
 
 describe("WhatsApp provider", () => {
@@ -164,5 +164,33 @@ describe("WhatsApp provider", () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(`https://graph.facebook.com/${GRAPH_API_VERSION}/5556667778/messages`);
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer store-token");
+  });
+  it("a list message is Meta's interactive list with one section of rows (#559)", () => {
+    expect(toGraphPayload({
+      type: "list",
+      to: "+14045550123",
+      body: "Pick one",
+      button: "Choose",
+      rows: [{ id: "Garri (2 kg)", title: "Garri", description: "2 kg · $5.99" }, { id: "Yam (1 tuber)", title: "Yam" }],
+    })).toEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "14045550123",
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: "Pick one" },
+        action: {
+          button: "Choose",
+          sections: [{
+            title: "Choices",
+            rows: [
+              { id: "Garri (2 kg)", title: "Garri", description: "2 kg · $5.99" },
+              { id: "Yam (1 tuber)", title: "Yam" },
+            ],
+          }],
+        },
+      },
+    });
   });
 });
