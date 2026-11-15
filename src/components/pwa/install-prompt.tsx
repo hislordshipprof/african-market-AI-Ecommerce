@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Share, SquarePlus, X } from "lucide-react";
 import { isIos, isStandalone } from "@/lib/push/client";
+import { takeHeldInstallEvent } from "./install-event";
 
 const VISITS = "pwa:visits";
 const COUNTED = "pwa:visit-counted";
@@ -80,6 +81,8 @@ export function InstallPrompt({ storeName }: { storeName: string }) {
     }
     window.addEventListener("beforeinstallprompt", onPrompt);
     window.addEventListener("appinstalled", onInstalled);
+    const held = takeHeldInstallEvent();
+    if (held) onPrompt(held);
     return () => {
       window.removeEventListener("beforeinstallprompt", onPrompt);
       window.removeEventListener("appinstalled", onInstalled);

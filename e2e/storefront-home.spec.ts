@@ -1,5 +1,5 @@
 import { storeUrl } from "./urls";
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const BASE = storeUrl("mama-ngozi");
 
@@ -52,6 +52,25 @@ test.describe("Quick-add button", () => {
   });
 });
 
+/** The final largest-paint candidate: the one still last after a second with no new entry. */
+function finalLcp(page: Page) {
+  return page.evaluate(() => new Promise<{ hero: boolean; time: number }>(resolve => {
+    let timer = 0;
+    new PerformanceObserver(list => {
+      const last = list.getEntries().at(-1) as PerformanceEntry & { element?: Element | null };
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => resolve({ hero: !!last.element?.closest(".sf-hero-background"), time: last.startTime }), 1000);
+    }).observe({ type: "largest-contentful-paint", buffered: true });
+  }));
+}
+
+/** Paths of the scripts the home page's HTML loads (src and preload). */
+async function htmlScripts(request: APIRequestContext) {
+  const html = await (await request.get(`${BASE}/`)).text();
+  return [...html.matchAll(/<script[^>]+src="([^"]+)"/g), ...html.matchAll(/<link[^>]+as="script"[^>]+href="([^"]+)"/g)]
+    .map(match => match[1].replaceAll("&amp;", "&"));
+}
+
 test.describe("Hero image on a phone (#563 LCP)", () => {
   test.use({ viewport: { width: 412, height: 823 }, deviceScaleFactor: 1.75, isMobile: true });
 
@@ -59,14 +78,7 @@ test.describe("Hero image on a phone (#563 LCP)", () => {
     await page.goto(`${BASE}/`);
     const hero = page.locator("[data-testid='hero-carousel'] .sf-hero-background img").first();
     await expect(hero).toBeVisible({ timeout: 15000 });
-
-    const lcpIsHero = await page.evaluate(() => new Promise<boolean>(resolve => {
-      new PerformanceObserver(list => {
-        const last = list.getEntries().at(-1) as PerformanceEntry & { element?: Element | null };
-        resolve(!!last?.element?.closest(".sf-hero-background"));
-      }).observe({ type: "largest-contentful-paint", buffered: true });
-    }));
-    expect(lcpIsHero).toBe(true);
+    expect((await finalLcp(page)).hero).toBe(true);
 
     await expect(hero).not.toHaveAttribute("loading", "lazy");
     await expect(hero).toHaveAttribute("fetchpriority", "high");
@@ -77,15 +89,35 @@ test.describe("Hero image on a phone (#563 LCP)", () => {
     });
     expect(preloadPriority).toBe("high");
   });
+
+  // Lighthouse counts a script requested before the largest paint toward it; the prompt's chunk used to be
+  // requested a frame after the hero was revealed, so it raced the paint (#563).
+  test("the install prompt's code is requested well after the hero paints", async ({ page, request }) => {
+    const own = new Set((await htmlScripts(request)).map(src => new URL(src, BASE).pathname));
+    await page.goto(`${BASE}/`);
+    await expect(page.locator("[data-testid='hero-carousel'] .sf-hero-background img").first()).toBeVisible({ timeout: 15000 });
+    const lcp = await finalLcp(page);
+    const bodies = new Map<string, string>();
+    let prompt: { path: string; start: number } | undefined;
+    await expect.poll(async () => {
+      const scripts = await page.evaluate(() => performance.getEntriesByType("resource")
+        .map(entry => ({ path: new URL(entry.name).pathname, start: entry.startTime }))
+        .filter(entry => entry.path.endsWith(".js")));
+      for (const script of scripts.filter(({ path }) => !own.has(path))) {
+        if (!bodies.has(script.path)) bodies.set(script.path, await (await request.get(new URL(script.path, BASE).href)).text());
+        if (bodies.get(script.path)!.includes("to your Home Screen")) prompt = script;
+      }
+      return prompt?.path;
+    }, { timeout: 10000 }).toBeTruthy();
+    expect(prompt!.start - lcp.time).toBeGreaterThan(500);
+  });
 });
 
 test.describe("First load without the animation library (#563 LCP)", () => {
   // The scripts the home page's HTML loads. Not every script the browser fetches: after idle, Next prefetches
   // linked routes (search, aisles), whose bundles do carry motion, so a network-wide check would race that.
   test("the home page's first-load scripts carry no motion code", async ({ request }) => {
-    const html = await (await request.get(`${BASE}/`)).text();
-    const srcs = [...html.matchAll(/<script[^>]+src="([^"]+)"/g), ...html.matchAll(/<link[^>]+as="script"[^>]+href="([^"]+)"/g)]
-      .map(match => match[1].replaceAll("&amp;", "&"));
+    const srcs = await htmlScripts(request);
     expect(srcs.length).toBeGreaterThan(5);
     const bodies = await Promise.all(srcs.map(async src => ({ src, body: await (await request.get(new URL(src, BASE).href)).text() })));
     // "whileDrag" is in motion's prop list, which every motion bundle carries.

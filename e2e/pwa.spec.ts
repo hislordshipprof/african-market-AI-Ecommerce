@@ -64,13 +64,13 @@ test.describe("PWA first (#563)", () => {
       await sheet.getByRole("button", { name: "Got it" }).click();
       await expect(sheet).toBeHidden();
       await page.reload();
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(4000);
       await expect(sheet).toBeHidden();
     });
 
     test("a first visit with no order shows no sheet", async ({ page }) => {
       await page.goto(`${BASE}/`);
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(4000);
       await expect(page.getByRole("dialog")).toHaveCount(0);
     });
   });
