@@ -41,15 +41,21 @@ ALTER TABLE "courier_incident_notes"
 ALTER TABLE "courier_incident_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "courier_incident_notes" FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY courier_incident_notes_isolation ON "courier_incident_notes"
-    FOR ALL TO app_user
-    USING (store_id = current_setting('app.store_id', true))
+-- Notes are append-only: policies for read and insert only, so no UPDATE or DELETE matches a row whatever the grants.
+-- They go with their order (cascade).
+CREATE POLICY courier_incident_notes_isolation_select ON "courier_incident_notes"
+    FOR SELECT TO app_user
+    USING (store_id = current_setting('app.store_id', true));
+CREATE POLICY courier_incident_notes_isolation_insert ON "courier_incident_notes"
+    FOR INSERT TO app_user
     WITH CHECK (store_id = current_setting('app.store_id', true));
 
-CREATE POLICY courier_incident_notes_platform_admin ON "courier_incident_notes"
-    FOR ALL TO app_user
-    USING (current_setting('app.is_platform_admin', true) = 'true')
+CREATE POLICY courier_incident_notes_platform_admin_select ON "courier_incident_notes"
+    FOR SELECT TO app_user
+    USING (current_setting('app.is_platform_admin', true) = 'true');
+CREATE POLICY courier_incident_notes_platform_admin_insert ON "courier_incident_notes"
+    FOR INSERT TO app_user
     WITH CHECK (current_setting('app.is_platform_admin', true) = 'true');
 
--- Notes are append-only: no UPDATE or DELETE. They go with their order (cascade).
-GRANT SELECT, INSERT ON "courier_incident_notes" TO app_user;
+-- The init migration's default privileges grant UPDATE and DELETE on every new table; take them back.
+REVOKE UPDATE, DELETE ON "courier_incident_notes" FROM app_user;

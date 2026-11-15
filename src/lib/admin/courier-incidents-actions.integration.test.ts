@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { Prisma } from "@prisma/client";
 import { generateTOTP } from "../../../e2e/totp";
 
 vi.hoisted(() => {
@@ -242,8 +243,14 @@ describe.skipIf(!process.env.DATABASE_URL)("courier incident detail and notes (#
     expect(Number(seenByA[0].n)).toBe(0);
     const seenByB = await storeScopedTransaction(storeB, (tx) => tx.$queryRaw<Array<{ body: string }>>`SELECT body FROM courier_incident_notes`);
     expect(seenByB.map((r) => r.body)).toEqual(["Platform note on B"]);
-    // Append-only: store B can read the platform's note on its order but cannot delete it.
-    await expect(storeScopedTransaction(storeB, (tx) => tx.$executeRaw`DELETE FROM courier_incident_notes`)).rejects.toThrow(/permission denied/);
+    // Append-only: store B can read the platform's note on its order but cannot change or delete it. The policies
+    // hold even where a grant came back (another test replays the init migration's blanket grant).
+    const rowsChanged = (write: (tx: Prisma.TransactionClient) => Promise<number>) =>
+      storeScopedTransaction(storeB, write).catch((err: unknown) => (/permission denied/.test(String(err)) ? 0 : Promise.reject(err)));
+    expect(await rowsChanged((tx) => tx.$executeRaw`UPDATE courier_incident_notes SET body = 'changed'`)).toBe(0);
+    expect(await rowsChanged((tx) => tx.$executeRaw`DELETE FROM courier_incident_notes`)).toBe(0);
+    const kept = await storeScopedTransaction(storeB, (tx) => tx.$queryRaw<Array<{ body: string }>>`SELECT body FROM courier_incident_notes`);
+    expect(kept.map((r) => r.body)).toEqual(["Platform note on B"]);
   });
 
   it("only a 2FA-verified platform admin: a store owner, a customer and a signed-out visitor are sent to sign-in and nothing is written", async () => {
