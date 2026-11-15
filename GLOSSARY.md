@@ -149,6 +149,10 @@ Product attributes Claude read from a master product's label photo and descripti
 **Listing draft**:
 One product Claude read from a store's shelf photo, matched to the master catalog (one match, several for the owner to pick, none, or already listed). It becomes a listing only when the owner sets or checks its price and taps Publish. The shelf photo stays private and is never a product image.
 
+**Product proposal**:
+A new master product a store owner suggested while publishing a listing draft the catalog did not match: a name, local name, size, suggested category and, optionally, a photo the owner framed on the shelf photo. The store's custom listing sells at once. A platform admin approves it as a new product or as an existing one, and the listing is re-pointed to it; a rejected proposal leaves the listing as it is. The framed photo stays private until approved.
+_Avoid_: Catalog request, product submission
+
 **Reorder list**:
 The owner's saved list of what to buy from a wholesaler, started from the copilot's reorder suggestions and edited by the owner. One draft per store; saving replaces it. It orders nothing and changes no stock.
 
