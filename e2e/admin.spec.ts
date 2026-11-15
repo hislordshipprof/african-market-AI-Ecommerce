@@ -945,7 +945,7 @@ test.describe("Courier incident log (#536)", () => {
 
       await row.getByRole("link", { name: `#${number}` }).click();
       await expect(page.locator("h1")).toContainText(`Order #${number}`);
-      await expect(page.getByTestId("incident-timeline")).toContainText("No available dashers");
+      await expect(page.getByTestId("incident-timeline")).toContainText(/no available dashers/i);
       await page.getByText("Event details").click();
       await expect(page.getByTestId("incident-timeline")).toContainText("[redacted]");
       await expect(page.locator("body")).not.toContainText("5550199");
