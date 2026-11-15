@@ -6,4 +6,6 @@ At checkout the customer sees up to three **fulfillment options**: **Store deliv
 
 Courier eligibility keeps the **50 lb rule** (no single item over 50 lb and no order over 50 lb in total). It is a platform setting, to be raised once a provider confirms multi-package grocery limits in writing. Uber's terms say 50 lb *per package*, while DoorDash Drive's limit is unverified. Orders that aren't eligible get Store delivery or Pickup.
 
+Refined by #535 (2026-11-14): a platform admin may put one provider first (it is booked whenever it quotes) or switch a provider off. Cheapest stays the default. The weight limit and the assignment timeout are edited on the same page.
+
 Considered: letting the customer pick Uber vs DoorDash (rejected: failover would need a second customer decision); Roadie for heavy orders (deferred: a third integration); Bolt (not available in the US).
