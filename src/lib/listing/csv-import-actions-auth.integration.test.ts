@@ -39,14 +39,13 @@ import { authPrisma, healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
 import { csvCommitAction, csvPreviewAction } from "./csv-import-actions";
 import type { CommitSelection, CsvPreviewResult } from "./csv-import";
-import { verifyUrlFromEmail } from "../test-magic-link";
+import { AUTH_BASE, authGet, authPost, verifyUrlFromEmail } from "../test-auth";
 
 // DATABASE_URL absent: the suite skips. Lane and hosted CI set it, so a real run skips 0.
 // APP_RUNTIME_PASSWORD absent is not a skip: under NODE_ENV=test the app falls back to the
 // owner URL and the current_user assertion fails. AUTH_RATE_LIMIT_RELAXED is set above,
 // before auth is imported. next/navigation stays real.
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t222-${Date.now()}`;
 const password = "ImportAuth-222!";
 const USER_KEYS = [
@@ -315,20 +314,8 @@ interface AuthView {
   session: { id: string; twoFactorVerified: boolean };
 }
 
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const requestHeaders: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) requestHeaders.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(body) }));
-}
-
-async function authGet(url: string, cookies?: string): Promise<Response> {
-  const requestHeaders: Record<string, string> = {};
-  if (cookies) requestHeaders.cookie = cookies;
-  return auth.handler(new Request(url, { headers: requestHeaders, redirect: "manual" }));
-}
-
 async function readSession(cookies: string): Promise<AuthView | null> {
-  const res = await authGet(`${BASE}/get-session`, cookies || undefined);
+  const res = await authGet(`${AUTH_BASE}/get-session`, cookies || undefined);
   const text = await res.text();
   if (!text || text === "null") return null;
   let body: {
