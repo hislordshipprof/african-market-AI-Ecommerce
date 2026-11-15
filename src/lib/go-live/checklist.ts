@@ -17,6 +17,8 @@ export interface GoLiveItem {
 }
 
 export interface GoLiveChecklist {
+  /** The store's status when read: `setup`, `active` or `suspended`. */
+  status: string;
   items: GoLiveItem[];
   ready: boolean;
   /** Active listings with a price needed, from AI and onboarding settings (#561). */
@@ -95,5 +97,5 @@ export async function readGoLiveChecklist(storeId: string, now: Date): Promise<G
       detail: !courierNeeded ? "Not needed on Starter" : courierRegistered ? "Registered" : "Waiting for the platform team to register the store",
     },
   ];
-  return { items, ready: items.every((i) => i.done), floor };
+  return { status: store.status, items, ready: items.every((i) => i.done), floor };
 }
