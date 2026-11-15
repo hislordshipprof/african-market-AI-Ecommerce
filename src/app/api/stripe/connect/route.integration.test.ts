@@ -27,27 +27,16 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { POST } from "./route";
-import { auth } from "@/lib/auth";
 import { authPrisma, storeScopedTransaction } from "@/lib/db";
 import { setStripeProvider } from "@/lib/stripe";
 import { fakeStripeProvider } from "@/lib/stripe/fake";
+import { authPost, collectCookies } from "../../../../lib/test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-con`;
 const password = "GuardPass-123!";
 const email = `connect-309-${suffix}@test.example`;
 
 let creates = 0;
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 function postConnect(origin = "http://localhost:3000") {
   return POST(new NextRequest("http://localhost:3000/api/stripe/connect", {

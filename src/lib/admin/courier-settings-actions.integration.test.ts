@@ -23,11 +23,10 @@ vi.mock("next/navigation", () => ({
 
 import CourierSettingsPage from "@/app/admin/(shell)/settings/couriers/page";
 import { saveCourierSettingsAction } from "./courier-settings-actions";
-import { auth } from "../auth";
 import { authPrisma, platformAdmin } from "../db";
 import { readCourierSettings, type CourierSettings } from "../delivery/courier-settings";
+import { authPost, collectCookies } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-cs535`;
 const password = "GuardPass-123!";
 const emails = {
@@ -36,16 +35,6 @@ const emails = {
   customer: `cs535-customer-${suffix}@test.example`,
 };
 const storeId = crypto.randomUUID();
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 async function signUpAndIn(email: string): Promise<{ userId: string; cookies: string }> {
   const signedUp = await authPost("/sign-up/email", { email, password, name: "Courier 535" });
