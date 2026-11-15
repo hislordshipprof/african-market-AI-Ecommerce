@@ -4,6 +4,7 @@ import {
   claimStripeBillingEvent,
   lockPilotOffer,
   lockStoreSubscriptionRow,
+  overrideEndWindow,
   platformAdmin,
   platformAdminTransaction,
   readStorePlanRows,
@@ -81,10 +82,8 @@ export async function setPlanOverride(
   return platformAdminTransaction(async (tx) => {
     const store = await tx.store.findUnique({ where: { id: input.storeId }, select: { id: true } });
     if (!store) return { ok: false as const, error: "Store not found." };
-    const [window] = await tx.$queryRaw<{ future: boolean; withinMax: boolean }[]>`
-      SELECT ${input.endsAt}::timestamptz > now() AS future,
-             ${input.endsAt}::timestamptz <= now() + make_interval(days => ${PLAN_OVERRIDE_MAX_DAYS}) AS "withinMax"`;
-    if (!window?.future) return { ok: false as const, error: "The end date must be in the future." };
+    const window = await overrideEndWindow(tx, input.endsAt, PLAN_OVERRIDE_MAX_DAYS);
+    if (!window.future) return { ok: false as const, error: "The end date must be in the future." };
     if (!window.withinMax) return { ok: false as const, error: `An override can run for at most ${PLAN_OVERRIDE_MAX_DAYS} days.` };
     const row = await lockedRow(tx, input.storeId);
     await tx.storeSubscription.update({

@@ -2300,6 +2300,18 @@ export async function readStorePlanRows(tx: Pick<PrismaClient, "$queryRaw">, sto
   `;
 }
 
+/** Where a plan override's end falls against the database clock: after now, and within the cap. */
+export async function overrideEndWindow(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  endsAt: Date,
+  maxDays: number,
+): Promise<{ future: boolean; withinMax: boolean }> {
+  const [row] = await tx.$queryRaw<{ future: boolean; withinMax: boolean }[]>`
+    SELECT ${endsAt}::timestamptz > now() AS future,
+           ${endsAt}::timestamptz <= now() + make_interval(days => ${maxDays}) AS "withinMax"`;
+  return row!;
+}
+
 export type SubscriptionOverviewRow = {
   storeId: string;
   storeName: string;
