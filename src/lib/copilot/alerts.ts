@@ -1,4 +1,4 @@
-import { Prisma, findStoreIdsAfter, lockCopilotPush, platform, storeScoped, storeScopedTransaction, txQuery } from "../db";
+import { Prisma, claimCopilotAlertsForPush, findStoreIdsAfter, lockCopilotPush, platform, storeScoped, storeScopedTransaction, txQuery } from "../db";
 import { pushToStoreMembers } from "../push/store-members";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
@@ -183,18 +183,7 @@ export async function pushCopilotAlerts(
     if (waiting === 0) return [];
     const allowed = await takeRateLimit(`copilot-push:${storeId}`, PUSH_CAP, PUSH_WINDOW_MS, now);
     if (!allowed.ok) return [];
-    return txQuery<Array<{
-      id: string;
-      kind: string;
-      listing_id: string;
-      order_id: string | null;
-      created_at: Date;
-    }>>(tx, Prisma.sql`
-      UPDATE copilot_alerts
-      SET pushed_at = ${new Date(now)}
-      WHERE store_id = ${storeId} AND state = 'open' AND pushed_at IS NULL
-      RETURNING id, kind, listing_id, order_id, created_at
-    `);
+    return claimCopilotAlertsForPush(tx, storeId, new Date(now));
   });
   if (claimed.length === 0) return;
 

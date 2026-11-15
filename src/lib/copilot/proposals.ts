@@ -1,4 +1,4 @@
-import { Prisma, txExecute, txQuery, type storeScopedTransaction } from "../db";
+import { Prisma, expirePendingStockProposals, insertStockProposal, txQuery, type storeScopedTransaction } from "../db";
 import { cardFromParts } from "./cards";
 import type { Draft } from "./tools";
 import type { StockProposalCard } from "./types";
@@ -28,29 +28,22 @@ export async function insertProposalRows(
   drafts: readonly Draft[],
 ): Promise<StockProposalCard[]> {
   if (drafts.length === 0) return [];
-  await txExecute(tx, Prisma.sql`
-    UPDATE stock_proposals
-    SET state = 'expired'
-    WHERE store_id = ${input.storeId}
-      AND state = 'pending'
-      AND listing_id IN (${Prisma.join(drafts.map((draft) => draft.listingId))})
-  `);
+  await expirePendingStockProposals(tx, input.storeId, drafts.map((draft) => draft.listingId));
   const cards: StockProposalCard[] = [];
   for (const draft of drafts) {
     const id = crypto.randomUUID();
     const before = { qty: draft.beforeQty, status: draft.beforeStatus };
-    await txExecute(tx, Prisma.sql`
-      INSERT INTO stock_proposals (
-        id, store_id, conversation_id, listing_id, client_message_id,
-        kind, quantity, status_value, before, state, expires_at, created_at
-      ) VALUES (
-        ${id}, ${input.storeId}, ${input.conversationId}, ${draft.listingId}, ${input.messageId},
-        ${draft.kind}, ${draft.quantity}, ${draft.statusValue}, ${JSON.stringify(before)}::jsonb,
-        'pending',
-        (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 minutes',
-        (clock_timestamp() AT TIME ZONE 'UTC')
-      )
-    `);
+    await insertStockProposal(tx, {
+      id,
+      storeId: input.storeId,
+      conversationId: input.conversationId,
+      listingId: draft.listingId,
+      messageId: input.messageId,
+      kind: draft.kind,
+      quantity: draft.quantity,
+      statusValue: draft.statusValue,
+      before,
+    });
     await tx.auditLog.create({
       data: {
         storeId: input.storeId,

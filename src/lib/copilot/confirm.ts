@@ -1,4 +1,14 @@
-import { Prisma, lockListingRow, lockStoreRow, storeScoped, storeScopedTransaction, txQuery } from "../db";
+import {
+  Prisma,
+  claimOpenCopilotAlert,
+  claimProposalConfirm,
+  claimProposalReject,
+  lockListingRow,
+  lockStoreRow,
+  storeScoped,
+  storeScopedTransaction,
+  txQuery,
+} from "../db";
 import { cardFromParts, listingLabel } from "./cards";
 import {
   QTY_COLUMN_MAX,
@@ -183,15 +193,7 @@ export async function confirmProposal(storeId: string, proposalId: string, actor
         return { ok: false, code: "too_large" };
       }
 
-      const claimed = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
-        UPDATE stock_proposals
-        SET state = 'confirmed', decided_by_id = ${actor.id}, decided_at = ${now}
-        WHERE id = ${proposalId}
-          AND state = 'pending'
-          AND expires_at > (clock_timestamp() AT TIME ZONE 'UTC')
-        RETURNING id
-      `);
-      if (claimed.length === 0) {
+      if (!(await claimProposalConfirm(tx, proposalId, actor.id, now))) {
         const again = await tx.stockProposal.findUnique({ where: { id: proposalId } });
         if (again?.state === "confirmed") return confirmedResult(tx, again, listing);
         return { ok: false, code: "not_found" };
@@ -245,13 +247,7 @@ export async function rejectProposal(storeId: string, proposalId: string, actor:
     const now = new Date();
     const proposal = await tx.stockProposal.findUnique({ where: { id: proposalId } });
     if (!proposal || proposal.state !== "pending") return { ok: false, code: "not_found" };
-    const claimed = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
-      UPDATE stock_proposals
-      SET state = 'rejected', decided_by_id = ${actor.id}, decided_at = ${now}
-      WHERE id = ${proposalId} AND state = 'pending'
-      RETURNING id
-    `);
-    if (claimed.length === 0) return { ok: false, code: "not_found" };
+    if (!(await claimProposalReject(tx, proposalId, actor.id, now))) return { ok: false, code: "not_found" };
     await tx.auditLog.create({
       data: {
         storeId,
@@ -310,13 +306,7 @@ export async function answerAlert(storeId: string, alertId: string, answer: Aler
     const change = changeFor(answer, listing.stockMode);
     if (!change) return { ok: false, code: "stale" };
 
-    const claimed = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
-      UPDATE copilot_alerts
-      SET state = 'resolved', resolved_by_id = ${actor.id}, resolved_at = ${now}
-      WHERE id = ${alertId} AND state = 'open'
-      RETURNING id
-    `);
-    if (claimed.length === 0) return { ok: false, code: "not_found" };
+    if (!(await claimOpenCopilotAlert(tx, alertId, actor.id, now))) return { ok: false, code: "not_found" };
 
     const updated = await writeStockChange(tx, storeId, listing, change, actor, `copilot-alert:${alertId}`, { alertId }, now);
     await tx.copilotAlert.updateMany({

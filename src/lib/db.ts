@@ -647,13 +647,286 @@ export async function lockStoreRow(
   };
 }
 
-/** Tagged SQL on an open transaction. Callers outside this file cannot call $queryRaw. */
+/** A read on an open transaction. Callers outside this file cannot call $queryRaw; writes get a named helper below. */
 export function txQuery<T>(tx: Pick<PrismaClient, "$queryRaw">, query: Prisma.Sql): Promise<T> {
   return tx.$queryRaw<T>(query);
 }
 
-export function txExecute(tx: Pick<PrismaClient, "$executeRaw">, query: Prisma.Sql): Promise<number> {
-  return tx.$executeRaw(query);
+/** Expires every pending proposal on these listings. The caller holds the store lock. */
+export async function expirePendingStockProposals(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  storeId: string,
+  listingIds: readonly string[],
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE stock_proposals
+    SET state = 'expired'
+    WHERE store_id = ${storeId}
+      AND state = 'pending'
+      AND listing_id IN (${Prisma.join([...listingIds])})
+  `;
+}
+
+/** A pending proposal that expires 60 minutes from now by the database clock. */
+export async function insertStockProposal(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  row: {
+    id: string;
+    storeId: string;
+    conversationId: string;
+    listingId: string;
+    messageId: string;
+    kind: string;
+    quantity: number | null;
+    statusValue: string | null;
+    before: unknown;
+  },
+): Promise<void> {
+  await tx.$executeRaw`
+    INSERT INTO stock_proposals (
+      id, store_id, conversation_id, listing_id, client_message_id,
+      kind, quantity, status_value, before, state, expires_at, created_at
+    ) VALUES (
+      ${row.id}, ${row.storeId}, ${row.conversationId}, ${row.listingId}, ${row.messageId},
+      ${row.kind}, ${row.quantity}, ${row.statusValue}, ${JSON.stringify(row.before)}::jsonb,
+      'pending',
+      (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 minutes',
+      (clock_timestamp() AT TIME ZONE 'UTC')
+    )
+  `;
+}
+
+/** Confirms a pending, unexpired proposal. False when it was already decided or has expired. */
+export async function claimProposalConfirm(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  proposalId: string,
+  actorId: string,
+  now: Date,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE stock_proposals
+    SET state = 'confirmed', decided_by_id = ${actorId}, decided_at = ${now}
+    WHERE id = ${proposalId}
+      AND state = 'pending'
+      AND expires_at > (clock_timestamp() AT TIME ZONE 'UTC')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/** Dismisses a pending proposal. False when it was already decided. */
+export async function claimProposalReject(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  proposalId: string,
+  actorId: string,
+  now: Date,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE stock_proposals
+    SET state = 'rejected', decided_by_id = ${actorId}, decided_at = ${now}
+    WHERE id = ${proposalId} AND state = 'pending'
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/** Resolves one open alert. False when another answer resolved it first. */
+export async function claimOpenCopilotAlert(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  alertId: string,
+  actorId: string,
+  now: Date,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE copilot_alerts
+    SET state = 'resolved', resolved_by_id = ${actorId}, resolved_at = ${now}
+    WHERE id = ${alertId} AND state = 'open'
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export interface PushedCopilotAlert {
+  id: string;
+  kind: string;
+  listing_id: string;
+  order_id: string | null;
+  created_at: Date;
+}
+
+/** Marks every open, unpushed alert of the store as pushed and returns them. The caller holds lockCopilotPush. */
+export function claimCopilotAlertsForPush(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  now: Date,
+): Promise<PushedCopilotAlert[]> {
+  return tx.$queryRaw<PushedCopilotAlert[]>`
+    UPDATE copilot_alerts
+    SET pushed_at = ${now}
+    WHERE store_id = ${storeId} AND state = 'open' AND pushed_at IS NULL
+    RETURNING id, kind, listing_id, order_id, created_at
+  `;
+}
+
+/** Claims an owner's client message id for 60 seconds. False when it is already claimed. */
+export async function insertCopilotClientMessage(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  userId: string,
+  messageId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    INSERT INTO copilot_client_messages (
+      id, store_id, user_id, client_message_id, claimed_until, created_at
+    ) VALUES (
+      ${crypto.randomUUID()}, ${storeId}, ${userId}, ${messageId},
+      (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds',
+      (clock_timestamp() AT TIME ZONE 'UTC')
+    )
+    ON CONFLICT (store_id, user_id, client_message_id) DO NOTHING
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/** Takes over a claim that lapsed without a reply. */
+export async function retakeCopilotClientMessage(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  userId: string,
+  messageId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE copilot_client_messages
+    SET claimed_until = (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds'
+    WHERE store_id = ${storeId}
+      AND user_id = ${userId}
+      AND client_message_id = ${messageId}
+      AND reply IS NULL
+      AND claimed_until <= (clock_timestamp() AT TIME ZONE 'UTC')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function releaseCopilotClientMessage(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  storeId: string,
+  userId: string,
+  messageId: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    DELETE FROM copilot_client_messages
+    WHERE store_id = ${storeId}
+      AND user_id = ${userId}
+      AND client_message_id = ${messageId}
+      AND reply IS NULL
+  `;
+}
+
+/** Stores the reply on the claimed message. False when the claim was lost. */
+export async function recordCopilotReply(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  input: { storeId: string; userId: string; messageId: string; reply: string; conversationId: string },
+): Promise<boolean> {
+  const updated = await tx.$executeRaw`
+    UPDATE copilot_client_messages
+    SET reply = ${input.reply}, conversation_id = ${input.conversationId}
+    WHERE store_id = ${input.storeId}
+      AND user_id = ${input.userId}
+      AND client_message_id = ${input.messageId}
+      AND reply IS NULL
+  `;
+  return updated > 0;
+}
+
+/** False when the id is taken, in this store or another. */
+export async function insertCopilotConversation(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  input: { id: string; storeId: string; userId: string; model: string },
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    INSERT INTO copilot_conversations (
+      id, store_id, user_id, model, messages, created_at, last_message_at
+    ) VALUES (
+      ${input.id}, ${input.storeId}, ${input.userId}, ${input.model}, '[]'::jsonb,
+      (clock_timestamp() AT TIME ZONE 'UTC'),
+      (clock_timestamp() AT TIME ZONE 'UTC')
+    )
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function deleteEmptyCopilotConversation(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  conversationId: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    DELETE FROM copilot_conversations
+    WHERE id = ${conversationId} AND messages = '[]'::jsonb
+  `;
+}
+
+/** A 60-second lease on the conversation; the token is its expiry text. Null while another turn holds it. */
+export async function takeCopilotLease(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  conversationId: string,
+): Promise<string | null> {
+  const rows = await tx.$queryRaw<Array<{ token: string }>>`
+    UPDATE copilot_conversations
+    SET in_flight_until = (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds'
+    WHERE id = ${conversationId}
+      AND (in_flight_until IS NULL OR in_flight_until <= (clock_timestamp() AT TIME ZONE 'UTC'))
+    RETURNING to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') AS token
+  `;
+  return rows[0]?.token ?? null;
+}
+
+export async function releaseCopilotLease(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  conversationId: string,
+  token: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE copilot_conversations
+    SET in_flight_until = NULL
+    WHERE id = ${conversationId}
+      AND to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') = ${token}
+  `;
+}
+
+/** Locks the conversation row while this lease token still holds it. False when the lease was lost. */
+export async function lockCopilotLease(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  conversationId: string,
+  token: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM copilot_conversations
+    WHERE id = ${conversationId}
+      AND to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') = ${token}
+    FOR UPDATE
+  `;
+  return rows.length > 0;
+}
+
+/** Saves the turn's messages, releases the lease and adds the turn's usage. The caller holds lockCopilotLease. */
+export async function saveCopilotTurn(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  input: { conversationId: string; messages: unknown; tokensIn: number; tokensOut: number; costMicros: number },
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE copilot_conversations
+    SET messages = ${JSON.stringify(input.messages)}::jsonb,
+        last_message_at = (clock_timestamp() AT TIME ZONE 'UTC'),
+        in_flight_until = NULL,
+        tokens_in = tokens_in + ${input.tokensIn},
+        tokens_out = tokens_out + ${input.tokensOut},
+        cost_micros = cost_micros + ${input.costMicros}
+    WHERE id = ${input.conversationId}
+  `;
 }
 
 /** The store's hours and zone, read inside the caller's transaction (after lockStoreRow, so they cannot change under it). */
