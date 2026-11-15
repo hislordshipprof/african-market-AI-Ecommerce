@@ -3,15 +3,42 @@ import { storeUnreadCount } from "@/lib/support/thread";
 import { getStoreBilling } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
 import { PLAN_NAMES, planAllows } from "@/lib/billing/plan";
+import { directoryOrderCount } from "@/lib/directory/directory-orders";
+import { goLiveItemLabel, readGoLiveChecklist, type GoLiveItemKey } from "@/lib/go-live/checklist";
+import type { GoLiveItemView } from "@/components/go-live/go-live-items";
 import { StoreAdminDashboard } from "./dashboard";
+
+/** Set by the platform admin in the store form: the store has no settings page for these yet. */
+const PLATFORM_SET: readonly GoLiveItemKey[] = ["hours", "fulfillment"];
+
+async function goLiveItems(storeId: string, storeSlug: string, isOwner: boolean): Promise<GoLiveItemView[] | null> {
+  const checklist = await readGoLiveChecklist(storeId, new Date());
+  if (!checklist || checklist.status !== "setup") return null;
+  const store = `?store=${encodeURIComponent(storeSlug)}`;
+  const hrefs: Partial<Record<GoLiveItemKey, string>> = {
+    listings: `/store-admin/listings${store}`,
+    weights: `/store-admin/listings${store}`,
+    ...(isOwner ? { payouts: `/store-admin/payouts${store}`, plan: `/store-admin/plan${store}` } : {}),
+  };
+  return checklist.items.map((item) => ({
+    key: item.key,
+    label: goLiveItemLabel(item.key, checklist.floor),
+    detail: !item.done && PLATFORM_SET.includes(item.key) ? `${item.detail}. The platform team sets this for you.` : item.detail,
+    done: item.done,
+    href: hrefs[item.key],
+  }));
+}
 
 export default async function StoreAdminPage() {
   const session = await requireStoreMember();
-  const [unreadMessages, billing] = await Promise.all([
+  const [unreadMessages, billing, directoryOrders] = await Promise.all([
     storeUnreadCount(session.store.id),
     getStoreBilling(session.store.id),
+    directoryOrderCount(session.store.id),
   ]);
-  const usage = session.membership.role === "owner" ? await assistantChatUsage(session.store.id, billing.plan) : null;
+  const isOwner = session.membership.role === "owner";
+  const usage = isOwner ? await assistantChatUsage(session.store.id, billing.plan) : null;
+  const goLive = session.store.status === "setup" ? await goLiveItems(session.store.id, session.store.slug, isOwner) : null;
 
   return (
     <StoreAdminDashboard
@@ -21,6 +48,8 @@ export default async function StoreAdminPage() {
       role={session.membership.role}
       stripeOnboardingStatus={session.store.stripeOnboardingStatus}
       unreadMessages={unreadMessages}
+      directoryOrders={directoryOrders}
+      goLive={goLive}
       plan={{
         name: PLAN_NAMES[billing.plan],
         status: billing.status,

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { storeMayUse } from "../billing/plan";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS } from "../db";
+import type { AcquisitionSource } from "../directory/attribution";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS, storeHasWhatsAppNumber } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
@@ -14,16 +15,23 @@ import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
-import { captureSplit, orderServiceFeeSettings, serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
+import { captureSplit, orderServiceFeeSettings } from "../order/platform-fee";
 import { readServiceFeeSettings } from "../order/service-fee-settings";
 import { reserveOrderStock } from "../order/stock-ledger";
-import { validPhone } from "../customer-account/phone";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
+import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
+import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
+import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCourier } from "../delivery/dispatch";
+import { checkCourierEligibility } from "../delivery/eligibility";
+import { anyCourierEnabled, readCourierSettings, type CourierSettings } from "../delivery/courier-settings";
+import { courierOffered } from "../delivery/courier-offered";
+import type { DeliveryProvider } from "../delivery/provider";
+import { validPhone } from "../customer-account/phone";
+import { assertSlotOffered, SlotUnavailableError } from "./slots";
 import type {
   CheckoutQuote,
   Contact,
-  FlowProblem,
   Fulfillment,
 } from "../customer-flow/contracts";
 
@@ -111,127 +119,6 @@ async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentInte
   };
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function validEmail(email: string): boolean {
-  return EMAIL_RE.test(email.trim());
-}
-
-export interface StoreDeliveryQuote {
-  enabled: boolean;
-  feeCents: number;
-  radiusMi: number;
-  hasCoordinates: boolean;
-  /** Null until Census has confirmed the address. Distance is not stored here. */
-  confirmed: { withinRadius: boolean } | null;
-  leaveAtDoor: boolean;
-}
-
-/** A Starter store does not offer courier delivery (ADR-0021). */
-export const COURIER_NOT_OFFERED = "This store does not offer courier delivery.";
-
-export function computeQuote(
-  minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean }>,
-  contact: Contact,
-  fulfillment: Fulfillment,
-  serviceFee: ServiceFeeSettings,
-  delivery?: StoreDeliveryQuote | null,
-): CheckoutQuote {
-  const problems: FlowProblem[] = [];
-  let subtotalCents = 0;
-
-  for (const line of cartLines) {
-    if (
-      !Number.isInteger(line.qty) ||
-      line.qty < 1
-    ) {
-      problems.push({ code: "max-quantity", message: "Check item quantity." });
-      continue;
-    }
-    if (line.maxPerOrder !== null && line.qty > line.maxPerOrder) {
-      problems.push({
-        code: "max-quantity",
-        message: `Maximum ${line.maxPerOrder} per order for this item.`,
-      });
-    }
-    subtotalCents += line.price * line.qty;
-  }
-
-  if (!cartLines.length || subtotalCents < minimumOrderCents) {
-    problems.push({
-      code: "minimum-order",
-      message: `Minimum order is $${(minimumOrderCents / 100).toFixed(2)}.`,
-    });
-  }
-
-  if (
-    !contact.name.trim() ||
-    !validEmail(contact.email) ||
-    !validPhone(contact.phone)
-  ) {
-    problems.push({
-      code: "invalid-contact",
-      message: "Name, email, and a valid phone number are required.",
-    });
-  }
-
-  let deliveryFeeCents = 0;
-  if (fulfillment === "courier") {
-    problems.push({
-      code: "ineligible",
-      message: "Only pickup is available for this store.",
-    });
-  } else if (fulfillment === "store-delivery") {
-    // The fee stays in the hold when delivery is switched off or the radius
-    // shrinks, so those refusals are visible as problems rather than a new total.
-    deliveryFeeCents = Math.max(0, delivery?.feeCents ?? 0);
-    if (!delivery || !delivery.enabled || !delivery.hasCoordinates || delivery.radiusMi <= 0) {
-      problems.push({
-        code: "ineligible",
-        message: "Only pickup is available for this store.",
-      });
-    } else if (!delivery.confirmed) {
-      problems.push({
-        code: "ineligible",
-        message: "We couldn't find that address",
-      });
-    } else if (!delivery.confirmed.withinRadius) {
-      problems.push({
-        code: "outside-radius",
-        message: "That address is outside the delivery area",
-      });
-    }
-    if (delivery?.leaveAtDoor && cartLines.some((line) => line.frozen)) {
-      problems.push({
-        code: "ineligible",
-        message: "Frozen items require handoff.",
-      });
-    }
-  }
-
-  const tipCents = 0;
-  const serviceFeeCentsQuoted = serviceFeeCents(subtotalCents, serviceFee);
-  const totalCents = subtotalCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents;
-  const bufferCents = Math.min(Math.round(subtotalCents * 0.1), 2000);
-  const holdCents = totalCents + bufferCents;
-
-  return {
-    id: crypto.randomUUID(),
-    subtotalCents,
-    deliveryFeeCents,
-    courierFeeCents: 0,
-    serviceFeeCents: serviceFeeCentsQuoted,
-    taxCents: 0,
-    tipCents,
-    discountCents: 0,
-    totalCents,
-    bufferCents,
-    holdCents,
-    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-    problems,
-  };
-}
-
 export interface DeliveryRequest {
   line1: string;
   line2?: string | null;
@@ -269,6 +156,28 @@ function deliveryQuoteInput(
   };
 }
 
+export interface QuoteCheckoutOptions {
+  /** Defaults to Uber Direct and DoorDash Drive. */
+  couriers?: DeliveryProvider[];
+  /** Pay: ask the couriers again, and report a fee that differs from the one last shown (#527 AC2). */
+  recheckCourier?: boolean;
+  /** Defaults to the platform's courier settings (#535). */
+  courierSettings?: CourierSettings;
+  /** The signed-in shopper, whose account a coupon's per-customer limit counts against (#557). */
+  actorUserId?: string | null;
+}
+
+/**
+ * The cart's coupon code checked now, or null when the cart has none (#557). `email` is null for a
+ * quote, so a typed email is never checked against the store's orders; placement passes the contact's.
+ */
+async function cartCoupon(storeId: string, cartId: string, email: string | null, actorUserId: string | null): Promise<QuoteCouponInput | null> {
+  const scoped = storeScoped(storeId);
+  const cart = await scoped.cart.findUnique({ where: { id: cartId }, select: { couponCode: true } });
+  if (!cart?.couponCode) return null;
+  return readCartCoupon(scoped, storeId, cart.couponCode, { email, userId: actorUserId, now: new Date() });
+}
+
 export async function quoteCheckout(
   storeId: string,
   minimumOrderCents: number,
@@ -276,11 +185,13 @@ export async function quoteCheckout(
   contact: Contact,
   fulfillment: Fulfillment,
   request?: DeliveryRequest | null,
+  options: QuoteCheckoutOptions = {},
 ): Promise<CheckoutQuote> {
-  const [cart, store, serviceFee] = await Promise.all([
+  const [cart, store, serviceFee, coupon] = await Promise.all([
     getCartWithLines(storeId, cartId),
     platform.store.findUnique({ where: { id: storeId } }),
     readServiceFeeSettings(),
+    cartCoupon(storeId, cartId, null, options.actorUserId ?? null),
   ]);
   if (!store) throw new Error("Store not found");
   const serverLines = (cart?.lines ?? []).map((line) => ({
@@ -288,13 +199,25 @@ export async function quoteCheckout(
     qty: line.qty,
     maxPerOrder: line.variant.listing.maxPerOrder,
     frozen: line.variant.listing.frozen,
+    perishable: line.variant.listing.perishable,
   }));
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
-    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
+    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee, null, null, coupon);
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
   }
+  if (fulfillment === "courier") {
+    const courierSettings = options.courierSettings ?? (await readCourierSettings());
+    if (!anyCourierEnabled(courierSettings, cartId)) {
+      const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
+      return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
+    }
+    const courier = cart
+      ? await courierQuoteFor(store, cart, contact, request ?? null, options, courierSettings)
+      : null;
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, courier, coupon);
+  }
   if (fulfillment !== "store-delivery") {
-    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee);
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, null, coupon);
   }
   let point: { lat: number; lng: number } | null = null;
   if (request && store.lat != null && store.lng != null) {
@@ -311,13 +234,92 @@ export async function quoteCheckout(
     fulfillment,
     serviceFee,
     deliveryQuoteInput(store, point, request?.leaveAtDoor === true),
+    null,
+    coupon,
   );
 }
 
+type CourierStoreRow = NonNullable<Awaited<ReturnType<typeof platform.store.findUnique>>>;
+
+/** Spec D4 and §11.3: a registered store, the weight limit, a confirmed address within the radius, then the #140 quote. */
+async function courierQuoteFor(
+  store: CourierStoreRow,
+  cart: NonNullable<Awaited<ReturnType<typeof getCartWithLines>>>,
+  contact: Contact,
+  request: DeliveryRequest | null,
+  options: QuoteCheckoutOptions,
+  settings: CourierSettings,
+): Promise<CourierQuoteInput> {
+  const unavailable = (message: string, code: "ineligible" | "outside-radius" = "ineligible"): CourierQuoteInput => ({ ok: false, problem: { code, message } });
+  if (!courierOffered(store)) return unavailable("This store isn't set up for courier delivery yet.");
+  const eligibility = checkCourierEligibility(cart.lines.map((line) => ({ weightG: line.variant.weightG, quantity: line.qty })), { courierWeightLimitLb: settings.weightLimitLb });
+  if (!eligibility.eligible) {
+    const what = eligibility.reason === "item_over_limit" ? "An item in your basket is" : "This order is";
+    return unavailable(`${what} over the ${settings.weightLimitLb} lb courier limit. Choose pickup or store delivery.`);
+  }
+  if (!request) return unavailable("Confirm your delivery address to see the courier fee.");
+  const confirmed = await lookupConfirmed(
+    { line1: request.line1, city: request.city, state: request.state, zip: request.zip },
+    { lat: store.lat as number, lng: store.lng as number, radiusMi: Number(store.deliveryRadiusMi) },
+  );
+  if (!confirmed?.ok) return unavailable("We couldn't find that address");
+  if (!confirmed.withinRadius) return unavailable("That address is outside the delivery area", "outside-radius");
+  if (!validPhone(contact.phone)) return unavailable("Add your phone number to see the courier fee.");
+
+  const address = { line1: confirmed.match.line1, line2: request.line2 ?? null, city: confirmed.match.city, state: confirmed.match.state, zip: confirmed.match.zip };
+  const key = JSON.stringify({ address, subtotalCents: cart.subtotalCents });
+  const leaveAtDoor = request.leaveAtDoor;
+  const saved = await storeScoped(store.id).cart.findUnique({
+    where: { id: cart.id },
+    select: { courierFeeCents: true, courierProvider: true, courierQuoteKey: true, courierQuoteExpiresAt: true },
+  });
+  const shown = saved?.courierQuoteKey === key && saved.courierFeeCents != null ? saved.courierFeeCents : null;
+  if (!options.recheckCourier && shown != null && saved?.courierQuoteExpiresAt && saved.courierQuoteExpiresAt > new Date()) {
+    return { ok: true, feeCents: shown, provider: saved.courierProvider as "Uber Direct" | "DoorDash Drive", leaveAtDoor };
+  }
+
+  const { request: courierRequest, registrations } = buildCourierRequest(store.id, store, {
+    address,
+    phone: contact.phone.trim(),
+    name: contact.name,
+    contactless: leaveAtDoor,
+  }, {
+    orderValueCents: cart.subtotalCents,
+    tipCents: 0,
+    pinRequired: cart.lines.some((line) => line.variant.listing.frozen) || cart.subtotalCents > PIN_ABOVE_TOTAL_CENTS,
+  });
+  const quoted = await quoteCourier({ referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders(), settings);
+  await storeScoped(store.id).cart.update({
+    where: { id: cart.id },
+    data: {
+      courierFeeCents: quoted?.feeCents ?? null,
+      courierProvider: quoted?.courierProvider ?? null,
+      courierQuoteKey: quoted ? key : null,
+      courierQuoteExpiresAt: quoted?.expiresAt ?? null,
+    },
+  });
+  if (!quoted) return unavailable("No courier can take this order right now. Choose pickup or store delivery.");
+  const changed = options.recheckCourier === true && quoted.feeCents !== shown;
+  return { ok: true, feeCents: quoted.feeCents, provider: quoted.courierProvider, leaveAtDoor, changed };
+}
+
+/** Placement charges the courier fee the shopper last saw and the hold was sized on; it never asks the couriers again. */
+function shownCourier(
+  cart: { courierFeeCents: number | null; courierProvider: string | null; deliveryLine1: string | null },
+  leaveAtDoor: boolean,
+): CourierQuoteInput {
+  if (cart.courierFeeCents == null || !cart.courierProvider || !cart.deliveryLine1) {
+    return { ok: false, problem: { code: "ineligible", message: "Confirm your delivery address to see the courier fee." } };
+  }
+  return { ok: true, feeCents: cart.courierFeeCents, provider: cart.courierProvider as "Uber Direct" | "DoorDash Drive", leaveAtDoor };
+}
+
+export { COURIER_NOT_OFFERED, computeQuote, type StoreDeliveryQuote } from "./quote";
 export { checkoutTestHooks } from "./test-hooks";
 export { SavedCardUnavailableError } from "./saved-card-payment";
 export { LiveModeBlockedError } from "./live-mode";
 export { StoreNotTakingOrdersError } from "../order/store-queue";
+export { SlotUnavailableError } from "./slots";
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
@@ -519,6 +521,9 @@ export interface RecordAuthorizedOrderInput {
   minimumOrderCents?: number;
   /** Direct place calls can set this even when the cart snapshot does not. */
   leaveAtDoor?: boolean;
+  /** The checkout's WhatsApp updates tick (#560); kept only when the store has a registered number. */
+  whatsappUpdates?: boolean;
+  acquisitionSource?: AcquisitionSource | null;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -568,6 +573,8 @@ export async function recordAuthorizedOrder(
         ? storeAvailability(hours.hours, hours.timezone, now)
         : ({ kind: "unavailable" } as const);
       if (availability.kind === "unavailable") throw new StoreNotTakingOrdersError();
+      // Under the same lock, so two orders cannot both take a slot's last place (#565).
+      await assertSlotOffered(tx, storeId, lockedStore, input.fulfillment, input.pickupSlot, now);
 
       if (input.lines.length === 0) {
         throw new Error("Order lines are required");
@@ -605,6 +612,7 @@ export async function recordAuthorizedOrder(
         substituteVariantId: line.substituteVariantId,
         maxPerOrder: line.variant.listing.maxPerOrder,
         frozen: line.variant.listing.frozen,
+        perishable: line.variant.listing.perishable,
       }));
       if (!sameBasket(current, input.lines)) throw new BasketChangedError();
       const point = cart.deliveryLat != null && cart.deliveryLng != null
@@ -613,7 +621,17 @@ export async function recordAuthorizedOrder(
       const delivery = input.fulfillment === "store-delivery"
         ? deliveryQuoteInput(lockedStore, point, cart.leaveAtDoor || input.leaveAtDoor === true)
         : null;
+      const courier = input.fulfillment === "courier"
+        ? shownCourier(cart, cart.leaveAtDoor || input.leaveAtDoor === true)
+        : null;
       const serviceFee = await readServiceFeeSettings(tx);
+      // Under the store lock, so two orders cannot both take a coupon's last use (#557).
+      const couponUserId = input.actorUserId !== undefined ? input.actorUserId : cart.userId;
+      const coupon = cart.couponCode
+        ? await readCartCoupon(tx, storeId, cart.couponCode, { email: input.contact.email, userId: couponUserId, now })
+        : null;
+      const refused = customerRefusal(coupon);
+      if (refused) throw new CouponRefusedError(refused);
       const currentQuote = computeQuote(
         input.minimumOrderCents ?? 0,
         current,
@@ -621,14 +639,17 @@ export async function recordAuthorizedOrder(
         input.fulfillment,
         serviceFee,
         delivery,
+        courier,
+        coupon,
       );
+      const couponId = appliedCouponId(coupon, currentQuote);
       if (
         currentQuote.problems.length > 0
         || currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)
       ) {
         throw new BasketChangedError();
       }
-      const delivering = input.fulfillment === "store-delivery" && point != null;
+      const delivering = (input.fulfillment === "store-delivery" || input.fulfillment === "courier") && point != null;
       const distanceMi = delivering && lockedStore.lat != null && lockedStore.lng != null
         ? assessRadius(point, {
             lat: lockedStore.lat,
@@ -679,6 +700,7 @@ export async function recordAuthorizedOrder(
         },
       });
       const nextNumber = await getNextOrderNumber(tx, storeId);
+      const whatsappOptIn = input.whatsappUpdates === true && await storeHasWhatsAppNumber(storeId, tx);
       const order = await tx.order.create({
         data: {
           storeId,
@@ -691,10 +713,15 @@ export async function recordAuthorizedOrder(
           tipCents: currentQuote.tipCents,
           bufferCents: currentQuote.bufferCents,
           totalAuthorizedCents: currentQuote.holdCents,
-          deliveryFeeCents: currentQuote.deliveryFeeCents,
+          // A courier order keeps the courier fee here; courierFeeCents() reads it back (#495).
+          deliveryFeeCents: currentQuote.deliveryFeeCents + currentQuote.courierFeeCents,
           totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
+          couponId,
+          discountCents: currentQuote.discountCents,
+          couponCustomerKey: couponId ? couponCustomerKey(couponUserId, input.contact.email) : null,
+          acquisitionSource: input.acquisitionSource ?? null,
           serviceFeeCents: currentQuote.serviceFeeCents,
           serviceFeeBps: serviceFee.rateBps,
           serviceFeeMinCents: serviceFee.minCents,
@@ -702,7 +729,7 @@ export async function recordAuthorizedOrder(
           platformFeeCents: captureSplit({
             capturedCents: currentQuote.totalCents,
             serviceFeeCents: currentQuote.serviceFeeCents,
-            courierFeeCents: 0,
+            courierFeeCents: currentQuote.courierFeeCents,
           }).platformFeeCents,
           notes: input.notes || null,
           deliveryLine1: delivering ? cart.deliveryLine1 : null,
@@ -716,6 +743,7 @@ export async function recordAuthorizedOrder(
           leaveAtDoor: delivering ? cart.leaveAtDoor : false,
           trackingToken: newTrackingToken(),
           acceptanceClockStartsAt: availability.clockStartsAt,
+          whatsappOptInAt: whatsappOptIn ? now : null,
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
@@ -741,12 +769,15 @@ export async function recordAuthorizedOrder(
         lockedStock,
       );
       await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
+      // The assistant's pickup time was for this order; the next basket starts fresh (#247).
+      await tx.aiConversation.updateMany({ where: { cartId: input.cartId }, data: { checkoutDraft: Prisma.DbNull } });
       await tx.cart.update({
         where: { id: input.cartId },
         data: {
           paymentIntentId: null,
           paymentAttemptToken: null,
           purchaseEpoch: { increment: 1 },
+          couponCode: null,
         },
       });
       const notify = await recordOrderNotification(tx, storeId, order.id, "placed");
@@ -773,6 +804,7 @@ function cartLinesToOrderLines(
   substituteVariantId: string | null;
   maxPerOrder: number | null;
   frozen: boolean;
+  perishable: boolean;
 }> {
   return cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -783,6 +815,7 @@ function cartLinesToOrderLines(
     substituteVariantId: l.substituteVariantId,
     maxPerOrder: l.variant.listing.maxPerOrder,
     frozen: l.variant.listing.frozen,
+    perishable: l.variant.listing.perishable,
   }));
 }
 
@@ -990,13 +1023,11 @@ export async function placeOrder(
   paymentIntentId: string,
   actorUserId: string | null = null,
   leaveAtDoor = false,
+  whatsappUpdates = false,
+  acquisitionSource: AcquisitionSource | null = null,
 ): Promise<PlacedOrder> {
   assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
-
-  if (fulfillment === "courier") {
-    throw new Error("Only pickup fulfillment is supported");
-  }
 
   const pi = await retrieveCheckoutIntent(paymentIntentId);
 
@@ -1095,10 +1126,12 @@ export async function placeOrder(
     qty: l.qty,
     maxPerOrder: l.maxPerOrder,
     frozen: l.frozen,
+    perishable: l.perishable,
   }));
-  const [storeRow, serviceFee] = await Promise.all([
+  const [storeRow, serviceFee, coupon] = await Promise.all([
     platform.store.findUnique({ where: { id: storeId } }),
     readServiceFeeSettings(),
+    cartCoupon(storeId, cartId, contact.email, actorUserId),
   ]);
   if (!storeRow) throw new Error("Store not found");
   const point = cart.delivery.lat != null && cart.delivery.lng != null
@@ -1107,12 +1140,26 @@ export async function placeOrder(
   const delivery = fulfillment === "store-delivery"
     ? deliveryQuoteInput(storeRow, point, cart.delivery.leaveAtDoor || leaveAtDoor)
     : null;
-  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery);
+  const courier = fulfillment === "courier"
+    ? shownCourier(
+        await storeScoped(storeId).cart.findUniqueOrThrow({
+          where: { id: cartId },
+          select: { courierFeeCents: true, courierProvider: true, deliveryLine1: true },
+        }),
+        cart.delivery.leaveAtDoor || leaveAtDoor,
+      )
+    : null;
+  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier, coupon);
 
   const contactOnly = quote.problems.length > 0
     && quote.problems.every((problem) => problem.code === "invalid-contact");
   if (contactOnly) {
     throw new Error(quote.problems.map((problem) => problem.message).join(" "));
+  }
+  const refused = customerRefusal(coupon);
+  if (refused) {
+    await dropRefusedCoupon(storeId, cartId, paymentIntentId);
+    throw new CouponRefusedError(refused);
   }
   if (quote.problems.length > 0 || pi.amount !== quote.holdCents) {
     await releaseLosingHold(storeId, cartId, paymentIntentId);
@@ -1154,6 +1201,8 @@ export async function placeOrder(
       epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
       leaveAtDoor,
+      whatsappUpdates,
+      acquisitionSource,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
         qty: line.qty,
@@ -1163,6 +1212,10 @@ export async function placeOrder(
       })),
     });
   } catch (error) {
+    if (error instanceof CouponRefusedError) {
+      await dropRefusedCoupon(storeId, cartId, paymentIntentId);
+      throw error;
+    }
     if (error instanceof BasketAlreadyOrderedError) {
       const settled = await settleConsumedBasket({
         storeId,
@@ -1182,7 +1235,11 @@ export async function placeOrder(
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw new Error("Cart is empty");
     }
-    if (error instanceof BasketChangedError || error instanceof StoreNotTakingOrdersError) {
+    if (
+      error instanceof BasketChangedError
+      || error instanceof StoreNotTakingOrdersError
+      || error instanceof SlotUnavailableError
+    ) {
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw error;
     }
@@ -1198,6 +1255,15 @@ export async function placeOrder(
   await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
 
   return { token: recorded.orderId, trackingToken: recorded.trackingToken, quote };
+}
+
+/**
+ * A guest learns of a per-customer or first-order refusal only here, after paying (#557): the hold is
+ * released and the code taken off the cart, so the next quote shows the full price.
+ */
+async function dropRefusedCoupon(storeId: string, cartId: string, paymentIntentId: string): Promise<void> {
+  await releaseLosingHold(storeId, cartId, paymentIntentId);
+  await removeCartCoupon(storeId, cartId);
 }
 
 async function recoverSavedCardConsent(

@@ -1,5 +1,11 @@
 import { customerStatusLabel } from "../customer-account/order-history-view";
-import { presetPrimary } from "../theme";
+import { quotedFrom, stripHeaderChars } from "../email/from";
+import { escapeHtml, money } from "../format";
+import { fulfilledStatus } from "../order/constants";
+import type { PushMessage } from "../push/sender";
+import { presetPrimary, readableFillColor } from "../theme";
+import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage } from "../whatsapp/templates";
+import type { OutboundMessage, WhatsAppSender } from "../whatsapp/types";
 import type { OrderNotifyEvent } from "./record";
 
 export type NotifyLine = {
@@ -19,6 +25,7 @@ export type NotifyLine = {
 
 export type NotifyOrder = {
   id: string;
+  storeId: string;
   number: number;
   status: string;
   fulfillment: string;
@@ -26,6 +33,8 @@ export type NotifyOrder = {
   tipCents: number;
   deliveryFeeCents: number;
   serviceFeeCents: number;
+  discountCents: number;
+  coupon: { code: string } | null;
   totalAuthorizedCents: number;
   capturedAmountCents: number | null;
   refundId: string | null;
@@ -43,57 +52,27 @@ export type NotifyOrder = {
   };
   lines: NotifyLine[];
   manualResolution: { refundedCents: number; repaidCents: number; capturedCents: number } | null;
+  /** Set only when the customer opted in to WhatsApp updates at checkout (#560). */
+  whatsapp?: {
+    /** The store's registered number; null when it has none now or its token cannot be opened. */
+    sender: WhatsAppSender | null;
+    /** The customer sent STOP to this store's number. */
+    optedOut: boolean;
+  } | null;
 };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const loggedTimezones = new Set<string>();
 const loggedMissingCapture = new Set<string>();
 
-export function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function stripHeaderChars(value: string): string {
-  return value.replace(/["\\]/g, "").replace(/[\u0000-\u001F\u007F]/g, "").trim();
-}
-
-/** RFC 5322 quoted display name so a comma or parenthesis is not a second address. */
-export function quotedFrom(storeName: string, fromAddress: string): string {
-  const wrapped = fromAddress.match(/<([^>]+)>/);
-  const address = (wrapped?.[1] ?? fromAddress).trim();
-  const name = stripHeaderChars(storeName);
-  if (!name) return address;
-  return `"${name}" <${address}>`;
-}
-
 export function smsStoreName(name: string): string {
   const mapped = name
     .replace(/[\u2018\u2019\u2032]/g, "'")
     .replace(/[\u201C\u201D\u2033]/g, '"')
-    .replace(/[\u0000-\u001F\u007F]/g, "")
     .replace(/\s+/g, " ")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
     .trim();
   return Array.from(mapped).slice(0, 40).join("");
-}
-
-function money(cents: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
-}
-
-function onFill(hex: string): string {
-  const channel = (start: number) => {
-    const s = parseInt(hex.slice(start, start + 2), 16) / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  const white = 1.05 / (luminance + 0.05);
-  const black = (luminance + 0.05) / 0.05;
-  return white >= black ? "#FFFFFF" : "#0B0B0B";
 }
 
 export function headerColor(store: NotifyOrder["store"]): string {
@@ -111,7 +90,6 @@ export function httpsLogo(url: string | null): string | null {
   }
 }
 
-/** Pickup is Awaiting pickup. Delivery is Ready. Matches fulfilledStatus(). */
 export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied" | "substitution">, fulfillment: string): string {
   switch (event) {
     case "placed":
@@ -119,7 +97,7 @@ export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied" 
     case "accepted":
       return "ACCEPTED";
     case "ready":
-      return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+      return fulfilledStatus(fulfillment);
     case "out_for_delivery":
       return "OUT_FOR_DELIVERY";
     case "delivered":
@@ -195,6 +173,12 @@ function cancelCopy(order: NotifyOrder): string {
 /** Events after capture: the order is picked and the final amount is charged. */
 const CHARGED_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set(["ready", "out_for_delivery", "delivered", "completed"]);
 
+function promoLine(order: NotifyOrder): string {
+  if (order.discountCents <= 0) return "";
+  const label = order.coupon ? `Promo ${order.coupon.code}` : "Promo discount";
+  return `<p>${escapeHtml(label)}: −${escapeHtml(money(order.discountCents))}.</p>`;
+}
+
 function lineRows(order: NotifyOrder, event: OrderNotifyEvent): string {
   const picked = CHARGED_EVENTS.has(event);
   return order.lines.map((line) => {
@@ -213,6 +197,8 @@ export type RenderedMessage = {
   subject?: string;
   html?: string;
   text?: string;
+  push?: { storeId: string; orderId: string; message: PushMessage };
+  whatsapp?: { message: OutboundMessage; sender: WhatsAppSender };
 };
 
 /** The subject and first line: the order status, or that the store answered the customer's message. */
@@ -228,7 +214,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   const status = headline(order, event);
   const storeName = order.store.name;
   const color = headerColor(order.store);
-  const ink = onFill(color);
+  const ink = readableFillColor(color);
   const logo = httpsLogo(order.store.logoUrl);
   const subject = stripHeaderChars(`${storeName} order #${order.number}: ${status}`);
   const around = event === "accepted" ? readyAround(order) : null;
@@ -246,7 +232,8 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
   if (event !== "cancelled" && event !== "store_replied" && event !== "refunded" && event !== "substitution") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {
-    const estimate = order.subtotalCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;
+    const estimate = order.subtotalCents - order.discountCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;
+    parts.push(promoLine(order));
     if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
     parts.push(`<p>Estimated total ${escapeHtml(money(estimate))}.</p>`);
     parts.push(`<p>Card hold ${escapeHtml(money(order.totalAuthorizedCents))}. You'll be charged the final amount after picking.</p>`);
@@ -261,6 +248,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
         }));
       }
     } else {
+      parts.push(promoLine(order));
       if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
       parts.push(`<p>Charged ${escapeHtml(money(order.capturedAmountCents))}.</p>`);
     }
@@ -272,7 +260,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     parts.push(`<p>The store could not find everything you ordered. You have 10 minutes to choose; after that your swap preference applies.</p>`);
   }
   const linkText = event === "store_replied" ? "Read the reply" : event === "substitution" ? "Choose now" : "Track your order";
-  parts.push(`<p><a href="${escapeHtml(url)}">${linkText}</a></p>`);
+  parts.push(`<p><a href="${escapeHtml(url)}" style="display:inline-block;background:${escapeHtml(color)};color:${ink};padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">${linkText}</a></p>`);
   parts.push(`</div>`);
   parts.push(`<p style="font-size:12px">Powered by the Platform</p>`);
   return {
@@ -280,6 +268,15 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     from: quotedFrom(storeName, fromAddress),
     subject,
     html: parts.join(""),
+  };
+}
+
+/** A lock-screen line: the store's name and the status, never money or items. */
+export function renderPush(order: NotifyOrder, event: OrderNotifyEvent, url: string): RenderedMessage {
+  const body = `Order #${order.number}: ${headline(order, event)}`;
+  return {
+    to: order.id,
+    push: { storeId: order.storeId, orderId: order.id, message: { title: order.store.name, body, url, tag: `order-${order.number}` } },
   };
 }
 
@@ -295,4 +292,32 @@ export function renderSms(order: NotifyOrder, event: OrderNotifyEvent, url: stri
   let text = `${name}: order #${order.number} ${status}. Track it: ${url}`;
   if (event === "placed") text += " Reply STOP to opt out.";
   return { to: order.customer.phone ?? "", text };
+}
+
+type WhatsAppEvent = Exclude<OrderNotifyEvent, "store_replied">;
+
+function whatsappTemplate(order: NotifyOrder, event: WhatsAppEvent) {
+  if (event === "ready") {
+    return order.fulfillment === "pickup" ? ORDER_UPDATE_TEMPLATES.ready_pickup : ORDER_UPDATE_TEMPLATES.ready_delivery;
+  }
+  return ORDER_UPDATE_TEMPLATES[event];
+}
+
+/**
+ * The order-update template (#560): the store name and the tracking link only.
+ * The link's path after the store's host is the button's URL suffix; null when
+ * the link has no path to carry.
+ */
+export function renderWhatsApp(
+  order: NotifyOrder,
+  event: WhatsAppEvent,
+  url: string,
+  to: string,
+  sender: WhatsAppSender,
+): RenderedMessage | null {
+  const origin = new URL(url).origin;
+  const suffix = url.startsWith(`${origin}/`) ? url.slice(origin.length + 1) : "";
+  if (!suffix) return null;
+  const message = orderUpdateMessage(to, whatsappTemplate(order, event), smsStoreName(order.store.name), suffix);
+  return { to, from: sender.phoneNumberId, whatsapp: { message, sender } };
 }

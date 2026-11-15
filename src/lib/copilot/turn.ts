@@ -5,6 +5,7 @@ import {
   assistantProviderOptions,
   createAssistantModel,
 } from "../assistant/model";
+import { callCostMicros, tokenUsageOf } from "../assistant/cost";
 import { AssistantConfigError } from "../assistant/errors";
 import { claimCapAlert, assistantSpendState, utcDay } from "../assistant/spend";
 import { lockStoreRow, Prisma as DbPrisma, storeScoped, storeScopedRawQuery, storeScopedTransaction, txExecute, txQuery } from "../db";
@@ -14,7 +15,8 @@ import { choiceCards } from "./choices";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
 import { COPILOT_SYSTEM_PROMPT } from "./prompt";
 import { databaseClock, insertProposalRows } from "./proposals";
-import { copilotTools, createDraftBook, type Draft, type PendingChoice } from "./tools";
+import { copilotTools, createDraftBook, type DraftBook, type Draft, type PendingChoice } from "./tools";
+import { estimateText } from "./inventory-report";
 import {
   CONVERSATION_MAX,
   FIXED_ERROR,
@@ -23,6 +25,7 @@ import {
   MAX_OUTPUT_TOKENS,
   MESSAGE_MAX,
   MODEL_TIMEOUT_MS,
+  PROPOSAL_MAX,
   RESTING_MESSAGE,
   SENDS_PER_HOUR,
   STEP_CAP,
@@ -219,6 +222,30 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
 }
 
 export const NOTHING_DRAFTED = "Nothing was drafted.";
+export const NUMBER_REFUSED =
+  "I can only give numbers from your stock records, and that answer had one I could not check. See Stock movement on this page.";
+
+const NUMBER = /\d+(?:[.,]\d+)*/g;
+const REPLY_ROWS = 5;
+
+function numbersIn(text: string): string[] {
+  return (text.match(NUMBER) ?? []).map((token) => String(Number(token.replace(/,(?=\d{3}\b)/g, ""))));
+}
+
+/**
+ * The reply may quote only numbers from the owner's message or this turn's tool results. Any other
+ * number swaps the model's text for a fixed summary of the report rows, or a refusal.
+ */
+export function checkedText(text: string, ownerText: string, book: DraftBook): string {
+  const allowed = new Set([ownerText, ...book.toolResults, String(PROPOSAL_MAX)].flatMap(numbersIn));
+  if (numbersIn(text).every((n) => allowed.has(n))) return text;
+  const rows = [...new Map(book.report.map((row) => [row.listingId, row])).values()].slice(0, REPLY_ROWS);
+  if (rows.length === 0) return NUMBER_REFUSED;
+  return rows.map((row) => (
+    `${row.name}: ${row.online7} sold online this week (${row.onlinePrior7} the week before), `
+    + `${row.counter7} counter sales reported. ${estimateText(row.estimate)}.`
+  )).join("\n");
+}
 
 /** The model's text, plus fixed lines chosen from what the turn produced. The model's text is never inspected. */
 function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean): string {
@@ -245,7 +272,7 @@ export interface GateRefusal {
 }
 
 /** Before any model call: the model is configured, the platform spend cap is not reached, and `rateKey` has sends left this hour. */
-export async function copilotGate(rateKey: string): Promise<GateRefusal | null> {
+export async function copilotGate(rateKey: string, perHour = SENDS_PER_HOUR): Promise<GateRefusal | null> {
   if (configMissing()) return { ok: false, code: "copilot_unavailable", message: UNAVAILABLE_MESSAGE };
   try {
     const spend = await assistantSpendState();
@@ -256,7 +283,7 @@ export async function copilotGate(rateKey: string): Promise<GateRefusal | null> 
   } catch {
     return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
   }
-  const limit = await takeRateLimit(rateKey, SENDS_PER_HOUR, HOUR_MS);
+  const limit = await takeRateLimit(rateKey, perHour, HOUR_MS);
   if (!limit.ok) {
     return {
       ok: false,
@@ -319,7 +346,8 @@ export async function sendCopilotTurn(input: {
     });
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = steps >= STEP_CAP || result.finishReason === "length" || book.overflow;
-    const reply = visibleReply(result.text, book.drafts, book.choices, capped);
+    const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped);
+    const usage = turnUsage(modelId, result.steps);
     const stored = await commitTurn({
       storeId: input.storeId,
       userId: input.userId,
@@ -332,6 +360,7 @@ export async function sendCopilotTurn(input: {
       existing: conversation.messages,
       drafts: book.drafts,
       choices: book.choices,
+      usage,
     });
     committed = true;
     return stored;
@@ -355,6 +384,30 @@ export async function sendCopilotTurn(input: {
   }
 }
 
+interface TurnUsage {
+  tokensIn: number;
+  tokensOut: number;
+  costMicros: number;
+}
+
+/** Tokens and cost of one turn's model steps. An unpriced model still saves the turn; the spend gate already failed closed. */
+function turnUsage(modelId: string, steps: unknown): TurnUsage {
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let cost = BigInt(0);
+  for (const step of Array.isArray(steps) ? steps : []) {
+    const usage = tokenUsageOf((step as { usage?: unknown } | null)?.usage);
+    try {
+      cost += callCostMicros(modelId, usage);
+    } catch {
+      // No price for this model.
+    }
+    tokensIn += Number(usage.inputTokens?.total ?? 0);
+    tokensOut += Number(usage.outputTokens?.total ?? 0);
+  }
+  return { tokensIn, tokensOut, costMicros: Number(cost) };
+}
+
 async function commitTurn(input: {
   storeId: string;
   userId: string;
@@ -367,6 +420,7 @@ async function commitTurn(input: {
   existing: StoredMessage[];
   drafts: Draft[];
   choices: PendingChoice[];
+  usage: TurnUsage;
 }): Promise<SendResult> {
   let proposals: Awaited<ReturnType<typeof insertProposalRows>> = [];
   let choices: ListingChoice[] = [];
@@ -399,13 +453,17 @@ async function commitTurn(input: {
         text: input.reply,
         messageId: input.messageId,
         ...(choices.length > 0 ? { choices } : {}),
+        costMicros: input.usage.costMicros,
       },
     ];
     await txExecute(tx, DbPrisma.sql`
       UPDATE copilot_conversations
       SET messages = ${JSON.stringify(nextMessages)}::jsonb,
           last_message_at = (clock_timestamp() AT TIME ZONE 'UTC'),
-          in_flight_until = NULL
+          in_flight_until = NULL,
+          tokens_in = tokens_in + ${input.usage.tokensIn},
+          tokens_out = tokens_out + ${input.usage.tokensOut},
+          cost_micros = cost_micros + ${input.usage.costMicros}
       WHERE id = ${input.conversationId}
     `);
     const receipt = await txExecute(tx, DbPrisma.sql`

@@ -2,7 +2,7 @@ import { resolveAuthBaseUrl } from "../auth";
 import { platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { sendEmail } from "../email/send";
 import { inngest } from "../inngest/client";
-import { escapeHtml } from "../notifications/messages";
+import { escapeHtml } from "../format";
 import { isValidTimezone } from "../order/store-hours";
 import { stockBadge, type StockBadge } from "../storefront/stock-badge";
 import { describeAlerts, type AlertKind, type AlertView } from "./alerts";
@@ -112,6 +112,7 @@ async function readDigest(storeId: string, since: Date): Promise<DigestData> {
 const KIND_HEADINGS: Record<AlertKind, string> = {
   sold_out: "Sold out",
   running_low: "Running low",
+  running_out_soon: "Running out soon",
   order_needs_low_stock: "Orders that need low stock",
   confirm_request: "Stock checks asked",
 };
@@ -154,7 +155,7 @@ async function sendStoreDigest(
 ): Promise<boolean> {
   const owners = await storeScoped(store.id).storeMembership.findMany({
     where: { role: "owner" },
-    select: { user: { select: { email: true } } },
+    select: { user: { select: { id: true, email: true } } },
   });
   if (owners.length === 0) return false;
 
@@ -177,7 +178,7 @@ async function sendStoreDigest(
       to: owner.user.email,
       subject: `${store.name}: daily stock digest`,
       html: claim.html,
-      idempotencyKey: `copilot-digest:${store.id}:${clock.date}:${owner.user.email}`,
+      idempotencyKey: `copilot-digest:${store.id}:${clock.date}:${owner.user.id}`,
     });
   }
   await storeScopedTransaction(store.id, (tx) => tx.copilotDigest.update({ where: day, data: { sentAt: new Date() } }));

@@ -28,9 +28,9 @@ import { CARD_NOT_FOUND, CARDS_UNAVAILABLE, SAVED_CARD_PURPOSE, SAVED_CARD_TERMS
 import { ensureStripeCustomer } from "./stripe-customer";
 import { CheckoutProviderError, fakeCheckoutPayments, fakeDetachCalls, getCheckoutPayments, type NormalizedCard } from "../stripe/checkout-payments";
 import { getStripeClient } from "../stripe/provider";
+import { AUTH_BASE, authGet, authPost, verifyUrlFromEmail } from "../test-auth";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
-const BASE = "http://localhost:3000/api/auth";
 const password = "AccountAuth-248!";
 const issuedEmails: string[] = [];
 
@@ -61,18 +61,6 @@ class CookieJar {
   }
 }
 
-async function authPost(path: string, body: unknown): Promise<Response> {
-  return auth.handler(new Request(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }));
-}
-
-async function authGet(url: string): Promise<Response> {
-  return auth.handler(new Request(url, { redirect: "manual" }));
-}
-
 async function customerCookie(email: string, name: string): Promise<{ id: string; cookie: string }> {
   const signup = await authPost("/sign-up/email", { email, password, name });
   expect(signup.status, await signup.clone().text()).toBe(200);
@@ -81,7 +69,7 @@ async function customerCookie(email: string, name: string): Promise<{ id: string
   const sent = await authPost("/sign-in/magic-link", { email, callbackURL: "/account" });
   expect(sent.status).toBe(200);
   const message = getTestSentEmails().find((item) => item.to === email);
-  const href = message?.html.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+  const href = verifyUrlFromEmail(message?.html);
   expect(href).toBeTruthy();
   const jar = new CookieJar();
   const verify = await authGet(href!);
@@ -362,7 +350,7 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
       else process.env.VERCEL = previousVercel;
     }
 
-    const signOut = await auth.handler(new Request(`${BASE}/sign-out`, {
+    const signOut = await auth.handler(new Request(`${AUTH_BASE}/sign-out`, {
       method: "POST",
       headers: { cookie: a.cookie, origin: "http://localhost:3000" },
     }));

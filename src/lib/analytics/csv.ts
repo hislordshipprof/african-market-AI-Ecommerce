@@ -25,7 +25,7 @@ function cell(value: string | number | null): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-function toCsv(rows: Array<Array<string | number | null>>): string {
+export function toCsv(rows: Array<Array<string | number | null>>): string {
   return rows.map((row) => row.map(cell).join(",")).join("\r\n") + "\r\n";
 }
 
@@ -34,6 +34,7 @@ const salesCells = (t: Totals) => [
   t.orders,
   csvDollars(t.goodsCents),
   csvDollars(t.averageOrderCents),
+  csvDollars(t.discountsCents),
   csvDollars(t.refundsCents),
   csvDollars(t.cardFeeCents),
   csvDollars(t.courierFeeCents),
@@ -46,7 +47,7 @@ export function analyticsCsv(view: AnalyticsView, data: StoreAnalytics, chatUsag
   switch (view) {
     case "sales":
       return toCsv([
-        ["Row", "Orders", "Goods revenue", "Average order", "Refunds", "Card fee", "Courier fee", "Net to store"],
+        ["Row", "Orders", "Goods revenue", "Average order", "Discounts given", "Refunds", "Card fee", "Courier fee", "Net to store"],
         ...data.sales.days.map((d) => [d.day, ...salesCells(d)]),
         ...data.sales.byFulfillment.map((f) => [FULFILLMENT_LABELS[f.fulfillment] ?? f.fulfillment, ...salesCells(f)]),
         [`Total ${range}`, ...salesCells(data.sales.totals)],

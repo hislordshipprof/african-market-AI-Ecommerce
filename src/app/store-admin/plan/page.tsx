@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 const dateFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" });
+/** An override ends at the start of its UTC date, the date the admin picked. */
+const overrideFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 function planLines(plan: Plan): string[] {
   const staff = staffLimit(plan);
@@ -98,6 +100,11 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                   </span>
                 )}
               </div>
+              {billing.override && (
+                <p className="mt-2 text-sm text-foreground" data-testid="plan-override">
+                  {PLAN_NAMES[billing.override.plan]}, courtesy of the platform team until {overrideFormat.format(billing.override.endsAt)}.
+                </p>
+              )}
               {billing.pilotTrialAvailable && (
                 <p className="mt-2 text-sm text-foreground">Your first {PILOT_FREE_MONTHS} months are free. Choose a plan to start.</p>
               )}

@@ -12,7 +12,7 @@ export default async function CartRoute() {
   ]);
   const harness = checkoutHarnessOn(cookieStore);
   const realCheckout = checkoutTakesPayment(
-    store.stripeOnboardingStatus,
+    store,
     process.env.STRIPE_PUBLISHABLE_KEY,
     harness,
   );

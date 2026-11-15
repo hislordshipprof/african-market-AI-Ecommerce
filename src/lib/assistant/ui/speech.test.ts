@@ -64,6 +64,16 @@ describe("assistant speech", () => {
     expect(state.draft).toBe("I want rice and beans now");
   });
 
+  it("never cuts an emoji in half at the limit", () => {
+    const lone = (text: string) => /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(text);
+    const spoken = applyFinal(beginSpeech("x".repeat(1999), 1), 1, 0, "😀 more");
+    expect(spoken.notice).toBe(SPEECH_LIMIT_MESSAGE);
+    expect(lone(spoken.draft)).toBe(false);
+    const full = beginSpeech(`${"x".repeat(1999)}😀`, 1);
+    expect(lone(full.draft)).toBe(false);
+    expect(full.draft.length).toBeLessThanOrEqual(2000);
+  });
+
   it("stops at 2000 characters", () => {
     const state = applyFinal(beginSpeech("a".repeat(1990), 1), 1, 0, "b".repeat(20));
     expect(state.draft).toHaveLength(2000);

@@ -2,6 +2,7 @@
 # Stage A (build) and Fix rounds. See docs/agents/orchestration.md.
 # Round-cap helpers live above the orchestrator so tests can source this file.
 # ticket_review_count matches review-ticket.sh: review-<n>-*.json, excluding *.second.json.
+. "$(dirname "${BASH_SOURCE[0]}")/review-watch.sh"
 
 # ticket_review_count <logs-dir> <issue>: review logs for one ticket.
 # Same count as review-ticket.sh (PRIOR): review-<n>-*.json, excluding *.second.json.
@@ -50,11 +51,14 @@ ticket_round_after_review() {
 # one session is capped (BUILD_TIMEOUT_MIN, default 90), and all of a ticket's builder sessions together have a
 # budget (LANE_BUDGET_MIN, default 300), so --continue cannot restart the clock.
 
-# _log_stamp_epoch <log-file>: the start time in a log's name (…-YYYYmmdd-HHMMSS.json), as epoch seconds.
+# _log_stamp_epoch <log-file>: the start time in a log's name (…-YYYYmmdd-HHMMSS.json), as epoch seconds; GNU
+# date, then BSD date (macOS). A name it cannot read is warned about on stderr, so a log is never dropped unseen.
 _log_stamp_epoch() {
   local s
   s=$(basename "$1" | sed -nE 's/.*-([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2})\.json$/\1-\2-\3 \4:\5:\6/p')
-  [ -n "$s" ] && date -d "$s" +%s 2>/dev/null
+  [ -n "$s" ] && { date -d "$s" +%s 2>/dev/null || date -j -f '%Y-%m-%d %H:%M:%S' "$s" +%s 2>/dev/null; } && return 0
+  echo "builder time: cannot read the start time in $1; it is not counted" >&2
+  return 1
 }
 
 # ticket_builder_minutes <logs-dir> <issue>: minutes of builder sessions so far (build, fix and continue logs,
@@ -64,7 +68,7 @@ ticket_builder_minutes() {
   for f in "$dir"/ticket-"$n"-*.json; do
     [ -f "$f" ] || continue
     start=$(_log_stamp_epoch "$f") || continue
-    end=$(stat -c %Y "$f" 2>/dev/null) || continue
+    end=$(file_mtime "$f") || continue
     [ "$end" -gt "$start" ] && total=$(( total + end - start ))
   done
   echo $(( total / 60 ))
@@ -132,7 +136,6 @@ mkdir -p .builder/logs
 # Every worktree shares this setting: .githooks/commit-msg strips AI co-author trailers from lane commits.
 git config core.hooksPath .githooks
 . "$ROOT/scripts/agent-cli.sh"
-. "$ROOT/scripts/review-watch.sh"
 
 # The round cap covers every mode. It used to cover --resume only, so a plain rerun or --continue could keep a
 # builder working on a ticket that had already used its 3 rounds.
@@ -246,7 +249,7 @@ fi
 REVIEW_RULE="Do NOT run the code-review step on your own work: no agent reviews its own work. When implement reaches its review step, stop there. After you push, an independent reviewer in a separate fresh session reviews the PR (and a second reviewer too for money, auth and external-provider tickets); its findings come back to you as a fix round. Still run the QA pass and every check in the Definition of done yourself."
 PORT_RULE="This lane's e2e port is $LANE_PORT: run Playwright with E2E_PORT=$LANE_PORT and never use another lane's port."
 
-RULES="Run headless: never ask the user. Never add a Co-Authored-By trailer for yourself or any AI tool, a Claude-Session link or a Generated-with line to a commit or a PR. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Handle every edge case in the agent brief and its 'Brief review' comment in code. Write the brief's Required tests and no others beyond what docs/agents/builder.md 'Which tests to write' allows. Meet the brief's Review checklist before you push. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). Run only the affected e2e specs and unit tests, plus pnpm typecheck and pnpm lint before each push. Never run scripts/ci-local.sh or the whole test suite yourself: after you push, the pipeline runs local-ci once (machine-wide queue, automatic flake retry) in parallel with the independent review, and sends any real failure back to you as a finding. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE ${DB_RULE:-} Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
+RULES="Run headless: never ask the user. Never add a Co-Authored-By trailer for yourself or any AI tool, a Claude-Session link or a Generated-with line to a commit or a PR. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Handle every edge case in the agent brief and its 'Brief review' comment in code. Write the brief's Required tests and no others beyond what docs/agents/builder.md 'Which tests to write' allows. Meet the brief's Review checklist before you push. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (origin/main merged in, never rebased or force-pushed, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). Run only the affected e2e specs and unit tests, plus pnpm typecheck and pnpm lint before each push. Never run scripts/ci-local.sh or the whole test suite yourself: after you push, the pipeline runs local-ci once (machine-wide queue, automatic flake retry) in parallel with the independent review, and sends any real failure back to you as a finding. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE ${DB_RULE:-} Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
 
 ROLE=build; [ "$TIER" = "light" ] && ROLE=light
 save_session() {
@@ -319,16 +322,14 @@ CI_LOCAL="${CI_LOCAL:-$ROOT/scripts/ci-local.sh}"
 if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
   cd "$ROOT"
   while true; do
+    # The refusal at the top keeps prior under 3, and only the first round's autofix comes back here.
     prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
-    if [ "$prior" -ge 3 ]; then
-      echo "Ticket #$N already has $prior review rounds (cap is 3). No further review or automatic fix. The coordinator decides."
-      break
-    fi
     last=$(ticket_round_is_last "$MODE" "$prior")
     round=$((prior + 1))
     CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
     # Own checkout, e2e port and database, so it never collides with the reviewer working in $WT on the lane's
-    # port and database. One runner checkout serves every lane: the machine-wide lock runs one suite at a time.
+    # port and database. ci-local.sh runs up to CI_SLOTS suites at once, each slot with its own runner checkout,
+    # database and port derived from these.
     (cd "$WT" && E2E_PORT="$((LANE_PORT + 50))" CI_DB=ci CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" \
       bash "$CI_LOCAL" > "$CI_LOG" 2>&1) &
     ci_pid=$!
@@ -336,8 +337,8 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
     verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
     echo "Independent review $round: $verdict"
     count=$(ticket_review_count "$ROOT/.builder/logs" "$N")
-    # A blocked review means this commit will not merge, so a run still queued for the machine-wide lock only
-    # makes every other lane wait longer: cancel it. A run that already holds the lock finishes, because its
+    # A blocked review means this commit will not merge, so a run still queued for a local-ci slot only
+    # makes every other lane wait longer: cancel it. A run that already holds a slot finishes, because its
     # failures go into this fix round.
     # The last round is never cancelled: the coordinator may accept its findings, and then needs the CI result.
     if [ "$last" != yes ] && [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then

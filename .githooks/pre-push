@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Refuses a push to main: main changes only through scripts/merge-ticket.sh. ALLOW_MAIN_PUSH=1 is the owner's
+# escape; agents never set it (docs/agents/builder.md).
+# Turned on per clone with: git config core.hooksPath .githooks   (build-ticket.sh does it for the lanes)
+[ "${ALLOW_MAIN_PUSH:-}" != 1 ] || exit 0
+while read -r _ _ remote_ref _; do
+  if [ "$remote_ref" = refs/heads/main ]; then
+    echo "pre-push: pushing to main is refused. Push a branch and open a PR; scripts/merge-ticket.sh merges it." >&2
+    exit 1
+  fi
+done
+exit 0

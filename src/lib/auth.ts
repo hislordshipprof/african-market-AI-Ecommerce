@@ -1,10 +1,11 @@
 import { betterAuth, APIError } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
-import { authPrisma, platform } from "./db";
+import { authPrisma, countMagicLinksForEmail, platform } from "./db";
 import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
-import { magicLinkMessage } from "./magic-link-mail";
+import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { isSlugRoutable, slugFromHost } from "./slug";
 
@@ -99,7 +100,37 @@ export function validateAuthSecret(
   }
 }
 
+export const RESEND_SANDBOX_FROM = "onboarding@resend.dev";
+
+/**
+ * Resend's sandbox sender only delivers to the account owner, so magic links never arrive.
+ * Logged, not thrown: production has no EMAIL_FROM yet, and a throw would end every sign-in.
+ */
+export function emailFromProblem(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  if (env.NEXT_PHASE === "phase-production-build") return null;
+  if (env.NODE_ENV !== "production") return null;
+  const from = env.EMAIL_FROM?.trim();
+  if (!from) return "EMAIL_FROM is not set";
+  if (from.includes(RESEND_SANDBOX_FROM)) return "EMAIL_FROM is Resend's sandbox sender";
+  return null;
+}
+
 validateAuthSecret();
+const emailFromIssue = emailFromProblem();
+if (emailFromIssue) {
+  console.error(JSON.stringify({ event: "email_from_misconfigured", message: emailFromIssue }));
+}
+
+// Per-IP limits alone let someone rotating IPs flood one inbox. The row for this send already
+// exists when the sender runs; links live 15 minutes, so expiry after now+5m means created in 10.
+// A blocked send deletes its row, so only mailed links count and a trickle cannot hold the cap.
+const INBOX_CAP = 5;
+
+async function inboxCapReached(email: string): Promise<boolean> {
+  return (await countMagicLinksForEmail(email, new Date(Date.now() + 5 * 60_000))) > INBOX_CAP;
+}
 
 const baseUrl = resolveAuthBaseUrl();
 
@@ -111,21 +142,58 @@ function requestHeaders(ctx: unknown): Headers | null {
   return null;
 }
 
+// The proxy sets x-custom-domain from the Host; only a domain a store has registered counts.
+export async function registeredCustomDomain(headers: Headers): Promise<string | null> {
+  const customDomain = headers.get("x-custom-domain");
+  if (!customDomain) return null;
+  const store = await platform.store.findUnique({
+    where: { customDomain },
+    select: { customDomain: true },
+  });
+  return store?.customDomain ?? null;
+}
+
+// A custom domain is served on the deployment's scheme: https live, http on a local server.
+function customDomainOrigin(domain: string): string {
+  return `${new URL(baseUrl).protocol}//${domain}`;
+}
+
+async function trustedOriginsForRequest(request?: Request): Promise<string[]> {
+  const origins = resolveAuthTrustedOrigins();
+  const domain = request ? await registeredCustomDomain(request.headers) : null;
+  return domain ? [...origins, customDomainOrigin(domain)] : origins;
+}
+
+// Better Auth builds links and redirects on its fallback base URL for hosts outside
+// allowedHosts, which is static; move those onto the store's custom domain.
+export function onCustomDomain(url: string, domain: string): string {
+  const target = new URL(url, baseUrl);
+  if (target.origin !== new URL(baseUrl).origin) return url;
+  return new URL(`${target.pathname}${target.search}${target.hash}`, customDomainOrigin(domain)).toString();
+}
+
+async function magicLinkUrlForHost(url: string, ctx: unknown): Promise<string> {
+  const headers = requestHeaders(ctx);
+  const domain = headers ? await registeredCustomDomain(headers) : null;
+  return domain ? onCustomDomain(url, domain) : url;
+}
+
 async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
   const headers = requestHeaders(ctx);
   if (!headers) return null;
   const headerSlug = headers.get("x-store-slug")?.toLowerCase() ?? null;
+  const customDomain = headers.get("x-custom-domain");
   const host = headers.get("host");
   const slug =
     headerSlug && isSlugRoutable(headerSlug)
       ? headerSlug
-      : host
+      : !customDomain && host
         ? slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN)
         : null;
-  if (!slug) return null;
+  if (!slug && !customDomain) return null;
   try {
     const store = await platform.store.findUnique({
-      where: { slug },
+      where: slug ? { slug } : { customDomain: customDomain! },
       select: { name: true },
     });
     return store?.name ?? null;
@@ -147,6 +215,16 @@ export const auth = betterAuth({
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
+    // Account recovery (ADR-0015): a reset never skips the second step, and ends every session.
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      const message = passwordResetMessage({
+        to: user.email,
+        url,
+        fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
+      });
+      scheduleAfterResponse(() => sendEmail(message), "password_reset_delivery_failed");
+    },
   },
   plugins: [
     twoFactor({
@@ -154,18 +232,22 @@ export const auth = betterAuth({
     }),
     magicLink({
       expiresIn: 900,
-      sendMagicLink: async ({ email, url }, ctx) => {
+      sendMagicLink: async ({ email, url, token }, ctx) => {
         const normalizedEmail = email.trim().toLowerCase();
         const privileged = await isPrivilegedEmail(normalizedEmail);
         if (privileged) return;
+        if (await inboxCapReached(normalizedEmail)) {
+          await authPrisma.verification.deleteMany({ where: { identifier: `magic-link:${token}` } });
+          return;
+        }
         const storeName = await storeNameForMagicLink(ctx);
         const message = magicLinkMessage({
           to: normalizedEmail,
-          url,
+          url: confirmLinkUrl(await magicLinkUrlForHost(url, ctx)),
           storeName,
-          fromAddress: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+          fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
         });
-        scheduleAfterResponse(() => sendEmail(message));
+        scheduleAfterResponse(() => sendEmail(message), "magic_link_delivery_failed");
       },
       disableSignUp: false,
     }),
@@ -175,11 +257,27 @@ export const auth = betterAuth({
     modelName: "rateLimit",
     window: 60,
     max: relaxedAuth ? 1000 : 10,
+    // A window restarts only after a quiet minute, so relaxed (e2e) limits must cover a whole run from one IP.
     customRules: {
-      "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
-      "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
-      "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
+      "/sign-in/email": { window: 60, max: relaxedAuth ? 1000 : 5 },
+      "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 1000 : 5 },
+      "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 1000 : 5 },
+      "/request-password-reset": { window: 60, max: relaxedAuth ? 1000 : 3 },
+      "/two-factor/verify-backup-code": { window: 60, max: relaxedAuth ? 1000 : 5 },
     },
+  },
+  hooks: {
+    // A trusted-device cookie skips the second step but leaves twoFactorVerified false, so guards
+    // would reject that session anyway: never issue one.
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path.startsWith("/two-factor/") && ctx.body?.trustDevice) {
+        return { context: { body: { ...ctx.body, trustDevice: false } } };
+      }
+      // The storefront never sends a name. Blanked, not dropped: hook context merges skip undefined.
+      if (ctx.path === "/sign-in/magic-link" && ctx.body?.name) {
+        return { context: { body: { ...ctx.body, name: "" } } };
+      }
+    }),
   },
   databaseHooks: {
     session: {
@@ -235,7 +333,7 @@ export const auth = betterAuth({
       },
     },
   },
-  trustedOrigins: resolveAuthTrustedOrigins(),
+  trustedOrigins: trustedOriginsForRequest,
   advanced: {
     useSecureCookies: baseUrl.startsWith("https://"),
   },

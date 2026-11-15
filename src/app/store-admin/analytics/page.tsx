@@ -235,7 +235,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       <main className="mx-auto max-w-5xl space-y-8 px-4 py-6">
         <RangePicker slug={store.slug} range={range} today={storeToday(store.timezone)} />
 
-        <Section id="sales" title="Sales" note="Captured orders by the day they were placed. Net to store is after the card fee, courier fees and refunds." csvHref={csv("sales")}>
+        <Section id="sales" title="Sales" note="Captured orders by the day they were placed. The card fee leaves out the customer's service fee. Net to store is after the card fee, the service fee, courier fees and refunds." csvHref={csv("sales")}>
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
             <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Net to store</p>
@@ -247,6 +247,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
             <dl className="grid grid-cols-2 gap-4 self-start lg:grid-cols-1">
               <Stat label="Goods revenue" value={money(t.goodsCents)} />
               <Stat label="Orders" value={count(t.orders)} detail={`Average ${money(t.averageOrderCents)}`} />
+              <Stat label="Promo discounts given" value={money(t.discountsCents)} detail="Funded by your store; goods are after it" />
               <Stat label="Refunds" value={money(t.refundsCents)} />
               <Stat label="Card fee" value={money(t.cardFeeCents)} detail={t.courierFeeCents > 0 ? `Courier fees ${money(t.courierFeeCents)}` : undefined} />
             </dl>

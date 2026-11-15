@@ -26,7 +26,6 @@ vi.mock("../inngest/notify", async (importOriginal) => ({
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { generateTOTP } from "../../../e2e/totp";
-import { auth } from "../auth";
 import { authPrisma, findStuckTransitionalOrders, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
 import { scheduleOrderNotification } from "../inngest/notify";
@@ -40,8 +39,8 @@ import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction 
 import { listOrdersToCheck } from "./orders-to-check";
 import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 import { parseRepaidDollars } from "./repaid-dollars";
+import { authPost } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t264-${Date.now()}`;
 const password = "RefundResolve-186!";
 const hasDb = !!process.env.DATABASE_URL;
@@ -84,14 +83,6 @@ class CookieJar {
   header(): string {
     return [...this.jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
   }
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }),
-  );
 }
 
 async function signInWithTotp(email: string): Promise<string> {
@@ -349,9 +340,9 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const resolved = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(resolved?.status).toBe("CANCELLED");
     expect(resolved?.notes).toBe(note);
-    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(3);
     await resolveRefundFailed(orderId, note, 600, 600);
-    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(3);
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
@@ -400,6 +391,9 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const updated = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(updated?.status).toBe("CANCELLED");
     expect(updated?.capturedAmountCents).toBeNull();
+    // The fee ledger's capture record is append-only: the repayment never changes it.
+    expect(updated?.confirmedCaptureCents).toBe(1000);
+    expect(updated?.captureConfirmedAt).toEqual(before?.captureConfirmedAt);
     expect(updated?.notes).toBe("Paid customer by Zelle 11/05");
     const audit = await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: orderId, action: "refund_resolved_manually" },
@@ -1282,6 +1276,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(stored?.status).toBe("CANCELLED");
     expect(stored?.capturedAmountCents).toBeNull();
+    expect(stored?.captureCents).toBe(1000);
   });
 
   it("a counted refund failing after manual resolution alerts without reopening", async () => {
@@ -1500,7 +1495,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(lockedReads).not.toContain(true);
     expect(readsAfterCommit).toBe(1);
     expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
-    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(3);
     expect(scheduled).toEqual([[storeAId, order.id, "cancelled"]]);
     // The baseline is stored, so the next evaluation (webhook or sweep) still alerts on a refund that moved.
     await fakeStripeProvider.refundPayment(pi, 1000, "lock-free-late");

@@ -2,9 +2,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertAppRuntimeLogin, platform, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../../db";
+import { assertAppRuntimeLogin, authPrisma, platform, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../../db";
+import { auth } from "../../auth";
 import { resolveIngredients } from "../../catalog/ingredients";
-import type { CatalogFixture } from "./types";
+import { declaredRecipe, dishKey, type SeedRecipe } from "../recipe-base";
+import { findRecipe } from "../recipes";
+import type { CatalogFixture, EvalCase, PastOrder } from "./types";
 import type { MasterCatalogRow } from "./fingerprint";
 
 const LEASE_DIR = join(tmpdir(), "shopper-assistant-eval-leases");
@@ -23,6 +26,36 @@ export interface CreatedEvalStores {
 export async function assertRuntimeRole(): Promise<string> {
   await assertAppRuntimeLogin();
   return "app_runtime";
+}
+
+/**
+ * Dataset dishes the current seed declarations do not answer, or the database answers with anything but that
+ * declaration's curated row; core items the recipe has no ingredient for ("dish: core label"); and mapped
+ * recipe ingredients store A has no listing for ("dish: ingredient"). Unmapped ingredients such as onion are
+ * left to the store's search: an exact item, else a similar item the shopper accepts (#607, #633).
+ */
+export async function unseededDishes(cases: EvalCase[], fixture: CatalogFixture, declarations: SeedRecipe[]): Promise<string[]> {
+  const masterOf = new Map(fixture.listings.map((listing) => [listing.key, listing.masterProductId]));
+  const sold = new Set(fixture.listings.filter((listing) => listing.store === "A" && listing.active).map((listing) => listing.masterProductId));
+  const names = [...new Set(cases.flatMap((item) => (item.dish ? [item.dish.name] : [])))];
+  const problems: string[] = [];
+  for (const name of names) {
+    const declared = declaredRecipe(declarations, name);
+    const recipe = declared ? await findRecipe(name) : null;
+    if (!declared || !recipe || recipe.origin !== "curated" || dishKey(recipe.name) !== dishKey(declared.name)) {
+      problems.push(name);
+      continue;
+    }
+    const masters = new Set(declared.ingredients.flatMap((row) => row.masterProductId ?? []));
+    const core = new Map(cases.flatMap((item) => (item.dish?.name === name ? item.dish.core : [])).map((group) => [group.label, group]));
+    for (const group of core.values()) {
+      if (!group.options.some((key) => masters.has(masterOf.get(key) ?? ""))) problems.push(`${name}: ${group.label}`);
+    }
+    for (const row of declared.ingredients) {
+      if (row.masterProductId && !sold.has(row.masterProductId)) problems.push(`${name}: ${row.name}`);
+    }
+  }
+  return problems;
 }
 
 export async function createEvalStores(fixture: CatalogFixture): Promise<CreatedEvalStores> {
@@ -143,6 +176,8 @@ function storeData(slug: string, fixture: CatalogFixture) {
 }
 
 export async function deleteEvalStore(storeId: string): Promise<void> {
+  await storeScoped(storeId).order.deleteMany({});
+  await storeScoped(storeId).customer.deleteMany({});
   await storeScoped(storeId).cart.deleteMany({});
   await storeScoped(storeId).listing.deleteMany({});
   await platformAdmin.store.delete({ where: { id: storeId } }).catch(async () => {
@@ -192,5 +227,80 @@ export async function sweepAbandonedEvalStores(ownRunId: string): Promise<void> 
     const leased = existsSync(join(LEASE_DIR, `${runId}.json`));
     if (!leased && age < 60 * 60 * 1000) continue;
     await deleteEvalStore(store.id);
+  }
+}
+
+const AUTH_ORIGIN = "http://localhost:3000";
+
+export interface EvalShopper {
+  /** The session cookie for the chat request. */
+  cookie: string;
+  remove: () => Promise<void>;
+}
+
+/**
+ * A real account signed in through the auth handler, with the case's orders placed: its own at store A or B,
+ * and another customer's at the same store, so "my usual" is checked against what it must not see.
+ */
+export async function signInEvalShopper(created: CreatedEvalStores, orders: PastOrder[]): Promise<EvalShopper> {
+  const email = `golden-eval-${created.runId}-${randomBytes(4).toString("hex")}@example.com`;
+  const password = `Eval-${randomBytes(12).toString("hex")}`;
+  const call = (path: string, body: Record<string, string>) => auth.handler(new Request(`${AUTH_ORIGIN}/api/auth/${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: AUTH_ORIGIN },
+    body: JSON.stringify(body),
+  }));
+  const signedUp = await call("sign-up/email", { email, password, name: "Eval Shopper" });
+  if (!signedUp.ok) throw new Error(`Eval shopper sign-up failed: ${signedUp.status}`);
+  const user = await authPrisma.user.findFirstOrThrow({ where: { email }, select: { id: true } });
+  const remove = async () => {
+    for (const storeId of [created.storeAId, created.storeBId]) {
+      await storeScoped(storeId).order.deleteMany({ where: { customer: { OR: [{ userId: user.id }, { email }] } } });
+      await storeScoped(storeId).customer.deleteMany({ where: { OR: [{ userId: user.id }, { email }] } });
+    }
+    await authPrisma.session.deleteMany({ where: { userId: user.id } });
+    await authPrisma.account.deleteMany({ where: { userId: user.id } });
+    await authPrisma.user.delete({ where: { id: user.id } });
+  };
+  try {
+    const signedIn = await call("sign-in/email", { email, password });
+    if (!signedIn.ok) throw new Error(`Eval shopper sign-in failed: ${signedIn.status}`);
+    const cookie = (signedIn.headers.getSetCookie?.() ?? []).map((value) => value.split(";")[0]).join("; ");
+    let number = 7000;
+    for (const order of orders) {
+      const storeId = order.store === "A" ? created.storeAId : created.storeBId;
+      const scoped = storeScoped(storeId);
+      const customer = order.customer === "self"
+        ? await scoped.customer.findFirst({ where: { userId: user.id } }) ?? await scoped.customer.create({ data: { storeId, userId: user.id, name: "Eval Shopper" } })
+        : await scoped.customer.create({ data: { storeId, name: "Other Shopper", email } });
+      const lines = order.lines.map((line) => {
+        const variantId = created.ids.get(line.listingKey)?.variants.get(line.variantKey);
+        if (!variantId) throw new Error(`Eval past order names unknown variant ${line.variantKey}.`);
+        return { variantId, qty: line.qty };
+      });
+      number += 1;
+      const placed = await scoped.order.create({
+        data: {
+          storeId,
+          number,
+          customerId: customer.id,
+          status: "COMPLETED",
+          fulfillment: "pickup",
+          subtotalCents: 0,
+          bufferCents: 0,
+          totalAuthorizedCents: 0,
+          totalCents: 0,
+          trackingToken: `golden-eval-${randomBytes(12).toString("hex")}`,
+          createdAt: new Date(Date.now() - number * 60_000),
+        },
+      });
+      await scoped.orderLine.createMany({
+        data: lines.map((line) => ({ storeId, orderId: placed.id, listingVariantId: line.variantId, qtyOrdered: line.qty, unitPriceCents: 0 })),
+      });
+    }
+    return { cookie, remove };
+  } catch (error) {
+    await remove().catch(() => {});
+    throw error;
   }
 }

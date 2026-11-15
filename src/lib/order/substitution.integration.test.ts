@@ -4,7 +4,7 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { isRlsRejection } from "../listing/cross-store-write";
 import { setStripeProvider } from "../stripe";
-import { capturedFees, capturedPayments, fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
+import { capturedFees, capturedMetadata, capturedPayments, fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
 import { clearTestSentSms, getTestSentSms } from "../notifications/sms";
 import { makeFakeStep } from "../inngest/fake-step";
 import { sendCustomerNotification, substitutionTimeout } from "../inngest/functions";
@@ -44,6 +44,16 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
     egusi: "", ogbono: "", crayfish: "", palmOil: "", yam: "",
   };
   let orderSeq = 0;
+  let ownerId = "";
+
+  async function percentCoupon(code: string, percentOff: number) {
+    if (!ownerId) {
+      ownerId = (await raw.user.create({ data: { id: crypto.randomUUID(), email: `${RUN}-owner@example.com`, name: "Owner", emailVerified: true } })).id;
+    }
+    return storeScoped(storeId).storeCoupon.create({
+      data: { storeId, code, kind: "percent", percentOff, startsAt: new Date("2026-01-01T00:00:00Z"), createdById: ownerId },
+    });
+  }
 
   async function variant(name: string, price: number, qty: number, master: string | null) {
     const listing = await storeScoped(storeId).listing.create({
@@ -57,7 +67,7 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
 
   type LineSpec = { variantId: string; qty: number; price: number; swapRule?: string; substituteVariantId?: string };
 
-  async function order(lines: LineSpec[], holdCents?: number, serviceFeeCents = 0) {
+  async function order(lines: LineSpec[], holdCents?: number, serviceFeeCents = 0, coupon?: { id: string; discountCents: number }) {
     const subtotal = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
     const hold = holdCents ?? Math.round(subtotal * 1.1);
     const paymentIntentId = `pi_${RUN}_${++orderSeq}`;
@@ -76,6 +86,7 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
             ? { serviceFeeCents, serviceFeeBps: 300, serviceFeeMinCents: 99, serviceFeeMaxCents: 299 }
             : {}),
           paymentIntentId,
+          ...(coupon ? { couponId: coupon.id, discountCents: coupon.discountCents, totalCents: subtotal - coupon.discountCents + serviceFeeCents } : {}),
           trackingToken: `tok_${RUN}_${orderSeq}_${"x".repeat(20)}`,
           acceptedAt: new Date(),
         },
@@ -153,6 +164,7 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
       await scoped.orderLine.deleteMany({});
       await scoped.order.deleteMany({});
       await scoped.customer.deleteMany({});
+      await scoped.storeCoupon.deleteMany({});
       await scoped.listingVariant.deleteMany({});
       await scoped.listing.deleteMany({});
     }
@@ -162,6 +174,7 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
       await tx.category.deleteMany({ where: { id: categoryId } });
     });
     await raw.store.deleteMany({ where: { id: { in: [storeId, storeBId] } } });
+    if (ownerId) await raw.user.deleteMany({ where: { id: ownerId } });
     await raw.$disconnect();
   });
 
@@ -326,6 +339,42 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
     expect(row.serviceFeeCents).toBe(138);
     // The store's card fee on $46: $1.33 + 30¢.
     expect(capturedFees.get(placed.paymentIntentId)).toBe(138 + 163);
+  });
+
+  it("#557: at capture a percent discount is recomputed on the goods picked, split per line, and Stripe gets the coupon id", async () => {
+    const coupon = await percentCoupon("CAP20", 20);
+    // $50.00 goods, 20% = $10.00; fee 3% of $40.00 = $1.20; buffer $4.00; hold $45.20.
+    const placed = await order([
+      { variantId: v.yam, qty: 2, price: 1600 },
+      { variantId: v.egusi, qty: 1, price: 1000 },
+      { variantId: v.crayfish, qty: 1, price: 800 },
+    ], 4520, 120, { id: coupon.id, discountCents: 1000 });
+    await markLinePicked(storeId, placed.lineIds[0]);
+    await markLineShort(storeId, placed.lineIds[1], 0);
+    await resolveSubstitutionByToken(storeId, placed.token, (await requestFor(placed.lineIds[1])).id, "refund");
+    await markLinePicked(storeId, placed.lineIds[2]);
+
+    // Picked $40.00, 20% = $8.00 (640 + 0 + 160). Fee 3% of $32.00 = 96¢ → 99¢ minimum. Capture $32.99.
+    expect(await markReady(storeId, placed.id)).toEqual({ ok: true, capturedAmountCents: 3299 });
+    const row = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.id }, include: { lines: true } });
+    expect(row.discountCents).toBe(800);
+    expect(row.serviceFeeCents).toBe(99);
+    expect(placed.lineIds.map((id) => row.lines.find((line) => line.id === id)!.discountCents)).toEqual([640, 0, 160]);
+    // The store funds the discount: application fee = 99¢ fee + its card fee on $32.00 (93¢ + 30¢).
+    expect(capturedFees.get(placed.paymentIntentId)).toBe(99 + 123);
+    expect(capturedMetadata.get(placed.paymentIntentId)).toEqual({ coupon_id: coupon.id });
+  });
+
+  it("#557: a swap up is offered when the discounted goods and their fee still fit the hold", async () => {
+    const coupon = await percentCoupon("SWAP20", 20);
+    // Hold $45.20 as above. Swapping egusi $10 → palm oil $14: goods $54.00, 20% off = $43.20, fee $1.30 = $44.50.
+    const placed = await order([
+      { variantId: v.yam, qty: 2, price: 1600 },
+      { variantId: v.egusi, qty: 1, price: 1000, swapRule: "named_substitute", substituteVariantId: v.palmOil },
+      { variantId: v.crayfish, qty: 1, price: 800 },
+    ], 4520, 120, { id: coupon.id, discountCents: 1000 });
+    await markLineShort(storeId, placed.lineIds[1], 0);
+    expect((await requestFor(placed.lineIds[1])).proposedUnitPriceCents).toBe(1400);
   });
 
   it("AC5: after answers and timeouts, no order has an unapproved substitution", async () => {

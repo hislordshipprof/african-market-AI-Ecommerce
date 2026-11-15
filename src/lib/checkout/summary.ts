@@ -17,6 +17,10 @@ export interface OrderSummaryView {
 /** The money lines the basket and checkout both show, read only from the server quote. */
 export function orderSummary(quote: CheckoutQuote, fulfillment: Fulfillment): OrderSummaryView {
   const lines: SummaryLine[] = [{ key: "subtotal", label: "Subtotal", cents: quote.subtotalCents }];
+  if (quote.discountCents) {
+    const label = quote.coupon ? `Promo ${quote.coupon.code}` : "Promo savings";
+    lines.push({ key: "discount", label, cents: -quote.discountCents });
+  }
   if (quote.serviceFeeCents > 0) {
     lines.push({ key: "service-fee", label: "Service fee", cents: quote.serviceFeeCents });
   }
@@ -29,9 +33,6 @@ export function orderSummary(quote: CheckoutQuote, fulfillment: Fulfillment): Or
   lines.push({ key: "tax", label: "Estimated tax", cents: quote.taxCents });
   if (fulfillment !== "pickup" || quote.tipCents > 0) {
     lines.push({ key: "tip", label: "Tip", cents: quote.tipCents });
-  }
-  if (quote.discountCents) {
-    lines.push({ key: "discount", label: "Promo savings", cents: -quote.discountCents });
   }
   return {
     lines,

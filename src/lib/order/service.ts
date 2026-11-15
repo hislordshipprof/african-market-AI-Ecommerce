@@ -1,18 +1,21 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type Order, type OrderLine } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
+import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
-import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
+import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
+import { couponTerms } from "../coupon/discount";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
-import { scheduleCourierDispatch, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
+import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { captureCharge } from "./substitution-pricing";
+import { recordCapture } from "./capture-record";
+import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -46,7 +49,7 @@ type TransitionalStatus = "CAPTURING" | "CANCELLING";
 const CAPTURE_STATUS_CHANGED = "Order status changed during capture";
 
 /** Stock writes wait on listing locks, so these transactions cannot use Prisma's 5-second default. */
-const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
+export const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
 
 /** A capture result may report this amount only when the order row already stored it. */
 function storedCaptureAmount(
@@ -54,10 +57,6 @@ function storedCaptureAmount(
 ): { ok: true; capturedAmountCents: number } | { ok: false; error: typeof CAPTURE_STATUS_CHANGED } {
   if (capturedAmountCents == null) return { ok: false, error: CAPTURE_STATUS_CHANGED };
   return { ok: true, capturedAmountCents };
-}
-
-export function fulfilledStatus(fulfillment: string): "AWAITING_PICKUP" | "READY" {
-  return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 }
 
 function orderAuditWhere(entityId: string, action: string) {
@@ -127,6 +126,8 @@ async function finalizeCancelledOrder(
     from?: TransitionalStatus[];
     refundId?: string | null;
     after?: Prisma.InputJsonValue;
+    /** Stripe captured this much before the cancel refunded it. */
+    capturedCents?: number;
   },
 ): Promise<{ wrote: boolean }> {
   const from = options?.from ?? ["CAPTURING", "CANCELLING"];
@@ -134,9 +135,9 @@ async function finalizeCancelledOrder(
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status === "CANCELLED" || !from.includes(current.status as TransitionalStatus)) {
-      return { wrote: false, notify: false };
+      return { wrote: false, notify: false, courier: false };
     }
-    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false };
+    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false, courier: false };
     const existing = await tx.auditLog.findFirst({ where: orderAuditWhere(orderId, action) });
     await tx.order.update({
       where: { id: orderId },
@@ -147,6 +148,7 @@ async function finalizeCancelledOrder(
         ...(options?.refundId ? { refundId: options.refundId } : {}),
       },
     });
+    if (options?.capturedCents != null) await recordCapture(tx, orderId, options.capturedCents, null);
     if (!existing) {
       await tx.auditLog.create({
         data: systemAuditData(storeId, orderId, action, options?.after ?? {}),
@@ -154,9 +156,11 @@ async function finalizeCancelledOrder(
     }
     await releaseOrderStock(tx, storeId, orderId);
     const notify = await recordOrderNotification(tx, storeId, orderId, "cancelled");
-    return { wrote: true, notify };
+    return { wrote: true, notify, courier: current.fulfillment === "courier" };
   }, LEDGER_TRANSACTION);
   if (outcome.notify) scheduleOrderNotification(storeId, orderId, "cancelled");
+  // A courier booked at packing start (#562) is cancelled with the order.
+  if (outcome.courier) scheduleCourierCancel(storeId, orderId);
   return { wrote: outcome.wrote };
 }
 
@@ -279,7 +283,7 @@ function isTerminalRefundStatus(status: string): boolean {
 }
 
 /** Statuses a picker can tick or short lines in. */
-const PICKABLE_STATUSES: string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
+export const PICKABLE_STATUSES: string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
 
 const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
@@ -303,6 +307,14 @@ const NAMED_VARIANT = {
 
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  coupon: { select: { code: true } },
+  // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
+  deliveries: {
+    where: { status: { not: "cancelled" } },
+    select: { provider: true, status: true, pickupReadyAt: true, courierJson: true },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+  },
   lines: {
     include: {
       substitutedVariant: NAMED_VARIANT,
@@ -326,6 +338,8 @@ const ORDER_WITH_LINES = {
   },
 } as const;
 
+const PLATFORM_REFUNDED_STATUSES: OrderStatus[] = ["PARTIALLY_REFUNDED", "REFUNDED"];
+
 export async function getStoreOrders(storeId: string) {
   const orders = await storeScopedTransaction(storeId, async (tx) => {
     const resolved = await tx.auditLog.findMany({
@@ -333,18 +347,39 @@ export async function getStoreOrders(storeId: string) {
       select: { entityId: true },
     });
     const resolvedIds = resolved.map((row) => row.entityId);
-    return tx.order.findMany({
+    const platformRefunded = await tx.auditLog.findMany({
+      where: { action: PLATFORM_REFUND_ACTION, entityType: "order" },
+      select: { entityId: true },
+    });
+    const platformRefundedIds = platformRefunded.map((row) => row.entityId);
+    // #539: an order with an open card dispute stays in the inbox, badged, whatever its status.
+    const openDisputes = await tx.paymentDispute.findMany({
+      where: { orderId: { not: null }, status: { notIn: [...CLOSED_DISPUTE_STATUSES] } },
+      select: { orderId: true },
+    });
+    const disputedIds = openDisputes.map((row) => row.orderId!);
+    const rows = await tx.order.findMany({
       where: {
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           ...(resolvedIds.length > 0
             ? [{ id: { in: resolvedIds }, status: "CANCELLED" as const }]
             : []),
+          // #538: the store sees a refund the platform team made.
+          ...(platformRefundedIds.length > 0
+            ? [{ id: { in: platformRefundedIds }, status: { in: PLATFORM_REFUNDED_STATUSES } }]
+            : []),
+          ...(disputedIds.length > 0 ? [{ id: { in: disputedIds } }] : []),
         ],
       },
       include: ORDER_WITH_LINES,
       orderBy: { createdAt: "desc" },
     });
+    return rows.map((row) => ({
+      ...row,
+      refundedByPlatform: platformRefundedIds.includes(row.id) && (PLATFORM_REFUNDED_STATUSES as string[]).includes(row.status),
+      disputed: disputedIds.includes(row.id),
+    }));
   });
   // This payload reaches a client component. A user id is the same at every store, so it
   // would let two stores' admins match one person: send only whether an account is linked.
@@ -387,15 +422,86 @@ export async function acceptOrder(
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
+/** Packing starts with the first line picked or marked short: a courier order books its courier then (#562). */
+function startPackingData(order: { status: string }) {
+  return order.status === "ACCEPTED" ? { pickingStartedAt: new Date() } : {};
+}
+
+function packingStarted(order: { status: string; fulfillment: string }): boolean {
+  return order.status === "ACCEPTED" && order.fulfillment === "courier";
+}
+
+/** What a pick or short sets off once its transaction commits. */
+export type PickEffects = {
+  orderId: string;
+  packing: boolean;
+  substitution?: { request: { id: string; expiresAt: Date }; notify: boolean };
+};
+
+type PickTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
+
+/** A batched order (#564) is picked from its batch only; a separate pick would race the combined list. */
+export const ORDER_IN_BATCH = "This order is in a batch. Pick it from the batch screen";
+
+/** Ticks one whole line in the caller's transaction, which holds the store lock. */
+export async function pickLineInTx(tx: PickTx, line: OrderLine, order: Order): Promise<{ orderStatus: OrderStatus; effects: PickEffects }> {
+  await tx.orderLine.update({
+    where: { id: line.id },
+    data: { status: "picked", qtyPicked: line.qtyOrdered },
+  });
+  if (order.status === "ACCEPTED") {
+    await tx.order.update({
+      where: { id: order.id },
+      data: { status: "PICKING", ...startPackingData(order) },
+    });
+  }
+  // Picking goes on while a customer answers a substitution prompt.
+  const orderStatus = order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING";
+  return { orderStatus, effects: { orderId: order.id, packing: packingStarted(order) } };
+}
+
+/** Marks one line short in the caller's transaction and opens its #13 prompt. */
+export async function shortLineInTx(
+  tx: PickTx,
+  storeId: string,
+  line: OrderLine,
+  order: Order,
+  qtyFound: number,
+): Promise<{ orderStatus: OrderStatus; effects: PickEffects }> {
+  const request = await openSubstitutionRequest(tx, storeId, line, qtyFound, order);
+  await tx.orderLine.update({
+    where: { id: line.id },
+    data: { status: "short", qtyPicked: qtyFound },
+  });
+  await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING", ...startPackingData(order) } });
+  await settleShortLine(tx, storeId, line.id, line.qtyOrdered - qtyFound);
+  const notify = await recordSubstitutionPrompt(tx, storeId, order.id);
+  return {
+    orderStatus: "SUBSTITUTION_PENDING",
+    effects: { orderId: order.id, packing: packingStarted(order), substitution: { request, notify } },
+  };
+}
+
+export function runPickEffects(storeId: string, effects: PickEffects[]): void {
+  for (const effect of effects) {
+    if (effect.packing) scheduleCourierPacking(storeId, effect.orderId);
+    if (!effect.substitution) continue;
+    const { request, notify } = effect.substitution;
+    scheduleSubstitutionTimer(storeId, effect.orderId, request.id, request.expiresAt);
+    if (notify) scheduleOrderNotification(storeId, effect.orderId, "substitution", request.id);
+  }
+}
+
 export async function markLinePicked(
   storeId: string,
   lineId: string,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx): Promise<
+    { ok: true; orderStatus: OrderStatus; effects: PickEffects } | { ok: false; error: string }
+  > => {
     await lockStoreRow(tx, storeId);
 
-    const lines = await tx.orderLine.findMany({ where: { id: lineId } });
-    const line = lines[0];
+    const line = await tx.orderLine.findUnique({ where: { id: lineId } });
     if (!line) return { ok: false, error: "Order line not found" };
     if (line.status !== "pending") {
       return { ok: false, error: `Line already resolved (${line.status})` };
@@ -406,22 +512,13 @@ export async function markLinePicked(
     if (!PICKABLE_STATUSES.includes(order.status)) {
       return { ok: false, error: `Cannot pick lines for order in status ${order.status}` };
     }
+    if (order.pickBatchId) return { ok: false, error: ORDER_IN_BATCH };
 
-    await tx.orderLine.update({
-      where: { id: lineId },
-      data: { status: "picked", qtyPicked: line.qtyOrdered },
-    });
-
-    if (order.status === "ACCEPTED") {
-      await tx.order.update({
-        where: { id: order.id },
-        data: { status: "PICKING" },
-      });
-    }
-
-    // Picking goes on while a customer answers a substitution prompt.
-    return { ok: true, orderStatus: order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING" };
+    return { ok: true, ...(await pickLineInTx(tx, line, order)) };
   });
+  if (!result.ok) return result;
+  runPickEffects(storeId, [result.effects]);
+  return { ok: true, orderStatus: result.orderStatus };
 }
 
 /**
@@ -435,7 +532,7 @@ export async function markLineShort(
   qtyFound: number,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
   const result = await storeScopedTransaction(storeId, async (tx): Promise<
-    { ok: true; orderStatus: OrderStatus; orderId: string; request: { id: string; expiresAt: Date }; notify: boolean } | { ok: false; error: string }
+    { ok: true; orderStatus: OrderStatus; effects: PickEffects } | { ok: false; error: string }
   > => {
     await lockStoreRow(tx, storeId);
 
@@ -453,21 +550,12 @@ export async function markLineShort(
     if (!PICKABLE_STATUSES.includes(order.status)) {
       return { ok: false, error: `Cannot mark lines short for order in status ${order.status}` };
     }
+    if (order.pickBatchId) return { ok: false, error: ORDER_IN_BATCH };
 
-    const request = await openSubstitutionRequest(tx, storeId, line, qtyFound, order);
-    await tx.orderLine.update({
-      where: { id: lineId },
-      data: { status: "short", qtyPicked: qtyFound },
-    });
-    await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING" } });
-    await settleShortLine(tx, storeId, lineId, line.qtyOrdered - qtyFound);
-    const notify = await recordSubstitutionPrompt(tx, storeId, order.id);
-
-    return { ok: true, orderStatus: "SUBSTITUTION_PENDING", orderId: order.id, request, notify };
+    return { ok: true, ...(await shortLineInTx(tx, storeId, line, order, qtyFound)) };
   }, LEDGER_TRANSACTION);
   if (!result.ok) return result;
-  scheduleSubstitutionTimer(storeId, result.orderId, result.request.id, result.request.expiresAt);
-  if (result.notify) scheduleOrderNotification(storeId, result.orderId, "substitution", result.request.id);
+  runPickEffects(storeId, [result.effects]);
   return { ok: true, orderStatus: result.orderStatus };
 }
 
@@ -633,6 +721,8 @@ async function persistRefundFailure(
           : {}),
       },
     });
+    const known = current.capturedAmountCents ?? restoredCapture;
+    if (known != null) await recordCapture(tx, orderId, known, null);
     const prior = await tx.auditLog.findMany({
       where: orderAuditWhere(orderId, "refund_failed"),
     });
@@ -694,6 +784,8 @@ async function settleCapturedRefund(
       from: ["CANCELLING"],
       refundId: decision.refundId,
       after: { refundId: decision.refundId, amountRefunded: decision.amountRefunded },
+      // A settled refund covers the whole capture (canonicalSucceededSettlement).
+      capturedCents: decision.amountRefunded,
     });
     return { outcome: "refunded" };
   }
@@ -859,6 +951,7 @@ export async function markTerminalRefundFailure(input: {
     await lockStoreRow(tx, order.storeId);
     const row = await tx.order.findUnique({ where: { id: order.id } });
     if (!row || (row.status !== "CANCELLING" && row.status !== "CANCELLED")) return;
+    await recordCapture(tx, order.id, captured, null);
     const manual = await tx.auditLog.findFirst({
       where: orderAuditWhere(order.id, "refund_resolved_manually"),
     });
@@ -904,6 +997,11 @@ export async function markTerminalRefundFailure(input: {
   return { ok: true, action: covered ? "covered" : "refund_failed" };
 }
 
+/** Stripe metadata naming the coupon an order used (#557). */
+function couponMetadata(couponId: string | null | undefined): Record<string, string> | undefined {
+  return couponId ? { coupon_id: couponId } : undefined;
+}
+
 /** The application fee for a stored capture amount; the service fee was stored with it. */
 function applicationFeeFor(
   order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number },
@@ -937,6 +1035,7 @@ export async function markReady(
         paymentIntentId: order.paymentIntentId!,
         totalAuthorizedCents: order.totalAuthorizedCents,
         newStatus: fulfilledStatus(order.fulfillment),
+        couponId: order.couponId,
       };
     }
     if (order.status !== "PICKING") {
@@ -953,7 +1052,10 @@ export async function markReady(
     }
 
     // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
-    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order) });
+    // The coupon's value cannot change once an order used it (#556), so it is read as placed.
+    const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+    const coupon = couponRow ? couponTerms(couponRow) : null;
+    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order), coupon });
     const capturedAmountCents = charge.amountCents;
 
     if (!order.paymentIntentId) {
@@ -1002,8 +1104,13 @@ export async function markReady(
         capturedAmountCents,
         serviceFeeCents: charge.serviceFeeCents,
         platformFeeCents: split.platformFeeCents,
+        discountCents: charge.discountCents,
       },
     });
+    for (const [index, line] of lines.entries()) {
+      const share = charge.lineDiscountsCents[index];
+      if (line.discountCents !== share) await tx.orderLine.update({ where: { id: line.id }, data: { discountCents: share } });
+    }
 
     return {
       ok: true as const,
@@ -1015,6 +1122,7 @@ export async function markReady(
       voidInsteadOfCapture: false,
       orderId: order.id,
       storeId,
+      couponId: order.couponId,
     };
   });
 
@@ -1088,6 +1196,7 @@ export async function markReady(
       validation.capturedAmountCents,
       captureKey(orderId, captureAttempt),
       validation.applicationFeeAmount,
+      couponMetadata(validation.couponId),
     );
   } catch (err) {
     if (isIdempotencyKeyInUse(err)) {
@@ -1135,14 +1244,16 @@ export async function markReady(
       }
       return { ok: false as const, error: CAPTURE_STATUS_CHANGED };
     }
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: validation.newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents: captureResult.amountCaptured,
       },
     });
+    await recordCapture(tx, orderId, captureResult.amountCaptured, now);
     await settleCapturedStock(tx, storeId, orderId);
     notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
     courierReady = order.fulfillment === "courier";
@@ -1453,6 +1564,7 @@ export async function reconcileStuckOrder(
           amount,
           captureKey(orderId, attempt),
           sweepFee > 0 ? sweepFee : undefined,
+          couponMetadata(order.couponId),
         );
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {
@@ -1592,14 +1704,16 @@ async function finalizeCaptureFromSweep(
     if (!current || current.status !== "CAPTURING") return;
     finalized = true;
 
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents,
       },
     });
+    await recordCapture(tx, orderId, capturedAmountCents, now);
     await tx.auditLog.create({
       data: systemAuditData(storeId, orderId, "reconcile_capture", {}),
     });

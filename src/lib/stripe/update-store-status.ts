@@ -28,7 +28,7 @@ export async function updateStoreOnboardingStatus(
     data: { stripeOnboardingStatus: status },
   });
 
-  revalidateStore({ id: store.id, slug: store.slug });
+  revalidateStore(store);
 
   return { storeId: store.id, status };
 }

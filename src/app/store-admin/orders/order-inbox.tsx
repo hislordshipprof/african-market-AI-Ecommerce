@@ -33,6 +33,7 @@ import {
   HandMetal,
   Package,
   RefreshCw,
+  ShieldAlert,
   Truck,
   ShoppingBag,
   UserCheck,
@@ -49,6 +50,7 @@ import {
   markOutForDeliveryAction,
   markDeliveredAction,
   cancelOrderAction,
+  pushReadyTimeAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
@@ -59,6 +61,8 @@ import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
+import { CourierTiming } from "./courier-timing";
+import { BatchPicking, packingHref } from "./batch-picking";
 
 const STATUS_CONFIG: Record<
   string,
@@ -77,6 +81,7 @@ const STATUS_CONFIG: Record<
   PICKED_UP: { label: "Courier picked up", variant: "secondary", icon: Truck },
   OUT_FOR_DELIVERY: { label: "Out for delivery", variant: "secondary", icon: Truck },
   DELIVERED: { label: "Delivered", variant: "outline", icon: CheckCircle2 },
+  COMPLETED: { label: "Completed", variant: "outline", icon: CheckCircle2 },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
   PARTIALLY_REFUNDED: { label: "Partly refunded", variant: "outline", icon: RefreshCw },
   REFUNDED: { label: "Refunded", variant: "outline", icon: CheckCircle2 },
@@ -106,6 +111,16 @@ function AccountBadge() {
       <span className="sr-only">Linked to a customer </span>
       Account
     </span>
+  );
+}
+
+/** An open card dispute (#539), next to the order's status. */
+function DisputedBadge() {
+  return (
+    <Badge variant="destructive" data-testid="disputed-badge">
+      <ShieldAlert data-icon="inline-start" aria-hidden="true" />
+      Disputed
+    </Badge>
   );
 }
 
@@ -283,6 +298,20 @@ export function OrderInbox({
       const result = await markLinePickedAction(lineId);
       if (result.ok) {
         toast.success("Line picked");
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handlePushReady(orderId: string) {
+    startTransition(async () => {
+      const result = await pushReadyTimeAction(orderId);
+      if (result.ok) {
+        const when = new Date(result.readyEstimateAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The courier already on the way keeps the first time.", none: "" }[result.courier];
+        toast.success(`Ready by ${when}.${courier}`);
         pollOrders();
       } else {
         toast.error(result.error);
@@ -469,14 +498,17 @@ export function OrderInbox({
                   <CardTitle className="text-lg font-bold tabular-nums">
                     Order #{selectedOrder.number}
                   </CardTitle>
-                  <Badge
-                    variant={
-                      STATUS_CONFIG[selectedOrder.status]?.variant ?? "outline"
-                    }
-                  >
-                    {STATUS_CONFIG[selectedOrder.status]?.label ??
-                      selectedOrder.status}
-                  </Badge>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    {selectedOrder.disputed && <DisputedBadge />}
+                    <Badge
+                      variant={
+                        STATUS_CONFIG[selectedOrder.status]?.variant ?? "outline"
+                      }
+                    >
+                      {STATUS_CONFIG[selectedOrder.status]?.label ??
+                        selectedOrder.status}
+                    </Badge>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   <span>
@@ -509,8 +541,26 @@ export function OrderInbox({
                 {selectedOrder.status === "CANCELLED" && selectedOrder.notes ? (
                   <p className="mt-2 text-sm text-foreground">The platform resolved this refund.</p>
                 ) : null}
+                {selectedOrder.refundedByPlatform && (
+                  <p className="mt-2 text-sm text-foreground" data-testid="refunded-by-platform">Refunded by the platform team</p>
+                )}
+                {selectedOrder.disputed && (
+                  <p className="mt-2 text-sm text-foreground" data-testid="order-disputed">
+                    The customer disputed this card payment with their bank. The platform team answers the dispute and covers it if it is lost, so your payout is not changed. We may ask you for proof of pickup or delivery.
+                  </p>
+                )}
               </CardHeader>
               <CardContent>
+                {selectedOrder.fulfillment === "courier" && (
+                  <CourierTiming
+                    status={selectedOrder.status}
+                    readyEstimateAt={selectedOrder.readyEstimateAt}
+                    readyPushedAt={selectedOrder.readyPushedAt}
+                    courier={selectedOrder.deliveries[0] ?? null}
+                    disabled={isPending}
+                    onPush={() => handlePushReady(selectedOrder.id)}
+                  />
+                )}
                 {selectedOrder.status === "AUTHORIZED" && (
                   <Button
                     className="mb-4 w-full rounded-full"
@@ -528,6 +578,17 @@ export function OrderInbox({
                     <h3 className="mb-2 text-sm font-semibold text-foreground">
                       Pick list
                     </h3>
+                    {selectedOrder.pickBatchId && (
+                      <p className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm text-foreground">
+                        This order is in a batch. Pick it from the packing screen.
+                        <Link
+                          href={packingHref(selectedOrder.pickBatchId, storeParam)}
+                          className="min-h-11 content-center font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          Open packing screen
+                        </Link>
+                      </p>
+                    )}
                     <div className="space-y-2">
                       {sortedPickLines.map((line) => (
                         <div
@@ -564,7 +625,7 @@ export function OrderInbox({
                               </div>
                             )}
                           </div>
-                          {line.status === "pending" ? (
+                          {line.status === "pending" && selectedOrder.pickBatchId ? null : line.status === "pending" ? (
                             <div className="flex shrink-0 gap-2">
                               <Button
                                 variant="ghost"
@@ -682,6 +743,12 @@ export function OrderInbox({
                     <span className="text-muted-foreground">Subtotal</span>
                     <span className="tabular-nums">{money(selectedOrder.subtotalCents)}</span>
                   </div>
+                  {selectedOrder.discountCents > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Promo discount{selectedOrder.coupon ? ` ${selectedOrder.coupon.code}` : ""} (your store funds it)</span>
+                      <span className="tabular-nums" data-testid="order-discount">−{money(selectedOrder.discountCents)}</span>
+                    </div>
+                  )}
                   {selectedOrder.serviceFeeCents > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Service fee (platform)</span>
@@ -732,6 +799,7 @@ export function OrderInbox({
         ) : (
           <div>
             {problems}
+            <BatchPicking orders={orders} storeParam={storeParam} />
             {orders.length === 0 ? (
               <div className="py-20 text-center">
                 <ShoppingBag className="mx-auto mb-4 size-12 text-muted-foreground/50" />
@@ -771,6 +839,7 @@ export function OrderInbox({
                               >
                                 {config?.label ?? order.status}
                               </Badge>
+                              {order.disputed && <DisputedBadge />}
                               {order.hasAccount && <AccountBadge />}
                             </div>
                             <div className="mt-0.5 flex items-baseline gap-1 text-xs text-muted-foreground">

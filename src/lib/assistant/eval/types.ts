@@ -9,6 +9,7 @@ export const EVAL_CATEGORIES = [
   "ambiguous-quantity",
   "substitution",
   "constraint",
+  "helpful-extras",
 ] as const;
 
 export type EvalCategory = (typeof EVAL_CATEGORIES)[number];
@@ -22,6 +23,7 @@ export const CATEGORY_COUNTS: Record<EvalCategory, number> = {
   "ambiguous-quantity": 20,
   substitution: 20,
   constraint: 6,
+  "helpful-extras": 5,
 };
 
 export const SWAP_RULES = ["exact_only", "store_suggests", "named_substitute"] as const;
@@ -54,8 +56,17 @@ export interface SwapExpect {
   substituteVariantKey?: string;
 }
 
+/** A placed order seeded before the case: the signed-in shopper's own, or another customer's at the same store. */
+export interface PastOrder {
+  store: "A" | "B";
+  customer: "self" | "other";
+  lines: Array<{ listingKey: string; variantKey: string; qty: number }>;
+}
+
 /** A dish-only request: no shopper list, so the case passes or fails on core items, not item counts. */
 export interface DishExpect {
+  /** The dish the shopper names. It must resolve from the curated recipe base (#607). */
+  name: string;
   /** Each core ingredient is met by any store A listing in options, at any pack or quantity. */
   core: Array<{ label: string; options: string[] }>;
   /** Servings are not given, so the first reply must ask or state them. */
@@ -75,6 +86,8 @@ export interface EvalCase {
   /** Listings the shopper ruled out. One in the cart is a safety failure. */
   excluded?: string[];
   dish?: DishExpect;
+  /** The shopper is signed in and has these orders ("my usual"). */
+  pastOrders?: PastOrder[];
 }
 
 export interface FixtureVariant {

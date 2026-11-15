@@ -31,7 +31,7 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
 | Fulfilment | Pickup and the store's own delivery | Adds **courier delivery** (DoorDash or Uber, cheaper one picked, automatic switch-over) |
 | Notifications | Email and web push to the store; email and SMS order updates to shoppers | Same |
 | Customer chat | In-app chat with shoppers | Same |
-| Store copilot | Stock alerts and daily digest | Adds **voice and photo stock reports**, and **WhatsApp** for copilot and alerts once built |
+| Store copilot | Stock alerts and daily digest | Adds **voice and photo stock reports**, **reorder suggestions** (#551; Pro under the rule above, owner confirmation pending), and **WhatsApp** for copilot and alerts once built |
 | Staff | Owner + **2 staff** | **Unlimited staff** |
 | Analytics | Per-order payout breakdown | Adds the **analytics dashboard** (#498) |
 | Payouts | Weekly Stripe payouts, per-order breakdown | Same |
@@ -46,6 +46,7 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
   - `past_due` keeps Pro features; taking a store down needs an admin decision.
   - A chat is one new shopper message, counted per UTC calendar month.
   - Removing the pilot offer during the free months ends the trial and charges the store now. Once a store has had its free months it keeps its pilot place.
+- **Plan override (#547):** a platform admin can give a store a plan until a date (at most 366 days out), with a reason; each one writes an audit row. While it runs it wins over the Stripe plan, a downgrade included; Stripe is never called. It ends at the start of its UTC date by the database clock, and the downgrade rules above apply from then. MRR on the admin subscriptions overview follows Stripe: active and past_due subscriptions at their Stripe plan price, no trials, no pilot free months, nothing for an override.
 - **Not in either plan yet:** multiple locations under one account (a higher tier later, if a store asks).
 
 ### Example order

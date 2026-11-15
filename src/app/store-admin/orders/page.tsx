@@ -5,10 +5,12 @@ import { platform } from "@/lib/db";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { OrderInbox } from "./order-inbox";
 import { ProblemsToReview } from "./problems-to-review";
+import { DriverRoutes } from "./driver-routes";
+import { driverRouteBoard } from "@/lib/delivery/driver-route";
 
 export default async function OrdersPage() {
   const session = await requireStoreMember();
-  const [orders, issues, store] = await Promise.all([
+  const [orders, issues, store, routeSlots] = await Promise.all([
     getStoreOrders(session.store.id),
     issuesToReview(session.store.id),
     platform.store.findUnique({
@@ -18,6 +20,7 @@ export default async function OrdersPage() {
         prepTimeMinutes: true,
       },
     }),
+    driverRouteBoard(session.store.id, session.store.timezone),
   ]);
 
   return (
@@ -28,7 +31,12 @@ export default async function OrdersPage() {
       vapidPublicKey={vapidPublicKey()}
       autoAcceptOrders={store?.autoAcceptOrders ?? false}
       defaultPrepMinutes={store?.prepTimeMinutes ?? 30}
-      problems={<ProblemsToReview issues={issues} />}
+      problems={(
+        <>
+          <ProblemsToReview issues={issues} timeZone={session.store.timezone} />
+          <DriverRoutes initialSlots={routeSlots} />
+        </>
+      )}
     />
   );
 }

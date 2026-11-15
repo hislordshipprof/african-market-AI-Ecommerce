@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 import { storeScoped } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
-import { hasConstraints, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
+import { hasConstraints, haveAtHomeCovers, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
 import type { ShopperNeed } from "../../catalog/attributes";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
@@ -12,6 +12,8 @@ import { getRecipeInput, parseToolInput } from "./schemas";
 export interface RecipeDeps {
   /** Model for the web lookup: the chat's own model, so its calls are metered like the chat's. */
   lookupModel?: LanguageModel;
+  /** False answers a dish missing from the base with recipe_not_found and never looks it up (the #146 eval, #607). */
+  onlineLookup?: boolean;
   now?: () => Date;
 }
 
@@ -53,12 +55,12 @@ async function listingForMaster(storeId: string, masterProductId: string): Promi
   };
 }
 
-/** Name and synonym fits from the storefront search; a near row is not a fit. The need filters in SQL, before the cap. */
+/** Name and synonym fits from the storefront search, name fits first; a near row is not a fit. The need filters in SQL, before the cap. */
 async function searchFits(storeId: string, name: string, need: ShopperNeed | null = null): Promise<StoreItem[]> {
   const hits = await searchCatalogHits(storeId, name, need);
-  const fits = hits.filter((hit) => hit.match === "name" || hit.match === "synonym");
-  const ranked = fits.some((hit) => hit.match === "name") ? fits.filter((hit) => hit.match === "name") : fits;
-  return ranked.flatMap((hit) => hit.variantId ? [{
+  const fits = hits.filter((hit) => hit.match === "name" || hit.match === "synonym")
+    .sort((left, right) => Number(left.match !== "name") - Number(right.match !== "name"));
+  return fits.flatMap((hit) => hit.variantId ? [{
     listingId: hit.id,
     name: hit.name,
     variantId: hit.variantId,
@@ -66,6 +68,29 @@ async function searchFits(storeId: string, name: string, need: ShopperNeed | nul
     priceCents: hit.price,
     mayBeUnavailable: hit.badge !== "in-stock",
   }] : []);
+}
+
+/**
+ * Search fits for one recipe ingredient. Another product fits only when its own name or a synonym is the
+ * ingredient, case and punctuation folded: De Rica is "tomato paste", Honey beans are not "honey" (#607), and a
+ * pepper and onion mix is not "onion" (#633). For an ingredient with no master product, the other name and
+ * synonym hits are similar items, closest first; a seeded ingredient names its product and has none.
+ */
+async function ingredientFits(storeId: string, ingredient: RecipeRow["ingredients"][number], need: ShopperNeed | null = null): Promise<{ fits: StoreItem[]; similar: StoreItem[] }> {
+  const found = await searchFits(storeId, ingredient.name, need);
+  if (found.length === 0) return { fits: [], similar: [] };
+  const wanted = dishKey(ingredient.name);
+  const rows = await storeScoped(storeId).listing.findMany({
+    where: { id: { in: found.map((item) => item.listingId) } },
+    select: { id: true, customName: true, masterProductId: true, masterProduct: { select: { name: true, synonyms: { select: { term: true } } } } },
+  });
+  const same = new Set(rows.filter((row) => (ingredient.masterProductId != null && row.masterProductId === ingredient.masterProductId)
+    || [row.customName, row.masterProduct?.name, ...(row.masterProduct?.synonyms ?? []).map((synonym) => synonym.term)]
+      .some((term) => term != null && dishKey(term) === wanted)).map((row) => row.id));
+  return {
+    fits: found.filter((item) => same.has(item.listingId)),
+    similar: ingredient.masterProductId ? [] : found.filter((item) => !same.has(item.listingId)),
+  };
 }
 
 function scaledAmount(qty: number | null, unit: string | null, base: number | null, servings: number): string | undefined {
@@ -76,35 +101,48 @@ function scaledAmount(qty: number | null, unit: string | null, base: number | nu
 
 /**
  * Items are checked against the saved constraints, as in search: an excluded item is never offered, and an
- * unknown one is marked cannotConfirm. An ingredient whose every item is excluded is listed as excluded.
+ * unknown one is marked cannotConfirm. An ingredient whose every item is excluded is listed as excluded. An
+ * ingredient with no fit but a similar item gets that item in similar, for the shopper to accept or not.
  */
 async function placeIngredients(storeId: string, recipe: RecipeRow, servings: number, constraints: ShopperConstraints) {
   const inStock: Placed[] = [];
   const lowOrOut: Placed[] = [];
   const notCarried: string[] = [];
   const excluded: string[] = [];
+  const similar: Placed[] = [];
   const need = hasConstraints(constraints) ? shopperNeed(constraints) : null;
-  const found = await Promise.all(recipe.ingredients.map(async (ingredient) => ({
+  const atHome = (name: string) => constraints.haveAtHome.some((term) => haveAtHomeCovers(term, name));
+  const haveAtHome = recipe.ingredients.filter((ingredient) => atHome(ingredient.name)).map((ingredient) => ingredient.name);
+  const found = await Promise.all(recipe.ingredients.filter((ingredient) => !atHome(ingredient.name)).map(async (ingredient) => ({
     ingredient,
-    fits: await searchFits(storeId, ingredient.name, need),
+    ...(await ingredientFits(storeId, ingredient, need)),
     master: ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null,
   })));
-  const items = found.flatMap((row) => [...row.fits, ...(row.master ? [row.master] : [])]);
+  const items = found.flatMap((row) => [...row.fits, ...row.similar, ...(row.master ? [row.master] : [])]);
   const verdicts = hasConstraints(constraints)
     ? await listingVerdicts(storeId, items.map((item) => item.listingId), constraints)
     : null;
   const status = (item: StoreItem): ConstraintStatus => (verdicts ? verdicts.get(item.listingId)?.status ?? "excluded" : "ok");
   const placedByListing = new Map<string, Placed>();
-  for (const { ingredient, fits: hits, master } of found) {
-    // A confirmed-safe item is preferred over one the constraints cannot confirm.
-    const fits = hits.filter((item) => status(item) !== "excluded")
-      .sort((left, right) => Number(status(left) === "unknown") - Number(status(right) === "unknown"));
+  // A confirmed-safe item is preferred over one the constraints cannot confirm.
+  const allowed = (items: StoreItem[]) => items.filter((item) => status(item) !== "excluded")
+    .sort((left, right) => Number(status(left) === "unknown") - Number(status(right) === "unknown"));
+  const amountOf = (ingredient: RecipeRow["ingredients"][number]) => scaledAmount(ingredient.qty, ingredient.unit, recipe.servings, servings);
+  for (const { ingredient, fits: hits, similar: near, master } of found) {
+    const fits = allowed(hits);
     const mapped = master && status(master) === "ok" ? master : undefined;
     const pick = mapped ?? fits.find((item) => !item.mayBeUnavailable) ?? fits[0]
       ?? (master && status(master) === "unknown" ? master : undefined);
+    const close = pick ? undefined : allowed(near).find((item) => !item.mayBeUnavailable) ?? allowed(near)[0];
+    if (close) {
+      const amount = amountOf(ingredient);
+      similar.push({ ingredient: ingredient.name, ...(amount ? { amount } : {}), ...close, ...verdictFields(verdicts?.get(close.listingId)) });
+      continue;
+    }
     if (!pick) {
       // Search left out excluded items, so only an unfiltered search tells excluded from not carried.
-      if (master || (need && (await searchFits(storeId, ingredient.name)).length > 0)) excluded.push(ingredient.name);
+      const unfiltered = master || !need ? null : await ingredientFits(storeId, ingredient);
+      if (master || (unfiltered && unfiltered.fits.length + unfiltered.similar.length > 0)) excluded.push(ingredient.name);
       else notCarried.push(ingredient.name);
       continue;
     }
@@ -113,7 +151,7 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
       already.covers = [...(already.covers ?? []), ingredient.name];
       continue;
     }
-    const amount = scaledAmount(ingredient.qty, ingredient.unit, recipe.servings, servings);
+    const amount = amountOf(ingredient);
     const verdict = verdicts?.get(pick.listingId);
     const placed: Placed = {
       ingredient: ingredient.name,
@@ -130,7 +168,14 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
     if (backup) placed.backupVariantId = backup.variantId;
     lowOrOut.push(placed);
   }
-  return { inStock, lowOrOut, notCarried, ...(excluded.length > 0 ? { excluded } : {}) };
+  return {
+    inStock,
+    lowOrOut,
+    notCarried,
+    ...(similar.length > 0 ? { similar } : {}),
+    ...(excluded.length > 0 ? { excluded } : {}),
+    ...(haveAtHome.length > 0 ? { haveAtHome } : {}),
+  };
 }
 
 /** The chat saves only its own steps' cost, so the lookup adds its own to the conversation. */
@@ -160,6 +205,7 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
   let recipe = await findRecipe(parsed.dish);
   let lookedUp = false;
   if (!recipe) {
+    if (deps.onlineLookup === false) return notFound();
     const now = (deps.now ?? (() => new Date()))();
     if (!(await takeLookupSlot(ctx.storeId, now))) {
       return recordRead(ctx, "get_recipe", parsed, {

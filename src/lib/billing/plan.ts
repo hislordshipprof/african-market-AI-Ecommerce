@@ -1,4 +1,4 @@
-import { storeScoped } from "../db";
+import { readStorePlanRows, storeScopedTransaction } from "../db";
 
 /**
  * The one place that answers "may this store use feature X" (ADR-0021 "Plan features").
@@ -10,6 +10,7 @@ export type PlanFeature =
   | "own-domain"
   | "courier-delivery"
   | "copilot-reports"
+  | "reorder-suggestions"
   | "whatsapp"
   | "analytics-dashboard";
 
@@ -17,6 +18,7 @@ export const PRO_FEATURES: readonly PlanFeature[] = [
   "own-domain",
   "courier-delivery",
   "copilot-reports",
+  "reorder-suggestions",
   "whatsapp",
   "analytics-dashboard",
 ];
@@ -25,6 +27,7 @@ export const FEATURE_LABELS: Record<PlanFeature, string> = {
   "own-domain": "Your own domain",
   "courier-delivery": "Courier delivery",
   "copilot-reports": "Voice and photo stock reports",
+  "reorder-suggestions": "Reorder suggestions",
   whatsapp: "WhatsApp for copilot and alerts",
   "analytics-dashboard": "Analytics dashboard",
 };
@@ -67,9 +70,17 @@ const PRO_STATUSES = new Set(["trialing", "active", "past_due"]);
 export interface SubscriptionPlanRow {
   plan: string;
   status: string;
+  /** A running platform override only (`readStorePlanRows` drops it once it ends). */
+  overridePlan?: string | null;
 }
 
+function isPlan(value: string | null | undefined): value is Plan {
+  return value === "starter" || value === "pro";
+}
+
+/** A running override wins over Stripe, downgrade included; after it ends the Stripe plan applies (#547). */
 export function effectivePlan(row: SubscriptionPlanRow | null | undefined): Plan {
+  if (isPlan(row?.overridePlan)) return row.overridePlan;
   return row?.plan === "pro" && PRO_STATUSES.has(row.status) ? "pro" : "starter";
 }
 
@@ -95,10 +106,7 @@ export function supportLevel(plan: Plan): string {
 }
 
 export async function storePlan(storeId: string): Promise<Plan> {
-  const row = await storeScoped(storeId).storeSubscription.findUnique({
-    where: { storeId },
-    select: { plan: true, status: true },
-  });
+  const [row] = await storeScopedTransaction(storeId, (tx) => readStorePlanRows(tx, [storeId]));
   return effectivePlan(row);
 }
 
