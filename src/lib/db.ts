@@ -1706,6 +1706,11 @@ export async function claimInboundWhatsAppMessage(tx: RawTx, messageId: string):
   return true;
 }
 
+/** Undoes a committed claim whose handling failed, so Meta's redelivery is handled. */
+export async function releaseInboundWhatsAppMessage(messageId: string): Promise<void> {
+  await platformAdminTransaction((tx) => tx.$executeRaw`DELETE FROM whatsapp_inbound_messages WHERE id = ${messageId}`);
+}
+
 export type OwnerLinkCodeOutcome =
   | { kind: "no_pending" }
   | { kind: "wrong_or_expired" }
@@ -1962,6 +1967,203 @@ export async function readOwnerLink(storeId: string, userId: string): Promise<{
     verifiedAt: row.verified_at,
     codeLive: row.code_live === true,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Store WhatsApp numbers (#558). The business token is ciphertext sealed by
+// src/lib/whatsapp/token-box.ts; nothing here returns it.
+
+export interface StoreWhatsAppNumberRow {
+  wabaId: string;
+  phoneNumberId: string;
+  displayNumber: string | null;
+  status: "pending" | "registered" | "failed" | "disconnected";
+  coexistence: boolean;
+  failureCode: string | null;
+  updatedAt: Date;
+}
+
+/** The phone_number_id is held by another store's pending or registered row, or this store has a link in flight. */
+export class StoreWhatsAppNumberTakenError extends Error {
+  constructor() {
+    super("WhatsApp number is linked to another store");
+    this.name = "StoreWhatsAppNumberTakenError";
+  }
+}
+
+/** A raw-query unique violation on the platform-wide phone_number_id index. */
+function isPhoneNumberIdTaken(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  const cause = (error.meta as { driverAdapterError?: { cause?: { originalCode?: unknown; constraint?: { index?: unknown } } } } | undefined)
+    ?.driverAdapterError?.cause;
+  return cause?.originalCode === "23505" && cause.constraint?.index === "store_whatsapp_numbers_phone_number_id_key";
+}
+
+/**
+ * Starts a link under the store row's lock. The same ids already registered
+ * return "linked" untouched (a retry keeps the token). Otherwise the row goes
+ * `pending` with these ids, its token cleared, plus an audit row; committed
+ * before Meta is called. A pending row younger than LINK_IN_FLIGHT is another
+ * link still running and refuses this one; an older one is a run that died,
+ * which the owner links again.
+ */
+export async function beginStoreWhatsAppNumberLink(input: {
+  storeId: string;
+  actorId: string;
+  actorEmail: string;
+  wabaId: string;
+  phoneNumberId: string;
+  coexistence: boolean;
+}): Promise<"begun" | "linked"> {
+  try {
+    return await storeScopedTransaction(input.storeId, async (tx) => {
+      const existing = await tx.$queryRaw<Array<{ status: string; waba_id: string; phone_number_id: string; coexistence: boolean }>>`
+        SELECT status, waba_id, phone_number_id, coexistence FROM store_whatsapp_numbers
+        WHERE store_id = ${input.storeId}
+        FOR UPDATE
+      `;
+      const row = existing[0];
+      if (row?.status === "registered" && row.waba_id === input.wabaId
+        && row.phone_number_id === input.phoneNumberId && row.coexistence === input.coexistence) {
+        return "linked";
+      }
+      // Provider calls are 5 at most, each with a 10 s timeout, so a live link is pending well under this.
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        INSERT INTO store_whatsapp_numbers (
+          id, store_id, waba_id, phone_number_id, display_number, status, coexistence,
+          business_token, failure_code, created_at, updated_at
+        ) VALUES (
+          ${crypto.randomUUID()}, ${input.storeId}, ${input.wabaId}, ${input.phoneNumberId}, NULL, 'pending',
+          ${input.coexistence}, NULL, NULL, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
+        )
+        ON CONFLICT (store_id) DO UPDATE SET
+          waba_id = EXCLUDED.waba_id,
+          phone_number_id = EXCLUDED.phone_number_id,
+          display_number = NULL,
+          status = 'pending',
+          coexistence = EXCLUDED.coexistence,
+          business_token = NULL,
+          failure_code = NULL,
+          updated_at = EXCLUDED.updated_at
+        WHERE store_whatsapp_numbers.status <> 'pending'
+          OR store_whatsapp_numbers.updated_at < EXCLUDED.updated_at - ${LINK_IN_FLIGHT}::interval
+        RETURNING id
+      `;
+      const id = rows[0]?.id;
+      if (!id) throw new StoreWhatsAppNumberTakenError();
+      await tx.auditLog.create({
+        data: {
+          storeId: input.storeId,
+          actorId: input.actorId,
+          actorEmail: input.actorEmail,
+          action: "whatsapp_number.link",
+          entityType: "store_whatsapp_number",
+          entityId: id,
+          after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, coexistence: input.coexistence },
+        },
+      });
+      return "begun";
+    });
+  } catch (error) {
+    if (isPhoneNumberIdTaken(error)) throw new StoreWhatsAppNumberTakenError();
+    throw error;
+  }
+}
+
+const LINK_IN_FLIGHT = "2 minutes";
+
+/**
+ * Finishes a pending link. Keyed on the phone id, so a newer link for another
+ * number is never overwritten. False when no pending row matched: the link was
+ * superseded or disconnected meanwhile, so the caller must not report success.
+ */
+export async function finishStoreWhatsAppNumberLink(
+  storeId: string,
+  phoneNumberId: string,
+  result:
+    | { status: "registered"; displayNumber: string; sealedToken: string }
+    | { status: "failed"; failureCode: string },
+): Promise<boolean> {
+  const updated = await storeScopedTransaction(storeId, (tx) =>
+    result.status === "registered"
+      ? tx.$executeRaw`
+          UPDATE store_whatsapp_numbers
+          SET status = 'registered', display_number = ${result.displayNumber},
+            business_token = ${result.sealedToken}, failure_code = NULL, updated_at = (now() AT TIME ZONE 'UTC')
+          WHERE store_id = ${storeId} AND phone_number_id = ${phoneNumberId} AND status = 'pending'
+        `
+      : tx.$executeRaw`
+          UPDATE store_whatsapp_numbers
+          SET status = 'failed', business_token = NULL, failure_code = ${result.failureCode},
+            updated_at = (now() AT TIME ZONE 'UTC')
+          WHERE store_id = ${storeId} AND phone_number_id = ${phoneNumberId} AND status = 'pending'
+        `,
+  );
+  return updated === 1;
+}
+
+/** Marks the store's number disconnected and drops its token, with an audit row when one existed. */
+export async function disconnectStoreWhatsAppNumberRow(storeId: string, actorId: string, actorEmail: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      UPDATE store_whatsapp_numbers
+      SET status = 'disconnected', business_token = NULL, updated_at = (now() AT TIME ZONE 'UTC')
+      WHERE store_id = ${storeId} AND status <> 'disconnected'
+      RETURNING id
+    `;
+    if (!rows[0]) return;
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId,
+        actorEmail,
+        action: "whatsapp_number.disconnect",
+        entityType: "store_whatsapp_number",
+        entityId: rows[0].id,
+      },
+    });
+  });
+}
+
+export async function readStoreWhatsAppNumber(storeId: string): Promise<StoreWhatsAppNumberRow | null> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.$queryRaw<Array<{
+      waba_id: string;
+      phone_number_id: string;
+      display_number: string | null;
+      status: StoreWhatsAppNumberRow["status"];
+      coexistence: boolean;
+      failure_code: string | null;
+      updated_at: Date;
+    }>>`
+      SELECT waba_id, phone_number_id, display_number, status, coexistence, failure_code, updated_at
+      FROM store_whatsapp_numbers
+      WHERE store_id = ${storeId}
+    `,
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    wabaId: row.waba_id,
+    phoneNumberId: row.phone_number_id,
+    displayNumber: row.display_number,
+    status: row.status,
+    coexistence: row.coexistence,
+    failureCode: row.failure_code,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** The store a registered number belongs to, by exact phone_number_id. Inside the inbound platformAdminTransaction. */
+export async function findStoreByWhatsAppPhoneNumberId(
+  tx: RawTx,
+  phoneNumberId: string,
+): Promise<{ storeId: string } | null> {
+  const rows = await tx.$queryRaw<Array<{ store_id: string }>>`
+    SELECT store_id FROM store_whatsapp_numbers
+    WHERE phone_number_id = ${phoneNumberId} AND status = 'registered'
+  `;
+  return rows[0] ? { storeId: rows[0].store_id } : null;
 }
 
 /** Creates the store's billing row if missing and locks it for this transaction (#494). */

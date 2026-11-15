@@ -258,7 +258,9 @@ function sse(events: unknown[]): string {
 }
 
 function toolUseId(): string {
-  return `toolu_${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
+  // Digits become letters: a run of 13+ digits can pass the Luhn check, and the card scrubber would then rewrite the id.
+  const suffix = globalThis.crypto.randomUUID().replace(/-/g, "").replace(/\d/g, (digit) => "ghijklmnop"[Number(digit)]);
+  return `toolu_${suffix}`;
 }
 
 function eventsFor(step: ScriptStep, model: string): unknown[] {

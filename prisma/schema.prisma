@@ -110,6 +110,7 @@ model Store {
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  whatsAppNumber        StoreWhatsAppNumber?
   driverRoutes          DriverRoute[]
   pickBatches           PickBatch[]
 
@@ -1751,6 +1752,28 @@ model AssistantChatMonth {
 
   @@id([storeId, month])
   @@map("assistant_chat_months")
+}
+
+/// A store's own WhatsApp number for customers (#558, ADR-0010). Written by raw SQL in src/lib/db.ts.
+model StoreWhatsAppNumber {
+  id            String   @id @default(cuid())
+  storeId       String   @unique @map("store_id")
+  wabaId        String   @map("waba_id")
+  /// Unique platform-wide among pending and registered rows (partial unique index in SQL), so an inbound message resolves to one store.
+  phoneNumberId String   @map("phone_number_id")
+  displayNumber String?  @map("display_number")
+  /// pending | registered | failed | disconnected
+  status        String   @default("pending")
+  coexistence   Boolean  @default(true)
+  /// AES-256-GCM ciphertext (WHATSAPP_TOKEN_KEY). Never read outside src/lib/whatsapp.
+  businessToken String?  @map("business_token")
+  failureCode   String?  @map("failure_code")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@map("store_whatsapp_numbers")
 }
 
 /// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.
