@@ -49,6 +49,7 @@ function message(at: Date, from: string, fields: Partial<InboundMessage>): Inbou
     text: null,
     timestamp: Math.floor(at.getTime() / 1000) - 5,
     replyId: null,
+    inGroup: false,
     ...fields,
   };
 }

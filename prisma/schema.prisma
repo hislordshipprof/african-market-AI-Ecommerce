@@ -1754,6 +1754,8 @@ model OwnerWhatsAppLink {
   /// Number a live or last-sent code is for. The linked number above changes only when it is verified.
   pendingPhoneNumber    String?   @map("pending_phone_number")
   pendingWaId           String?   @map("pending_wa_id")
+  /// Meta's business-scoped user id for the owner's account; matched like wa_id (#409).
+  bsuid                 String?
   verified              Boolean   @default(false)
   optInAlerts           Boolean   @default(false) @map("opt_in_alerts")
   optInDigest           Boolean   @default(false) @map("opt_in_digest")
