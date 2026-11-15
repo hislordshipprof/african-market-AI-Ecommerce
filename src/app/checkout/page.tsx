@@ -9,7 +9,7 @@ import { loadCheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import { LIVE_MODE_BLOCKED_MESSAGE, liveModeCheck } from "@/lib/checkout/live-mode";
 import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 import { slotOptions } from "@/lib/checkout/slots";
-import { platform, storeScoped } from "@/lib/db";
+import { platform, storeHasWhatsAppNumber, storeScoped } from "@/lib/db";
 
 export default async function CheckoutRoute() {
   // Before the prefill (which calls Stripe for saved cards) and before any key reaches the browser.
@@ -29,7 +29,9 @@ export default async function CheckoutRoute() {
   const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
   const prefill = !unavailable && session?.user?.id ? await loadCheckoutPrefill(session.user.id) : null;
   const takesPayment = !unavailable && checkoutTakesPayment(store.stripeOnboardingStatus, publishableKey, harness);
-  const slotStore = takesPayment ? await platform.store.findUnique({ where: { id: store.id } }) : null;
+  const [slotStore, whatsappUpdates] = takesPayment
+    ? await Promise.all([platform.store.findUnique({ where: { id: store.id } }), storeHasWhatsAppNumber(store.id)])
+    : [null, false];
   const pickupSlots = slotStore
     ? await slotOptions(storeScoped(store.id), store.id, slotStore, "pickup", new Date())
     : undefined;
@@ -42,6 +44,7 @@ export default async function CheckoutRoute() {
           signedIn: Boolean(session?.user?.id),
           prefill,
           pickupSlots,
+          whatsappUpdates,
         }
       : undefined;
 

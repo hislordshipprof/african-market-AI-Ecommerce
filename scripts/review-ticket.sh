@@ -59,7 +59,7 @@ Hunt for what breaks in production:
 - how each external provider actually works (read its official docs when unsure), for example which Stripe account owns a destination charge;
 - whether the necessary tests would catch a regression: test doubles must enforce the provider's real rules, and each external path needs a real sandbox test. Judge test helpers by what real inputs produce, not by hypothetical input.
 $ROUND_RULE
-Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT; stop any server you start.
+Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT. Use only your own port, stop only the processes you started (by PID), and never use pkill or killall by pattern: other lanes share this machine.
 Run every reader and validator in the foreground and wait for it. Do not end your turn until $TARGET exists: a turn that ends first counts as no review.
 Write your result to $TARGET. The FIRST line must be exactly 'VERDICT: PASS' (no blocking findings) or 'VERDICT: BLOCKING'. Then list every finding with: severity (blocking = security, data isolation, money or data loss, a failed acceptance criterion, or broken build/CI; otherwise non-blocking), file:line, the concrete failure scenario, and how to reproduce it."
 
