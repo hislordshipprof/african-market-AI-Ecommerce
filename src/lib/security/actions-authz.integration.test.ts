@@ -32,13 +32,12 @@ import { inviteMemberAction, removeMemberAction } from "../store-admin/actions";
 import { setStoreStatus } from "../admin/actions";
 import { approveProduct } from "../admin/catalog-actions";
 import { resolveRefundFailedAction } from "../admin/refund-resolution";
-import { auth } from "../auth";
 import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction } from "../db";
 import { removeWhatsAppLinkAction, startWhatsAppLinkAction } from "../whatsapp/actions";
 import { fakeWhatsAppProvider, getFakeOutbox, resetFake } from "../whatsapp/fake";
 import { setWhatsAppProvider } from "../whatsapp/index";
+import { authPost, collectCookies } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-az`;
 const password = "GuardPass-123!";
 const emailA = `authz-a-${suffix}@test.example`;
@@ -46,16 +45,6 @@ const emailB = `authz-b-${suffix}@test.example`;
 const slugA = `az-a-${suffix}`;
 const slugB = `az-b-${suffix}`;
 const slugC = `az-c-${suffix}`;
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 async function signUp(email: string, name: string): Promise<string> {
   const res = await authPost("/sign-up/email", { email, password, name });

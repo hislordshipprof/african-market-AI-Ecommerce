@@ -25,11 +25,10 @@ vi.mock("../inngest/client", () => {
 import IncidentsPage from "@/app/admin/(shell)/couriers/incidents/page";
 import IncidentPage from "@/app/admin/(shell)/couriers/incidents/[orderId]/page";
 import { addCourierIncidentNoteAction, getCourierIncident, listCourierIncidents } from "./courier-incidents";
-import { auth } from "../auth";
 import { testPrismaClient } from "../test-prisma";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
+import { authPost, collectCookies } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-ci536`;
 const password = "GuardPass-123!";
 const emails = {
@@ -40,16 +39,6 @@ const emails = {
 const storeA = crypto.randomUUID();
 const storeB = crypto.randomUUID();
 const ids = { orderA: "", orderB: "", quietOrder: "", deliveryA: "" };
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 async function signUpAndIn(email: string): Promise<{ userId: string; cookies: string }> {
   const signedUp = await authPost("/sign-up/email", { email, password, name: "Incident 536" });

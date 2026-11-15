@@ -15,7 +15,7 @@ import { authPrisma, storeScoped } from "./db";
 import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
 import { resolveDirectUrl } from "./env";
-import { verifyUrlFromEmail } from "./test-magic-link";
+import { AUTH_BASE, authGet, authPost, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
 import { customerRlsErrorText, isCustomerRlsRejection } from "./customer-rls-error";
 import { syncCustomerForStore } from "./customer-claim";
 import { listAccountOrders } from "./customer-account/order-history";
@@ -26,58 +26,12 @@ import {
   type EmailMessage,
 } from "./email/send";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = Date.now();
-
-async function authPost(
-  path: string,
-  body: unknown,
-  cookies?: string,
-  extra?: Record<string, string>,
-): Promise<Response> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...extra,
-  };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-async function authGet(
-  url: string,
-  cookies?: string,
-  extra?: Record<string, string>,
-): Promise<Response> {
-  const headers: Record<string, string> = { ...extra };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(url, { headers, redirect: "manual" }));
-}
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
 
 function extractVerifyUrl(html = getTestSentEmails().at(-1)?.html): string {
   const url = verifyUrlFromEmail(html);
   if (!url) throw new Error("No sign-in link in the email");
   return url;
-}
-
-async function latestMagicLink(email: string): Promise<{ token: string; id: string } | null> {
-  const rows = await authPrisma.verification.findMany({
-    where: { identifier: { startsWith: "magic-link:" } },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-  });
-  const row = rows.find((item) => item.value.includes(email));
-  if (!row) return null;
-  return { id: row.id, token: row.identifier.replace(/^magic-link:/, "") };
 }
 
 describe("auth integration (real DB, app_runtime)", () => {
@@ -247,7 +201,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     const cookies = collectCookies(verifyRes);
     expect(cookies).toContain("better-auth.session_token");
 
-    const sessionRes = await authGet(`${BASE}/get-session`, cookies);
+    const sessionRes = await authGet(`${AUTH_BASE}/get-session`, cookies);
     expect(sessionRes.status).toBe(200);
     const body = await sessionRes.json();
     expect(body.session.twoFactorVerified).toBe(false);
@@ -417,7 +371,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     });
 
     const verifyRes = await authGet(
-      `${BASE}/magic-link/verify?token=${link!.token}&callbackURL=/account`,
+      `${AUTH_BASE}/magic-link/verify?token=${link!.token}&callbackURL=/account`,
     );
     expect(verifyRes.status).toBeGreaterThanOrEqual(300);
     expect(verifyRes.headers.get("location")).toContain("INVALID_TOKEN");
@@ -445,14 +399,14 @@ describe("auth integration (real DB, app_runtime)", () => {
     });
     const verifyRes = await authGet(extractVerifyUrl());
     const cookies = collectCookies(verifyRes);
-    const before = await authGet(`${BASE}/get-session`, cookies);
+    const before = await authGet(`${AUTH_BASE}/get-session`, cookies);
     const beforeBody = await before.json();
     expect(beforeBody.session).toBeTruthy();
     const sessionId = beforeBody.session.id as string;
 
     const signedOut = await authPost("/sign-out", {}, cookies);
     expect(signedOut.status).toBeLessThan(400);
-    const afterSignOut = await authGet(`${BASE}/get-session`, cookies);
+    const afterSignOut = await authGet(`${AUTH_BASE}/get-session`, cookies);
     const body = await afterSignOut.json();
     expect(body?.session ?? null).toBeNull();
     expect(await authPrisma.session.findUnique({ where: { id: sessionId } })).toBeNull();
@@ -532,7 +486,7 @@ describe("auth integration (real DB, app_runtime)", () => {
         });
         const cookies = collectCookies(verifyRes);
         expect(cookies).toContain("session_token");
-        const sessionRes = await authGet(`${BASE}/get-session`, cookies);
+        const sessionRes = await authGet(`${AUTH_BASE}/get-session`, cookies);
         const sessionBody = await sessionRes.json();
         expect(sessionBody.user.email).toBe(customerEmail);
         sessionIds.push(sessionBody.session.id);

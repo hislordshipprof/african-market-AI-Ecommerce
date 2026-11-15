@@ -25,12 +25,11 @@ vi.mock("next/navigation", () => ({
 
 import { forceGoLiveAction, retryCourierRegistrationAction, updateStore } from "./actions";
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
-import { auth } from "../auth";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
 import { inngest } from "../inngest/client";
 import { STORE_LISTED } from "../directory/store-requests";
+import { authPost, collectCookies } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-hrs`;
 const password = "GuardPass-123!";
 const email = `hours-309-${suffix}@test.example`;
@@ -46,16 +45,6 @@ const storedShape = {
   saturday: "8:00 AM - 9:00 PM",
   sunday: "10:00 AM - 6:00 PM",
 };
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 function storeForm(storeId: string, hours: unknown): FormData {
   const data = new FormData();

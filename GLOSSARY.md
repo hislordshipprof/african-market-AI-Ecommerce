@@ -315,6 +315,10 @@ A platform admin recorded the amount they repaid outside the app. The order beco
 A refund a platform admin makes from the order detail (#538) when the store does not act or the problem is the courier's or the app's: an amount from 1¢ up to what is left on the payment, and a reason of up to 500 characters. It goes through the refund ledger like an issue refund and comes out of the store's transfer; on a courier order the platform keeps its fee and returns only the service fee share. A `platform_refund` audit row names the admin, the amount and the reason. The store sees "Refunded by the platform team" on the order in its inbox, and the customer gets the usual refund message once per order.
 _Avoid_: Goodwill credit, manual refund (that is Resolved manually)
 
+**Dispute**:
+A customer asked their bank to reverse a card payment (#539). Stripe calls an early one an inquiry (status `warning_…`) and a formal one a chargeback. On our destination charges Stripe takes the disputed amount and its fee (US $15) from the platform balance, and the platform absorbs a lost dispute in v1; the store's payout is not touched, and recovering it from the store is a later manual decision. The `charge.dispute.*` webhooks are the only writer of the `payment_disputes` row: amount (may be less than the order), reason, status, evidence due date, outcome (won, lost or inquiry closed) and Stripe's fee. The store's owners get one push and the order shows Disputed in the store inbox while the dispute is open. A dispute whose charge matches no order is kept with no order and emailed to platform admins. Platform admins see open disputes on the Disputes page, soonest deadline first, and submit evidence in the Stripe Dashboard, not in the app.
+_Avoid_: Chargeback (as the general term), claim
+
 **RefundRequest**:
 One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
 

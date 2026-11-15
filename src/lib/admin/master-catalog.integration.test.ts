@@ -39,28 +39,17 @@ vi.mock("next/navigation", () => ({
 import sharp from "sharp";
 import { getMasterProductEditor, listMasterCatalog, saveMasterProduct, uploadMasterProductImage } from "./master-catalog";
 import { approveProduct, rejectProduct, updateReviewProduct } from "./catalog-actions";
-import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { matchToMasterProducts } from "../listing/csv-import";
 import { searchMasterProducts } from "../listing/photo-drafts";
 import { listMasterProducts } from "../listing/service";
 import { getListingDetail, searchListings } from "../storefront/service";
+import { authPost, collectCookies } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `mc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const password = "GuardPass-123!";
 const adminEmail = `${RUN}-admin@test.example`;
 const ownerEmail = `${RUN}-owner@test.example`;
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 async function signUp(email: string): Promise<string> {
   const res = await authPost("/sign-up/email", { email, password, name: RUN });
