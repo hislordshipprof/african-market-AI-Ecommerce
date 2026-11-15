@@ -7,8 +7,13 @@ import { UberDirectProvider } from "./uber-direct";
 import { orderReadyEstimate, READY_PUSH_MINUTES } from "./ready-estimate";
 import { DeliveryProviderError, type CreatedDelivery, type DeliveryAddress, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
 
-/** Spec §11.3: above this order total, or with any frozen item, the courier checks a PIN at drop-off. */
-export const PIN_ABOVE_TOTAL_CENTS = 15_000;
+/** Spec §11.3: above this goods value (the subtotal, before fees, tip and tax), or with any frozen item, the courier checks a PIN at drop-off. */
+const PIN_ABOVE_GOODS_CENTS = 15_000;
+
+/** The one rule for the drop-off PIN, used by the checkout quote and by dispatch: frozen goods, or goods strictly above $150. */
+export function pinRequired(goodsCents: number, hasFrozenLine: boolean): boolean {
+  return hasFrozenLine || goodsCents > PIN_ABOVE_GOODS_CENTS;
+}
 
 /** A courier order reached Ready: book its courier, or move the order on to the courier it already has. */
 export const COURIER_ORDER_READY = "courier/order.ready";
@@ -220,7 +225,6 @@ export async function courierRequest(storeId: string, orderId: string, pickupRea
     select: {
       subtotalCents: true,
       tipCents: true,
-      totalCents: true,
       leaveAtDoor: true,
       lines: {
         where: { OR: [{ listingVariant: { listing: { frozen: true } } }, { substitutedVariant: { listing: { frozen: true } } }] },
@@ -247,7 +251,7 @@ export async function courierRequest(storeId: string, orderId: string, pickupRea
   }, {
     orderValueCents: order.subtotalCents,
     tipCents: order.tipCents,
-    pinRequired: order.lines.length > 0 || order.totalCents > PIN_ABOVE_TOTAL_CENTS,
+    hasFrozenLine: order.lines.length > 0,
     pickupReadyAt,
   });
 }
@@ -276,7 +280,7 @@ export function buildCourierRequest(
   storeId: string,
   store: CourierStore,
   dropoff: { address: DeliveryAddress; phone: string; name: string; contactless: boolean },
-  value: { orderValueCents: number; tipCents: number; pinRequired: boolean; pickupReadyAt?: Date | null },
+  value: { orderValueCents: number; tipCents: number; hasFrozenLine: boolean; pickupReadyAt?: Date | null },
 ): Pick<DispatchInput, "request" | "registrations"> {
   if (!store.addressLine1 || !store.city || !store.state || !store.zip) throw new Error("Store has no pickup address");
   const [givenName, ...rest] = dropoff.name.trim().split(/\s+/);
@@ -298,7 +302,7 @@ export function buildCourierRequest(
     },
     orderValueCents: value.orderValueCents,
     tipCents: value.tipCents,
-    dropoffPin: value.pinRequired ? String(randomInt(0, 10_000)).padStart(4, "0") : null,
+    dropoffPin: pinRequired(value.orderValueCents, value.hasFrozenLine) ? String(randomInt(0, 10_000)).padStart(4, "0") : null,
     pickupReadyAt: value.pickupReadyAt ?? null,
   };
   return { request, registrations };
