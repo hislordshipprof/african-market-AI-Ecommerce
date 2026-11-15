@@ -63,23 +63,16 @@ import sharp from "sharp";
 import { generateTOTP } from "../../../e2e/totp";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
-import { auth } from "../auth";
 import { authPrisma, platformAdmin, storeScoped } from "../db";
 import { replyToThreadAction } from "../support/store-actions";
 import { READ_ONLY_MESSAGE } from "../store-admin/session";
 import { listPendingOwnerReports, matchReportItem, REPORTS_LOCKED_MESSAGE } from "./owner-report";
 import { confirmOwnerReportItems, submitPhotoReport, submitVoiceReport } from "./report-actions";
+import { authPost } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t21-${Date.now()}`;
 const password = "Owner-Report-21!";
 const hasDb = !!process.env.DATABASE_URL;
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 function cookiesOf(response: Response, jar: Map<string, string>): string {
   for (const raw of response.headers.getSetCookie?.() ?? []) {
