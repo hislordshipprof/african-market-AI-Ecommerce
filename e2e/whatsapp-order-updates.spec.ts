@@ -101,7 +101,7 @@ test("checkout offers WhatsApp updates only at a store with a registered number,
     const order = await asStore((tx) => tx.order.findFirst({ where: { storeId: store.id } }));
     expect(order?.whatsappOptInAt).toBeInstanceOf(Date);
     const rows = await asStore((tx) => tx.notificationLog.findMany({ where: { orderId: order!.id, event: "placed" } }));
-    expect(rows.map((row) => row.channel).sort()).toEqual(["email", "sms", "whatsapp"]);
+    expect(rows.map((row) => row.channel).sort()).toEqual(["email", "push", "sms", "whatsapp"]);
   } finally {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;

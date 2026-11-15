@@ -318,6 +318,9 @@ The platform-wide rules a platform admin sets for courier delivery: the selectio
 **Assignment timeout**:
 How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.
 
+**Courier incident**:
+A courier order where something went wrong: failover, both couriers failed, the courier company cancelled, the order came back to the store or the return failed, a courier was assigned after the assignment timeout, or it was delivered with no proof. One per order. Listed for platform admins at `/admin/couriers/incidents`; worked out from the delivery events each time the page opens, never stored. Only an admin's notes, and whether it is resolved, are stored. A newer incident event reopens a resolved one.
+
 **Courier**:
 A driver from a courier company. Not a user of the platform.
 _Avoid_: Driver (reserve for the store's own driver)

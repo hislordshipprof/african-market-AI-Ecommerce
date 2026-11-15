@@ -1,6 +1,5 @@
 "use client";
 
-import { LazyMotion, domAnimation, MotionConfig } from "motion/react";
 import { useEffect, type ReactNode } from "react";
 
 export function StorefrontMotion({ children }: { children: ReactNode }) {
@@ -43,5 +42,6 @@ export function StorefrontMotion({ children }: { children: ReactNode }) {
     preference.addEventListener("change", start);
     return () => { stop(); preference.removeEventListener("change", start); };
   }, []);
-  return <LazyMotion features={domAnimation}><MotionConfig reducedMotion="user">{children}</MotionConfig></LazyMotion>;
+  // No animation library here: pages that animate with motion load it in their own components (#563).
+  return children;
 }

@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from "react";
 import { ShoppingBag, Trash2 } from "lucide-react";
-import { m, useReducedMotion } from "motion/react";
 import {
   cartItemKey,
   EMPTY_CART,
@@ -49,11 +48,22 @@ import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { Sheet } from "./sheet";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { toast } from "sonner";
 import { money } from "@/lib/format";
 import { bindCartRefresh } from "@/lib/assistant/ui/cart-bridge";
 import { AssistantSlot } from "./assistant/assistant-slot";
 import styles from "./cart.module.css";
+import { TOASTER_WANTED } from "@/components/ui/sonner";
+
+type Sonner = typeof import("sonner");
+// Sonner loads on the first toast, not on the path to the first paint (#563); the event mounts the Toaster.
+function loadSonner() {
+  window.dispatchEvent(new Event(TOASTER_WANTED));
+  return import("sonner");
+}
+const toast = Object.assign(
+  (...args: Parameters<Sonner["toast"]>) => void loadSonner().then((mod) => mod.toast(...args)),
+  { error: (...args: Parameters<Sonner["toast"]["error"]>) => void loadSonner().then((mod) => mod.toast.error(...args)) },
+);
 
 /** Wall clock for the Undo window; only read from event handlers and timers. */
 const undoClock = () => Date.now();
@@ -1005,7 +1015,6 @@ export function CartTrigger({
   children?: ReactNode;
 }) {
   const { count, openCart, syncing, attention, loading } = useCart();
-  const reduced = useReducedMotion();
   return (
     <button
       type="button"
@@ -1021,20 +1030,10 @@ export function CartTrigger({
         // No number until the server cart is read, so the badge never flashes a false 0.
         <span data-testid="cart-count" data-loading="true" aria-hidden="true" className={styles.countLoading} />
       ) : (
-        <m.span
-          key={count}
-          data-testid="cart-count"
-          aria-hidden="true"
-          initial={reduced ? false : { scale: 1.2 }}
-          animate={{ scale: 1 }}
-          transition={
-            reduced
-              ? { duration: 0 }
-              : { type: "spring", stiffness: 400, damping: 20 }
-          }
-        >
+        // Remounts on each change, so the bump replays (CSS; reduced motion turns it off).
+        <span key={count} data-testid="cart-count" aria-hidden="true" className={styles.countBump}>
           {count}
-        </m.span>
+        </span>
       )}
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {loading ? "" : `${count} ${count === 1 ? "item" : "items"} in cart`}
