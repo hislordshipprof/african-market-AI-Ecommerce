@@ -1555,13 +1555,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
 
   it("B11 a disabled flag rejects the POST before any model, cart, or conversation write", async () => {
     const before = await storeScoped(storeId).aiConversation.count();
-    const seen = strictModel(() => [
-      { type: "stream-start", warnings: [] },
-      { type: "text-start", id: "t" },
-      { type: "text-delta", id: "t", delta: "no" },
-      { type: "text-end", id: "t" },
-      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
-    ]);
+    const fetched = vi.spyOn(globalThis, "fetch");
     vi.stubEnv("ASSISTANT_CHAT_ENABLED", "");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -1579,7 +1573,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(await response.json()).toEqual({
       error: { code: "assistant_disabled", message: "The helper is not available." },
     });
-    expect(seen.calls()).toBe(0);
+    expect(fetched).not.toHaveBeenCalled();
     expect(await storeScoped(storeId).aiConversation.count()).toBe(before);
   });
 

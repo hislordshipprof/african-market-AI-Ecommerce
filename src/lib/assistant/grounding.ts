@@ -25,7 +25,10 @@ const CENT_WORDS = new Set(["cent", "cents"]);
 const FOREIGN_WORDS = new Set(["naira", "cedi", "cedis", "euro", "euros", "pound", "pounds"]);
 const NUMBER_RE = /^(?:(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?|\.(\d+))/;
 
-const LIST_LINE = /^[ \t]*(?:[-*•][ \t]+|\d+[.)][ \t]+)/;
+/** Between a USD amount and the second amount of a range. */
+const RANGE_JOIN = /^(?:[ \t]*[-–][ \t]*|[ \t]+to[ \t]+)$/;
+
+const LIST_LINE = /^[ \t]*(?:[-*•][ \t]+|\d+[.)][ \t]+|\|)/;
 const TITLES = new Set(["dr", "mr", "mrs", "ms", "st"]);
 const CONDITIONAL_ENDS = new Set(["oz", "lb", "lbs", "g", "kg", "ml", "fl", "am", "pm", "us", "no"]);
 
@@ -293,11 +296,20 @@ function findMoney(text: string): MoneyToken[] {
   const atoms = tokenize(text);
   const owner = markOwners(text, atoms);
   const tokens: MoneyToken[] = [];
+  let rangeFrom: MoneyToken | null = null;
   for (let index = 0; index < atoms.length; index += 1) {
     const number = atoms[index];
     if (number.kind !== "number") continue;
     const marks = atoms.filter((_, markIndex) => owner.get(markIndex) === index);
-    if (marks.length === 0) continue;
+    if (marks.length === 0) {
+      if (rangeFrom && RANGE_JOIN.test(text.slice(rangeFrom.end, number.start))) {
+        const parsed = { end: number.end, whole: number.whole, frac: number.frac };
+        const token = { start: number.start, end: number.end, raw: text.slice(number.start, number.end), cents: dollarCents(parsed) };
+        tokens.push(token);
+        rangeFrom = token;
+      }
+      continue;
+    }
     const foreign = marks.some((mark) => mark.role === "foreign");
     const cent = marks.some((mark) => mark.role === "cent");
     const usd = marks.some((mark) => mark.role === "usd");
@@ -306,6 +318,7 @@ function findMoney(text: string): MoneyToken[] {
     const start = Math.min(number.start, ...marks.map((mark) => mark.start));
     const end = Math.max(number.end, ...marks.map((mark) => mark.end));
     pushToken(text, start, end, cents, tokens);
+    rangeFrom = usd && !foreign && !cent ? tokens[tokens.length - 1] : null;
   }
   return tokens;
 }
@@ -376,7 +389,7 @@ function replaceSentences(line: string, tokens: MoneyToken[], allowedCents: Set<
       pieces.push(slice);
     } else {
       for (const token of bad) stripped.push(token.raw);
-      const lead = /^[ \t]*/.exec(slice)?.[0] ?? "";
+      const lead = /^[ \t]*(?:#{1,6}[ \t]+)?/.exec(slice)?.[0] ?? "";
       pieces.push(`${lead}${PHRASE}`);
     }
     cursor = end;
@@ -422,7 +435,7 @@ function priceKey(record: Record<string, unknown>): string | null {
 }
 
 /** Keyed `priceCents` / `unitPriceCents` only. Other `*Cents` fields are not unit prices. */
-export function collectKeyedUnitPrices(value: unknown, into: KeyedUnitPrice[] = []): KeyedUnitPrice[] {
+function collectKeyedUnitPrices(value: unknown, into: KeyedUnitPrice[] = []): KeyedUnitPrice[] {
   if (Array.isArray(value)) {
     for (const item of value) collectKeyedUnitPrices(item, into);
     return into;
