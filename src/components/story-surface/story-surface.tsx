@@ -8,7 +8,8 @@ import { DepthSceneGate } from "./depth-scene-gate";
 import {
   BODIJA_MARKET,
   POSTER_MID_MEDIA,
-  POSTER_TALL_MEDIA,
+  POSTER_MID_PRELOAD_MEDIA,
+  POSTER_TALL_PRELOAD_MEDIA,
   POSTER_WIDE_MEDIA,
   type StoryScene,
 } from "./scenes";
@@ -45,14 +46,14 @@ export function StorySurface({
         rel="preload"
         as="image"
         href={scene.posterMid.src}
-        media={POSTER_MID_MEDIA}
+        media={POSTER_MID_PRELOAD_MEDIA}
         fetchPriority="high"
       />
       <link
         rel="preload"
         as="image"
         href={scene.posterTall.src}
-        media={POSTER_TALL_MEDIA}
+        media={POSTER_TALL_PRELOAD_MEDIA}
         fetchPriority="high"
       />
       {/* Phones anchor the form in thumb reach, except under a store header, where the
