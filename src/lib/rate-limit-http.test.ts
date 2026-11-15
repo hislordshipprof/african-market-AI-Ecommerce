@@ -128,6 +128,31 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
     expect(sent.filter((message) => message.to === victim)).toHaveLength(1);
   });
 
+  // A Better Auth window restarts only after a quiet minute, so e2e's one IP spends a single budget per run.
+  it("relaxed limits let one IP make more than 100 password sign-ins in one window (a whole e2e run)", async () => {
+    const ip = `10.190.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    process.env.AUTH_RATE_LIMIT_RELAXED = "1";
+    vi.resetModules();
+    try {
+      const { auth: relaxed } = await import("./auth");
+      const statuses = new Set<number>();
+      for (let i = 0; i < 150; i++) {
+        const res = await relaxed.handler(
+          new Request("http://localhost:3000/api/auth/sign-in/email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-forwarded-for": ip },
+            body: JSON.stringify({ email: `rl-relaxed-${stamp}@test.example`, password: "not-the-password" }),
+          }),
+        );
+        statuses.add(res.status);
+      }
+      expect([...statuses]).toEqual([401]);
+    } finally {
+      delete process.env.AUTH_RATE_LIMIT_RELAXED;
+      await authPrisma.rateLimit.deleteMany({ where: { key: { startsWith: `${ip}|` } } });
+    }
+  }, 60_000);
+
   it("an address containing % is refused before any link is stored", async () => {
     const victim = `rl%pct-${stamp}@test.example`;
     expect((await sendLink(victim, "10.189.1.1")).status).toBe(400);
