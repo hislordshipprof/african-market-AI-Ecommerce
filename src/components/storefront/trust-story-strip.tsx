@@ -2,6 +2,14 @@ import Image from "next/image";
 import type { StoreProfile } from "@/lib/storefront/service";
 import { Store } from "lucide-react";
 import { CountUp, SectionReveal } from "./scroll-motion";
+export const TRUST_COPY = {
+  stepTitle: "Good food. Familiar people.",
+  approvalNote:
+    "Nothing is swapped without your approval. If an item is short, you choose a swap or a refund.",
+  hoursTitle: "Come on in",
+  hoursNote: "No swaps without your approval.",
+};
+export type TrustCopy = typeof TRUST_COPY;
 const DAYS = [
   "monday",
   "tuesday",
@@ -15,11 +23,14 @@ export function TrustStoryStrip({
   profile,
   demo = false,
   productCount,
+  trustCopy,
 }: {
   profile: StoreProfile;
   demo?: boolean;
   productCount?: number;
+  trustCopy?: Partial<TrustCopy>;
 }) {
+  const copy = { ...TRUST_COPY, ...trustCopy };
   if (!profile.ownerName && !profile.ownerStory) return null;
   const actualPhoto =
     profile.ownerPhotoUrl && !profile.ownerPhotoUrl.endsWith(".svg")
@@ -68,12 +79,9 @@ export function TrustStoryStrip({
         {demo && <span className="sf-badge">Demo store story</span>}
         <p>{profile.ownerStory?.split(". ")[0]}.</p>
         </SectionReveal><SectionReveal className="sf-story-step">
-          <h3>Good food. Familiar people.</h3>
+          <h3>{copy.stepTitle}</h3>
           <p>{profile.ownerStory}</p>
-          <p>
-            Nothing is swapped without your approval. If an item is short, you
-            choose a swap or a refund.
-          </p>
+          <p>{copy.approvalNote}</p>
         </SectionReveal>
         <div className="sf-story-facts">
           {year && (
@@ -90,7 +98,7 @@ export function TrustStoryStrip({
         </div>
       </div>
       <div className="sf-hours">
-        <h3>Come on in</h3>
+        <h3>{copy.hoursTitle}</h3>
         <dl>
           {DAYS.map((day) =>
             typeof hours[day] === "string" ? (
@@ -106,7 +114,7 @@ export function TrustStoryStrip({
             ? `Pickup ready in about ${profile.prepTimeMinutes} minutes.`
             : "Delivery available. Pickup is not offered."}
         </p>
-        <p>No swaps without your approval.</p>
+        <p>{copy.hoursNote}</p>
       </div>
     </section>
   );
