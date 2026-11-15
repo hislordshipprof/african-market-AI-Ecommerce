@@ -174,7 +174,7 @@ export async function createPaymentIntentAction(
   if (!when.ok) return { ok: false, error: "Payment setup failed" };
   try {
     const store = await getStore();
-    const gate = checkCheckoutReady(store.stripeOnboardingStatus);
+    const gate = checkCheckoutReady(store);
     if (!gate.enabled) {
       return { ok: false, error: gate.message ?? "Checkout is not available" };
     }
@@ -301,6 +301,9 @@ export async function placeOrderAction(
   if (!payment.ok || !note.ok || !when.ok || !whatsapp.ok) return { ok: false, error: "Could not place order" };
   try {
     const store = await getStore();
+    // A store in setup or suspended places no order (#555); a hold from before a suspension lapses on its own.
+    const gate = checkCheckoutReady({ status: store.status, stripeOnboardingStatus: "complete" });
+    if (!gate.enabled) return { ok: false, error: gate.message ?? "Checkout is not available" };
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
     const result = await placeOrder(

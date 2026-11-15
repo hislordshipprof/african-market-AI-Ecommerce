@@ -18,7 +18,7 @@ const SECTIONS: Array<{ legend: string; fields: Array<{ name: Field; label: stri
         name: "goLiveListingFloor",
         label: "Listings needed to go live",
         unit: "listings",
-        hint: "Active listings with a price a new store needs before Go live turns on. Not in use until the go-live checklist ships.",
+        hint: "Active listings with a price a new store needs before Go live turns on.",
       },
       {
         name: "rejectedApplicationRetentionMonths",

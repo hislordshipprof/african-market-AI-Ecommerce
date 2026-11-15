@@ -61,6 +61,7 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
         { slug: slug("starter"), name: "Starter Plan Market", ...located, listed: true, addressLine1: "1 Main St", zip: "77002", phone: "+17135550454", doordashStoreId: `dd_t453_${stamp}` },
         { slug: slug("unlisted"), name: "Unlisted Market", ...located },
         { slug: slug("suspended"), name: "Suspended Market", ...located, listed: true, status: "suspended" },
+        { slug: slug("setup"), name: "Opening Soon Market", ...located, listed: true, status: "setup" },
         { slug: slug("nopoint"), name: "No Point Market", city: "Houston", state: "TX", listed: true },
         { slug: slug("nolng"), name: "No Lng Market", city: "Houston", state: "TX", lat: 29.7, listed: true },
       ],
@@ -88,9 +89,9 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
     expect(mine.find((s) => s.slug === slug("starter"))?.courierMayDeliver).toBe(false);
   });
 
-  it("never returns unlisted, suspended or unlocated stores", async () => {
+  it("never returns unlisted, suspended, unlocated or setup stores (#555)", async () => {
     const slugs = (await listDirectoryStores()).map((s) => s.slug);
-    for (const name of ["unlisted", "suspended", "nopoint", "nolng"]) {
+    for (const name of ["unlisted", "suspended", "nopoint", "nolng", "setup"]) {
       expect(slugs).not.toContain(slug(name));
     }
   });
