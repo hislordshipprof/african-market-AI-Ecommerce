@@ -102,6 +102,8 @@ export interface CheckoutQuote {
   taxCents: number;
   tipCents: number;
   discountCents: number;
+  /** The store coupon code on the cart (#557): what it took off goods, or why it gave nothing. */
+  coupon?: { code: string; discountCents: number; message?: string };
   totalCents: number;
   bufferCents: number;
   holdCents: number;

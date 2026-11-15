@@ -18,6 +18,8 @@ import { cartItemKey } from "@/lib/storefront/cart-store";
 import { clearCart } from "@/lib/cart/actions";
 import {
   quoteCheckoutAction,
+  applyCouponAction,
+  removeCouponAction,
   createPaymentIntentAction,
   placeOrderAction,
   confirmAddressAction,
@@ -46,6 +48,7 @@ import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import type { SlotOptions } from "@/lib/checkout/slots";
+import { CouponField } from "./coupon-field";
 import styles from "./cart-checkout.module.css";
 
 type Outcome =
@@ -326,6 +329,8 @@ function RealCheckoutForm({
   const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
+  // Bumped when the cart's code changes, so the quote is asked again (#557).
+  const [couponRev, setCouponRev] = useState(0);
   const metadata = lines.map((line) => ({
     line,
     item: catalog.find((item) => cartItemKey(item) === cartItemKey(line)),
@@ -335,6 +340,15 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
+  async function applyCoupon(code: string) {
+    const result = await applyCouponAction(code);
+    if (result.ok) setCouponRev((rev) => rev + 1);
+    return result;
+  }
+  async function removeCoupon() {
+    await removeCouponAction();
+    setCouponRev((rev) => rev + 1);
+  }
   const delivery = fulfillment !== "pickup" && confirmed
     ? {
         line1: confirmed.line1,
@@ -345,7 +359,7 @@ function RealCheckoutForm({
         leaveAtDoor: !frozen && leaveAtDoor,
       }
     : undefined;
-  const currentKey = JSON.stringify({ contact, fulfillment, delivery });
+  const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
@@ -376,7 +390,7 @@ function RealCheckoutForm({
         if (result.ok) {
           setQuote(result.quote);
           setSlotOptions(result.slots);
-          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery }));
+          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery, couponRev }));
         } else {
           setError(result.error);
         }
@@ -564,6 +578,13 @@ function RealCheckoutForm({
           setPayState("idle");
           return;
         }
+        if (orderResult.code === "coupon_refused") {
+          // The hold was released and the code taken off; the next quote shows the full price.
+          setError(orderResult.error);
+          setPayState("idle");
+          setCouponRev((rev) => rev + 1);
+          return;
+        }
         throw new Error(orderResult.error);
       }
       setErrorHref(null);
@@ -684,6 +705,7 @@ function RealCheckoutForm({
       setAppliedPromo={() => {}}
       promoMessage=""
       setPromoMessage={() => {}}
+      coupon={{ apply: applyCoupon, remove: removeCoupon }}
       tipPercent={0}
       setTipPercent={() => {}}
       customTip=""
@@ -897,6 +919,11 @@ interface CheckoutLayoutProps {
   setAppliedPromo: (v: string) => void;
   promoMessage: string;
   setPromoMessage: (v: string) => void;
+  /** Real checkout: the cart's store coupon, put on and taken off on the server (#557). */
+  coupon?: {
+    apply: (code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    remove: () => Promise<void>;
+  };
   tipPercent: number | null;
   setTipPercent: (v: number | null) => void;
   customTip: string;
@@ -927,7 +954,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     suggestions, setSuggestions, searching, notes, setNotes,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
     slot, setSlot, slots, slotRequired = false, promo, setPromo,
-    setAppliedPromo, promoMessage, setPromoMessage,
+    setAppliedPromo, promoMessage, setPromoMessage, coupon,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
@@ -1278,7 +1305,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </li>
               ))}
             </ul>
-            {!isRealPayment && (
+            {coupon ? (
+              <CouponField
+                applied={quote?.coupon ?? null}
+                apply={coupon.apply}
+                remove={coupon.remove}
+                disabled={payState !== "idle"}
+              />
+            ) : (
               <>
                 <label className={styles.field}>
                   Promo code

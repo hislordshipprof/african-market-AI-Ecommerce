@@ -45,15 +45,25 @@ const PAYMENT_MODULES = [
   "checkout/saved-card-payment",
 ];
 
+/** Modules that apply, check or list store coupon codes: the assistant can neither apply nor reveal one (#557). */
+const COUPON_MODULES = [
+  "coupon/checkout",
+  "coupon/service",
+  "coupon/actions",
+  "coupon/form",
+];
+
+const FORBIDDEN_MODULES = [...PAYMENT_MODULES, ...ACCOUNT_LOADERS, ...COUPON_MODULES];
+
 function forbiddenResolved(normalized: string): boolean {
-  return [...PAYMENT_MODULES, ...ACCOUNT_LOADERS].some((module) => normalized.endsWith(`/lib/${module}.ts`));
+  return FORBIDDEN_MODULES.some((module) => normalized.endsWith(`/lib/${module}.ts`));
 }
 
 function forbiddenSpecifier(spec: string): boolean {
   return spec === "stripe"
     || spec.startsWith("@stripe/")
     || FORBIDDEN_PACKAGES.has(spec)
-    || [...PAYMENT_MODULES, ...ACCOUNT_LOADERS].some((module) => spec === `@/lib/${module}` || spec.endsWith(`/lib/${module}`));
+    || FORBIDDEN_MODULES.some((module) => spec === `@/lib/${module}` || spec.endsWith(`/lib/${module}`));
 }
 
 /** Import, re-export, import(), and require() specifiers, including side-effect imports. */
