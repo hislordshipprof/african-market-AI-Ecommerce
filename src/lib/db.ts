@@ -2251,6 +2251,11 @@ export async function lockStoreSubscriptionRow(tx: Pick<PrismaClient, "$executeR
   await tx.$queryRaw`SELECT store_id FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`;
 }
 
+/** Serialises finding or creating one WhatsApp sender's cart at one store (#559). */
+export async function lockWhatsAppShopper(tx: Pick<PrismaClient, "$executeRaw">, storeId: string, senderKey: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`whatsapp-shopper:${storeId}:${senderKey}`}))`;
+}
+
 /** Serialises pilot-offer changes so the 5-store cap holds under concurrency. */
 export async function lockPilotOffer(tx: Pick<PrismaClient, "$executeRaw">): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('store_subscriptions.pilot'))`;
