@@ -2,7 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { platformAdmin, storeScoped } from "../db";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
-import { createPaymentIntent, placeOrder, quoteCheckout } from "../checkout/service";
+import { createPaymentIntent, placeOrder, quoteCheckout, saveDeliverySnapshot } from "../checkout/service";
+import { writeGeocodeCache } from "../address/cache";
 import { fakeTaxCalculator, setTaxCalculatorForTests, stripeTaxCalculator, TAX_LOCATION_MESSAGE, TAX_UNAVAILABLE_MESSAGE, type TaxCalculator } from "./calculator";
 
 vi.mock("../inngest/send", () => ({ sendOrderAuthorized: vi.fn().mockResolvedValue(undefined) }));
@@ -12,8 +13,9 @@ const RUN = `t65q-${Date.now().toString(36)}`;
 const CONTACT = { name: "Ada", phone: "+15551234567", email: "ada@example.test" };
 const FOOD = "txcd_40040000";
 const BEAUTY = "txcd_32050025";
-// Texas exempts groceries; Montana has no sales tax.
-const RATES = { TX: { rate: 0.0825, exemptCodes: [FOOD] }, MT: { rate: 0 } };
+// Texas exempts groceries; Montana has no sales tax; Arkansas is across the line from Texarkana, TX.
+const RATES = { TX: { rate: 0.0825, exemptCodes: [FOOD] }, MT: { rate: 0 }, AR: { rate: 0.095 } };
+const ACROSS_THE_LINE = { line1: "200 E BROAD ST", line2: null, city: "TEXARKANA", state: "AR", zip: "71854", leaveAtDoor: false };
 
 describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
   const raw = testPrismaClient();
@@ -24,6 +26,8 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
   let mt = "";
   let bare = "";
   let liable = "";
+  let foodMaster = "";
+  let beautyMaster = "";
   const variants = new Map<string, { food: string; beauty: string }>();
 
   async function category(code: string) {
@@ -44,12 +48,12 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
     return row.id;
   }
 
-  async function stock(storeId: string, foodMaster: string, beautyMaster: string) {
+  async function stock(storeId: string, foodId: string, beautyId: string) {
     const make = async (masterProductId: string, price: number) => {
       const listing = await storeScoped(storeId).listing.create({ data: { storeId, masterProductId, price, stockMode: "unlimited" } });
       return (await storeScoped(storeId).listingVariant.create({ data: { listingId: listing.id, label: "1", price, weightG: 100 } })).id;
     };
-    variants.set(storeId, { food: await make(foodMaster, 1000), beauty: await make(beautyMaster, 333) });
+    variants.set(storeId, { food: await make(foodId, 1000), beauty: await make(beautyId, 333) });
   }
 
   async function cart(storeId: string, lines: Array<["food" | "beauty", number]>) {
@@ -81,13 +85,13 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("CI", "true");
     resetFakeCheckoutPayments();
-    const food = await category(FOOD);
-    const beauty = await category(BEAUTY);
+    foodMaster = await category(FOOD);
+    beautyMaster = await category(BEAUTY);
     tx = await store("tx", { state: "TX", city: "Houston", zip: "77002" });
     mt = await store("mt", { state: "MT", city: "Billings", zip: "59101" });
     bare = await store("bare", null);
     liable = await store("liable", { state: "TX", city: "Austin", zip: "78701" }, "store");
-    for (const id of [tx, mt, bare, liable]) await stock(id, food, beauty);
+    for (const id of [tx, mt, bare, liable]) await stock(id, foodMaster, beautyMaster);
   });
 
   afterEach(() => setTaxCalculatorForTests(null));
@@ -142,6 +146,38 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
     const { order } = await checkout(tx, cartId);
     expect(order).toMatchObject({ status: "AUTHORIZED", taxCents: 82 });
     expect(fake.calls).toHaveLength(1);
+  });
+
+  it("a first delivery checkout is taxed at the confirmed delivery address, and places with that tax", async () => {
+    const fake = install(fakeTaxCalculator(RATES));
+    const row = await platformAdmin.store.create({
+      data: {
+        slug: `${RUN}-texarkana`, name: "Tax delivery", pickupEnabled: true, stripeOnboardingStatus: "complete",
+        stripeAccountId: `acct_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+        addressLine1: "100 Main St", city: "Texarkana", state: "TX", zip: "75501",
+        lat: 33.4251, lng: -94.0477, deliveryRadiusMi: 8, storeDeliveryEnabled: true, storeDeliveryFeeCents: 500,
+      },
+    });
+    storeIds.push(row.id);
+    await stock(row.id, foodMaster, beautyMaster);
+    const match = { lat: 33.4418, lng: -94.0377 };
+    await writeGeocodeCache(ACROSS_THE_LINE, { ...ACROSS_THE_LINE, formattedAddress: "200 E BROAD ST, TEXARKANA, AR, 71854", ...match });
+    const cartId = await cart(row.id, [["beauty", 3]]);
+
+    // The order of createPaymentIntentAction: quote, hold, then the confirmed address is saved on the cart.
+    const quote = await quoteCheckout(row.id, 0, cartId, CONTACT, "store-delivery", ACROSS_THE_LINE);
+    expect(quote.problems).toEqual([]);
+    const pi = await createPaymentIntent(row.id, cartId, quote.holdCents);
+    await getCheckoutPayments().confirmPaymentIntent(pi.paymentIntentId, { payment_method: "pm_card_visa" });
+    await saveDeliverySnapshot(row.id, cartId, { ...ACROSS_THE_LINE, ...match });
+    const placed = await placeOrder(row.id, 0, cartId, CONTACT, "store-delivery", null, null, pi.paymentIntentId);
+
+    // 3 × $3.33 = 999 at Arkansas's 9.5% = 94.9 → 95, shown before Pay and charged.
+    expect(quote.taxCents).toBe(95);
+    const order = await storeScoped(row.id).order.findUniqueOrThrow({ where: { id: placed.token } });
+    expect(order).toMatchObject({ status: "AUTHORIZED", taxCents: 95, totalAuthorizedCents: quote.holdCents });
+    const states = fake.calls.map((call) => (call.input as { address: { state: string } }).address.state);
+    expect(states).toEqual(["AR"]);
   });
 
   it("AC2: a Montana store collects no tax, and the zero is explained", async () => {

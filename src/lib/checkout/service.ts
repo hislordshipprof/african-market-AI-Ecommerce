@@ -20,7 +20,7 @@ import { readServiceFeeSettings } from "../order/service-fee-settings";
 import { reserveOrderStock } from "../order/stock-ledger";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
-import { pinnedCheckoutTax, quoteCheckoutTax, TaxLocationError, TaxUnavailableError, type CheckoutTax } from "../tax/checkout-tax";
+import { pinnedCheckoutTax, quoteCheckoutTax, TaxLocationError, TaxUnavailableError, type CheckoutTax, type DeliveryAddressFields } from "../tax/checkout-tax";
 import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCourier } from "../delivery/dispatch";
@@ -193,7 +193,8 @@ export async function quoteCheckout(
   const lines = (cart?.lines ?? []).map((line) => ({ variantId: line.variant.id, qty: line.qty, price: line.variant.price }));
   if (!cart || lines.length === 0) return quote;
   try {
-    const tax = await quoteCheckoutTax(storeId, cartId, lines, quote.discountCents, fulfillment);
+    const delivery = await confirmedDeliveryAddress(storeId, fulfillment, request ?? null);
+    const tax = await quoteCheckoutTax(storeId, cartId, lines, quote.discountCents, fulfillment, delivery);
     return withTax(quote, tax.taxCents);
   } catch (error) {
     if (error instanceof TaxLocationError || error instanceof TaxUnavailableError) {
@@ -202,6 +203,29 @@ export async function quoteCheckout(
     }
     throw error;
   }
+}
+
+/** The request's address as the payment step saves it on the cart: the confirmed match, with the shopper's line 2. */
+async function confirmedDeliveryAddress(
+  storeId: string,
+  fulfillment: Fulfillment,
+  request: DeliveryRequest | null,
+): Promise<DeliveryAddressFields | null> {
+  if (fulfillment === "pickup" || !request) return null;
+  const store = await platform.store.findUnique({ where: { id: storeId }, select: { lat: true, lng: true, deliveryRadiusMi: true } });
+  if (store?.lat == null || store.lng == null) return null;
+  const confirmed = await lookupConfirmed(
+    { line1: request.line1, city: request.city, state: request.state, zip: request.zip },
+    { lat: store.lat, lng: store.lng, radiusMi: Number(store.deliveryRadiusMi) },
+  );
+  if (!confirmed?.ok) return null;
+  return {
+    deliveryLine1: confirmed.match.line1,
+    deliveryLine2: request.line2 ?? null,
+    deliveryCity: confirmed.match.city,
+    deliveryState: confirmed.match.state,
+    deliveryZip: confirmed.match.zip,
+  };
 }
 
 async function untaxedQuote(

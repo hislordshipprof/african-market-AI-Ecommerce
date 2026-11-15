@@ -46,11 +46,19 @@ export async function variantTaxCodes(db: ScopedTx, variantIds: string[]): Promi
   }));
 }
 
+export type DeliveryAddressFields = {
+  deliveryLine1: string | null;
+  deliveryLine2: string | null;
+  deliveryCity: string | null;
+  deliveryState: string | null;
+  deliveryZip: string | null;
+};
+
 /** Pickup is taxed where the shopper takes the goods, the store; delivery at the delivery address. */
 export function taxAddress(
   fulfillment: Fulfillment,
   store: { addressLine1: string | null; addressLine2: string | null; city: string | null; state: string | null; zip: string | null },
-  cart: { deliveryLine1: string | null; deliveryLine2: string | null; deliveryCity: string | null; deliveryState: string | null; deliveryZip: string | null },
+  cart: DeliveryAddressFields,
 ): TaxAddress {
   if (fulfillment !== "pickup" && cart.deliveryLine1) {
     return { line1: cart.deliveryLine1, line2: cart.deliveryLine2, city: cart.deliveryCity, state: cart.deliveryState, postalCode: cart.deliveryZip };
@@ -70,7 +78,15 @@ export function taxLineInputs(lines: TaxedLine[], discountCents: number, codes: 
   }));
 }
 
-async function checkoutTaxInputs(db: ScopedTx, storeId: string, cartId: string, lines: TaxedLine[], discountCents: number, fulfillment: Fulfillment) {
+async function checkoutTaxInputs(
+  db: ScopedTx,
+  storeId: string,
+  cartId: string,
+  lines: TaxedLine[],
+  discountCents: number,
+  fulfillment: Fulfillment,
+  delivery: DeliveryAddressFields | null = null,
+) {
   const [store, cart, codes] = await Promise.all([
     platform.store.findUniqueOrThrow({
       where: { id: storeId },
@@ -85,7 +101,7 @@ async function checkoutTaxInputs(db: ScopedTx, storeId: string, cartId: string, 
     }),
     variantTaxCodes(db, lines.map((line) => line.variantId)),
   ]);
-  const address = taxAddress(fulfillment, store, cart);
+  const address = taxAddress(fulfillment, store, delivery ?? cart);
   const liableParty: TaxLiableParty = store.taxLiableParty === "store" ? "store" : "platform";
   const taxLines = taxLineInputs(lines, discountCents, codes);
   const key = JSON.stringify({ address, liableParty, lines: taxLines });
@@ -103,16 +119,20 @@ function pinned(cart: { taxCents: number | null; taxLines: unknown; taxLiablePar
   };
 }
 
-/** The quote's tax: the pinned calculation when the basket and address are unchanged, else a new one. */
+/**
+ * The quote's tax: the pinned calculation when the basket and address are unchanged, else a new one.
+ * `delivery` is the confirmed address in the request, which the cart saves only after the hold.
+ */
 export async function quoteCheckoutTax(
   storeId: string,
   cartId: string,
   lines: TaxedLine[],
   discountCents: number,
   fulfillment: Fulfillment,
+  delivery: DeliveryAddressFields | null = null,
 ): Promise<CheckoutTax> {
   const db = storeScoped(storeId);
-  const inputs = await checkoutTaxInputs(db, storeId, cartId, lines, discountCents, fulfillment);
+  const inputs = await checkoutTaxInputs(db, storeId, cartId, lines, discountCents, fulfillment, delivery);
   const kept = pinned(inputs.cart, inputs.key);
   if (kept) return kept;
   if (lines.length === 0) return { calculationId: null, taxCents: 0, lines: [], liableParty: inputs.liableParty, key: inputs.key };
