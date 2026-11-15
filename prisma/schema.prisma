@@ -116,6 +116,7 @@ model Store {
   whatsAppCheckoutLinks WhatsAppCheckoutLink[]
   driverRoutes          DriverRoute[]
   pickBatches           PickBatch[]
+  notifiedStoreRequests DirectoryStoreRequest[]
 
   @@map("stores")
 }
@@ -292,11 +293,12 @@ model AddressGeocode {
 
 /// US Census Gazetteer ZCTA centroid, seeded once by migration for the directory's near-me search (#452).
 model GazetteerZip {
-  zip     String @id
-  lat     Float
-  lng     Float
+  zip           String                  @id
+  lat           Float
+  lng           Float
   /// A point within this many miles of the centroid is taken to be in the ZIP (for "is this point in the US").
-  reachMi Float  @map("reach_mi")
+  reachMi       Float                   @map("reach_mi")
+  storeRequests DirectoryStoreRequest[]
 
   @@index([lat])
   @@map("gazetteer_zips")
@@ -313,6 +315,24 @@ model GazetteerPlace {
   @@id([state, nameKey])
   @@index([nameKey])
   @@map("gazetteer_places")
+}
+
+/// "Tell me when a store opens near me" (#455). Checks and RLS live in its migration.
+model DirectoryStoreRequest {
+  id              String       @id
+  zip             String
+  email           String?
+  phone           String?
+  consentText     String       @map("consent_text")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  notifiedAt      DateTime?    @map("notified_at")
+  notifiedStoreId String?      @map("notified_store_id")
+  gazetteerZip    GazetteerZip @relation(fields: [zip], references: [zip], onDelete: Restrict)
+  notifiedStore   Store?       @relation(fields: [notifiedStoreId], references: [id], onDelete: SetNull)
+
+  @@unique([zip, email])
+  @@unique([zip, phone])
+  @@map("directory_store_requests")
 }
 
 model AuditLog {

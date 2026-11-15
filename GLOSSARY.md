@@ -65,8 +65,12 @@ An order placed within 30 days of the shopper arriving on the store's site from 
 _Avoid_: Referral, marketplace order
 
 **Near me**:
-The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
+The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few, a Store request panel, and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
 _Avoid_: Store locator, geo search
+
+**Store request**:
+A shopper's "tell me when a store opens near me" from the Store directory: a ZIP and an email or US mobile number, with consent. It gets one message when a listed store is within 50 miles of that ZIP, and its contact is then deleted. Platform admins see the requests by state and ZIP as onboarding leads.
+_Avoid_: Waitlist, lead form, store suggestion
 
 ## Catalog
 
@@ -147,7 +151,7 @@ A listing whose attribute for a Shopper constraint is unknown. It is shown marke
 A customer message that starts, as a whole word, with yes, ok, okay, sure, go ahead, add those, or add what you suggested. On that turn the Shopper assistant adds a product only when the previous reply or the customer's own message named it.
 
 **Recipe base**:
-The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog.
+The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog. The #146 eval uses seeded dishes only and never looks one up (#607).
 
 **Review card**:
 The last card in a Shopper assistant chat before paying, drawn by the server from the normal checkout quote: items, pickup time, fees, total and card hold. Its "Review and pay" button opens the normal checkout. It is information, not consent: it places nothing, and checkout shows the current basket (#247).
