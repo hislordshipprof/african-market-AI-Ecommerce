@@ -220,7 +220,7 @@ A stock alert the Store copilot raises for the store owner: sold out, running lo
 A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
 
 **Linked WhatsApp number**:
-The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number, or by Meta's business-scoped user id (BSUID) when the owner has adopted a WhatsApp username and Meta omits the number.
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number, or by Meta's business-scoped user id (BSUID) when the owner has adopted a WhatsApp username and Meta omits the number. The owner sends owner reports to the Store copilot from it and confirms each change with a tap, and can turn on Copilot alerts and the Daily digest on WhatsApp (both off by default).
 
 **WhatsApp checkout link**:
 The link the Shopper assistant sends on WhatsApp when a customer is ready to check out. It opens the store's normal checkout with the cart the chat filled, works once and for 60 minutes, and places nothing: the customer pays on that page, as a guest or signed in. A used or expired link shows "This checkout link has expired".
