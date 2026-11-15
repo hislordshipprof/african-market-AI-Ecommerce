@@ -3,6 +3,7 @@ import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { discountedGoodsCents, maxGoodsWithin, orderServiceFeeSettings, serviceFeeCents } from "./platform-fee";
 import { canOfferSwap, lineChargeCents, type ChargeLine } from "./substitution-pricing";
 import { couponTerms } from "../coupon/discount";
+import type { TaxLine } from "../tax/calculator";
 
 /** How long the customer has to answer before the line's swap rule applies. */
 export const SUBSTITUTION_WINDOW_MS = 10 * 60_000;
@@ -63,6 +64,16 @@ async function proposeSwap(tx: SubstitutionTx, line: ShortLine, units: number, m
 }
 
 /**
+ * The most tax a capture can add on `net` goods (#65), since capture taxes the final goods on top. Stripe's
+ * breakdown may list each jurisdiction's rate on its own, so their sum bounds any line's rate; the order's
+ * average rate would not, as a swap on its taxed line in a basket of exempt food shows. A cent a line covers rounding.
+ */
+function taxReserve(taxLines: unknown, lineCount: number): (net: number) => number {
+  const rate = ((taxLines ?? []) as TaxLine[]).reduce((sum, line) => sum + Math.max(0, Number(line.rate) || 0), 0) / 100;
+  return (net) => (rate > 0 && net > 0 ? Math.ceil(net * rate) + lineCount : 0);
+}
+
+/**
  * Opens the prompt for a line just marked short, inside the caller's transaction and store lock.
  * The order's total counts every pending prompt as swapped, since its timer may still accept it.
  */
@@ -79,6 +90,7 @@ export async function openSubstitutionRequest(
     serviceFeeMinCents: number;
     serviceFeeMaxCents: number;
     couponId: string | null;
+    taxLines: unknown;
   },
 ): Promise<{ id: string; expiresAt: Date }> {
   const units = line.qtyOrdered - qtyFound;
@@ -98,12 +110,13 @@ export async function openSubstitutionRequest(
   // Capture recomputes the coupon discount on the goods charged (#557), so the hold check does too.
   const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
   const coupon = couponRow ? couponTerms(couponRow) : null;
+  const tax = taxReserve(order.taxLines, lines.length);
   const totalWith = (goods: number) => {
     const net = discountedGoodsCents(goods, coupon);
-    return net + serviceFeeCents(net, serviceFee) + extrasCents;
+    return net + serviceFeeCents(net, serviceFee) + tax(net) + extrasCents;
   };
-  // The largest unit price whose goods, with their service fee, still fit the hold.
-  const goodsHeadroom = maxGoodsWithin(order.totalAuthorizedCents - extrasCents, serviceFee, coupon) - goodsCents;
+  // The largest unit price whose goods, with their service fee and tax, still fit the hold.
+  const goodsHeadroom = maxGoodsWithin(order.totalAuthorizedCents - extrasCents, serviceFee, coupon, tax) - goodsCents;
   const maxUnitCents = line.unitPriceCents + Math.floor(goodsHeadroom / units);
   const proposal = await proposeSwap(tx, line, units, maxUnitCents);
   const currentTotalCents = totalWith(goodsCents);
