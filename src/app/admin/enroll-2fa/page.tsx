@@ -37,6 +37,8 @@ const ERROR_ID = "admin-enroll-error";
 const BACK_ID = "enroll-back";
 const PASSWORD_ID = "enroll-password";
 const CODE_ID = "enroll-code";
+const SCAN_STEP_ID = "enroll-step-scan";
+const CODE_STEP_ID = "enroll-step-code";
 const SESSION_ENDED = "Your session ended. Go back and sign in again.";
 const ENROLL_ERRORS = { INVALID_PASSWORD: "That password isn't right. Try again." };
 // Starting setup again replaces the secret, so an entry saved earlier can never match.
@@ -202,8 +204,8 @@ export default function Enroll2FA() {
 
           {totpUri && !verified && (
             <div className="flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:items-start lg:gap-8">
-              <section className="flex flex-col gap-3">
-                <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
+              <section aria-labelledby={SCAN_STEP_ID} className="flex flex-col gap-3">
+                <p id={SCAN_STEP_ID} ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
                   1. <span className="md:hidden">Add this account to</span>
                   <span className="hidden md:inline">Scan this code with</span> an authenticator app, such
                   as Google Authenticator or 1Password. Keep this page open until you&apos;ve entered the
@@ -242,8 +244,8 @@ export default function Enroll2FA() {
                 )}
               </section>
 
-              <form onSubmit={verifyCode} noValidate className="flex flex-col gap-3">
-                <p className="text-base font-medium">
+              <form onSubmit={verifyCode} noValidate aria-labelledby={CODE_STEP_ID} className="flex flex-col gap-3">
+                <p id={CODE_STEP_ID} className="text-base font-medium">
                   2. Enter the 6-digit code the app shows for {AUTHENTICATOR_ENTRY}. You&apos;ll use a new one
                   each time you sign in.
                 </p>
