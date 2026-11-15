@@ -14,6 +14,7 @@ import { scheduleCourierPacking } from "../inngest/notify";
 import { dispatchPackingOrder, type CourierEvent } from "../delivery/dispatch";
 import { DoorDashDriveProvider } from "../delivery/doordash";
 import { fakeDoorDash } from "../delivery/doordash-fake";
+import { readCourierSettings } from "../delivery/courier-settings";
 import { markLinePicked, markLineShort, markReady } from "./service";
 import {
   BATCH_NOT_FOUND,
@@ -274,6 +275,7 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
     const booked = await dispatchPackingOrder(storeId, courier.id, {
       providers: [new DoorDashDriveProvider({ env: keys, fetch: fake.fetch, now })],
       emit: async (event) => { events.push(event); },
+      settings: () => readCourierSettings(),
       now,
     });
 

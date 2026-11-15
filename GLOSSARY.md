@@ -172,6 +172,9 @@ A Copilot alert asking the owner to confirm a listing whose confidence fell belo
 **Linked WhatsApp number**:
 The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
 
+**WhatsApp order updates**:
+Order status messages a customer gets on WhatsApp from the Store WhatsApp number instead of SMS, after ticking "Get order updates on WhatsApp" at checkout (default off, offered only when the store's number is Live). Email is unchanged. If a WhatsApp message cannot go, that update goes by SMS once. Replying STOP turns them off for that store.
+
 **Store WhatsApp number**:
 The store's own WhatsApp Business number, which customers message (ADR-0010). Linked by the owner or a platform admin through Meta's Embedded Signup (in test mode, ids typed into a form); "Live" once registered. By default the store keeps the WhatsApp Business app on it (coexistence). Not the Linked WhatsApp number, which is the owner's personal number.
 
@@ -297,6 +300,12 @@ A 4-digit code the courier must get from the customer at the door. Required for 
 
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
+
+**Courier settings**:
+The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+
+**Assignment timeout**:
+How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.
 
 **Courier**:
 A driver from a courier company. Not a user of the platform.

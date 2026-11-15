@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GRAPH_API_VERSION } from "./provider";
-import { ownerLinkCodeMessage } from "./templates";
+import { cloudApiWhatsAppProvider, GRAPH_API_VERSION } from "./provider";
+import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage, ownerLinkCodeMessage } from "./templates";
 
 describe("WhatsApp provider", () => {
   afterEach(() => {
@@ -150,5 +150,19 @@ describe("WhatsApp provider", () => {
     expect(error).toBeInstanceOf(WhatsAppApiError);
     expect((error as Error).message).not.toContain("es-code");
     expect((error as InstanceType<typeof WhatsAppApiError>).code).toBe(100);
+  });
+
+  it("sends from a store's own number with the store's token, not the platform's (#560)", async () => {
+    vi.stubEnv("WHATSAPP_ACCESS_TOKEN", "platform-token");
+    vi.stubEnv("WHATSAPP_PHONE_NUMBER_ID", "1029384756");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ messages: [{ id: "wamid.1" }], contacts: [{ wa_id: "14045550123" }] })));
+    vi.stubGlobal("fetch", fetchMock);
+    await cloudApiWhatsAppProvider.send(
+      orderUpdateMessage("+14045550123", ORDER_UPDATE_TEMPLATES.placed, "Ada", "order/tok"),
+      { phoneNumberId: "5556667778", accessToken: "store-token" },
+    );
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`https://graph.facebook.com/${GRAPH_API_VERSION}/5556667778/messages`);
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer store-token");
   });
 });

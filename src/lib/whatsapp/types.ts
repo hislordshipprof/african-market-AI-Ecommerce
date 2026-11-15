@@ -50,8 +50,15 @@ export interface ConnectedStoreNumber {
   displayNumber: string;
 }
 
+/** A store's own number to send from (#560): its phone_number_id and the store's business token. */
+export interface WhatsAppSender {
+  phoneNumberId: string;
+  accessToken: string;
+}
+
 export interface WhatsAppProvider {
-  send(message: OutboundMessage): Promise<SendResult>;
+  /** From the store's number when `from` is given, else from the platform number. */
+  send(message: OutboundMessage, from?: WhatsAppSender): Promise<SendResult>;
   /** Exchanges the code, subscribes the app to the WABA and registers the number. */
   connectStoreNumber(input: ConnectStoreNumberInput): Promise<ConnectedStoreNumber>;
 }

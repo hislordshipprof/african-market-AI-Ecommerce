@@ -2,10 +2,12 @@ import { providerSinkMode, sendEmail } from "../email/send";
 import { productionRuntime } from "../inngest/event-key";
 import { ProviderSendError } from "./provider-error";
 import { normalizeUsPhone } from "./phone";
-import { renderEmail, renderSms, type NotifyOrder, type RenderedMessage } from "./messages";
+import { renderEmail, renderSms, renderWhatsApp, type NotifyOrder, type RenderedMessage } from "./messages";
 import { smsSender, type SmsSender } from "./sms";
+import { getWhatsAppProvider } from "../whatsapp/index";
+import { whatsappErrorCode } from "../whatsapp/errors";
 import type { NotificationChannelKind } from "./channel-kinds";
-import type { OrderNotifyEvent } from "./record";
+import { WHATSAPP_EVENTS, type OrderNotifyEvent } from "./record";
 
 type NotSent =
   | { outcome: "skipped"; reason: string }
@@ -169,4 +171,39 @@ export const smsChannel: NotificationChannel = {
   },
 };
 
-export const notificationChannels: NotificationChannel[] = [emailChannel, smsChannel];
+/**
+ * Order updates from the store's own number for an opted-in customer (#560).
+ * Never retried: the send endpoint has no idempotency key. Any result but
+ * `sent` leaves the event to SMS, once.
+ */
+export const whatsappChannel: NotificationChannel = {
+  kind: "whatsapp",
+  prepare(order, event, url, env) {
+    const whatsapp = order.whatsapp;
+    if (!whatsapp) return { outcome: "skipped", reason: "not_opted_in" };
+    if (event === "store_replied" || !WHATSAPP_EVENTS.has(event)) return { outcome: "skipped", reason: "not_whatsapp_event" };
+    const phone = normalizeUsPhone(order.customer.phone);
+    if (!phone.ok) return { outcome: "skipped", reason: phone.reason };
+    if (previewEnv(env)) {
+      logOnce("preview_recipient", order.id, "whatsapp");
+      return { outcome: "skipped", reason: "preview_recipient" };
+    }
+    if (whatsapp.optedOut) return { outcome: "skipped", reason: "opted_out" };
+    if (!whatsapp.sender) return { outcome: "skipped", reason: "store_number_unavailable" };
+    const rendered = renderWhatsApp(order, event, url, phone.e164, whatsapp.sender);
+    if (!rendered) return { outcome: "skipped", reason: "tracking_url_unavailable" };
+    return { outcome: "ready", message: rendered };
+  },
+  async send(message) {
+    if (!message.whatsapp) return { outcome: "failed", reason: "whatsapp_unrendered", retryable: false };
+    try {
+      const sent = await getWhatsAppProvider().send(message.whatsapp.message, message.whatsapp.sender);
+      return { outcome: "sent", providerMessageId: sent.messageId };
+    } catch (err) {
+      return { outcome: "failed", reason: `whatsapp_${whatsappErrorCode(err)}`, retryable: false };
+    }
+  },
+};
+
+/** WhatsApp runs before SMS, so SMS can see whether it went (#560). */
+export const notificationChannels: NotificationChannel[] = [emailChannel, whatsappChannel, smsChannel];

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { storeMayUse } from "../billing/plan";
 import type { AcquisitionSource } from "../directory/attribution";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS, storeHasWhatsAppNumber } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
@@ -21,8 +21,9 @@ import { reserveOrderStock } from "../order/stock-ledger";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
 import { COURIER_NOT_OFFERED, computeQuote, type CourierQuoteInput, type StoreDeliveryQuote } from "./quote";
-import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCheapestCourier } from "../delivery/dispatch";
-import { checkCourierEligibility, readCourierWeightSettings } from "../delivery/eligibility";
+import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCourier } from "../delivery/dispatch";
+import { checkCourierEligibility } from "../delivery/eligibility";
+import { anyCourierEnabled, readCourierSettings, type CourierSettings } from "../delivery/courier-settings";
 import { courierOffered } from "../delivery/courier-offered";
 import type { DeliveryProvider } from "../delivery/provider";
 import { validPhone } from "../customer-account/phone";
@@ -159,6 +160,8 @@ export interface QuoteCheckoutOptions {
   couriers?: DeliveryProvider[];
   /** Pay: ask the couriers again, and report a fee that differs from the one last shown (#527 AC2). */
   recheckCourier?: boolean;
+  /** Defaults to the platform's courier settings (#535). */
+  courierSettings?: CourierSettings;
 }
 
 export async function quoteCheckout(
@@ -188,8 +191,13 @@ export async function quoteCheckout(
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
   }
   if (fulfillment === "courier") {
+    const courierSettings = options.courierSettings ?? (await readCourierSettings());
+    if (!anyCourierEnabled(courierSettings, cartId)) {
+      const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
+      return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
+    }
     const courier = cart
-      ? await courierQuoteFor(store, cart, contact, request ?? null, options)
+      ? await courierQuoteFor(store, cart, contact, request ?? null, options, courierSettings)
       : null;
     return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, courier);
   }
@@ -223,14 +231,14 @@ async function courierQuoteFor(
   contact: Contact,
   request: DeliveryRequest | null,
   options: QuoteCheckoutOptions,
+  settings: CourierSettings,
 ): Promise<CourierQuoteInput> {
   const unavailable = (message: string, code: "ineligible" | "outside-radius" = "ineligible"): CourierQuoteInput => ({ ok: false, problem: { code, message } });
   if (!courierOffered(store)) return unavailable("This store isn't set up for courier delivery yet.");
-  const weight = await readCourierWeightSettings();
-  const eligibility = checkCourierEligibility(cart.lines.map((line) => ({ weightG: line.variant.weightG, quantity: line.qty })), weight);
+  const eligibility = checkCourierEligibility(cart.lines.map((line) => ({ weightG: line.variant.weightG, quantity: line.qty })), { courierWeightLimitLb: settings.weightLimitLb });
   if (!eligibility.eligible) {
     const what = eligibility.reason === "item_over_limit" ? "An item in your basket is" : "This order is";
-    return unavailable(`${what} over the ${weight.courierWeightLimitLb} lb courier limit. Choose pickup or store delivery.`);
+    return unavailable(`${what} over the ${settings.weightLimitLb} lb courier limit. Choose pickup or store delivery.`);
   }
   if (!request) return unavailable("Confirm your delivery address to see the courier fee.");
   const confirmed = await lookupConfirmed(
@@ -263,7 +271,7 @@ async function courierQuoteFor(
     tipCents: 0,
     pinRequired: cart.lines.some((line) => line.variant.listing.frozen) || cart.subtotalCents > PIN_ABOVE_TOTAL_CENTS,
   });
-  const quoted = await quoteCheapestCourier({ referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders());
+  const quoted = await quoteCourier({ referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders(), settings);
   await storeScoped(store.id).cart.update({
     where: { id: cart.id },
     data: {
@@ -496,6 +504,8 @@ export interface RecordAuthorizedOrderInput {
   minimumOrderCents?: number;
   /** Direct place calls can set this even when the cart snapshot does not. */
   leaveAtDoor?: boolean;
+  /** The checkout's WhatsApp updates tick (#560); kept only when the store has a registered number. */
+  whatsappUpdates?: boolean;
   acquisitionSource?: AcquisitionSource | null;
 }
 
@@ -664,6 +674,7 @@ export async function recordAuthorizedOrder(
         },
       });
       const nextNumber = await getNextOrderNumber(tx, storeId);
+      const whatsappOptIn = input.whatsappUpdates === true && await storeHasWhatsAppNumber(storeId, tx);
       const order = await tx.order.create({
         data: {
           storeId,
@@ -703,6 +714,7 @@ export async function recordAuthorizedOrder(
           leaveAtDoor: delivering ? cart.leaveAtDoor : false,
           trackingToken: newTrackingToken(),
           acceptanceClockStartsAt: availability.clockStartsAt,
+          whatsappOptInAt: whatsappOptIn ? now : null,
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
@@ -981,6 +993,7 @@ export async function placeOrder(
   paymentIntentId: string,
   actorUserId: string | null = null,
   leaveAtDoor = false,
+  whatsappUpdates = false,
   acquisitionSource: AcquisitionSource | null = null,
 ): Promise<PlacedOrder> {
   assertLiveModeAllowed();
@@ -1152,6 +1165,7 @@ export async function placeOrder(
       epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
       leaveAtDoor,
+      whatsappUpdates,
       acquisitionSource,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
