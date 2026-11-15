@@ -342,6 +342,8 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "order",
   "platformSettings",
   "productSynonym",
+  "recipe",
+  "recipeIngredient",
   "refundRequest",
   "stockProposal",
   "store",
