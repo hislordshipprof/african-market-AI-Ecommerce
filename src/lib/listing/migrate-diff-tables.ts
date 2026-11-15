@@ -13,10 +13,14 @@ const FORMS: Array<{ kind: FormKind; source: string }> = [
 ];
 
 const UNHANDLED =
-  /\b(?:create|insert|truncate|do)\b|\b(?:alter|drop)\s+(?:table|index|type|view|trigger|function|procedure|schema|sequence|domain)\b|\b(?:update|delete)\b|\bcomment\s+on\b|\brename\b(?!\s+(?:to|column|constraint)\b)/i;
+  /\b(?:create|insert|truncate|do|alter|drop|rename|update|delete)\b|\bcomment\s+on\b/i;
+
+// Only the ALTER TABLE sub-clauses Prisma emits are known; any other ALTER, DROP or RENAME fails closed.
+const KNOWN_CLAUSES =
+  /\bon\s+(?:update|delete)\s+(?:cascade|restrict|no\s+action|set\s+null|set\s+default)\b|\b(?:alter|drop)\s+(?:column|constraint|default|not\s+null)\b|\brename\s+(?:to|column|constraint)\b/gi;
 
 function withoutClauses(text: string): string {
-  return text.replace(/\bon\s+(?:update|delete)\b/gi, (clause) => " ".repeat(clause.length));
+  return text.replace(KNOWN_CLAUSES, (clause) => " ".repeat(clause.length));
 }
 
 function withoutLineComments(script: string): string {

@@ -217,6 +217,16 @@ ALTER TABLE "stores" ADD COLUMN "y" TEXT;
     error: /unhandled statement: UPDATE/,
   },
   {
+    name: "a comment between ALTER and TABLE",
+    script: `${ELEVEN}ALTER/**/TABLE "orders" ADD COLUMN "unexpected" TEXT;\n`,
+    error: /unhandled statement: ALTER/,
+  },
+  {
+    name: "update after a comment ending in on",
+    script: `${ELEVEN}  -- switched on\nUPDATE "orders" SET "status" = 'X';\n`,
+    error: /unhandled statement: UPDATE/,
+  },
+  {
     name: "the same table twice",
     script: `ALTER TABLE "stores" ADD COLUMN "a" TEXT;\nALTER TABLE "stores" ADD COLUMN "b" TEXT;\n`,
     names: ["stores"],
