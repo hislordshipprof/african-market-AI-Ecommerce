@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { lockMasterProduct, readAdminChanges, withoutAdminChanges } from "./master-catalog-upsert";
 
 interface CatalogProduct {
   id: string;
@@ -1121,13 +1122,16 @@ export async function seedDemoCatalog(prisma: PrismaClient) {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.masterProduct.upsert({
-        where: { id: p.id },
-        update: { name: p.name, categoryId: p.categoryId },
-        create: { id: p.id, name: p.name, categoryId: p.categoryId },
-      });
+      // A re-seed keeps what a platform admin changed on a demo product, as the master catalog seed does (#613).
+      const existing = await lockMasterProduct(tx, p.id);
+      if (existing?.status === "merged") return;
+      const changes = await readAdminChanges(tx, p.id);
+      const values = { name: p.name, categoryId: p.categoryId };
+      if (existing) await tx.masterProduct.update({ where: { id: p.id }, data: withoutAdminChanges(values, changes) });
+      else await tx.masterProduct.create({ data: { id: p.id, ...values } });
       for (const syn of p.synonyms) {
         const synId = `${p.id}_syn_${syn.term.replace(/\s+/g, "_")}`;
+        if (changes.synonymIds.has(synId)) continue;
         await tx.productSynonym.upsert({
           where: { id: synId },
           update: { term: syn.term, language: syn.language ?? null },

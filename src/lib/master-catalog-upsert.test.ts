@@ -47,7 +47,7 @@ describe.skipIf(!hasDb)("upsertMasterProduct (DB integration)", () => {
     await raw.$disconnect();
   });
 
-  it("high-confidence variant: active, high, image set, synonyms written; re-run overwrites status but keeps image when none given", async () => {
+  it("high-confidence variant: active, high, image set, synonyms written; re-run keeps a rejected status and the image when none given", async () => {
     await asAdmin((tx) => upsertMasterProduct(tx, row(ids[0]), null, { statusOnCreate: "active", statusOnUpdate: "active", confidence: "high", imageUrl: "https://cdn.test/a.webp" }));
     const p = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: ids[0] }, include: { synonyms: true } }));
     expect(p).toMatchObject({ status: "active", confidence: "high", imageUrl: "https://cdn.test/a.webp", weightG: 1500, perishable: true, frozen: false, unit: "kg", originCountries: "Nigeria" });
@@ -56,7 +56,8 @@ describe.skipIf(!hasDb)("upsertMasterProduct (DB integration)", () => {
     await asAdmin((tx) => tx.masterProduct.update({ where: { id: ids[0] }, data: { status: "rejected" } }));
     await asAdmin((tx) => upsertMasterProduct(tx, row(ids[0], { english_name: `${RUN} Yam2` }), null, { statusOnCreate: "active", statusOnUpdate: "active", confidence: "high", imageUrl: null }));
     const again = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: ids[0] }, include: { synonyms: true } }));
-    expect(again).toMatchObject({ status: "active", imageUrl: "https://cdn.test/a.webp", name: `${RUN} Yam2` });
+    // #613: only an admin rejects a product; a re-seed never moves it out of rejected.
+    expect(again).toMatchObject({ status: "rejected", imageUrl: "https://cdn.test/a.webp", name: `${RUN} Yam2` });
     expect(again.synonyms).toHaveLength(3);
 
     // #89: a re-seed with edited synonyms drops the rows the CSV no longer names.
