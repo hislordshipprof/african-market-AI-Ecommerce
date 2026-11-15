@@ -187,7 +187,8 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     }]);
     const addButton = page.getByRole("button", { name: `Add ${name} to cart` });
     await expect(async () => {
-      await page.goto(`/?store=${slug}`);
+      // Arrives from a Store directory link, so the order is attributed to the directory (#454).
+      await page.goto(`/?store=${slug}&ref=directory`);
       await expect(page.getByRole("heading", { name: /reach the shelves/ })).toHaveCount(0);
       await expect(addButton).toBeVisible();
     }).toPass({ timeout: 20_000 });
@@ -233,6 +234,7 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     });
     expect(order?.fulfillment).toBe("store-delivery");
     expect(order?.deliveryFeeCents).toBe(500);
+    expect(order?.acquisitionSource).toBe("directory");
   } finally {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;

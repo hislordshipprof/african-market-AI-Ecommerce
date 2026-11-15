@@ -86,6 +86,15 @@ function check(message: OutboundMessage, now: number): void {
 }
 
 export const fakeWhatsAppProvider: WhatsAppProvider = {
+  // Fake Embedded Signup: the ids and display number come from the form. A
+  // missing display number is Meta's invalid-parameter error (100).
+  connectStoreNumber(input) {
+    if (!input.displayNumber) return Promise.reject(new WhatsAppApiError(100, 400));
+    return Promise.resolve({
+      businessToken: `fake-business-token-${input.phoneNumberId}`,
+      displayNumber: input.displayNumber,
+    });
+  },
   // Records synchronously before returning, so a caller that started the send
   // and did not await it still finds the entry.
   send(message) {

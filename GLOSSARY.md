@@ -60,6 +60,10 @@ _Avoid_: Marketplace, combined app
 A store's entry in the Store directory: the owner's "Listed in the directory" switch (off by default; a platform admin can override it), a blurb of at most 160 characters, and up to 3 cuisine tags from a fixed list. The street address is never part of it.
 _Avoid_: Profile, store page
 
+**Directory order**:
+An order placed within 30 days of the shopper arriving on the store's site from a Store directory link (`?ref=directory`, kept in a first-party cookie that says only "directory"). The order stores `acquisitionSource = 'directory'`; the owner's dashboard counts them.
+_Avoid_: Referral, marketplace order
+
 **Near me**:
 The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
 _Avoid_: Store locator, geo search
@@ -167,6 +171,9 @@ A Copilot alert asking the owner to confirm a listing whose confidence fell belo
 
 **Linked WhatsApp number**:
 The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
+**Store WhatsApp number**:
+The store's own WhatsApp Business number, which customers message (ADR-0010). Linked by the owner or a platform admin through Meta's Embedded Signup (in test mode, ids typed into a form); "Live" once registered. By default the store keeps the WhatsApp Business app on it (coexistence). Not the Linked WhatsApp number, which is the owner's personal number.
 
 **Daily sample**:
 The AI conversations a platform admin reviews for one UTC day (#544): up to 5 random Shopper assistant chats and 5 random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. The same day always shows the same sample.
