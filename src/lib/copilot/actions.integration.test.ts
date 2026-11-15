@@ -34,7 +34,6 @@ vi.mock("../assistant/model", async (importOriginal) => {
 import { generateTOTP } from "../../../e2e/totp";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
-import { auth } from "../auth";
 import * as dbModule from "../db";
 import { authPrisma, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
 import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
@@ -44,8 +43,8 @@ import { FIXED_ERROR } from "./types";
 import { NOTHING_DRAFTED, NUMBER_REFUSED } from "./turn";
 import { saveReorder, updateReorderDays } from "./reorder-actions";
 import { loadReorderList } from "./reorder-list";
+import { authPost } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t142-${Date.now()}`;
 const password = "Copilot-142-Owner!";
 const hasDb = !!process.env.DATABASE_URL;
@@ -67,12 +66,6 @@ class CookieJar {
   header(): string {
     return [...this.jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
   }
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
 }
 
 async function enableTwoFactor(email: string): Promise<string> {

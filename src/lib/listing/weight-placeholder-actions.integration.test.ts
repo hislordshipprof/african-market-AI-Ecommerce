@@ -24,32 +24,15 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { serializeVariants } from "../../app/store-admin/listings/variant-form";
-import { auth } from "../auth";
 import { addLine, getCartWithLines, getOrCreateCart } from "../cart/service";
 import { authPrisma, storeScoped } from "../db";
 import { createListingAction, updateListingAction } from "./actions";
 import { commitImport, generatePreview } from "./csv-import";
+import { authPost, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `w216-act-${Date.now().toString(36)}`;
 const password = "Placeholder-123!";
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
 
 async function signUp(email: string, name: string): Promise<void> {
   const res = await authPost("/sign-up/email", { email, password, name });

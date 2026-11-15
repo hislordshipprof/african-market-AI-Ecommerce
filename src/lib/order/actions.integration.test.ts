@@ -43,7 +43,6 @@ import { Prisma } from "@prisma/client";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { generateTOTP } from "../../../e2e/totp";
-import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { cancelledPayments, fakeStripeProvider, refundRequests, setAuthorizedAmount } from "../stripe/fake";
@@ -64,8 +63,8 @@ import { issuesToReview } from "./issue-review";
 import { acceptOrder, markLinePicked, markLineShort } from "./service";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import sharp from "sharp";
+import { authPost } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t186-${Date.now()}`;
 const password = "StaffIso-186!";
 const hasDb = !!process.env.DATABASE_URL;
@@ -86,14 +85,6 @@ class CookieJar {
   header(): string {
     return [...this.jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
   }
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }),
-  );
 }
 
 async function deliveredForm(orderId: string): Promise<FormData> {
