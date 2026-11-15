@@ -196,13 +196,17 @@ export function customerScoped(userId: string) {
 
 export type CustomerScopedClient = ReturnType<typeof customerScoped>;
 
+type CustomerScopedTxModels =
+  | "cardSaveConsent"
+  | "customerAddress"
+  | "platformCustomerProfile"
+  | "$queryRaw"
+  | "$executeRaw";
+
 export async function customerScopedTransaction<T>(
   userId: string,
   fn: (
-    tx: Pick<
-      PrismaClient,
-      "platformCustomerProfile" | "customerAddress" | "cardSaveConsent" | "$queryRaw" | "$executeRaw"
-    >,
+    tx: Pick<PrismaClient, CustomerScopedTxModels>,
   ) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
@@ -300,8 +304,34 @@ export async function appUserQuery<T>(
   });
 }
 
+type PlatformAdminTxModels =
+  | "aiAction"
+  | "aiConversation"
+  | "aiReviewFlag"
+  | "attributeProposal"
+  | "auditLog"
+  | "category"
+  | "copilotConversation"
+  | "ingredient"
+  | "ingredientSynonym"
+  | "masterProduct"
+  | "masterProductIngredient"
+  | "order"
+  | "platformSettings"
+  | "productSynonym"
+  | "refundRequest"
+  | "stockProposal"
+  | "store"
+  | "storeInvite"
+  | "storeMembership"
+  | "storeSubscription"
+  | "supportMessage"
+  | "supportThread"
+  | "$queryRaw"
+  | "$executeRaw";
+
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "aiReviewFlag" | "copilotConversation" | "stockProposal" | "supportThread" | "supportMessage" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, PlatformAdminTxModels>) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -345,9 +375,56 @@ export interface TransactionOptions {
   maxWait?: number;
 }
 
+type StoreScopedTxModels =
+  | "aiAction"
+  | "aiConversation"
+  | "assistantUndoReceipt"
+  | "auditLog"
+  | "cart"
+  | "cartLine"
+  | "copilotAlert"
+  | "copilotClientMessage"
+  | "copilotConversation"
+  | "copilotDigest"
+  | "customer"
+  | "delivery"
+  | "deliveryEvent"
+  | "driverRoute"
+  | "guestBrowserCart"
+  | "ingredient"
+  | "ingredientSynonym"
+  | "issueReport"
+  | "listing"
+  | "listingAttributes"
+  | "listingDraft"
+  | "listingImport"
+  | "listingIngredient"
+  | "listingVariant"
+  | "notificationLog"
+  | "order"
+  | "orderLine"
+  | "ownerReport"
+  | "ownerReportItem"
+  | "paymentIntentRelease"
+  | "pickBatch"
+  | "platformSettings"
+  | "pushSubscription"
+  | "refundRequest"
+  | "reorderList"
+  | "reorderListItem"
+  | "stockEvent"
+  | "stockProposal"
+  | "storeCoupon"
+  | "storeSubscription"
+  | "substitutionRequest"
+  | "supportMessage"
+  | "supportThread"
+  | "$queryRaw"
+  | "$executeRaw";
+
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "driverRoute" | "pickBatch" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "storeCoupon" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, StoreScopedTxModels>) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
