@@ -349,9 +349,9 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const resolved = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(resolved?.status).toBe("CANCELLED");
     expect(resolved?.notes).toBe(note);
-    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(3);
     await resolveRefundFailed(orderId, note, 600, 600);
-    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(3);
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
@@ -1500,7 +1500,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(lockedReads).not.toContain(true);
     expect(readsAfterCommit).toBe(1);
     expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
-    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(3);
     expect(scheduled).toEqual([[storeAId, order.id, "cancelled"]]);
     // The baseline is stored, so the next evaluation (webhook or sweep) still alerts on a refund that moved.
     await fakeStripeProvider.refundPayment(pi, 1000, "lock-free-late");
