@@ -162,6 +162,9 @@ export type FakeTaxCall =
 export function fakeTaxCalculator(rates: FakeTaxRates = {}): TaxCalculator & { calls: FakeTaxCall[] } {
   const calls: FakeTaxCall[] = [];
   const transactions = new Map<string, string>();
+  // Each calculation lives on the account that made it: the store's when it is liable, else the platform's.
+  const calculations = new Map<string, string | null>();
+  const account = (input: { liableParty: TaxLiableParty; stripeAccount: string | null }) => (input.liableParty === "store" ? input.stripeAccount : null);
   let next = 0;
   const collecting = Object.keys(rates).length > 0;
   return {
@@ -182,10 +185,15 @@ export function fakeTaxCalculator(rates: FakeTaxRates = {}): TaxCalculator & { c
         };
       });
       next += 1;
-      return { id: `taxcalc_fake_${next}`, taxCents: lines.reduce((sum, line) => sum + line.amount, 0), lines };
+      const id = `taxcalc_fake_${next}`;
+      calculations.set(id, account(input));
+      return { id, taxCents: lines.reduce((sum, line) => sum + line.amount, 0), lines };
     },
     async recordTransaction(input) {
       calls.push({ kind: "transaction", input });
+      if (!calculations.has(input.calculationId) || calculations.get(input.calculationId) !== account(input)) {
+        throw new Error(`No such tax calculation: '${input.calculationId}'`);
+      }
       const existing = transactions.get(input.reference);
       if (existing) return { id: existing };
       const id = `tax_txn_fake_${transactions.size + 1}`;
