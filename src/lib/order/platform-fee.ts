@@ -39,13 +39,18 @@ export function discountedGoodsCents(goodsCents: number, coupon?: CouponTerms | 
 }
 
 /**
- * The most goods whose total with the service fee fits `budgetCents`, after the coupon discount when
- * there is one (#557). Neither the discounted goods nor the fee ever fall as goods rise.
+ * The most goods whose total with the service fee, and the tax reserved on them (#65), fits
+ * `budgetCents`, after the coupon discount when there is one (#557). None of these falls as goods rise.
  */
-export function maxGoodsWithin(budgetCents: number, settings: ServiceFeeSettings, coupon?: CouponTerms | null): number {
+export function maxGoodsWithin(
+  budgetCents: number,
+  settings: ServiceFeeSettings,
+  coupon?: CouponTerms | null,
+  taxReserveCents: (netGoodsCents: number) => number = () => 0,
+): number {
   const charged = (goods: number) => {
     const net = discountedGoodsCents(goods, coupon);
-    return net + serviceFeeCents(net, settings);
+    return net + serviceFeeCents(net, settings) + taxReserveCents(net);
   };
   let low = 0;
   // A discount lets goods above the budget fit; a 90% coupon at most multiplies them by ten.

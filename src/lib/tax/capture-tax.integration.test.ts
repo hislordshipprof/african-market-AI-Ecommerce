@@ -4,16 +4,17 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { capturedPayments, fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
-import { markReady } from "../order/service";
-import { fakeTaxCalculator, setTaxCalculatorForTests, TaxUnavailableError, type FakeTaxCall } from "./calculator";
+import { markLineShort, markReady } from "../order/service";
+import { resolveSubstitutionByToken } from "../order/substitution";
+import { fakeTaxCalculator, setTaxCalculatorForTests, TaxUnavailableError, type FakeTaxCall, type TaxLine } from "./calculator";
 import { recordPendingTaxTransactions } from "./capture-tax";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t65c-${Date.now().toString(36)}`;
 const RATES = { TX: { rate: 0.0825, exemptCodes: ["txcd_40040000"] } };
 
-type LineSpec = { price: number; qty: number; status: "picked" | "refunded"; qtyPicked: number };
-type OrderSpec = { lines: LineSpec[]; taxCents: number; taxCalculationId: string | null; holdCents?: number; couponId?: string };
+type LineSpec = { price: number; qty: number; status: "picked" | "refunded" | "pending"; qtyPicked: number; food?: boolean; substitutePrice?: number };
+type OrderSpec = { lines: LineSpec[]; taxCents: number; taxCalculationId: string | null; holdCents?: number; couponId?: string; taxLines?: TaxLine[] };
 
 function calls(fake: { calls: FakeTaxCall[] }, kind: FakeTaxCall["kind"]) {
   return fake.calls.filter((call) => call.kind === kind).map((call) => call.input);
@@ -27,6 +28,8 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
   const customers = new Map<string, string>();
   let seq = 0;
   let ownerId = "";
+  let foodCategoryId = "";
+  let foodMasterId = "";
 
   async function newStore(slug: string, liable: "platform" | "store") {
     const store = await raw.store.create({
@@ -54,23 +57,31 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
           storeId: inStore, number: seq, customerId: customers.get(inStore)!, status: "PICKING",
           subtotalCents: subtotal, bufferCents: hold - subtotal - spec.taxCents, totalAuthorizedCents: hold,
           totalCents: subtotal + spec.taxCents, paymentIntentId, acceptedAt: new Date(),
-          taxCents: spec.taxCents, taxCalculationId: spec.taxCalculationId, taxLiableParty: liable,
+          taxCents: spec.taxCents, taxCalculationId: spec.taxCalculationId, taxLiableParty: liable, taxLines: spec.taxLines ?? [],
           couponId: spec.couponId ?? null,
           trackingToken: `tok_${RUN}_${seq}_${"x".repeat(20)}`,
         },
       });
       const lineIds: string[] = [];
       for (const [index, line] of spec.lines.entries()) {
-        const listing = await tx.listing.create({ data: { storeId: inStore, customName: `Item ${seq}-${index}`, price: line.price, stockMode: "untracked" } });
+        const listing = await tx.listing.create({
+          data: { storeId: inStore, customName: `Item ${seq}-${index}`, price: line.price, stockMode: "untracked", masterProductId: line.food ? foodMasterId : null },
+        });
         const variant = await tx.listingVariant.create({ data: { listingId: listing.id, label: "1 unit", price: line.price, weightG: 100 } });
+        let substituteVariantId: string | null = null;
+        if (line.substitutePrice != null) {
+          const other = await tx.listing.create({ data: { storeId: inStore, customName: `Swap ${seq}-${index}`, price: line.substitutePrice, stockMode: "counted", qty: 10 } });
+          substituteVariantId = (await tx.listingVariant.create({ data: { listingId: other.id, label: "1 unit", price: line.substitutePrice, weightG: 100 } })).id;
+        }
         lineIds.push((await tx.orderLine.create({
           data: {
             storeId: inStore, orderId: row.id, listingVariantId: variant.id, qtyOrdered: line.qty,
-            qtyPicked: line.qtyPicked, unitPriceCents: line.price, status: line.status, swapRule: "exact_only",
+            qtyPicked: line.qtyPicked, unitPriceCents: line.price, status: line.status,
+            swapRule: substituteVariantId ? "named_substitute" : "exact_only", substituteVariantId,
           },
         })).id);
       }
-      return { id: row.id, lineIds };
+      return { id: row.id, token: row.trackingToken!, lineIds };
     });
     setAuthorizedAmount(paymentIntentId, hold);
     return { ...created, paymentIntentId, hold };
@@ -83,6 +94,10 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
   beforeAll(async () => {
     raw = testPrismaClient();
     setStripeProvider(fakeStripeProvider);
+    await platformAdminTransaction(async (tx) => {
+      foodCategoryId = (await tx.category.create({ data: { name: `Food ${RUN}`, slug: `food-${RUN}`, sortOrder: 99, taxCode: "txcd_40040000" } })).id;
+      foodMasterId = (await tx.masterProduct.create({ data: { name: `Yam ${RUN}`, categoryId: foodCategoryId } })).id;
+    });
     storeId = await newStore(`tax-${RUN}`, "platform");
     liableStoreId = await newStore(`tax-liable-${RUN}`, "store");
   });
@@ -96,6 +111,7 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
     for (const id of storeIds) {
       const scoped = storeScoped(id);
       await scoped.notificationLog.deleteMany({});
+      await scoped.substitutionRequest.deleteMany({});
       await scoped.stockEvent.deleteMany({});
       await scoped.orderLine.deleteMany({});
       await scoped.order.deleteMany({});
@@ -106,6 +122,10 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
     }
     await platformAdminTransaction(async (tx) => {
       await tx.auditLog.deleteMany({ where: { storeId: { in: storeIds } } });
+    });
+    await platformAdminTransaction(async (tx) => {
+      await tx.masterProduct.deleteMany({ where: { id: foodMasterId } });
+      await tx.category.deleteMany({ where: { id: foodCategoryId } });
     });
     await raw.store.deleteMany({ where: { id: { in: storeIds } } });
     if (ownerId) await raw.user.deleteMany({ where: { id: ownerId } });
@@ -266,5 +286,42 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
     expect(await markReady(storeId, placed.id)).toEqual({ ok: false, error: "Order changed during capture, try again" });
     expect(capturedPayments.has(placed.paymentIntentId)).toBe(false);
     expect(await stored(placed.id)).toMatchObject({ status: "PICKING" });
+  });
+  /** Marks the line short with `found` units and returns its prompt's offer. */
+  async function shortOne(placed: Awaited<ReturnType<typeof order>>, lineIndex: number, found: number) {
+    expect(await markLineShort(storeId, placed.lineIds[lineIndex], found)).toMatchObject({ ok: true });
+    return storeScoped(storeId).substitutionRequest.findUniqueOrThrow({ where: { orderLineId: placed.lineIds[lineIndex] } });
+  }
+
+  const TX_TAXED: TaxLine = { amount: 0, rate: "8.25", jurisdiction: "TX", taxabilityReason: "standard_rated" };
+
+  it("a swap is offered only while the goods with their final tax fit the hold; the dearest one offered captures within it", async () => {
+    setTaxCalculatorForTests(fakeTaxCalculator(RATES));
+    // 2 x $10.00 taxed 165; hold 2000 + 165 + 217 = 2382. One unit short.
+    // A $12.01 swap: goods 2201 + tax 182 = 2383, over the hold.
+    const over = await order({ taxCents: 165, taxCalculationId: "taxcalc_checkout", taxLines: [{ ...TX_TAXED, amount: 165 }], lines: [{ price: 1000, qty: 2, status: "pending", qtyPicked: 0, substitutePrice: 1201 }] });
+    expect(over.hold).toBe(2382);
+    expect((await shortOne(over, 0, 1)).proposedVariantId).toBeNull();
+
+    // A $11.99 swap: goods 2199 + tax 181 = 2380.
+    const within = await order({ taxCents: 165, taxCalculationId: "taxcalc_checkout", taxLines: [{ ...TX_TAXED, amount: 165 }], lines: [{ price: 1000, qty: 2, status: "pending", qtyPicked: 0, substitutePrice: 1199 }] });
+    const offer = await shortOne(within, 0, 1);
+    expect(offer.proposedUnitPriceCents).toBe(1199);
+    expect(await resolveSubstitutionByToken(storeId, within.token, offer.id, "swap")).toEqual({ ok: true, orderStatus: "PICKING" });
+    expect(await markReady(storeId, within.id)).toEqual({ ok: true, capturedAmountCents: 2380 });
+    expect(capturedPayments.get(within.paymentIntentId)).toBe(2380);
+  });
+
+  it("the tax kept back for a swap is at the highest rate on the order, not the basket's average", async () => {
+    setTaxCalculatorForTests(fakeTaxCalculator(RATES));
+    // $20.00 of exempt food and a $10.00 taxed line (83): hold 3000 + 83 + 308 = 3391. The taxed line is short.
+    // A $12.90 swap fits at the average rate (2.8%), but is taxed 106 at 8.25%: 2000 + 1290 + 106 = 3396.
+    const placed = await order({
+      taxCents: 83, taxCalculationId: "taxcalc_checkout",
+      taxLines: [{ amount: 0, rate: "0", jurisdiction: "TX", taxabilityReason: "product_exempt" }, { ...TX_TAXED, amount: 83 }],
+      lines: [{ price: 2000, qty: 1, status: "picked", qtyPicked: 1, food: true }, { price: 1000, qty: 1, status: "pending", qtyPicked: 0, substitutePrice: 1290 }],
+    });
+    expect(placed.hold).toBe(3391);
+    expect((await shortOne(placed, 1, 0)).proposedVariantId).toBeNull();
   });
 });
