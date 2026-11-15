@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { listAttributeProposals, listReviewProducts, getReviewStats } from "@/lib/admin/catalog-actions";
+import { listCatalogCategories } from "@/lib/admin/master-catalog";
+import { listProductProposals } from "@/lib/admin/product-proposals";
 import { AttributeProposals } from "./attribute-proposals";
+import { ProductProposals } from "./product-proposals";
 import { ReviewTable } from "./review-table";
 
 export const metadata = { title: "Catalog Review — Platform Admin" };
@@ -12,10 +15,12 @@ export default async function CatalogReviewPage(props: {
   const page = Math.max(1, parseInt(searchParams.page ?? "1", 10) || 1);
   const status = searchParams.status ?? "needs_review";
 
-  const [data, stats, proposals] = await Promise.all([
+  const [data, stats, proposals, suggestions, categories] = await Promise.all([
     listReviewProducts({ status, page, pageSize: 25 }),
     getReviewStats(),
     listAttributeProposals(),
+    listProductProposals(),
+    status === "suggestions" ? listCatalogCategories() : Promise.resolve([]),
   ]);
 
   const tabs = [
@@ -23,6 +28,7 @@ export default async function CatalogReviewPage(props: {
     { key: "active", label: "Active", count: stats.active },
     { key: "rejected", label: "Rejected", count: stats.rejected },
     { key: "attributes", label: "Attributes", count: proposals.length },
+    { key: "suggestions", label: "Store suggestions", count: suggestions.length },
   ];
 
   return (
@@ -39,12 +45,12 @@ export default async function CatalogReviewPage(props: {
       </div>
 
       {/* Status tabs */}
-      <div className="mb-6 flex gap-1 rounded-xl border border-border bg-muted p-1">
+      <div className="mb-6 flex flex-wrap gap-1 rounded-xl border border-border bg-muted p-1">
         {tabs.map((tab) => (
           <Link
             key={tab.key}
             href={`/admin/catalog/review?status=${tab.key}`}
-            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               status === tab.key
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -64,6 +70,8 @@ export default async function CatalogReviewPage(props: {
 
       {status === "attributes" ? (
         <AttributeProposals proposals={proposals} />
+      ) : status === "suggestions" ? (
+        <ProductProposals proposals={suggestions} categories={categories} />
       ) : (
         <ReviewTable
           products={data.products}

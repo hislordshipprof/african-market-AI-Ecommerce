@@ -242,7 +242,7 @@ describe.skipIf(!hasDb)("photo-to-listing drafts (real auth, lane database)", ()
 
     // A price read from the tag is not a confirm.
     const unconfirmed = await publishListingDrafts({ picks: [{ draftId: ogbono.id, priceCents: 499, priceConfirmed: false }] });
-    expect(unconfirmed).toEqual({ ok: true, result: { listingIds: [], refused: [{ draftId: ogbono.id, reason: "price_not_confirmed" }] } });
+    expect(unconfirmed).toEqual({ ok: true, result: { listingIds: [], refused: [{ draftId: ogbono.id, reason: "price_not_confirmed" }], proposed: 0 } });
     expect(await storeScoped(storeAId).listing.count()).toBe(listingsBefore);
 
     asStore(slugA, cookies.staff);
@@ -276,7 +276,7 @@ describe.skipIf(!hasDb)("photo-to-listing drafts (real auth, lane database)", ()
 
     // Publishing the same draft again creates nothing.
     const again = await publishListingDrafts({ picks: [{ draftId: ogbono.id, priceCents: 499, priceConfirmed: true }] });
-    expect(again).toEqual({ ok: true, result: { listingIds: [], refused: [{ draftId: ogbono.id, reason: "not_found" }] } });
+    expect(again).toEqual({ ok: true, result: { listingIds: [], refused: [{ draftId: ogbono.id, reason: "not_found" }], proposed: 0 } });
 
     const picked = await publishListingDrafts({
       picks: [
@@ -315,7 +315,7 @@ describe.skipIf(!hasDb)("photo-to-listing drafts (real auth, lane database)", ()
     const draft = (await draftsOf()).find((row) => row.match === "already_listed")!;
     asStore(slugB, cookies.outsider);
     const result = await publishListingDrafts({ picks: [{ draftId: draft.id, priceCents: 500, priceConfirmed: true }] });
-    expect(result).toEqual({ ok: true, result: { listingIds: [], refused: [{ draftId: draft.id, reason: "not_found" }] } });
+    expect(result).toEqual({ ok: true, result: { listingIds: [], refused: [{ draftId: draft.id, reason: "not_found" }], proposed: 0 } });
     expect(await dismissListingDrafts({ draftIds: [draft.id] })).toEqual({ ok: true, count: 0 });
     expect(await listPendingDrafts(storeBId)).toEqual([]);
     expect(await storeScoped(storeBId).listingDraft.findUnique({ where: { id: draft.id } })).toBeNull();

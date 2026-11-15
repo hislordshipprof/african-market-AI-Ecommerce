@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { proposalInputSchema } from "../catalog/product-proposals";
 import { FIXED_ERROR } from "../copilot/types";
 import { DELIVERY_PROOF_MAX_BYTES } from "../order/delivery-proof";
 import { parseInput } from "../security/parse-input";
@@ -21,6 +22,7 @@ const publishSchema = z.strictObject({
     priceCents: z.number().int(),
     priceConfirmed: z.boolean(),
     masterProductId: z.string().min(1).max(200).nullable().optional(),
+    proposal: proposalInputSchema.optional(),
   })).min(1).max(200),
 });
 const dismissSchema = z.strictObject({ draftIds: z.array(z.string().min(1).max(200)).min(1).max(200) });
