@@ -9,7 +9,7 @@ import { storeScoped } from "../../db";
 import { itemHandles } from "../handles";
 import { usdMentions } from "./money";
 import { adjustTicketSpend, tryReserveTicket } from "./report";
-import { bindingFromFixture, scoreCase, type CatalogBinding, type ObservedTool, type TextBlock } from "./score";
+import { bindingFromFixture, quantityScore, scoreCase, type CatalogBinding, type ObservedTool, type TextBlock } from "./score";
 import {
   createEvalStores,
   deleteOwnedStores,
@@ -574,8 +574,7 @@ async function scoreAttempt(args: {
       substituteVariantKey: substitute?.key ?? null,
     };
   });
-  const quantityChecks = args.evalCase.qty?.length ?? 0;
-  const quantityHits = (args.evalCase.qty ?? []).filter((rule) => cart.some((line) => line.key === rule.listingKey && line.variantKey === rule.variantKey && line.qty >= rule.min && line.qty <= rule.max)).length;
+  const { checks: quantityChecks, hits: quantityHits } = quantityScore(args.evalCase, cart);
   const tools = toolsFromMessages(args.messages);
   // Streamed calls name item handles; saved calls keep ids, so compare them as ids.
   const handles = itemHandles(args.storeId, conversation.id);
@@ -953,7 +952,7 @@ function blankCase(evalCase: EvalCase): CaseResult {
     steps: 0,
     stepLimitHit: false,
     toolInputErrors: 0,
-    quantityChecks: evalCase.qty?.length ?? 0,
+    quantityChecks: quantityScore(evalCase, []).checks,
     quantityHits: 0,
     gapRequired: evalCase.gaps.length > 0,
     dish: evalCase.dish != null,

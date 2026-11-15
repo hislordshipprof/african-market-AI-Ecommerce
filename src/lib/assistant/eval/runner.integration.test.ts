@@ -285,40 +285,46 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
 
   it("reads evidence as app_runtime and denies another store read and write", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
-    const result = await run([evalCase({
-      id: "role-check",
-      category: "single-item",
-      turns: ["Add 1 garri."],
-      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
-      mayHave: [],
-      gaps: [],
-    })], listings, (ctx) => scripted(ctx, (current) => [{
-      kind: "tool",
-      toolName: "add_to_cart",
-      toolInput: { items: [{ variant_id: current.binding.byVariantKey.get("garri-pack")?.id ?? "", qty: 1 }] },
-    }, { kind: "text", text: "Added." }]), {
-      cleanup: async (stores) => {
-        leftover.push(stores);
-        expect(await platformSessionUser()).toBe("app_runtime");
-        const hidden = await storeScoped(stores.storeAId).listing.findMany({ where: { storeId: stores.storeBId } });
-        expect(hidden).toEqual([]);
-        await expect(storeScoped(stores.storeAId).listing.create({
-          data: {
-            storeId: stores.storeBId,
-            masterProductId: "garri-white",
-            price: 100,
-            stockMode: "unlimited",
-            confidence: 1,
-            active: true,
-            frozen: false,
-            perishable: false,
-          },
-        })).rejects.toThrow();
-        await deleteOwnedStores(stores);
-        leftover.pop();
-      },
-    });
-    expect(result.result.sessionUser).toBe("app_runtime");
+    let held: CreatedEvalStores | null = null;
+    try {
+      const result = await run([evalCase({
+        id: "role-check",
+        category: "single-item",
+        turns: ["Add 1 garri."],
+        mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+        mayHave: [],
+        gaps: [],
+      })], listings, (ctx) => scripted(ctx, (current) => [{
+        kind: "tool",
+        toolName: "add_to_cart",
+        toolInput: { items: [{ variant_id: current.binding.byVariantKey.get("garri-pack")?.id ?? "", qty: 1 }] },
+      }, { kind: "text", text: "Added." }]), {
+        cleanup: async (stores) => {
+          held = stores;
+        },
+      });
+      expect(result.result.sessionUser).toBe("app_runtime");
+      expect(result.result.cleanupError).toBeNull();
+      const stores = held as CreatedEvalStores | null;
+      if (!stores) throw new Error("The run never created its stores.");
+      expect(await platformSessionUser()).toBe("app_runtime");
+      const hidden = await storeScoped(stores.storeAId).listing.findMany({ where: { storeId: stores.storeBId } });
+      expect(hidden).toEqual([]);
+      await expect(storeScoped(stores.storeAId).listing.create({
+        data: {
+          storeId: stores.storeBId,
+          masterProductId: "garri-white",
+          price: 100,
+          stockMode: "unlimited",
+          confidence: 1,
+          active: true,
+          frozen: false,
+          perishable: false,
+        },
+      })).rejects.toThrow();
+    } finally {
+      if (held) await deleteOwnedStores(held);
+    }
   }, 90_000);
 
   it("scores every nested id field and invalid-schema calls without relying on audit rows", async () => {
@@ -736,7 +742,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(result.result.spendMicros > BigInt(0)).toBe(true);
     expect(result.result.complete).toBe(false);
     expect(result.result.incompleteReason).toBe("billing");
-    const published = publishEvalReport(sampleReport(result.result.cases), false, null, {
+    const published = publishEvalReport(sampleReport(result.result.cases, result.result), true, null, {
       committed: join(mkdtempSync(join(tmpdir(), "eval-report-")), "report.json"),
       partial: join(tmpdir(), `eval-partial-${Date.now()}.json`),
     });
@@ -762,7 +768,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     const dir = mkdtempSync(join(tmpdir(), "eval-truncated-"));
     const committed = join(dir, "report.json");
     writeFileSync(committed, "{\"keep\":true}\n");
-    const published = publishEvalReport(sampleReport(result.result.cases), true, result.result.cleanupError, {
+    const published = publishEvalReport(sampleReport(result.result.cases, result.result), true, result.result.cleanupError, {
       committed,
       partial: join(dir, "partial.json"),
     });
@@ -1093,6 +1099,43 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(saved.micros).toBe("150101");
   }, 90_000);
 
+  it("a finished stream that omits usage keeps the reserve instead of counting as free", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    const dir = mkdtempSync(join(tmpdir(), "eval-ticket-"));
+    const ticket = join(dir, "ticket-spend.json");
+    writeFileSync(ticket, "{\"schemaVersion\":1,\"micros\":\"0\",\"usd\":\"0.000000\"}\n");
+    const fake = createFakeAnthropicFetch({
+      expectedKey: KEY,
+      steps: [{ kind: "tool", toolName: "search_catalog", toolInput: { query: "garri" }, inputTokens: 1000, outputTokens: 2 }],
+    });
+    let calls = 0;
+    const result = await run([evalCase({
+      id: "omitted-usage",
+      category: "single-item",
+      turns: ["Add garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    })], listings, () => async (input, init) => {
+      calls += 1;
+      if (calls === 1) return fake.fetch(input, init);
+      return new Response([
+        { type: "message_start", message: { id: "msg_no_usage", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [], stop_reason: null } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Added." } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        { type: "message_stop" },
+      ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+    }, { maxAttempts: 1, ticketSpendPath: ticket });
+    const saved = JSON.parse(readFileSync(ticket, "utf8")) as { micros: string };
+    expect(calls).toBe(2);
+    expect(result.result.spendMicros).toBe(BigInt(101));
+    expect(result.result.unresolvedSpend).toBe(true);
+    expect(result.result.complete).toBe(false);
+    expect(saved.micros).toBe("150101");
+  }, 90_000);
+
   it("records a truncated attempt's measured cost without also keeping the reserve", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
     const dir = mkdtempSync(join(tmpdir(), "eval-ticket-"));
@@ -1200,21 +1243,25 @@ function emptyBinding(): CatalogBinding {
   };
 }
 
-function sampleReport(cases: NonNullable<Awaited<ReturnType<typeof runEval>>["result"]["cases"]>) {
+type EvalResult = Awaited<ReturnType<typeof runEval>>["result"];
+
+/** Publishable unless the run passed in says otherwise, so each test's refusal comes from the guard it names. */
+function sampleReport(cases: EvalResult["cases"], run: Partial<EvalResult> = {}) {
   return buildReport({
     result: {
-      complete: false,
-      incompleteReason: "test",
-      cases,
+      complete: true,
+      incompleteReason: null,
       sessionUser: "app_runtime",
       spendMicros: BigInt(1),
       droppedMicros: BigInt(0),
-      unresolvedSpend: true,
+      unresolvedSpend: false,
       ledgerDeltaMicros: BigInt(1),
       conversationMicros: BigInt(1),
       inputTokens: 1,
       outputTokens: 1,
-      cleanupError: "cleanup failed",
+      cleanupError: null,
+      ...run,
+      cases,
     },
     fingerprint: fingerprintFromParts({
       staticPrompt: "x",

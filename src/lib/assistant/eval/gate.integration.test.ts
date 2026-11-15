@@ -1,10 +1,12 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { createFakeAnthropicFetch } from "../messages-api-double";
 import { canonicalJson } from "./canonical";
 import { assessOfficial, assessReport, checkCommittedEval } from "./gate";
 import { formatUsdFromMicros } from "./money";
-import { officialReport, summarize } from "./report";
-import { scoreCase, type CatalogBinding, type ObservedTool, type ScoreOutput } from "./score";
+import { REPORT_PATH, loadDataset } from "./dataset";
+import { officialReport, summarize, type OfficialEvalReport } from "./report";
+import { quantityScore, scoreCase, type CatalogBinding, type ObservedTool, type ScoreOutput } from "./score";
 import { fingerprintFromParts, type Fingerprint } from "./fingerprint";
 import type { EvalReport } from "./report";
 import type { CartSnapshotLine, CaseResult, EvalCase } from "./types";
@@ -724,6 +726,21 @@ describe("shopper assistant eval gate", () => {
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
     vi.unstubAllEnvs();
+  }, 180_000);
+
+  it.skipIf(!hasDb)("accepts the committed runs re-scored with the runner's quantityScore", async () => {
+    const committed = JSON.parse(readFileSync(REPORT_PATH, "utf8")) as OfficialEvalReport;
+    const cases = loadDataset() as EvalCase[];
+    const runs = committed.runs.map((run) => {
+      const rescored = run.cases.map((item) => {
+        const { checks, hits } = quantityScore(cases.find((spec) => spec.id === item.id)!, item.finalCart);
+        return { ...item, quantityChecks: checks, quantityHits: hits };
+      });
+      return { ...run, cases: rescored, summary: summarize(rescored) };
+    });
+    const fake = createFakeAnthropicFetch({ expectedKey: "sk-ant-test", steps: [{ kind: "text", text: "probe" }] });
+    const verdict = await checkCommittedEval({ reportText: JSON.stringify(officialReport(runs)), fetch: fake.fetch });
+    expect(verdict.reasons).toEqual([]);
   }, 180_000);
 
   it.skipIf(!hasDb)("uses only the injected fake under hosted CI and with inherited local live flags", async () => {

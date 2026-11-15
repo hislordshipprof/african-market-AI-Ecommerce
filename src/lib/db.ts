@@ -332,6 +332,7 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "aiReviewFlag",
   "attributeProposal",
   "auditLog",
+  "catalogDuplicatePair",
   "category",
   "copilotConversation",
   "courierIncidentNote",
@@ -1418,6 +1419,134 @@ export async function productSynonymsWithSharedNames(
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
+}
+
+
+/** Serialises catalog duplicate scans for the rest of the transaction (#542). */
+export async function lockDuplicateScan(tx: RawTx): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('catalog_duplicate_scan'))`;
+}
+
+export type DuplicateCandidate = { a_id: string; b_id: string; sim: number; shared: number; score: number };
+
+/**
+ * Candidate duplicate pairs (#542): active or in-review products in the same category whose names are
+ * alike (ADR-0022 trigram similarity) or that share a name or synonym, compared whole and case-folded.
+ * A pair already dismissed or merged is left out. Best first: name similarity plus 0.15 per shared term, up to 3.
+ */
+export async function duplicateCandidates(tx: RawTx, minSimilarity: number, max: number): Promise<DuplicateCandidate[]> {
+  return tx.$queryRaw<DuplicateCandidate[]>`
+    WITH live AS (
+      SELECT id, name, category_id FROM master_products
+      WHERE status IN ('active', 'needs_review') AND category_id IS NOT NULL
+    ),
+    terms AS (
+      SELECT l.id, LOWER(ps.term) AS t FROM live l JOIN product_synonyms ps ON ps.product_id = l.id
+      UNION SELECT id, LOWER(name) FROM live
+    ),
+    shared AS (
+      SELECT a.id AS a_id, b.id AS b_id, COUNT(DISTINCT ta.t)::int AS shared
+      FROM live a
+      JOIN live b ON b.category_id = a.category_id AND a.id < b.id
+      JOIN terms ta ON ta.id = a.id
+      JOIN terms tb ON tb.id = b.id AND tb.t = ta.t
+      GROUP BY a.id, b.id
+    ),
+    pairs AS (
+      SELECT a.id AS a_id, b.id AS b_id, search_similarity(LOWER(a.name), LOWER(b.name)) AS sim, COALESCE(s.shared, 0) AS shared
+      FROM live a
+      JOIN live b ON b.category_id = a.category_id AND a.id < b.id
+      LEFT JOIN shared s ON s.a_id = a.id AND s.b_id = b.id
+    )
+    SELECT p.a_id, p.b_id, p.sim, p.shared, (p.sim + 0.15 * LEAST(p.shared, 3))::real AS score
+    FROM pairs p
+    WHERE (p.sim >= ${minSimilarity} OR p.shared > 0)
+      AND NOT EXISTS (
+        SELECT 1 FROM catalog_duplicate_pairs d
+        WHERE d.product_a_id = p.a_id AND d.product_b_id = p.b_id AND d.status <> 'open'
+      )
+    ORDER BY score DESC, p.a_id, p.b_id
+    LIMIT ${max}
+  `;
+}
+
+/** Open pairs become exactly the candidates; a pair already judged keeps its verdict. */
+export async function replaceOpenDuplicatePairs(tx: RawTx, candidates: DuplicateCandidate[]): Promise<void> {
+  const aIds = candidates.map((row) => row.a_id);
+  const bIds = candidates.map((row) => row.b_id);
+  await tx.$executeRaw`
+    DELETE FROM catalog_duplicate_pairs d
+    WHERE d.status = 'open'
+      AND NOT EXISTS (SELECT 1 FROM unnest(${aIds}::text[], ${bIds}::text[]) AS c(a, b) WHERE c.a = d.product_a_id AND c.b = d.product_b_id)
+  `;
+  // Key-share locks hold the products until commit; one deleted since the candidate read is skipped.
+  await tx.$executeRaw`
+    WITH kept AS (SELECT id FROM master_products WHERE id = ANY(${[...aIds, ...bIds]}::text[]) FOR KEY SHARE)
+    INSERT INTO catalog_duplicate_pairs (id, product_a_id, product_b_id, name_similarity, shared_terms, score, updated_at)
+    SELECT gen_random_uuid()::text, c.a, c.b, c.sim, c.shared, c.score, now()
+    FROM unnest(${aIds}::text[], ${bIds}::text[], ${candidates.map((row) => row.sim)}::real[],
+      ${candidates.map((row) => row.shared)}::int[], ${candidates.map((row) => row.score)}::real[]) AS c(a, b, sim, shared, score)
+    WHERE c.a IN (SELECT id FROM kept) AND c.b IN (SELECT id FROM kept)
+    ON CONFLICT (product_a_id, product_b_id) DO UPDATE
+      SET name_similarity = EXCLUDED.name_similarity, shared_terms = EXCLUDED.shared_terms, score = EXCLUDED.score, updated_at = now()
+  `;
+}
+
+/** Writes verdicts onto open pairs that have none yet. */
+export async function writeDuplicateVerdicts(tx: RawTx, verdicts: Array<{ id: string; verdict: string; reason: string }>): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE catalog_duplicate_pairs d
+    SET verdict = v.verdict, verdict_reason = v.reason, judged_at = now(), updated_at = now()
+    FROM unnest(${verdicts.map((row) => row.id)}::text[], ${verdicts.map((row) => row.verdict)}::text[], ${verdicts.map((row) => row.reason)}::text[]) AS v(id, verdict, reason)
+    WHERE d.id = v.id AND d.status = 'open' AND d.verdict IS NULL
+  `;
+}
+
+/** Listings per store for each master product; platform-admin transactions only. */
+export async function listingCountsByStore(tx: RawTx, productIds: string[]) {
+  return tx.$queryRaw<Array<{ product_id: string; store_id: string; store_name: string; listings: number }>>`
+    SELECT l.master_product_id AS product_id, s.id AS store_id, s.name AS store_name, COUNT(*)::int AS listings
+    FROM listings l JOIN stores s ON s.id = l.store_id
+    WHERE l.master_product_id = ANY(${productIds}::text[])
+    GROUP BY l.master_product_id, s.id, s.name
+    ORDER BY s.name, s.id
+  `;
+}
+
+/** Adds the source product's ingredient links to the target, skipping links it already has. */
+export async function copyMasterProductIngredients(tx: RawTx, fromId: string, toId: string): Promise<void> {
+  await tx.$executeRaw`
+    INSERT INTO master_product_ingredients (product_id, ingredient_id)
+    SELECT ${toId}, ingredient_id FROM master_product_ingredients WHERE product_id = ${fromId}
+    ON CONFLICT DO NOTHING
+  `;
+}
+
+/** Moves every listing of one master product to another, in every store. Nothing is deleted. */
+export async function repointListings(tx: RawTx, fromId: string, toId: string) {
+  return tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+    UPDATE listings SET master_product_id = ${toId}, updated_at = now()
+    WHERE master_product_id = ${fromId}
+    RETURNING id, store_id
+  `;
+}
+
+export async function repointRecipeIngredients(tx: RawTx, fromId: string, toId: string) {
+  return tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE recipe_ingredients SET master_product_id = ${toId} WHERE master_product_id = ${fromId} RETURNING id
+  `;
+}
+
+/** Pending shelf-photo drafts matched to, or offering, the source product now point at the target. */
+export async function repointPendingListingDrafts(tx: RawTx, fromId: string, toId: string) {
+  return tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE listing_drafts
+    SET master_product_id = CASE WHEN master_product_id = ${fromId} THEN ${toId} ELSE master_product_id END,
+      candidate_ids = ARRAY(SELECT DISTINCT unnest(array_replace(candidate_ids, ${fromId}, ${toId}))),
+      updated_at = now()
+    WHERE status = 'pending' AND (master_product_id = ${fromId} OR ${fromId} = ANY(candidate_ids))
+    RETURNING id
+  `;
 }
 
 /**
