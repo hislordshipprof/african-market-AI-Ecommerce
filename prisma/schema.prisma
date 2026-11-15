@@ -100,6 +100,7 @@ model Store {
   ownerReports          OwnerReport[]
   ownerReportItems      OwnerReportItem[]
   listingDrafts         ListingDraft[]
+  productProposals      ProductProposal[]
   reorderLists          ReorderList[]
   reorderListItems      ReorderListItem[]
   notificationLogs      NotificationLog[]
@@ -175,6 +176,8 @@ model User {
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
   listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
   listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  productProposals        ProductProposal[]        @relation("ProductProposalProposer")
+  productProposalReviews  ProductProposal[]        @relation("ProductProposalReviewer")
   storeCouponsCreated     StoreCoupon[]
   reorderLists            ReorderList[]            @relation("ReorderListSaver")
 
@@ -413,6 +416,7 @@ model Category {
   parent         Category?       @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
   children       Category[]      @relation("CategoryTree")
   masterProducts MasterProduct[]
+  productProposals ProductProposal[]
 
   @@index([parentId])
   @@map("categories")
@@ -451,6 +455,7 @@ model MasterProduct {
   attributeProposals AttributeProposal[]
   recipeIngredients  RecipeIngredient[]
   listingDrafts      ListingDraft[]
+  productProposals   ProductProposal[]
 
   @@index([categoryId])
   @@index([status])
@@ -556,6 +561,7 @@ model Listing {
   ownerReportItems  OwnerReportItem[]
   draftsListedAs    ListingDraft[]           @relation("ListingDraftExisting")
   draftsPublishedAs ListingDraft[]           @relation("ListingDraftPublished")
+  productProposal   ProductProposal?
   reorderListItems  ReorderListItem[]
   collectionItems   StoreCollectionListing[]
   attributes        ListingAttributes?
@@ -888,6 +894,7 @@ model ListingDraft {
   masterProduct   MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
   existingListing Listing?       @relation("ListingDraftExisting", fields: [existingListingId], references: [id], onDelete: SetNull)
   listing         Listing?       @relation("ListingDraftPublished", fields: [listingId], references: [id], onDelete: Restrict)
+  productProposal ProductProposal?
 
   @@index([storeId, status, createdAt])
   @@index([createdById])
@@ -896,6 +903,48 @@ model ListingDraft {
   @@index([existingListingId])
   @@index([listingId])
   @@map("listing_drafts")
+}
+
+/// A new master product a store owner suggested while publishing an unmatched listing draft (#553).
+/// The store's custom listing sells at once; a platform admin approves (a new or an existing master
+/// product, and the listing is re-pointed to it) or rejects (the listing stays as it is).
+model ProductProposal {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  /// The proposing store's custom listing, re-pointed to the master product on approval.
+  listingId       String    @unique @map("listing_id")
+  draftId         String?   @unique @map("draft_id")
+  proposedById    String    @map("proposed_by_id")
+  name            String
+  localName       String?   @map("local_name")
+  size            String?
+  categoryId      String?   @map("category_id")
+  /// Private crop of the shelf photo, under product-proposals/<storeId>/; used only once an admin approves it.
+  photoKey        String?   @map("photo_key")
+  /// pending | approved | rejected
+  status          String    @default("pending")
+  masterProductId String?   @map("master_product_id")
+  rejectReason    String?   @map("reject_reason")
+  reviewedById    String?   @map("reviewed_by_id")
+  reviewedAt      DateTime? @map("reviewed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing       Listing        @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  draft         ListingDraft?  @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  proposedBy    User           @relation("ProductProposalProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  reviewedBy    User?          @relation("ProductProposalReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  masterProduct MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, createdAt])
+  @@index([status, createdAt])
+  @@index([proposedById])
+  @@index([reviewedById])
+  @@index([categoryId])
+  @@index([masterProductId])
+  @@map("product_proposals")
 }
 
 model StoreBanner {
