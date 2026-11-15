@@ -1287,6 +1287,9 @@ model Order {
   readyPushedAt           DateTime? @map("ready_pushed_at")
   completedAt             DateTime? @map("completed_at")
   cancelledAt             DateTime? @map("cancelled_at")
+  /// Fee ledger (#546): the confirmed capture and when, written once by a trigger and never cleared.
+  captureConfirmedAt      DateTime? @map("capture_confirmed_at")
+  confirmedCaptureCents   Int?      @map("confirmed_capture_cents")
   inngestEventSentAt      DateTime? @map("inngest_event_sent_at")
   trackingToken           String?   @unique @map("tracking_token")
   /// When the acceptance alert and auto-cancel start counting. NULL means created_at (orders before #167).
@@ -1335,26 +1338,29 @@ model Order {
   @@index([storeId, sourceCartId, createdAt])
   @@index([storeId, createdAt])
   @@index([customerId])
+  @@index([captureConfirmedAt])
   @@map("orders")
 }
 
 /// One refund the app asked Stripe for. Stripe owns the outcome; this row owns the request.
 model RefundRequest {
-  id                   String   @id @default(cuid())
-  storeId              String   @map("store_id")
-  orderId              String   @map("order_id")
-  paymentIntentId      String   @map("payment_intent_id")
-  key                  String   @unique
-  amountCents          Int      @map("amount_cents")
-  refundApplicationFee Boolean  @map("refund_application_fee")
+  id                   String    @id @default(cuid())
+  storeId              String    @map("store_id")
+  orderId              String    @map("order_id")
+  paymentIntentId      String    @map("payment_intent_id")
+  key                  String    @unique
+  amountCents          Int       @map("amount_cents")
+  refundApplicationFee Boolean   @map("refund_application_fee")
   state                String
-  providerRefundId     String?  @map("provider_refund_id")
-  providerStatus       String?  @map("provider_status")
+  providerRefundId     String?   @map("provider_refund_id")
+  providerStatus       String?   @map("provider_status")
   /// #495: on a courier issue refund, the service fee part the platform returns from its application fee.
-  serviceFeeShareCents Int      @default(0) @map("service_fee_share_cents")
-  feeRefundId          String?  @map("fee_refund_id")
-  createdAt            DateTime @default(now()) @map("created_at")
-  lastCheckedAt        DateTime @default(now()) @map("last_checked_at")
+  serviceFeeShareCents Int       @default(0) @map("service_fee_share_cents")
+  feeRefundId          String?   @map("fee_refund_id")
+  /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
+  succeededAt          DateTime? @map("succeeded_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  lastCheckedAt        DateTime  @default(now()) @map("last_checked_at")
 
   store Store @relation(fields: [storeId], references: [id])
   order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
@@ -1362,6 +1368,7 @@ model RefundRequest {
   @@index([storeId])
   @@index([orderId])
   @@index([storeId, state])
+  @@index([succeededAt])
   @@map("refund_requests")
 }
 
