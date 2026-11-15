@@ -1825,6 +1825,10 @@ model StoreSubscription {
   checkoutSessionId    String?   @map("checkout_session_id")
   /// Creation time of the newest paid invoice event; an older payment failure arriving late is skipped.
   lastInvoicePaidAt    DateTime? @map("last_invoice_paid_at") @db.Timestamptz(6)
+  /// Plan a platform admin gave the store (#547); it drives the plan gate until overrideEndsAt, then the Stripe plan applies.
+  overridePlan         String?   @map("override_plan")
+  overrideEndsAt       DateTime? @map("override_ends_at") @db.Timestamptz(6)
+  overrideReason       String?   @map("override_reason")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
 

@@ -1,6 +1,7 @@
 import {
   claimAssistantChatWarning,
   incrementAssistantChatMonth,
+  readStorePlanRows,
   platformAdmin,
   storeScoped,
   storeScopedTransaction,
@@ -26,7 +27,7 @@ export type ChatClaim = { ok: true; chats: number; cap: number; plan: Plan } | {
 export async function claimAssistantChat(storeId: string, at: Date): Promise<ChatClaim> {
   const month = chatMonth(at);
   const claim = await storeScopedTransaction(storeId, async (tx) => {
-    const sub = await tx.storeSubscription.findUnique({ where: { storeId }, select: { plan: true, status: true } });
+    const [sub] = await readStorePlanRows(tx, [storeId]);
     const plan = effectivePlan(sub);
     const cap = assistantChatCap(plan);
     const chats = await incrementAssistantChatMonth(tx, storeId, month, cap);

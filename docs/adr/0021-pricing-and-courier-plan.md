@@ -46,6 +46,7 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
   - `past_due` keeps Pro features; taking a store down needs an admin decision.
   - A chat is one new shopper message, counted per UTC calendar month.
   - Removing the pilot offer during the free months ends the trial and charges the store now. Once a store has had its free months it keeps its pilot place.
+- **Plan override (#547):** a platform admin can give a store a plan until a date (at most 366 days out), with a reason; each one writes an audit row. While it runs it wins over the Stripe plan, a downgrade included; Stripe is never called. It ends at the start of its UTC date by the database clock, and the downgrade rules above apply from then. MRR on the admin subscriptions overview follows Stripe: active and past_due subscriptions at their Stripe plan price, no trials, no pilot free months, nothing for an override.
 - **Not in either plan yet:** multiple locations under one account (a higher tier later, if a store asks).
 
 ### Example order

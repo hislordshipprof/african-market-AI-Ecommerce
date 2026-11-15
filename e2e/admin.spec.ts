@@ -765,7 +765,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger", "Courier settings", "AI and onboarding"];
+  const MENU = ["Home", "Stores", "Subscriptions", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger", "Courier settings", "AI and onboarding"];
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -776,6 +776,7 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin", "Home"],
       ["/admin/stores", "Stores"],
       ["/admin/stores/new", "Stores"],
+      ["/admin/billing/subscriptions", "Subscriptions"],
       ["/admin/applications", "Applications"],
       ["/admin/store-requests", "Store requests"],
       ["/admin/catalog/products", "Products"],
@@ -1014,12 +1015,14 @@ test.describe("Courier incident log (#536)", () => {
     } finally {
       await withPlatformCatalog(async (tx) => {
         await tx.auditLog.deleteMany({ where: { entityType: "courier_incident", entityId: seeded.orderId } });
-        await tx.courierIncidentNote.deleteMany({ where: { orderId: seeded.orderId } });
         await tx.deliveryEvent.deleteMany({ where: { orderId: seeded.orderId } });
         await tx.delivery.deleteMany({ where: { orderId: seeded.orderId } });
         await tx.order.deleteMany({ where: { id: seeded.orderId } });
         await tx.customer.deleteMany({ where: { id: seeded.customerId } });
       });
+      // Notes are append-only for app_user (no DELETE): they go with the order's FK cascade.
+      const leftover = await withPlatformCatalog((tx) => tx.courierIncidentNote.count({ where: { orderId: seeded.orderId } }));
+      expect(leftover).toBe(0);
     }
   });
 });
