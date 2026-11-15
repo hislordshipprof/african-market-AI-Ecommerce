@@ -1,12 +1,11 @@
 import { findStoreIdsAfter, readStockEventRollups, storeScopedTransaction, writeConfidenceScores } from "../db";
-import { computeConfidence, CONFIDENCE_WINDOW_DAYS, type ConfidenceEvent } from "./confidence";
+import { computeConfidence, CONFIDENCE_WINDOW_DAYS, SIGNAL_EVENT_TYPES, type ConfidenceEvent } from "./confidence";
 
 const STORES_PER_BATCH = 100;
 /** A step past Vercel's limit retries from the same cursor and the stores after it never decay. */
 const BATCH_BUDGET_MS = 120_000;
 const WRITE_PAGE_SIZE = 500;
 const TRANSACTION = { timeout: 30_000, maxWait: 8_000 };
-const SIGNAL_EVENT_TYPES = ["recount", "restock", "adjust", "counter_sale", "sale", "short"];
 
 async function recomputeStore(storeId: string): Promise<number> {
   // Inside the step: replay must not reuse an older clock.

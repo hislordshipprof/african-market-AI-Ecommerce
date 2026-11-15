@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeConfidence, type ConfidenceEvent } from "./confidence";
+import { computeConfidence, SIGNAL_EVENT_TYPES, type ConfidenceEvent } from "./confidence";
 
 const NOW = new Date("2026-11-08T12:00:00.000Z");
 const daysAgo = (days: number) => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000);
@@ -23,7 +23,9 @@ describe("computeConfidence", () => {
     expect(computeConfidence(counted(8), reservationsOnly, NOW)).toBeLessThan(0.6);
 
     // Each kind of confirmation today restores it, even a day old and on a listing that sells fast.
-    for (const type of ["recount", "restock", "adjust"]) {
+    // The job reads only SIGNAL_EVENT_TYPES, so each confirmation must be in it too.
+    for (const type of ["recount", "restock", "adjust", "counter_sale"]) {
+      expect(SIGNAL_EVENT_TYPES).toContain(type);
       expect(computeConfidence(counted(90), [event(type, 5, 0)], NOW)).toBeGreaterThanOrEqual(0.9);
       expect(
         computeConfidence(counted(90, 1), [event("sale", -300, 2), event(type, 5, 0.99)], NOW),
