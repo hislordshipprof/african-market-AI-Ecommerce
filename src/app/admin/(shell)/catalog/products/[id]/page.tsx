@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, ImageOff } from "lucide-react";
-import { getMasterProductEditor } from "@/lib/admin/master-catalog";
+import { getMasterProductEditor, uploadMasterProductImage } from "@/lib/admin/master-catalog";
 import { MASTER_STATUS_LABELS } from "@/lib/admin/master-catalog-form";
 import { ProductForm } from "./product-form";
-import { PhotoForm } from "./photo-form";
+import { PhotoForm } from "../../photo-form";
+import { Synonyms } from "./synonyms";
 
 export const metadata = { title: "Edit product — Platform Admin" };
 
@@ -14,7 +15,7 @@ export default async function MasterProductEditorPage(props: { params: Promise<{
   const { id } = await props.params;
   const editor = await getMasterProductEditor(id);
   if (!editor) notFound();
-  const { product, categories, storeCount, mergedInto } = editor;
+  const { product, categories, storeCount, mergedInto, synonyms } = editor;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
@@ -53,13 +54,21 @@ export default async function MasterProductEditorPage(props: { params: Promise<{
                   <ImageOff role="img" aria-label="No photo yet" className="size-8 text-muted-foreground" />
                 )}
               </div>
-              <PhotoForm productId={product.id} />
+              <PhotoForm field="productId" id={product.id} upload={uploadMasterProductImage} />
             </div>
           </section>
 
           <section aria-labelledby="details-heading" className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
             <h2 id="details-heading" className="font-heading text-lg font-bold text-foreground">Details</h2>
             <ProductForm product={product} categories={categories} />
+          </section>
+
+          <section aria-labelledby="synonyms-heading" className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
+            <h2 id="synonyms-heading" className="font-heading text-lg font-bold text-foreground">Synonyms</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Local names, regional names and spellings. Storefront search and the store copilot find this product by them as soon as you save.
+            </p>
+            <Synonyms productId={product.id} synonyms={synonyms} />
           </section>
         </>
       )}

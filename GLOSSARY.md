@@ -106,6 +106,14 @@ Two master products in the same category that may be the same product, proposed 
 A master product folded into another by a duplicate merge. Its listings (every store's, none deleted), synonyms, recipe links and ingredient links moved to the product kept, and it points at that product. It is read-only and never matched or proposed again. A merge cannot be undone in the admin console; the audit log keeps the record.
 _Avoid_: Deleted product, duplicate removed
 
+**Synonym**:
+Another name a shopper searches for a master product: a local name ("egusi" in Yoruba), a regional name or a spelling ("garri"). It may carry an ISO 639 language code and a region. One product never has the same term twice; two products may share one ("agushi" names whole and ground egusi), and the admin editor warns when they do.
+_Avoid_: Alias, keyword
+
+**Category**:
+A platform-wide aisle (e.g. "Grains & Flours") that master products belong to, with a local name, a photo and a place in the order. A category may sit under one top-level category as a subcategory; there is no deeper level. Its slug never changes after creation.
+_Avoid_: Department, collection (a store's own curated list)
+
 **Listing**:
 A store's offer of a product: its price, sizes and stock at that store.
 _Avoid_: Product (when meaning the store's item), SKU

@@ -3,7 +3,14 @@
 import { createHash } from "node:crypto";
 import { uploadCatalogPhoto } from "../catalog-image";
 import { PHOTO_UPLOAD_MAX_BYTES } from "../listing/csv-file-cap";
-import { Prisma, lockMasterProductRow, platformAdminRawQuery, platformAdminTransaction, storesListingMasterProduct } from "../db";
+import {
+  Prisma,
+  lockMasterProductRow,
+  platformAdminRawQuery,
+  platformAdminTransaction,
+  productSynonymsWithSharedNames,
+  storesListingMasterProduct,
+} from "../db";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { listingRelevanceJoin, listingRelevanceWhere } from "../storefront/search-relevance";
@@ -129,6 +136,8 @@ export type MasterProductEditor = {
   mergedInto: { id: string; name: string } | null;
   categories: Array<{ id: string; name: string }>;
   storeCount: number;
+  /** Each synonym with the other products its term also names. */
+  synonyms: Array<{ id: string; term: string; language: string | null; region: string | null; alsoNames: string[] }>;
 };
 
 /** The editor's data, or null for an unknown product. */
@@ -150,7 +159,8 @@ export async function getMasterProductEditor(productId: string): Promise<MasterP
     const { mergedInto, ...details } = product;
     const categories = await tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
     const storeCount = (await storesListingMasterProduct(tx, product.id)).length;
-    return { product: { ...details, status: details.status as MasterStatus, version: detailsVersion(details) }, categories, storeCount, mergedInto };
+    const synonyms = await productSynonymsWithSharedNames(tx, product.id);
+    return { product: { ...details, status: details.status as MasterStatus, version: detailsVersion(details) }, categories, storeCount, mergedInto, synonyms };
   });
 }
 
