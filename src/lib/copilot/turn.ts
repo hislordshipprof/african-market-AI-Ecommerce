@@ -345,7 +345,7 @@ export async function sendCopilotTurn(input: {
       providerOptions: assistantProviderOptions(modelId),
     });
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
-    const capped = steps >= STEP_CAP || result.finishReason === "length" || book.overflow;
+    const capped = (steps >= STEP_CAP && result.finishReason === "tool-calls") || result.finishReason === "length" || book.overflow;
     const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped);
     const usage = turnUsage(modelId, result.steps);
     const stored = await commitTurn({

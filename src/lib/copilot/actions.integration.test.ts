@@ -563,6 +563,19 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     }
   }, 60_000);
 
+  it("a turn that uses every step but ends on its own does not say to send the rest (#406)", async () => {
+    const search = { kind: "tool" as const, toolName: "find_listings", toolInput: { query: "gari" } };
+    script([search, search, search, search, search, { kind: "text", text: "Gari is listed." }]);
+    const sent = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "do we have gari" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    expect(sent.reply).not.toContain("Send the rest");
+
+    script([search, search, search, search, search, search]);
+    const cut = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "do we have gari" });
+    expect(cut.ok && cut.reply).toContain("Send the rest");
+  }, 60_000);
+
   it("a text-only model turn drafts nothing", async () => {
     const before = await storeScoped(storeAId).stockProposal.count();
     script([{ kind: "text", text: "Which rice do you mean?" }]);
