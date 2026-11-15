@@ -103,7 +103,7 @@ export type StoreChatUsage = {
 export function storeChatUsage(rows: AssistantChatMonthRow[], limit = 50): { stores: StoreChatUsage[]; hidden: number } {
   const all = rows
     .map((row): StoreChatUsage => {
-      const plan = effectivePlan(row.subscriptionPlan && row.subscriptionStatus ? { plan: row.subscriptionPlan, status: row.subscriptionStatus } : null);
+      const plan = effectivePlan({ plan: row.subscriptionPlan ?? "starter", status: row.subscriptionStatus ?? "none", overridePlan: row.overridePlan });
       const cap = assistantChatCap(plan);
       return {
         storeId: row.storeId,
