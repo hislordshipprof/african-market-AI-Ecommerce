@@ -63,7 +63,7 @@ head -c 6000 /dev/urandom | base64 > "$TMP/six/.next/static/chunks/added-regress
 six_stats "${paths}\".next/static/chunks/added-regression.js\""
 six_run; check "a small sixth chunk that tips the budget fails" 1 $?
 has "failure names the new sixth chunk" "added-regression.js"
-has "failure says it is new" "new .*added-regression.js"
+has "failure says it is new" "added-regression.js.*(new, +"
 has "failure explains hashed names" "content-hashed"
 if sed -n '/new or grown/,/largest chunks/p' "$TMP/out" | grep -q "unchanged-"; then echo "not ok - unchanged chunk listed as grown"; cat "$TMP/out"; bad=1; else echo "ok - unchanged chunks are not listed as grown"; fi
 
