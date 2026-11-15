@@ -155,7 +155,7 @@ async function sendStoreDigest(
 ): Promise<boolean> {
   const owners = await storeScoped(store.id).storeMembership.findMany({
     where: { role: "owner" },
-    select: { user: { select: { email: true } } },
+    select: { user: { select: { id: true, email: true } } },
   });
   if (owners.length === 0) return false;
 
@@ -178,7 +178,7 @@ async function sendStoreDigest(
       to: owner.user.email,
       subject: `${store.name}: daily stock digest`,
       html: claim.html,
-      idempotencyKey: `copilot-digest:${store.id}:${clock.date}:${owner.user.email}`,
+      idempotencyKey: `copilot-digest:${store.id}:${clock.date}:${owner.user.id}`,
     });
   }
   await storeScopedTransaction(store.id, (tx) => tx.copilotDigest.update({ where: day, data: { sentAt: new Date() } }));
