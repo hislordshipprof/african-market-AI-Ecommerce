@@ -87,7 +87,7 @@ test("owner creates a code, sees its uses and discount, cannot change a used cod
   await form.getByLabel("Total uses").fill("50");
   await form.getByRole("button", { name: "Create code" }).click();
 
-  const row = page.getByRole("listitem").filter({ hasText: CODE });
+  const row = page.getByRole("list", { name: "Codes" }).getByRole("listitem").filter({ hasText: CODE });
   await expect(row).toBeVisible();
   await expect(row.getByText("10% off")).toBeVisible();
   await expect(row.getByText("Goods over $25.00 · 1 per customer")).toBeVisible();
