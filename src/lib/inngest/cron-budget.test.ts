@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { copilotDailyDigest } from "../copilot/digest";
+import { copilotWeeklyReport } from "../copilot/weekly-report";
 import { courierRegistrationRetry } from "../delivery/courier-functions";
 import { assistantRetention, dailyConfidence, directoryStoreRequestNotices, inngestFunctions, reconcileStuckTransitional, storeApplicationRetention, sweepOrphanedAuthorized } from "./functions";
 
@@ -23,6 +24,7 @@ describe("Inngest cron budget (ADR-0016)", () => {
     const retention = cronOf(assistantRetention);
     const confidence = cronOf(dailyConfidence);
     const digest = cronOf(copilotDailyDigest);
+    const weekly = cronOf(copilotWeeklyReport);
     const courierRetry = cronOf(courierRegistrationRetry);
     const applications = cronOf(storeApplicationRetention);
     expect(orphan).toBe("*/15 * * * *");
@@ -37,11 +39,13 @@ describe("Inngest cron budget (ADR-0016)", () => {
     expect(storeRequests).toBe("TZ=UTC 7 15 * * *");
     expect(inngestFunctions).toContain(directoryStoreRequestNotices);
     expect(inngestFunctions).toContain(courierRegistrationRetry);
+    expect(weekly).toBe("TZ=UTC 0 * * * *");
     expect(inngestFunctions).toContain(dailyConfidence);
     expect(inngestFunctions).toContain(copilotDailyDigest);
+    expect(inngestFunctions).toContain(copilotWeeklyReport);
     const total = monthlyRuns(orphan!) + monthlyRuns(reconcile!) + monthlyRuns(retention!) + monthlyRuns(confidence!)
-      + monthlyRuns(digest!) + monthlyRuns(courierRetry!) + monthlyRuns(applications!) + monthlyRuns(storeRequests!);
-    expect(total).toBe(6_630);
+      + monthlyRuns(digest!) + monthlyRuns(courierRetry!) + monthlyRuns(applications!) + monthlyRuns(storeRequests!) + monthlyRuns(weekly!);
+    expect(total).toBe(7_350);
     expect(total).toBeLessThan(35_000);
   });
 });

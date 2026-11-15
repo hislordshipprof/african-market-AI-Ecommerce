@@ -50,7 +50,8 @@ export async function GET(req: NextRequest) {
  * number (one Meta app, one app secret). Order: app secret configured (503), size
  * (413), signature over the raw bytes (401), then parse. After a valid
  * signature every answer is 200 unless handling failed (500, so Meta
- * redelivers); a 4xx would be retried for days.
+ * redelivers); a 4xx would be retried for days. A failed message does not
+ * stop the ones after it; those are claimed, so the redelivery skips them.
  */
 export async function POST(req: NextRequest) {
   const { appSecret, phoneNumberId } = readWhatsAppConfig();
@@ -84,9 +85,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true }, { status: 200 });
   }
 
-  const { messages, failedStatusCodes, unreadableMessages } = extractWebhook(parsed.data);
-  if (unreadableMessages > 0) {
-    console.warn(JSON.stringify({ event: "whatsapp_message_unparsed", count: unreadableMessages }));
+  const { messages, failedStatusCodes, unreadable } = extractWebhook(parsed.data);
+  if (unreadable.length > 0) {
+    console.warn(JSON.stringify({ event: "whatsapp_message_unparsed", count: unreadable.length, keys: unreadable }));
   }
   for (const code of failedStatusCodes) {
     console.warn(JSON.stringify({ event: "whatsapp_delivery_failed", code }));
@@ -94,6 +95,7 @@ export async function POST(req: NextRequest) {
 
   // The platform number is the owner path (#143); any other number is a
   // store's own number, routed to that store or dropped (#558).
+  let failed = false;
   for (const { phoneNumberId: to, message } of messages) {
     try {
       if (phoneNumberId && to === phoneNumberId) await handleInboundMessage(message);
@@ -104,9 +106,10 @@ export async function POST(req: NextRequest) {
         message: messageRef(message.id),
         error: error instanceof Error ? error.name : "unknown",
       }));
-      return NextResponse.json({ error: "Could not handle message" }, { status: 500 });
+      failed = true;
     }
   }
 
+  if (failed) return NextResponse.json({ error: "Could not handle message" }, { status: 500 });
   return NextResponse.json({ received: true }, { status: 200 });
 }

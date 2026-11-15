@@ -6,7 +6,7 @@ import { rangeDays, type AnalyticsRange } from "./range";
  * one query per view, all in integer cents. Days are store days in the store's time zone.
  *
  * Money rules, from what each order stored at capture (never recomputed rates):
- * - Goods = captured − tip − delivery fee.
+ * - Goods = captured − service fee − tip − delivery fee (the service fee is the customer's separate line, D3).
  * - Card fee = the order's stored platform fee. Courier orders also pass the courier fee to the platform,
  *   capped with the card fee at captured, as at capture.
  * - Net to store = captured − card fee − courier fee − the store's share of succeeded refunds.
@@ -126,7 +126,7 @@ const APPLICATION_FEE = Prisma.sql`LEAST(COALESCE(o.platform_fee_cents, 0) + CAS
 /** The store's card fee: the stored platform fee is the service fee plus this (captureSplit), so take the service fee off. */
 const CARD_FEE = Prisma.sql`GREATEST(COALESCE(o.platform_fee_cents, 0) - o.service_fee_cents, 0)`;
 
-async function salesRows(storeId: string, range: AnalyticsRange, timeZone: string): Promise<MoneyRow[]> {
+export async function salesRows(storeId: string, range: AnalyticsRange, timeZone: string): Promise<MoneyRow[]> {
   return storeScopedRawQuery<MoneyRow>(storeId, Prisma.sql`
     WITH b AS (${bounds(range, timeZone)}),
     r AS (
@@ -141,7 +141,7 @@ async function salesRows(storeId: string, range: AnalyticsRange, timeZone: strin
     )
     SELECT 'order' AS kind, ${storeDay(Prisma.sql`o.created_at`, timeZone)} AS day, o.fulfillment,
            COUNT(*)::int AS orders,
-           SUM(o.captured_amount_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
+           SUM(o.captured_amount_cents - o.service_fee_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
            SUM(o.discount_cents)::int AS discounts,
            SUM(${CARD_FEE})::int AS card_fee,
            SUM(COALESCE(o.platform_fee_cents, 0) - ${CARD_FEE})::int AS service_fee,
@@ -201,7 +201,7 @@ export function salesView(rows: MoneyRow[], range: AnalyticsRange): SalesView {
 
 const LISTING_NAME = Prisma.sql`COALESCE(li.custom_name, mp.name, 'Unnamed item')`;
 
-async function productsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<ProductsView> {
+export async function productsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<ProductsView> {
   const [sellers, shortOrSwapped, missedSearches] = await Promise.all([
     storeScopedRawQuery<ProductRow>(storeId, Prisma.sql`
       WITH b AS (${bounds(range, timeZone)}),
@@ -266,7 +266,7 @@ const ASSISTANT_CART = (cartId: Prisma.Sql, storeId: string) => Prisma.sql`EXIST
   JOIN ai_actions aa ON aa.conversation_id = ac.id AND aa.store_id = ac.store_id
   WHERE ac.store_id = ${storeId} AND ac.cart_id = ${cartId} AND aa.tool = 'add_to_cart' AND aa.ok)`;
 
-async function customersView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<CustomersView> {
+export async function customersView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<CustomersView> {
   const [row] = await storeScopedRawQuery<Omit<CustomersView, "returningShoppers" | "repeatRatePct" | "browsingOrders">>(storeId, Prisma.sql`
     WITH b AS (${bounds(range, timeZone)}),
     o AS (
@@ -306,7 +306,7 @@ export const CANCEL_REASON_LABELS: Record<string, string> = {
   unknown: "No reason recorded",
 };
 
-async function operationsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<OperationsView> {
+export async function operationsView(storeId: string, range: AnalyticsRange, timeZone: string): Promise<OperationsView> {
   const [[ready], [swaps], cancellations, [courier]] = await Promise.all([
     storeScopedRawQuery<{ readyOrders: number; median: number | null; average: number | null }>(storeId, Prisma.sql`
       WITH b AS (${bounds(range, timeZone)})

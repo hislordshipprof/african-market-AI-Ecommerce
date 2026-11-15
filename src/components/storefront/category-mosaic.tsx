@@ -4,7 +4,6 @@ import { categoryPhotos } from "@/lib/storefront/catalog";
 import { storefrontPhoto } from "@/lib/storefront/images";
 import { ProductImage } from "./product-image";
 import { RailScroller } from "./rail-scroller";
-import { SectionHeader } from "./primitives";
 interface MosaicCategory {
   id: string;
   name: string;
@@ -34,12 +33,6 @@ export function CategoryMosaic({
       );
   return (
     <section data-testid="category-mosaic" aria-label="Store aisles">
-      {all && <SectionHeader
-        id="mosaic-heading"
-        title="Aisles full of home"
-        description="The staples you know. A few new favorites."
-        href={all ? undefined : "/categories"}
-      />}
       <RailScroller className={all ? "sf-category-rail sf-all-categories" : "sf-category-rail"} label="Categories" title={all ? "Find your favorites" : "Aisles full of home"} description="The staples you know. A few new favorites." href={all ? undefined : "/categories"} hrefLabel="See all aisles">
         {visible.map((cat) => (
           <Link

@@ -99,7 +99,7 @@
 .sf-story-facts { flex-wrap:wrap; gap:24px; }
 .sf-story-facts strong { font-size:27px; }
 .sf-story-facts strong span { font:inherit; color:inherit; }
-.sf-counter { display:inline-block; position:relative; font-variant-numeric:tabular-nums; }
+.sf-counter { display:inline-block; position:relative; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .sf-counter-reserve { visibility:hidden; }
 .sf-counter-value { position:absolute; inset:0; }
 .sf-story .sf-hours { grid-column:2; }
@@ -116,6 +116,8 @@
 .sf-not-found h2 { margin-top:-20px; position:relative; }
 .sf-not-found form { margin:30px auto; max-width:460px; display:flex; gap:8px; }
 .sf-not-found input { width:100%; min-width:0; border-radius:99px; border:1px solid var(--color-line-strong); background:var(--color-surface); padding:12px 18px; }
+.sf-not-found .sf-text-link { display:inline-block; max-width:100%; padding-block:12px; margin-bottom:8px; white-space:normal; text-align:center; }
+.sf-not-found .sf-text-link svg { display:inline; vertical-align:-3px; margin-left:4px; }
 .sf-not-found-aisles { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:22px; }
 .sf-credits-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; margin-block:32px; }
 .sf-credit { border:1px solid var(--color-line); border-radius:16px; padding:24px; background:var(--color-surface); overflow-wrap:anywhere; }

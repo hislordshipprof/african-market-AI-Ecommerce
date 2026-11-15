@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { findStoreForHeaders } from "@/lib/get-store";
 import { listCategories } from "@/lib/storefront/service";
 import { StorefrontShell } from "./storefront-shell";
@@ -13,7 +14,7 @@ export async function PageNotFound() {
     <h2 className="sf-page-title">Page not found</h2>
     <p className="sf-page-intro">This shelf has moved. Let’s find what you came for.</p>
     <form action="/search" role="search"><label htmlFor="lost-search" className="sr-only">Search the store</label><input id="lost-search" name="q" placeholder="Try egusi, garri or plantain" /><button className="sf-button" type="submit">Search</button></form>
-    <Link className="sf-text-link" href="/">Back to {store.name} →</Link>
+    <Link className="sf-text-link" href="/">Back to {store.name} <ArrowRight size={16} aria-hidden /></Link>
     <h3>Explore popular aisles</h3><div className="sf-not-found-aisles">{categories.slice(0, 5).map(category => <Link className="sf-chip" key={category.id} href={`/categories/${category.slug}`}>{category.name}</Link>)}</div>
   </section></StorefrontShell>;
 }
