@@ -9,7 +9,7 @@ import { changedFingerprintParts, fingerprintFromRequest, type Fingerprint } fro
 import { formatUsdFromMicros } from "./money";
 import { recordingFetch, type RecordedExchange } from "./recording-fetch";
 import { averageRates, summarize, type EvalReport, type OfficialEvalReport, type ReportSummary } from "./report";
-import { bindingFromFixture, dishCartMisses, scoreCase, type CatalogBinding } from "./score";
+import { bindingFromFixture, dishCartMisses, quantityScore, scoreCase, type CatalogBinding } from "./score";
 import type { CaseResult, EvalCase } from "./types";
 
 const REQUEST_ID = /^req_/;
@@ -175,9 +175,8 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
     || !sameCartMisses(dishCartMisses(spec, item.finalCart), item.dishMisses)) {
     reasons.push(`cart does not match ${item.id}`);
   }
-  const quantityChecks = spec.qty?.length ?? 0;
-  const quantityHits = (spec.qty ?? []).filter((rule) => item.finalCart.some((line) => line.key === rule.listingKey && line.variantKey === rule.variantKey && line.qty >= rule.min && line.qty <= rule.max)).length;
-  if (item.quantityChecks !== quantityChecks || item.quantityHits !== quantityHits) reasons.push(`quantity counts ${item.id}`);
+  const quantity = quantityScore(spec, item.finalCart);
+  if (item.quantityChecks !== quantity.checks || item.quantityHits !== quantity.hits) reasons.push(`quantity counts ${item.id}`);
 }
 
 function sameCartMisses(expected: string[], claimed: unknown): boolean {
