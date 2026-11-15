@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped } from "../db";
+import { findCourierIncidents } from "../admin/courier-incidents-query";
 import { makeFakeStep } from "../inngest/fake-step";
 import type { CourierSettings } from "./courier-settings";
 import { DoorDashDriveProvider } from "./doordash";
@@ -629,6 +630,9 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const rows = await storeScoped(storeId).delivery.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
     expect(rows.map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"], ["doordash", "requested"]]);
     expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_DELIVERY_CREATED]);
+    // #536: the failover is on the delivery events, so the incident log lists it with both couriers.
+    const { rows: incidents } = await platformAdminTransaction((tx) => findCourierIncidents(tx, { storeId }));
+    expect(incidents.map((i) => [i.orderId, i.kinds, i.providers])).toEqual([[orderId, ["failover"], ["uber", "doordash"]]]);
   });
 
   it("N2: a replayed redispatch step after the alternate was booked books nothing and reports no failure", async () => {
