@@ -96,7 +96,7 @@ _Avoid_: Waitlist, lead form, store suggestion
 ## Catalog
 
 **Master product**:
-A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected, archived or merged. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
+A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected, archived or merged. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review. A re-seed of the catalog keeps what an admin changed (#613).
 _Avoid_: Deleting a master product
 
 **Duplicate pair**:
@@ -210,6 +210,9 @@ _Avoid_: Store AI, store assistant
 **Daily digest**:
 The Store copilot's end-of-day summary for a store owner.
 
+**Weekly report**:
+The Store copilot's Monday email to a store owner about the store week just ended (Monday to Sunday, store time), against the week before. The last 8 are on the copilot page.
+
 **Copilot alert**:
 A stock alert the Store copilot raises for the store owner: sold out, running low (a counted listing at 5 or fewer, or a status listing marked low), or an order that needs a low or ask-store item. Owners only; at most 2 pushes per store per hour.
 
@@ -217,7 +220,7 @@ A stock alert the Store copilot raises for the store owner: sold out, running lo
 A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
 
 **Linked WhatsApp number**:
-The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number, or by Meta's business-scoped user id (BSUID) when the owner has adopted a WhatsApp username and Meta omits the number.
 
 **WhatsApp checkout link**:
 The link the Shopper assistant sends on WhatsApp when a customer is ready to check out. It opens the store's normal checkout with the cart the chat filled, works once and for 60 minutes, and places nothing: the customer pays on that page, as a guest or signed in. A used or expired link shows "This checkout link has expired".

@@ -13,6 +13,18 @@ import {
 import { assistantRetention } from "../inngest/functions";
 import { runAssistantRetention, type AssistantStep } from "./retention";
 
+/** The sweep is limited to this file's stores, so a parallel file's old rows survive (#672). */
+const scope = vi.hoisted(() => ({ storeIds: [] as string[] }));
+
+vi.mock("./retention", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./retention")>();
+  return {
+    ...actual,
+    runAssistantRetention: (step: AssistantStep, options?: Parameters<typeof actual.runAssistantRetention>[1]) =>
+      actual.runAssistantRetention(step, { storeIds: scope.storeIds, ...options }),
+  };
+});
+
 const hasDb = !!process.env.DATABASE_URL;
 const PINNED_NOW = "2001-06-01T00:00:00.000Z";
 const OLD = new Date("2001-03-02T23:00:00.000Z");
@@ -87,6 +99,7 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     storeB = (await raw.store.create({
       data: { slug: `ai-ret-b-${suffix}`, name: "Retention B", themePreset: "lagoon-and-coral" },
     })).id;
+    scope.storeIds = [storeA, storeB];
     reviewer = (await raw.user.create({
       data: { id: `ai-ret-admin-${suffix}`, email: `ai-ret-admin-${suffix}@example.com`, name: "Reviewer", emailVerified: true },
     })).id;
@@ -170,6 +183,41 @@ describe.skipIf(!hasDb)("assistant retention", () => {
       `,
     );
   }
+
+  it("a sweep limited to store ids leaves another store's pre-cutoff conversation alone (#672)", async () => {
+    pinClock();
+    const bystanderStore = (await raw.store.create({
+      data: { slug: `ai-ret-c-${randomUUID().slice(0, 8)}`, name: "Retention C", themePreset: "palm-and-shea" },
+    })).id;
+    try {
+      const bystander = await conversation(bystanderStore, OLD);
+      await action(bystanderStore, bystander.conversationId, OLD);
+      const mine = await conversation(storeA, OLD);
+      await action(storeA, mine.conversationId, OLD);
+      const chat = (await storeScoped(bystanderStore).copilotConversation.create({
+        data: { storeId: bystanderStore, userId: reviewer, model: "claude-haiku-5-5", messages: [], createdAt: OLD, lastMessageAt: NEWER },
+      })).id;
+      const bystanderFlag = (await storeScoped(bystanderStore).aiReviewFlag.create({
+        data: { storeId: bystanderStore, copilotConversationId: chat, label: "tone", createdById: reviewer, createdAt: OLD },
+      })).id;
+
+      const result = await runAssistantRetention(makeFaithfulStep(), { storeIds: [storeA, storeB] });
+
+      expect(result.conversationsDeleted).toBe(1);
+      expect(result.actionsDeleted).toBe(1);
+      expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: mine.conversationId } })).toBeNull();
+      expect(await storeScoped(bystanderStore).aiConversation.findUnique({ where: { id: bystander.conversationId } })).not.toBeNull();
+      expect(await storeScoped(bystanderStore).aiAction.count({ where: { conversationId: bystander.conversationId } })).toBe(1);
+      expect(await storeScoped(bystanderStore).aiReviewFlag.findUnique({ where: { id: bystanderFlag } })).not.toBeNull();
+    } finally {
+      await storeScoped(bystanderStore).cart.deleteMany({});
+      await platformAdminTransaction(async (tx) => {
+        await tx.aiReviewFlag.deleteMany({ where: { storeId: bystanderStore } });
+        await tx.copilotConversation.deleteMany({ where: { storeId: bystanderStore } });
+      });
+      await raw.store.deleteMany({ where: { id: bystanderStore } });
+    }
+  });
 
   it("deletes rows strictly older than 90 days and keeps the boundary", async () => {
     pinClock();

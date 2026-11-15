@@ -391,6 +391,7 @@ const STORE_SCOPED_TX_MODELS = [
   "copilotClientMessage",
   "copilotConversation",
   "copilotDigest",
+  "copilotWeeklyReport",
   "customer",
   "delivery",
   "deliveryEvent",
@@ -1797,7 +1798,7 @@ export async function claimConversationLease(
 }
 
 /**
- * Deletes one batch of actions older than the naive timestamp.
+ * Deletes one batch of actions older than the naive timestamp, only in `storeIds` when given (a test seam).
  * The batch key is written in the same transaction, so a replay returns the
  * committed count instead of deleting the next batch.
  */
@@ -1805,12 +1806,14 @@ export function deleteExpiredAssistantActions(
   cutoff: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_actions
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
         ORDER BY created_at, id
         LIMIT ${batchSize}
         FOR UPDATE SKIP LOCKED
@@ -1835,12 +1838,14 @@ export function deleteExpiredAssistantConversations(
   now: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_conversations
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
           AND (in_flight_until IS NULL OR in_flight_until <= ${now})
         ORDER BY created_at, id
         LIMIT ${batchSize}
@@ -1865,12 +1870,14 @@ export function deleteExpiredReviewFlags(
   cutoff: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_review_flags
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
         ORDER BY created_at, id
         LIMIT ${batchSize}
         FOR UPDATE SKIP LOCKED
@@ -2013,16 +2020,24 @@ export async function releaseInboundWhatsAppMessage(messageId: string): Promise<
 
 export type OwnerLinkCodeOutcome =
   | { kind: "no_pending" }
-  | { kind: "wrong_or_expired" }
+  | { kind: "wrong_or_expired"; candidates: Array<{ storeId: string; userId: string }> }
   | { kind: "verified"; storeId: string; userId: string; storeName: string };
 
+/** A WhatsApp sender: the phone-number wa_id, the business-scoped user id (BSUID), or both. */
+export interface WhatsAppSenderIds {
+  waId: string | null;
+  bsuid: string | null;
+}
+
 /**
- * Tries a 6-digit code against the codes sent to this sender (newest first,
- * at most five rows, at any store, verified rows included when they are
- * changing number). The code decides the store. A match moves the pending
- * number into the link and verifies it in one UPDATE guarded by the database
- * clock; any other verified link for the same sender is deleted first, with
- * an audit row on the store that lost it.
+ * Tries a 6-digit code against the live codes sent to this sender (newest
+ * first, at most five rows, at any store, verified rows included when they
+ * are changing number) whose member is still the store's owner. An expired
+ * code, or one for a member no longer owner, is not a candidate. The code
+ * decides the store. A match moves the pending number into the link, records
+ * the sender's BSUID, and verifies it in one UPDATE guarded by the database
+ * clock; any other verified link for the same wa_id or BSUID is deleted
+ * first, with an audit row on the store that lost it.
  *
  * A miss counts an attempt on each candidate and voids a code at the limit,
  * unless `countMisses` is false. The inbound path passes false when the
@@ -2033,34 +2048,41 @@ export type OwnerLinkCodeOutcome =
  */
 export async function verifyOwnerLinkByCode(
   tx: RawTx,
-  waId: string,
+  sender: { waId: string; bsuid: string | null },
   code: string,
   options: { countMisses: boolean } = { countMisses: true },
 ): Promise<OwnerLinkCodeOutcome> {
+  const { waId, bsuid } = sender;
   const candidates = await tx.$queryRaw<Array<{
     id: string;
     store_id: string;
     user_id: string;
     verification_code_hash: string | null;
-    live: boolean;
   }>>`
-    SELECT id, store_id, user_id, verification_code_hash,
-      (verification_expires_at > (now() AT TIME ZONE 'UTC')) AS live
-    FROM owner_whatsapp_links
-    WHERE pending_wa_id = ${waId} AND verification_code_hash IS NOT NULL
-    ORDER BY updated_at DESC, id
+    SELECT l.id, l.store_id, l.user_id, l.verification_code_hash
+    FROM owner_whatsapp_links l
+    WHERE l.pending_wa_id = ${waId} AND l.verification_code_hash IS NOT NULL
+      AND l.verification_expires_at > (now() AT TIME ZONE 'UTC')
+      AND EXISTS (
+        SELECT 1 FROM store_memberships m
+        WHERE m.store_id = l.store_id AND m.user_id = l.user_id AND m.role = 'owner'
+      )
+    ORDER BY l.updated_at DESC, l.id
     LIMIT 5
-    FOR UPDATE
+    FOR UPDATE OF l
   `;
   if (candidates.length === 0) return { kind: "no_pending" };
 
-  const matches = candidates.map((row) =>
+  const match = candidates.find((row) =>
     linkCodeMatches({ storeId: row.store_id, userId: row.user_id, codeHash: row.verification_code_hash }, code),
   );
-  const match = candidates.find((row, index) => matches[index] && row.live === true);
+  const missed: OwnerLinkCodeOutcome = {
+    kind: "wrong_or_expired",
+    candidates: candidates.map((row) => ({ storeId: row.store_id, userId: row.user_id })),
+  };
 
   if (!match) {
-    if (!options.countMisses) return { kind: "wrong_or_expired" };
+    if (!options.countMisses) return missed;
     const ids = candidates.map((row) => row.id);
     await tx.$executeRaw`
       UPDATE owner_whatsapp_links
@@ -2080,12 +2102,12 @@ export async function verifyOwnerLinkByCode(
         updated_at = (now() AT TIME ZONE 'UTC')
       WHERE id IN (${Prisma.join(ids)})
     `;
-    return { kind: "wrong_or_expired" };
+    return missed;
   }
 
   const replaced = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
     DELETE FROM owner_whatsapp_links
-    WHERE wa_id = ${waId} AND verified AND id <> ${match.id}
+    WHERE verified AND id <> ${match.id} AND (wa_id = ${waId} OR bsuid = ${bsuid})
     RETURNING id, store_id
   `;
   const updated = await tx.$queryRaw<Array<{ store_id: string; user_id: string }>>`
@@ -2094,6 +2116,7 @@ export async function verifyOwnerLinkByCode(
       verified_at = (now() AT TIME ZONE 'UTC'),
       phone_number = pending_phone_number,
       wa_id = pending_wa_id,
+      bsuid = ${bsuid},
       pending_phone_number = NULL,
       pending_wa_id = NULL,
       verification_code_hash = NULL,
@@ -2107,7 +2130,7 @@ export async function verifyOwnerLinkByCode(
     RETURNING store_id, user_id
   `;
   const row = updated[0];
-  if (!row) return { kind: "wrong_or_expired" };
+  if (!row) return missed;
 
   const owner = await tx.$queryRaw<Array<{ email: string; name: string }>>`
     SELECT u.email, s.name
@@ -2130,26 +2153,51 @@ export async function verifyOwnerLinkByCode(
 }
 
 /**
- * The verified link for a sender whose membership is still `owner`. Matches
- * Meta's wa_id, or the E.164 number the owner entered.
+ * The verified link for a sender whose membership is still `owner`, matched
+ * on Meta's wa_id or the sender's BSUID (each unique among verified links).
+ * A wa_id match wins over a BSUID match.
  */
 export async function findVerifiedOwnerLink(
   tx: RawTx,
-  waId: string,
-): Promise<{ storeId: string; userId: string; role: string; storeName: string } | null> {
-  const e164 = `+${waId}`;
-  const rows = await tx.$queryRaw<Array<{ store_id: string; user_id: string; role: string; name: string }>>`
-    SELECT l.store_id, l.user_id, m.role, s.name
+  sender: WhatsAppSenderIds,
+): Promise<{ linkId: string; storeId: string; userId: string; role: string; storeName: string; bsuid: string | null } | null> {
+  const { waId, bsuid } = sender;
+  const rows = await tx.$queryRaw<Array<{
+    id: string;
+    store_id: string;
+    user_id: string;
+    role: string;
+    name: string;
+    bsuid: string | null;
+  }>>`
+    SELECT l.id, l.store_id, l.user_id, m.role, s.name, l.bsuid
     FROM owner_whatsapp_links l
     JOIN store_memberships m ON m.store_id = l.store_id AND m.user_id = l.user_id
     JOIN stores s ON s.id = l.store_id
-    WHERE l.verified AND (l.wa_id = ${waId} OR l.phone_number = ${e164}) AND m.role = 'owner'
-    ORDER BY l.verified_at DESC
+    WHERE l.verified AND (l.wa_id = ${waId} OR l.bsuid = ${bsuid}) AND m.role = 'owner'
+    ORDER BY (l.wa_id = ${waId}) IS TRUE DESC, l.verified_at DESC
     LIMIT 1
   `;
   const row = rows[0];
   if (!row) return null;
-  return { storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name };
+  return { linkId: row.id, storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name, bsuid: row.bsuid };
+}
+
+/**
+ * Records the BSUID Meta sent with a verified owner's message, for links
+ * verified before it was stored. Skipped when another verified link already
+ * holds it (the owner re-verifies to move it).
+ */
+export async function recordOwnerLinkBsuid(tx: RawTx, linkId: string, bsuid: string): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE owner_whatsapp_links
+    SET bsuid = ${bsuid}, updated_at = (now() AT TIME ZONE 'UTC')
+    WHERE id = ${linkId} AND verified AND bsuid IS DISTINCT FROM ${bsuid}
+      AND NOT EXISTS (
+        SELECT 1 FROM owner_whatsapp_links other
+        WHERE other.verified AND other.bsuid = ${bsuid} AND other.id <> ${linkId}
+      )
+  `;
 }
 
 /**

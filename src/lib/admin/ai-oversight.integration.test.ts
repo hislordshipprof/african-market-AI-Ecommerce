@@ -22,15 +22,15 @@ import { withAiOnboardingSettings } from "./platform-settings-test-lock";
 
 const hasDb = !!process.env.DATABASE_URL;
 const suffix = randomUUID().slice(0, 8);
-const DAY = "2001-02-03";
-const IN_DAY = new Date("2001-02-03T12:00:00.000Z");
-const LAST_MS = new Date("2001-02-03T23:59:59.999Z");
+const DAY = "2001-04-03";
+const IN_DAY = new Date("2001-04-03T12:00:00.000Z");
+const LAST_MS = new Date("2001-04-03T23:59:59.999Z");
 /** Over any cost threshold another test file sets (1 to 20 cents, see platform-settings-test-lock). */
 const ALWAYS_COSTLY = 1_000_000;
 /** 3 cents: over the 2-cent default, under 20 cents. */
 const MIDDLING = 30_000;
-const NEXT_DAY = new Date("2001-02-04T00:00:00.000Z");
-const DAY_BEFORE = new Date("2001-02-02T10:00:00.000Z");
+const NEXT_DAY = new Date("2001-04-04T00:00:00.000Z");
+const DAY_BEFORE = new Date("2001-04-02T10:00:00.000Z");
 
 type FakeSession = Awaited<ReturnType<typeof auth.api.getSession>>;
 
@@ -138,7 +138,7 @@ describe.skipIf(!hasDb)("AI oversight", () => {
     const flagged = sample.shopper.find((row) => row.id === flaggedShopper);
     expect(flagged?.reasons).toEqual(["amount_removed", "made_up_id", "forwarded", "costly_turn"]);
     expect(sample.shopper.filter((row) => !row.sampled).every((row) => row.reasons.length > 0)).toBe(true);
-    expect(sample.shopper.some((row) => row.lastMessageAt < "2001-02-03")).toBe(false);
+    expect(sample.shopper.some((row) => row.lastMessageAt < "2001-04-03")).toBe(false);
 
     expect(sample.copilot.filter((row) => row.sampled)).toHaveLength(5);
     expect(sample.copilot.find((row) => row.id === costlyCopilot)?.reasons).toEqual(["costly_turn"]);

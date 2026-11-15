@@ -251,6 +251,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
   let totalUploadBytes = 0;
   const failures: { id: string; reason: string }[] = [];
   const upsertedIds: string[] = [];
+  let adminKept = 0;
 
   const existingR2Keys =
     listClient && bucket
@@ -312,30 +313,32 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
       }
     }
 
-    await prisma.$transaction(async (tx) => {
+    const { keptAdminChanges } = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await upsertMasterProduct(tx, row, categoryId, {
+      return upsertMasterProduct(tx, row, categoryId, {
         statusOnCreate: "active",
         statusOnUpdate: "active",
         confidence: "high",
         imageUrl,
       });
     });
+    if (keptAdminChanges) adminKept++;
     upsertedIds.push(row.id);
   }
 
   for (const row of reviewRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
-    await prisma.$transaction(async (tx) => {
+    const { keptAdminChanges } = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await upsertMasterProduct(tx, row, categoryId, {
+      return upsertMasterProduct(tx, row, categoryId, {
         statusOnCreate: "needs_review",
         confidence: row.confidence.trim(),
         imageUrl: null,
       });
     });
+    if (keptAdminChanges) adminKept++;
     upsertedIds.push(row.id);
   }
 
@@ -354,6 +357,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     for (const failure of failures) log(`  ${failure.id}: ${failure.reason}`);
   }
   log(`Upserted ${reviewRows.length} review-queue products (new rows get status='needs_review'; existing rows keep their status)`);
+  log(`Kept admin changes on ${adminKept} ${adminKept === 1 ? "product" : "products"} (the fields, status and synonyms an admin changed)`);
 
   if (mode === "off") return;
 

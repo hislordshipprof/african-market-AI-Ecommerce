@@ -17,6 +17,7 @@ import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
 import { copilotDailyDigest } from "../copilot/digest";
+import { copilotWeeklyReport } from "../copilot/weekly-report";
 import { deleteExpiredRejectedApplications } from "../store-application/service";
 import { STORE_LISTED, notifyWaitingRequests } from "../directory/store-requests";
 import { courierAssignmentTimeout, courierCancelOnOrderCancelled, courierDispatchOnPacking, courierDispatchOnReady, courierProofCopy, courierRegistration, courierRegistrationRetry } from "../delivery/courier-functions";
@@ -450,6 +451,7 @@ export const inngestFunctions = [
   supportSlaEscalation,
   copilotOrderStockAlerts,
   copilotDailyDigest,
+  copilotWeeklyReport,
   courierAssignmentTimeout,
   courierDispatchOnReady,
   courierDispatchOnPacking,

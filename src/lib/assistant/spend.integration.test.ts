@@ -104,7 +104,7 @@ describe.skipIf(!hasDb)("assistant spend ledger", () => {
         },
       });
       const step: AssistantStep = { async run(_id, fn) { return fn(); } };
-      const swept = await runAssistantRetention(step);
+      const swept = await runAssistantRetention(step, { storeIds: [store.id] });
       expect(swept.conversationsDeleted).toBeGreaterThanOrEqual(1);
       expect(swept.actionsDeleted).toBeGreaterThanOrEqual(1);
       expect(await storeScoped(store.id).aiConversation.findUnique({ where: { id: conversation.id } })).toBeNull();
