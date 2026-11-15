@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { getCourierIncident } from "@/lib/admin/courier-incidents";
 import { NOTE_MAX } from "@/lib/admin/courier-incidents-query";
 import { formatAge } from "@/lib/admin/format-age";
@@ -70,8 +70,11 @@ export default async function CourierIncidentPage(props: { params: Promise<{ ord
                   {event.provider && <span className="text-muted-foreground">, {PROVIDER_LABELS[event.provider] ?? event.provider}</span>}
                 </p>
                 {reason && <p className="text-sm text-muted-foreground first-letter:uppercase">{reason}</p>}
-                <details className="mt-1 text-sm">
-                  <summary className={`inline-flex min-h-11 cursor-pointer items-center rounded text-muted-foreground hover:text-foreground sm:min-h-8 ${FOCUS}`}>Event details</summary>
+                <details className="group mt-1 text-sm">
+                  <summary className={`inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded text-muted-foreground hover:text-foreground sm:min-h-8 [&::-webkit-details-marker]:hidden ${FOCUS}`}>
+                    <ChevronRight aria-hidden className="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+                    Event details
+                  </summary>
                   <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed text-foreground">{JSON.stringify(event.payload, null, 2)}</pre>
                 </details>
               </div>
