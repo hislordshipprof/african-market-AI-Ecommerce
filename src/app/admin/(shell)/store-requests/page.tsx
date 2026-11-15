@@ -32,24 +32,24 @@ export default async function StoreRequestsPage() {
                 {STATE_NAMES[area.state]}
               </h2>
               <div className="overflow-x-auto rounded-lg border border-border bg-card">
-                <table className="w-full min-w-[32rem] text-left text-sm">
+                <table className="w-full text-left text-sm">
                   <thead className="border-b border-border bg-muted">
                     <tr>
-                      <th scope="col" className="px-4 py-3 font-medium text-muted-foreground">ZIP</th>
-                      <th scope="col" className="px-4 py-3 font-medium text-muted-foreground">Near</th>
-                      <th scope="col" className="px-4 py-3 text-right font-medium text-muted-foreground">Waiting</th>
-                      <th scope="col" className="px-4 py-3 text-right font-medium text-muted-foreground">Told</th>
-                      <th scope="col" className="px-4 py-3 font-medium text-muted-foreground">Latest</th>
+                      <th scope="col" className="px-3 py-3 sm:px-4 font-medium text-muted-foreground">ZIP</th>
+                      <th scope="col" className="px-3 py-3 sm:px-4 font-medium text-muted-foreground">Near</th>
+                      <th scope="col" className="px-3 py-3 sm:px-4 text-right font-medium text-muted-foreground">Waiting</th>
+                      <th scope="col" className="px-3 py-3 sm:px-4 text-right font-medium text-muted-foreground">Told</th>
+                      <th scope="col" className="px-3 py-3 sm:px-4 font-medium text-muted-foreground">Latest</th>
                     </tr>
                   </thead>
                   <tbody>
                     {area.zips.map((zip) => (
                       <tr key={zip.zip} className="border-b border-border last:border-0">
-                        <td className="px-4 py-3 font-mono text-foreground">{zip.zip}</td>
-                        <td className="px-4 py-3 text-foreground">{zip.place ?? "—"}</td>
-                        <td className="px-4 py-3 text-right font-medium tabular-nums text-foreground">{zip.waiting}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{zip.notified}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{day.format(zip.latest)}</td>
+                        <td className="px-3 py-3 sm:px-4 font-mono text-foreground">{zip.zip}</td>
+                        <td className="px-3 py-3 sm:px-4 text-foreground">{zip.place ?? "—"}</td>
+                        <td className="px-3 py-3 sm:px-4 text-right font-medium tabular-nums text-foreground">{zip.waiting}</td>
+                        <td className="px-3 py-3 sm:px-4 text-right tabular-nums text-muted-foreground">{zip.notified}</td>
+                        <td className="px-3 py-3 sm:px-4 text-muted-foreground">{day.format(zip.latest)}</td>
                       </tr>
                     ))}
                   </tbody>

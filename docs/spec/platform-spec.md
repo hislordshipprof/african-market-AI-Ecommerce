@@ -564,7 +564,7 @@ Phase 2 started on 2026-11-14, alongside the Phase 1 tail (Build Board decision 
   - D4 (#452): near me: ZIP, city or browser location, nearest first.
   - D5 (#453): store cards: open now, distance, pickup and delivery, owner face.
   - D6 (#454): attribution: stores see orders that came from the directory.
-  - D7 (#455, later): suggest a store, or get notified when one opens nearby.
+  - D7 (#455): "tell me when a store opens near me": a ZIP and an email or US mobile number with explicit consent, shown when no store is within 50 miles; one message when a listed store is that close, then the contact is deleted; platform admins see the requests by state and ZIP.
 - WhatsApp notifications.
 - Promotions: store coupons first.
 - Reports & payouts dashboard; platform admin console.

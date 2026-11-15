@@ -478,6 +478,7 @@
   font-size: 19px;
   font-weight: 700;
   letter-spacing: -0.2px;
+  text-wrap: balance;
   margin: 0 0 4px;
 }
 
