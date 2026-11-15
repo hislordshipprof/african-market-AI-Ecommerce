@@ -4,40 +4,22 @@ vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn, revali
 
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { platformAdmin, platformAdminTransaction, storeScoped } from "../db";
+import { platformAdmin } from "../db";
 import { withAiOnboardingSettings } from "../admin/platform-settings-test-lock";
 import { forceGoLive, goLive } from "./service";
+import { createReadyStore, deleteReadyStores, GO_LIVE_TEST_NOW as NOW } from "./test-fixtures";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t555s-${Date.now().toString(36)}`;
-const NOW = new Date("2026-11-16T20:00:00Z");
-const HOURS = { monday: "9:00 AM - 8:00 PM", tuesday: "9:00 AM - 8:00 PM" };
 
 describe.skipIf(!hasDb)("Go live and the admin's forced go live (#555)", () => {
   let raw: PrismaClient;
   let actor = { id: "", email: `owner-${RUN}@test.example` };
   const ids: string[] = [];
 
-  /** A store in setup with every checklist item done at a floor of 3. */
   async function readyStore(name: string, extra: { status?: string } = {}) {
-    const store = await raw.store.create({
-      data: {
-        slug: `${RUN}-${name}`,
-        name,
-        status: extra.status ?? "setup",
-        stripeOnboardingStatus: "complete",
-        hours: HOURS,
-        timezone: "America/Chicago",
-        pickupEnabled: true,
-      },
-    });
+    const store = await createReadyStore(raw, `${RUN}-${name}`, extra.status);
     ids.push(store.id);
-    await platformAdminTransaction((tx) => tx.storeSubscription.create({
-      data: { storeId: store.id, plan: "starter", status: "active", stripeSubscriptionId: `sub_${RUN}_${name}` },
-    }));
-    for (let i = 0; i < 3; i++) {
-      await storeScoped(store.id).listing.create({ data: { storeId: store.id, customName: `${RUN} item`, price: 299, stockMode: "status" } });
-    }
     return store;
   }
 
@@ -51,12 +33,7 @@ describe.skipIf(!hasDb)("Go live and the admin's forced go live (#555)", () => {
   }, 30_000);
 
   afterAll(async () => {
-    for (const id of ids) await storeScoped(id).listing.deleteMany({ where: { storeId: id } });
-    await platformAdminTransaction(async (tx) => {
-      await tx.auditLog.deleteMany({ where: { storeId: { in: ids } } });
-      await tx.storeSubscription.deleteMany({ where: { storeId: { in: ids } } });
-      await tx.store.deleteMany({ where: { id: { in: ids } } });
-    });
+    await deleteReadyStores(ids);
     await raw.user.delete({ where: { id: actor.id } });
     await raw.$disconnect();
   });
