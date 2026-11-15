@@ -38,6 +38,20 @@ A plan a platform admin gives a store until a date, with a reason (for example, 
 A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted once the retention set by the platform admin (default 12 months) has passed since the decision.
 _Avoid_: Sign-up, lead, merchant application
 
+**Setup**:
+Where every new store starts, from an approved store application or the stores page. Its storefront shows "Opening soon", checkout is refused before any payment call, and the Store directory never lists it. Stores created before the go-live checklist stayed live.
+_Avoid_: Draft, pending, password page
+
+**Go-live checklist**:
+What a store in setup must finish before it goes live, shown on the store admin home and the platform admin's store page: payouts connected, hours and time zone set, pickup or a delivery option on, at least the go-live listing floor of active listings with a price (a platform setting, default 20), no placeholder weights on active listings, a plan chosen or a pilot store, and courier registration done or not needed (Starter). A test order is recommended after going live, never required.
+
+**Go live**:
+The store owner's button that moves a store from setup to live once every checklist item is done, with an audit row. A platform admin can go live for a store with items still open, only with a reason, which the audit row keeps.
+_Avoid_: Launch, publish
+
+**Suspended**:
+A store a platform admin took offline. Suspension is separate from going live and wins over everything: the storefront is offline, checkout is refused and the store cannot go live. Lifting it returns the store to where the suspension found it, setup or live.
+
 **Customer**:
 A person who buys from a store, whether or not they have an account.
 _Avoid_: Buyer, shopper, user
