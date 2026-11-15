@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { platform, platformAdminTransaction, storeScoped } from "../db";
 import { lineChargeCents, type ChargeLine } from "../order/substitution-pricing";
-import { getTaxCalculator, TaxUnavailableError, type TaxLine, type TaxLineInput } from "./calculator";
+import { getTaxCalculator, TaxUnavailableError, type LineTaxAmount, type TaxLine, type TaxLineInput } from "./calculator";
 import { taxAddress, variantTaxCodes } from "./checkout-tax";
 
 /**
@@ -28,7 +28,8 @@ export type CaptureTaxOrder = {
 
 export type CaptureTaxLine = ChargeLine & { id: string; listingVariantId: string };
 
-export type FinalTax = { calculationId: string | null; taxCents: number; lines: TaxLine[] };
+/** `lineTaxes` is by order line id (#671); a line not in it has no tax. */
+export type FinalTax = { calculationId: string | null; taxCents: number; lines: TaxLine[]; lineTaxes: LineTaxAmount[] };
 
 /**
  * The final tax on the picked lines, after each line's share of the coupon discount. An order placed
@@ -41,7 +42,7 @@ export async function finalizeTaxForCapture(
   lineDiscountsCents: number[],
 ): Promise<FinalTax> {
   if (order.taxCalculationId == null && order.taxCents === 0) {
-    return { calculationId: null, taxCents: 0, lines: (order.taxLines ?? []) as TaxLine[] };
+    return { calculationId: null, taxCents: 0, lines: (order.taxLines ?? []) as TaxLine[], lineTaxes: [] };
   }
   const db = storeScoped(order.storeId);
   const [store, codes] = await Promise.all([
@@ -59,7 +60,7 @@ export async function finalizeTaxForCapture(
       taxCode: codes.get(line.listingVariantId) ?? null,
     }))
     .filter((line) => line.amountCents > 0);
-  if (inputs.length === 0) return { calculationId: null, taxCents: 0, lines: [] };
+  if (inputs.length === 0) return { calculationId: null, taxCents: 0, lines: [], lineTaxes: [] };
 
   const address = taxAddress(order.fulfillment === "pickup" ? "pickup" : "store-delivery", store, order);
   const liableParty = order.taxLiableParty === "store" ? "store" : "platform";
@@ -74,7 +75,10 @@ export async function finalizeTaxForCapture(
   if (calculation.lines.length > 0 && calculation.lines.reduce((sum, line) => sum + line.amount, 0) !== calculation.taxCents) {
     throw new TaxUnavailableError(new Error("Tax lines do not sum to the tax total"));
   }
-  return { calculationId: calculation.id, taxCents: calculation.taxCents, lines: calculation.lines };
+  if (calculation.lineTaxes.reduce((sum, line) => sum + line.taxCents, 0) !== calculation.taxCents) {
+    throw new TaxUnavailableError(new Error("Line taxes do not sum to the tax total"));
+  }
+  return { calculationId: calculation.id, taxCents: calculation.taxCents, lines: calculation.lines, lineTaxes: calculation.lineTaxes };
 }
 
 /** Statuses where a capture stands and its sale is reported; cancelled and in-flight orders are not. */
