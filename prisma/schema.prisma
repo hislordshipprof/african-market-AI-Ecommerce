@@ -111,6 +111,7 @@ model Store {
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
   whatsAppNumber        StoreWhatsAppNumber?
+  whatsAppOptOuts       WhatsAppOptOut[]
   driverRoutes          DriverRoute[]
   pickBatches           PickBatch[]
 
@@ -1276,6 +1277,8 @@ model Order {
   driverRouteId           String?   @map("driver_route_id")
   /// The open pick batch this order is in (#564); cleared when staff leave the batch.
   pickBatchId             String?   @map("pick_batch_id")
+  /// Checkout opt-in to WhatsApp order updates (#560); NULL keeps SMS.
+  whatsappOptInAt         DateTime? @map("whatsapp_opt_in_at")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1776,6 +1779,20 @@ model StoreWhatsAppNumber {
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
 
   @@map("store_whatsapp_numbers")
+}
+
+/// A customer who sent STOP to the store's own WhatsApp number (#560). Per store.
+model WhatsAppOptOut {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  /// Meta's digits-only sender id.
+  waId      String   @map("wa_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, waId])
+  @@map("whatsapp_opt_outs")
 }
 
 /// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.

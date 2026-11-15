@@ -67,4 +67,5 @@ export type {
   OutboundMessage,
   SendResult,
   WhatsAppProvider,
+  WhatsAppSender,
 } from "./types";
