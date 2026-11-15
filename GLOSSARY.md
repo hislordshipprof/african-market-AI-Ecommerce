@@ -183,7 +183,7 @@ A listing whose attribute for a Shopper constraint is unknown. It is shown marke
 A customer message that starts, as a whole word, with yes, ok, okay, sure, go ahead, add those, or add what you suggested. On that turn the Shopper assistant adds a product only when the previous reply or the customer's own message named it.
 
 **Recipe base**:
-The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog. The #146 eval uses seeded dishes only and never looks one up (#607).
+The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog. The #146 eval uses seeded dishes only and never looks one up (#607). A platform admin fixes, marks curated or deletes a dish at `/admin/catalog/recipes` (#543); a deleted dish is looked up again on its next request.
 
 **Review card**:
 The last card in a Shopper assistant chat before paying, drawn by the server from the normal checkout quote: items, pickup time, fees, total and card hold. Its "Review and pay" button opens the normal checkout. It is information, not consent: it places nothing, and checkout shows the current basket (#247).
