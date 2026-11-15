@@ -204,6 +204,13 @@ _Avoid_: Flag (on its own), rating
 **Order**:
 One customer's purchase from exactly one store.
 
+**Store coupon**:
+A code a store owner creates (#556) that takes a percent or a fixed amount off the goods of one order; the store funds it. A cart takes one code. The discount is never on tip or fees, is recomputed on the goods picked at capture, and is never removed by a short (#557). Shown to the shopper as "Promo CODE".
+_Avoid_: Voucher, promo (alone), discount code
+
+**Coupon use**:
+An order placed with a store coupon. It counts toward the code's total and per-customer limits until the order is cancelled.
+
 **Tracking link**:
 The unguessable link in every customer message that opens the order's tracking page without signing in.
 

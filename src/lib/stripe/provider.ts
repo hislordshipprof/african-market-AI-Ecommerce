@@ -209,12 +209,13 @@ export const stripeProvider: StripeProvider = {
     throw lastError instanceof Error ? lastError : new Error("Invalid webhook signature");
   },
 
-  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
+  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount, metadata) {
     const stripe = getStripeClient();
     try {
       const pi = await stripe.paymentIntents.capture(paymentIntentId, {
         amount_to_capture: amountCents,
         ...(applicationFeeAmount ? { application_fee_amount: applicationFeeAmount } : {}),
+        ...(metadata ? { metadata } : {}),
       }, idempotencyKey ? { idempotencyKey } : undefined);
       return {
         paymentIntentId: pi.id,

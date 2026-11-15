@@ -50,6 +50,19 @@ describe("assistant import boundary", () => {
     expect(hits.join("\n")).toContain("checkout/service");
   });
 
+  it("#557: no assistant tool applies or reads a store coupon, and assistant code cannot reach the coupon modules", () => {
+    expect(ASSISTANT_TOOL_NAMES.filter((name) => /coupon|promo|discount|code/.test(name))).toEqual([]);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-boundary-"));
+    temps.push(root);
+    const src = path.join(root, "src");
+    fs.mkdirSync(path.join(src, "lib/assistant"), { recursive: true });
+    fs.writeFileSync(path.join(src, "lib/assistant/apply.ts"), 'import { applyCartCoupon } from "@/lib/coupon/checkout";\nexport const apply = applyCartCoupon;\n');
+    fs.writeFileSync(path.join(src, "lib/assistant/list.ts"), 'import { listCoupons } from "@/lib/coupon/service";\nexport const list = listCoupons;\n');
+    const hits = findForbiddenImports([path.join(src, "lib/assistant")], src).join("\n");
+    expect(hits).toContain("coupon/checkout");
+    expect(hits).toContain("coupon/service");
+  });
+
   it("the registry is exactly the 19 tools, none of which pays or places an order (#247)", () => {
     expect(ASSISTANT_TOOL_NAMES).toHaveLength(19);
     expect(ASSISTANT_TOOL_NAMES.slice(-3)).toEqual(["get_fulfillment_options", "set_fulfillment", "prepare_checkout"]);

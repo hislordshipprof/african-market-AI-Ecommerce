@@ -3,6 +3,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../src/lib/system-actor";
 
+const E2E_COUPON = "E2ESAVE";
+
 async function withMama<T>(run: (tx: import("@prisma/client").Prisma.TransactionClient, storeId: string) => Promise<T>): Promise<T> {
   const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
   try {
@@ -25,6 +27,8 @@ export async function insertInboxOrder(input: {
   seedHold?: boolean;
   notes?: string | null;
   platformResolved?: boolean;
+  /** Goods discount from a store coupon (#557); subtotal stays the goods before it. */
+  discountCents?: number;
 }): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
@@ -36,6 +40,14 @@ export async function insertInboxOrder(input: {
     const variant = listing.variants[0];
     if (!variant) throw new Error("mama-ngozi has no listing variant");
     const amount = input.capturedAmountCents ?? 1000;
+    const discountCents = input.discountCents ?? 0;
+    const coupon = discountCents > 0
+      ? await tx.storeCoupon.upsert({
+          where: { storeId_code: { storeId, code: E2E_COUPON } },
+          update: {},
+          create: { storeId, code: E2E_COUPON, kind: "fixed", amountOffCents: discountCents, startsAt: new Date("2026-01-01T00:00:00Z"), createdById: SYSTEM_ACTOR_ID },
+        })
+      : null;
     const order = await tx.order.create({
       data: {
         storeId,
@@ -48,6 +60,8 @@ export async function insertInboxOrder(input: {
         totalAuthorizedCents: amount + 100,
         totalCents: amount,
         capturedAmountCents: input.capturedAmountCents,
+        discountCents,
+        couponId: coupon?.id ?? null,
         refundId: input.refundId ?? null,
         notes: input.notes ?? null,
         paymentIntentId: input.seedHold
@@ -145,6 +159,7 @@ export async function seedCaptureLabel(number: number): Promise<string> {
 export async function deleteInboxOrder(number: number): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number } });
+    await tx.storeCoupon.deleteMany({ where: { storeId, code: E2E_COUPON, orders: { none: {} } } });
   });
 }
 
