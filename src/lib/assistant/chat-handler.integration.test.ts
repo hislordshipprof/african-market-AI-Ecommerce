@@ -1188,7 +1188,11 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
-    const before = await raw.assistantSpendDay.aggregate({ _sum: { costMicros: true } });
+    // A ledger day of its own, so spend other test files record cannot pass the check below.
+    const ledgerDay = new Date(Date.UTC(2700, 0, 1) + randomInt(20_000) * 86_400_000);
+    const dayTotal = async () => (await raw.assistantSpendDay.findUnique({ where: { day: new Date(spend.utcDay(ledgerDay)) } }))?.costMicros ?? BigInt(0);
+    spend.setSpendClock(() => ledgerDay);
+    const before = await dayTotal();
     const errors: string[] = [];
     vi.spyOn(console, "error").mockImplementation((message: unknown) => {
       errors.push(String(message));
@@ -1207,11 +1211,11 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     });
     const response = await createChatHandler({ model })(request("save will fail", { ip: runIp("203.0.113.121"), cookie }));
     const body = await response.text();
+    spend.setSpendClock(null);
     expect(response.status).toBe(200);
     expect(body).toContain("kept reply");
     expect(errors.some((line) => line.includes("transcript not saved"))).toBe(true);
-    const after = await raw.assistantSpendDay.aggregate({ _sum: { costMicros: true } });
-    expect(after._sum.costMicros ?? BigInt(0)).toBeGreaterThan(before._sum.costMicros ?? BigInt(0));
+    expect(await dayTotal()).toBeGreaterThan(before);
     const again = await createChatHandler({ model: opener })(request("cart is free", { ip: runIp("203.0.113.122"), cookie }));
     expect(again.status).toBe(200);
     await again.text();

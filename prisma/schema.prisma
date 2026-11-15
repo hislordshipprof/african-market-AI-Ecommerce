@@ -969,6 +969,8 @@ model Cart {
   courierProvider       String?   @map("courier_provider")
   courierQuoteKey       String?   @map("courier_quote_key")
   courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
+  /// The one store coupon code the shopper entered (#557), upper-case. Checked on every quote and at placement.
+  couponCode            String?   @map("coupon_code")
   source                String    @default("manual")
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
@@ -1300,6 +1302,8 @@ model Order {
   couponId                String?   @map("coupon_id")
   /// Goods discount from the coupon, in cents; #557 writes it.
   discountCents           Int       @default(0) @map("discount_cents")
+  /// Who the coupon use counts against: "user:<id>" for an account, otherwise "email:<lower-case email>" (#557).
+  couponCustomerKey       String?   @map("coupon_customer_key")
   /// The store's own driver route this order is on (#566).
   driverRouteId           String?   @map("driver_route_id")
   /// The open pick batch this order is in (#564); cleared when staff leave the batch.
@@ -1328,6 +1332,7 @@ model Order {
   @@unique([id, storeId])
   @@unique([storeId, number])
   @@index([storeId, couponId])
+  @@index([storeId, couponId, couponCustomerKey])
   @@index([storeId, driverRouteId])
   @@index([storeId, pickBatchId])
   @@index([storeId])
@@ -1600,6 +1605,8 @@ model OrderLine {
   /// The variant the customer's answer or swap rule put in for the units found short (#13).
   substitutedVariantId      String?  @map("substituted_variant_id")
   substitutedUnitPriceCents Int?     @map("substituted_unit_price_cents")
+  /// This line's share of the order's coupon discount, written at capture (#557); an issue refund deducts it.
+  discountCents             Int      @default(0) @map("discount_cents")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @default(now()) @updatedAt @map("updated_at")
 

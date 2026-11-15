@@ -21,6 +21,8 @@ export interface SalesTotals {
   orders: number;
   goodsCents: number;
   averageOrderCents: number;
+  /** Store-funded promo discounts on captured orders; goods are already net of them. */
+  discountsCents: number;
   refundsCents: number;
   cardFeeCents: number;
   courierFeeCents: number;
@@ -108,6 +110,7 @@ type MoneyRow = {
   fulfillment: string;
   orders: number;
   goods: number;
+  discounts: number;
   card_fee: number;
   courier_fee: number;
   captured: number;
@@ -134,6 +137,7 @@ async function salesRows(storeId: string, range: AnalyticsRange, timeZone: strin
     SELECT 'order' AS kind, ${storeDay(Prisma.sql`o.created_at`, timeZone)} AS day, o.fulfillment,
            COUNT(*)::int AS orders,
            SUM(o.captured_amount_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
+           SUM(o.discount_cents)::int AS discounts,
            SUM(COALESCE(o.platform_fee_cents, 0))::int AS card_fee,
            SUM(${APPLICATION_FEE} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
            SUM(o.captured_amount_cents)::int AS captured,
@@ -144,7 +148,7 @@ async function salesRows(storeId: string, range: AnalyticsRange, timeZone: strin
     UNION ALL
     -- Stripe returns the fee in proportion but never more than the fee in total across partial refunds (stripe/fake.ts).
     SELECT 'refund', ${storeDay(Prisma.sql`r.created_at`, timeZone)}, r.fulfillment,
-           0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0,
            SUM(r.amount_cents)::int,
            SUM(r.amount_cents - (LEAST(r.fee_total, r.running) - LEAST(r.fee_total, r.running - r.proportional)))::int
     FROM r, b
@@ -153,12 +157,13 @@ async function salesRows(storeId: string, range: AnalyticsRange, timeZone: strin
 }
 
 function emptyTotals(): SalesTotals {
-  return { orders: 0, goodsCents: 0, averageOrderCents: 0, refundsCents: 0, cardFeeCents: 0, courierFeeCents: 0, netCents: 0 };
+  return { orders: 0, goodsCents: 0, averageOrderCents: 0, discountsCents: 0, refundsCents: 0, cardFeeCents: 0, courierFeeCents: 0, netCents: 0 };
 }
 
 function addRow(totals: SalesTotals, row: MoneyRow) {
   totals.orders += row.orders;
   totals.goodsCents += row.goods;
+  totals.discountsCents += row.discounts;
   totals.cardFeeCents += row.card_fee;
   totals.courierFeeCents += row.courier_fee;
   totals.refundsCents += row.refunds;

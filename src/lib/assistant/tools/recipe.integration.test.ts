@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import recipeBase from "../../../../prisma/recipe-base.json";
@@ -9,7 +9,7 @@ import { createAssistantModel } from "../model";
 import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
 import { WEB_SEARCH_MICROS } from "../cost";
 import { RECIPE_LOOKUPS_PER_STORE_DAY, saveLookedUpRecipe, takeLookupSlot } from "../recipes";
-import { failNextSpendWrites } from "../spend";
+import { failNextSpendWrites, setSpendClock, utcDay } from "../spend";
 import { setShopperNeeds, type AssistantContext } from "./execute";
 import { getRecipe } from "./recipe";
 
@@ -83,12 +83,15 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     return { listingId: row.id, variantId: variant.id };
   }
 
+  // A ledger day of its own, so spend other test files record on today's row cannot satisfy a spend check here.
+  const ledgerDay = new Date(Date.UTC(2700, 0, 1) + randomInt(20_000) * 86_400_000);
   async function spentToday(): Promise<bigint> {
-    const row = await raw.assistantSpendDay.findUnique({ where: { day: new Date(new Date().toISOString().slice(0, 10)) } });
+    const row = await raw.assistantSpendDay.findUnique({ where: { day: new Date(utcDay(ledgerDay)) } });
     return row?.costMicros ?? BigInt(0);
   }
 
   beforeAll(async () => {
+    setSpendClock(() => ledgerDay);
     raw = testPrismaClient();
     await seedRecipeBase(raw, base);
     storeA = (await raw.store.create({ data: { slug: `recipe-a-${suffix}`, name: "Recipe A", themePreset: "palm-and-shea" } })).id;
@@ -107,6 +110,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   });
 
   afterAll(async () => {
+    setSpendClock(null);
     vi.unstubAllEnvs();
     await platform.recipe.deleteMany({ where: { key: { startsWith: "kelewele " } } });
     await platform.recipe.deleteMany({ where: { key: { startsWith: "egusi stew " } } });
@@ -193,7 +197,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   });
 
   it("looks up a dish not in the base once, matches it to this store, saves it, and counts the search in spend", async () => {
-    const before = await raw.assistantSpendDay.findUnique({ where: { day: new Date(new Date().toISOString().slice(0, 10)) } });
+    const before = await spentToday();
     const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["Rice", "ripe plantain", "ginger", "rice"])] });
     const first = await getRecipe(ctxA, { dish, servings: 4 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) }) as unknown as RecipeOutput;
     expect(fake.requests).toHaveLength(1);
@@ -201,8 +205,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(first).toMatchObject({ ok: true, lookedUp: true, source: "https://recipes.example/kelewele" });
     expect(first.inStock.map((item) => item.listingId)).toEqual([rice.listingId]);
     expect(first.notCarried).toEqual(["ripe plantain", "ginger"]);
-    const after = await raw.assistantSpendDay.findUnique({ where: { day: new Date(new Date().toISOString().slice(0, 10)) } });
-    expect((after?.costMicros ?? BigInt(0)) - (before?.costMicros ?? BigInt(0))).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS);
+    expect((await spentToday()) - before).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS);
 
     const again = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
     const second = await getRecipe(ctxA, { dish: dish.toUpperCase(), servings: 8 }, { lookupModel: createAssistantModel({ fetch: again.fetch }) }) as unknown as RecipeOutput;
