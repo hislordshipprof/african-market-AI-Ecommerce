@@ -63,6 +63,11 @@ test.describe("Customer magic-link auth", () => {
     await expect(page.getByTestId("store-name")).toHaveText("Mama Ngozi African Market");
     await expect(page.getByText("Mama Ngozi African Market").first()).toBeVisible();
 
+    // 7b. Signed in, the header offers Account instead of Sign in
+    const header = page.getByTestId("storefront-header");
+    await expect(header.getByRole("link", { name: "Account", exact: true })).toHaveAttribute("href", "/account");
+    await expect(header.getByRole("link", { name: "Sign in", exact: true })).toHaveCount(0);
+
     // 8. Click sign out
     await page.getByRole("button", { name: "Sign out" }).click();
 
@@ -193,4 +198,29 @@ test.describe("sign-in reduced motion", () => {
     const second = await poster.evaluate((el) => getComputedStyle(el).transform);
     expect(second).toBe(first);
   });
+});
+
+test.describe("sign-in layout stability", () => {
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+    test(`the sign-in surface does not shift while it loads at ${viewport.width}px`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.addInitScript(() => {
+        const win = window as unknown as { __cls: number };
+        win.__cls = 0;
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries() as unknown as { value: number; hadRecentInput: boolean }[]) {
+            if (!entry.hadRecentInput) win.__cls += entry.value;
+          }
+        }).observe({ type: "layout-shift", buffered: true });
+      });
+      await page.goto(`${base}/account/sign-in`);
+      await expect(page.getByRole("button", { name: "Send sign-in link" })).toBeVisible();
+      await page.waitForLoadState("networkidle");
+      // The poster scale-in and form entrance run 1.2s.
+      await page.waitForTimeout(1500);
+      const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
+      // 0.1 is the "good" Core Web Vitals threshold.
+      expect(cls).toBeLessThan(0.1);
+    });
+  }
 });
