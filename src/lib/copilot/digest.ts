@@ -1,11 +1,14 @@
 import { resolveAuthBaseUrl } from "../auth";
-import { platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
+import { Prisma, claimDigestWhatsApp, platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
+import { salesRows, salesView } from "../analytics/queries";
 import { sendEmail } from "../email/send";
 import { inngest } from "../inngest/client";
-import { escapeHtml } from "../format";
+import { escapeHtml, money } from "../format";
 import { isValidTimezone } from "../order/store-hours";
 import { stockBadge, type StockBadge } from "../storefront/stock-badge";
-import { describeAlerts, type AlertKind, type AlertView } from "./alerts";
+import { optedInOwners, sendOwnerNotice } from "../whatsapp/owner-notify";
+import { COPILOT_TEMPLATES } from "../whatsapp/templates";
+import { describeAlerts, isRunningLow, isSoldOut, type AlertKind, type AlertView } from "./alerts";
 import { listingLabel } from "./cards";
 
 /** Owner decision 2026-11-10: 20:00 store time unless the owner changes it. */
@@ -13,6 +16,7 @@ export const DEFAULT_DIGEST_HOUR = 20;
 const STORES_PER_PAGE = 100;
 const BEST_SELLERS = 5;
 const CONFIRM_REQUESTS_SHOWN = 20;
+const LOW_OR_OUT_SHOWN = 5;
 
 interface LocalClock {
   hour: number;
@@ -60,6 +64,9 @@ interface DigestData {
   bands: Record<StockBadge, number>;
   ordersToday: number;
   bestSellers: Array<{ name: string; units: number }>;
+  stockChanges: Array<{ type: string; events: number; units: number }>;
+  soldOut: string[];
+  runningLow: string[];
 }
 
 async function readDigest(storeId: string, since: Date): Promise<DigestData> {
@@ -74,7 +81,11 @@ async function readDigest(storeId: string, since: Date): Promise<DigestData> {
       select: alertSelect,
     }),
     scoped.copilotAlert.count({ where: { kind: "confirm_request", state: "open" } }),
-    scoped.listing.findMany({ where: { active: true }, select: { confidence: true, stockMode: true, qty: true, status: true } }),
+    scoped.listing.findMany({
+      where: { active: true },
+      orderBy: { id: "asc" },
+      select: { confidence: true, stockMode: true, qty: true, status: true, customName: true, masterProduct: { select: { name: true } } },
+    }),
     scoped.order.count({ where: { createdAt: { gte: since } } }),
     scoped.stockEvent.groupBy({
       by: ["listingId"],
@@ -84,6 +95,13 @@ async function readDigest(storeId: string, since: Date): Promise<DigestData> {
       take: BEST_SELLERS,
     }),
   ]);
+  const changes = await scoped.stockEvent.groupBy({
+    by: ["type"],
+    where: { createdAt: { gte: since } },
+    _count: { _all: true },
+    _sum: { delta: true },
+    orderBy: { type: "asc" },
+  });
 
   const alertsByKind = new Map<AlertKind, AlertView[]>();
   for (const view of await describeAlerts(storeId, todayAlerts)) {
@@ -98,6 +116,13 @@ async function readDigest(storeId: string, since: Date): Promise<DigestData> {
   });
   const nameById = new Map(named.map((l) => [l.id, listingLabel(l)]));
   return {
+    stockChanges: changes.map((change) => ({
+      type: change.type,
+      events: change._count._all,
+      units: Math.abs(change._sum.delta ?? 0),
+    })),
+    soldOut: listings.filter(isSoldOut).map(listingLabel),
+    runningLow: listings.filter(isRunningLow).map(listingLabel),
     alertsByKind,
     confirmRequests: await describeAlerts(storeId, confirms),
     openConfirmRequests,
@@ -143,15 +168,96 @@ function renderDigest(storeName: string, date: string, data: DigestData, copilot
   ].join("\n");
 }
 
+/** The WhatsApp digest's facts (#144): template variables and text lines. Fixed at claim time. */
+interface WhatsAppDigest {
+  date: string;
+  orders: number;
+  goodsCents: number;
+  stockChanges: string;
+  lowOrOut: string;
+}
+
+const CHANGE_WORDS: Record<string, (c: { events: number; units: number }) => string> = {
+  sale: (c) => `${c.units} sold online`,
+  restock: (c) => `${c.units} restocked`,
+  counter_sale: (c) => `${c.units} sold at the counter`,
+  recount: (c) => `${c.events} ${c.events === 1 ? "recount" : "recounts"}`,
+  adjust: (c) => `${c.events} status ${c.events === 1 ? "change" : "changes"}`,
+};
+
+function namesWithMore(names: string[]): string {
+  const shown = names.slice(0, LOW_OR_OUT_SHOWN).join(", ");
+  return names.length > LOW_OR_OUT_SHOWN ? `${shown} and ${names.length - LOW_OR_OUT_SHOWN} more` : shown;
+}
+
+function whatsappDigest(date: string, data: DigestData, goodsCents: number): WhatsAppDigest {
+  const changes = data.stockChanges.map((c) => (CHANGE_WORDS[c.type] ?? ((x) => `${x.events} ${c.type.replace(/_/g, " ")}`))(c));
+  const lowOrOut = [
+    ...(data.soldOut.length > 0 ? [`out: ${namesWithMore(data.soldOut)}`] : []),
+    ...(data.runningLow.length > 0 ? [`low: ${namesWithMore(data.runningLow)}`] : []),
+  ];
+  return {
+    date,
+    orders: data.ordersToday,
+    goodsCents,
+    stockChanges: changes.length > 0 ? changes.join(", ") : "none",
+    lowOrOut: lowOrOut.length > 0 ? lowOrOut.join("; ") : "none",
+  };
+}
+
+function readWhatsAppDigest(value: Prisma.JsonValue | null): WhatsAppDigest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  return typeof v.date === "string" && typeof v.orders === "number" && typeof v.goodsCents === "number"
+    && typeof v.stockChanges === "string" && typeof v.lowOrOut === "string"
+    ? { date: v.date, orders: v.orders, goodsCents: v.goodsCents, stockChanges: v.stockChanges, lowOrOut: v.lowOrOut }
+    : null;
+}
+
+/**
+ * The digest on WhatsApp to each owner who opted in (#144). Each owner is added to
+ * `whatsapp_sent_to` before the send, so a retry or a second run never sends twice;
+ * a send that fails or a run that dies after the claim leaves that owner without
+ * today's WhatsApp digest (the email still goes).
+ */
+async function sendWhatsAppDigests(
+  store: { id: string; name: string },
+  localDate: string,
+  digest: WhatsAppDigest,
+  copilotUrl: string,
+  now: Date,
+): Promise<void> {
+  const recipients = await optedInOwners(store.id, "digest", now);
+  const text = [
+    `${store.name}: your day, ${digest.date}`,
+    `Orders: ${digest.orders}`,
+    `Goods sales: ${money(digest.goodsCents)}`,
+    `Stock changes: ${digest.stockChanges}`,
+    `Low or out of stock: ${digest.lowOrOut}`,
+    "",
+    `Open the stock copilot: ${copilotUrl}`,
+  ].join("\n");
+  for (const recipient of recipients) {
+    const claimed = await storeScopedTransaction(store.id, (tx) => claimDigestWhatsApp(tx, store.id, localDate, recipient.userId));
+    if (!claimed) continue;
+    await sendOwnerNotice(store.id, recipient, {
+      text,
+      template: COPILOT_TEMPLATES.digest,
+      values: [store.name, digest.date, String(digest.orders), money(digest.goodsCents), digest.stockChanges, digest.lowOrOut],
+    });
+  }
+}
+
 /**
  * Claims the store's day with the rendered email, then emails each owner and marks it sent.
  * A failure or a crash leaves the claim unsent, so a retry resends the same body under the
  * same idempotency keys: owners already sent are replayed by Resend, not emailed twice.
  */
 async function sendStoreDigest(
-  store: { id: string; name: string; slug: string },
+  store: { id: string; name: string; slug: string; timezone: string },
   clock: LocalClock,
   env: Record<string, string | undefined>,
+  now: Date,
 ): Promise<boolean> {
   const owners = await storeScoped(store.id).storeMembership.findMany({
     where: { role: "owner" },
@@ -161,17 +267,28 @@ async function sendStoreDigest(
 
   const day = { storeId_localDate: { storeId: store.id, localDate: clock.date } };
   const readClaim = () => storeScopedTransaction(store.id, (tx) =>
-    tx.copilotDigest.findUnique({ where: day, select: { html: true, sentAt: true } }));
+    tx.copilotDigest.findUnique({ where: day, select: { html: true, sentAt: true, whatsappSummary: true } }));
+  const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
+  const copilotUrl = `${base}/store-admin/copilot?store=${encodeURIComponent(store.slug)}`;
   let claim = await readClaim();
   if (!claim) {
-    const data = await readDigest(store.id, clock.dayStart);
-    const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
-    const html = renderDigest(store.name, clock.date, data, `${base}/store-admin/copilot?store=${encodeURIComponent(store.slug)}`);
+    const timeZone = isValidTimezone(store.timezone) ? store.timezone : "UTC";
+    const range = { preset: "custom" as const, from: clock.date, to: clock.date };
+    // Goods sales as on the analytics page: captured orders placed today, less fees and tip.
+    const [data, sales] = await Promise.all([readDigest(store.id, clock.dayStart), salesRows(store.id, range, timeZone)]);
+    const html = renderDigest(store.name, clock.date, data, copilotUrl);
+    const whatsappSummary = { ...whatsappDigest(clock.date, data, salesView(sales, range).totals.goodsCents) };
     await storeScopedTransaction(store.id, (tx) =>
-      tx.copilotDigest.createMany({ data: [{ storeId: store.id, localDate: clock.date, html }], skipDuplicates: true }));
+      tx.copilotDigest.createMany({
+        data: [{ storeId: store.id, localDate: clock.date, html, whatsappSummary }],
+        skipDuplicates: true,
+      }));
     claim = await readClaim();
   }
   if (!claim || claim.sentAt) return false;
+
+  const summary = readWhatsAppDigest(claim.whatsappSummary);
+  if (summary) await sendWhatsAppDigests(store, clock.date, summary, copilotUrl, now);
 
   for (const owner of owners) {
     await sendEmail({
@@ -207,7 +324,7 @@ async function sendDueDigests(stores: DigestStore[], now: Date, env: Record<stri
     if (clock.hour !== store.digestHour) continue;
     due += 1;
     try {
-      if (await sendStoreDigest(store, clock, env)) sent += 1;
+      if (await sendStoreDigest(store, clock, env, now)) sent += 1;
     } catch (err) {
       failedStoreIds.push(store.id);
       console.error(JSON.stringify({

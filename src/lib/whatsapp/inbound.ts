@@ -2,15 +2,18 @@ import {
   claimInboundWhatsAppMessage,
   findVerifiedOwnerLink,
   platformAdminTransaction,
+  recordOwnerInbound,
   recordOwnerLinkBsuid,
+  releaseInboundWhatsAppMessage,
   verifyOwnerLinkByCode,
 } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { scheduleAfterResponse } from "../schedule-after-response";
 import { LINK_CODE_PATTERN, messageRef, phoneKey } from "./code";
 import { sendWhatsAppMessage } from "./index";
-import { ownerMessageReply } from "./owner-handler";
+import { ownerCopilotReplies, type VerifiedOwner } from "./owner-handler";
 import { isBsuid, lastFour } from "./phone";
+import type { OutboundMessage } from "./types";
 import type { InboundMessage } from "./webhook-payload";
 
 export const NOT_LINKED_REPLY = "This number isn't linked to a store";
@@ -28,7 +31,7 @@ type Outcome =
   | { kind: "unaddressable_sender" }
   | { kind: "verified"; storeName: string }
   | { kind: "wrong_code" }
-  | { kind: "owner"; storeName: string }
+  | { kind: "owner"; owner: VerifiedOwner }
   | { kind: "unlinked" };
 
 /** Message digest, sender's last four digits (or a BSUID digest) and outcome only. */
@@ -40,8 +43,11 @@ function log(message: InboundMessage, outcome: string): void {
 /**
  * Handles one inbound message: claims its id, tries a link code, and finds a
  * verified owner by wa_id or BSUID, in one transaction (a failure rolls back
- * the claim, so the route answers 500 and Meta redelivers). The reply goes out
- * after commit and after the response, to the wa_id, or to the BSUID when Meta
+ * the claim, so the route answers 500 and Meta redelivers). A verified owner's
+ * message then runs the Store copilot (#144); if that throws, the claim is
+ * released and the error rethrown, so Meta redelivers it (the copilot turn and
+ * confirm are idempotent by message and proposal). Replies go out after commit
+ * and after the response, in order, to the wa_id, or to the BSUID when Meta
  * sent no number; a failed reply is logged and not retried. Edits, revokes,
  * reactions, system notices and group messages get no reply.
  */
@@ -55,6 +61,8 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     if (message.inGroup || NO_REPLY_TYPES.has(message.type)) return { kind: "ignored" };
     const owner = await findVerifiedOwnerLink(tx, { waId, bsuid });
     if (owner && waId && bsuid && owner.bsuid !== bsuid) await recordOwnerLinkBsuid(tx, owner.linkId, bsuid);
+    // Meta's window runs from the owner's own send time; a message with none leaves it as it was.
+    if (owner && message.timestamp !== null) await recordOwnerInbound(tx, owner.linkId, new Date(message.timestamp * 1000));
     // A verified owner's six-digit text is a code only if it matches a code
     // sent to them; otherwise it is an ordinary message and counts no attempt,
     // though a miss on their own link is still told it was wrong.
@@ -69,7 +77,12 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
         if (!owner || ownRow) return { kind: "wrong_code" };
       }
     }
-    if (owner) return { kind: "owner", storeName: owner.storeName };
+    if (owner) {
+      return {
+        kind: "owner",
+        owner: { storeId: owner.storeId, userId: owner.userId, email: owner.email, storeName: owner.storeName },
+      };
+    }
     // A username user known only by BSUID is not told anything about linking.
     if (!waId) return { kind: "unaddressable_sender" };
     return { kind: "unlinked" };
@@ -77,6 +90,7 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
 
   log(message, outcome.kind);
 
+  const to = waId ?? bsuid;
   let body: string;
   switch (outcome.kind) {
     case "duplicate":
@@ -89,9 +103,18 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     case "wrong_code":
       body = WRONG_CODE_REPLY;
       break;
-    case "owner":
-      body = ownerMessageReply({ storeName: outcome.storeName });
-      break;
+    case "owner": {
+      if (!to) return;
+      let replies: OutboundMessage[];
+      try {
+        replies = await ownerCopilotReplies(outcome.owner, message, to);
+      } catch (error) {
+        await releaseInboundWhatsAppMessage(message.id);
+        throw error;
+      }
+      if (replies.length > 0) scheduleAfterResponse(() => sendInOrder(replies), "whatsapp_reply_failed");
+      return;
+    }
     case "unlinked": {
       // The claim has committed: a limiter failure here must not answer 500,
       // or the redelivery is a duplicate and the sender never gets a reply.
@@ -112,7 +135,11 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     }
   }
 
-  const to = waId ?? bsuid;
   if (!to) return;
   scheduleAfterResponse(() => sendWhatsAppMessage({ type: "text", to, body }), "whatsapp_reply_failed");
+}
+
+/** The copilot's text, then each proposal's buttons, in order; a failed send stops the rest. */
+async function sendInOrder(replies: OutboundMessage[]): Promise<void> {
+  for (const reply of replies) await sendWhatsAppMessage(reply);
 }

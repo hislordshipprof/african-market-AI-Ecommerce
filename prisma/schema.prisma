@@ -795,13 +795,17 @@ model CopilotAlert {
 
 /// One per store per local day, claimed before the digest email goes out; sent_at is set once every owner has it.
 model CopilotDigest {
-  id        String    @id @default(cuid())
-  storeId   String    @map("store_id")
-  localDate String    @map("local_date")
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  localDate       String    @map("local_date")
   /// Rendered once at claim time, so a retry resends the same body under the same Resend idempotency key.
-  html      String
-  sentAt    DateTime? @map("sent_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  html            String
+  /// The WhatsApp digest's figures (#144), fixed at claim time like the email body.
+  whatsappSummary Json?     @map("whatsapp_summary")
+  /// Owners the WhatsApp digest was handed to, added before each send so a retry never sends twice.
+  whatsappSentTo  String[]  @default([]) @map("whatsapp_sent_to")
+  sentAt          DateTime? @map("sent_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
 
@@ -1905,6 +1909,8 @@ model OwnerWhatsAppLink {
   verificationExpiresAt DateTime? @map("verification_expires_at")
   verificationAttempts  Int       @default(0) @map("verification_attempts")
   verifiedAt            DateTime? @map("verified_at")
+  /// Meta's send time of the owner's last message to the platform number (#144): inside 24 hours, free text; else a template.
+  lastInboundAt         DateTime? @map("last_inbound_at")
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
 

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
 import { parseInput, readFormFields } from "../security/parse-input";
 import { PHONE_FORMAT_ERROR } from "./phone";
-import { removeOwnerLink, startOwnerLink } from "./owner-link";
+import { removeOwnerLink, setOwnerNotices, startOwnerLink } from "./owner-link";
 
 export type WhatsAppLinkActionResult = { ok: true } | { error: string };
 
@@ -36,6 +36,25 @@ export async function removeWhatsAppLinkAction(): Promise<WhatsAppLinkActionResu
     });
   } catch (error) {
     logActionFailure("whatsapp_link_remove_failed", error);
+    return { error: "Something went wrong. Try again." };
+  }
+}
+
+const noticesSchema = z.strictObject({ optInAlerts: z.boolean(), optInDigest: z.boolean() });
+
+/** Copilot alerts and the daily digest on WhatsApp (#144), for the owner's own verified number. */
+export async function updateWhatsAppNoticesAction(input: unknown): Promise<WhatsAppLinkActionResult> {
+  const session = await requireStoreOwner();
+  const parsed = parseInput(noticesSchema, input);
+  if (!parsed.ok) return { error: "Something went wrong. Try again." };
+  try {
+    const saved = await setOwnerNotices(
+      { storeId: session.store.id, userId: session.user.id, actorEmail: session.user.email },
+      parsed.data,
+    );
+    return saved ? { ok: true } : { error: "Link your number first." };
+  } catch (error) {
+    logActionFailure("whatsapp_notices_failed", error);
     return { error: "Something went wrong. Try again." };
   }
 }
