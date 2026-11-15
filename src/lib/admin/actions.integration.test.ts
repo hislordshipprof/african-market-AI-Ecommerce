@@ -23,7 +23,7 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { retryCourierRegistrationAction, updateStore } from "./actions";
+import { forceGoLiveAction, retryCourierRegistrationAction, updateStore } from "./actions";
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
@@ -264,5 +264,28 @@ describe("store hours schema", () => {
     data.set("storeId", storeId);
 
     await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=failed`);
+  });
+
+  it("platform admin forces a store in setup live only with a reason; the audit row keeps it (#555)", async () => {
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`UPDATE stores SET status = 'setup' WHERE id = ${storeId}`;
+    });
+    const blank = new FormData();
+    blank.set("storeId", storeId);
+    blank.set("reason", "  ");
+    await expect(forceGoLiveAction(blank)).rejects.toThrow(
+      `REDIRECT:/admin/stores/${storeId}?goLiveError=${encodeURIComponent("Give a reason for going live with items open.")}`,
+    );
+    expect((await authPrisma.store.findUniqueOrThrow({ where: { id: storeId } })).status).toBe("setup");
+
+    const data = new FormData();
+    data.set("storeId", storeId);
+    data.set("reason", "Launch partner, Stripe review pending");
+    await expect(forceGoLiveAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?goLive=forced`);
+    expect((await authPrisma.store.findUniqueOrThrow({ where: { id: storeId } })).status).toBe("active");
+    const audit = await platformAdmin.auditLog.findFirst({ where: { entityId: storeId, action: "store.go_live_forced" } });
+    expect(audit).toMatchObject({ actorId: userId, after: { status: "active", reason: "Launch partner, Stripe review pending" } });
   });
 });

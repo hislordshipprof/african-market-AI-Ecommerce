@@ -16,6 +16,7 @@ import { setPilot, setPlanOverride } from "../billing/service";
 import { effectivePlan } from "../billing/plan";
 import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
 import { queueStoreRequestNotices } from "../directory/store-requests";
+import { FORCE_REASON_MAX, forceGoLive } from "../go-live/service";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -59,7 +60,7 @@ function formText(data: unknown, key: string): string | null {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "phone", "storeDeliveryFee", "storeDeliveryEnabled", "listed", ...SLOT_FIELD_NAMES]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "phone", "storeDeliveryFee", "storeDeliveryEnabled", "listed", ...SLOT_FIELD_NAMES]) {
     const v = formText(data, key);
     if (v != null) raw[key] = v;
   }
@@ -74,7 +75,6 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     logoUrl: string | null;
     brandColor: string | null;
     themePreset: string;
-    status: string;
     hours: unknown;
     prepTimeMinutes: number;
     deliveryRadiusMi: number;
@@ -102,7 +102,6 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
   const logoUrl = formText(data, "logoUrl")?.trim() || null;
   const brandColor = formText(data, "brandColor")?.trim() || null;
   const themePreset = formText(data, "themePreset")?.trim() || "palm-and-shea";
-  const status = formText(data, "status")?.trim() || "active";
   const hoursRaw = formText(data, "hours")?.trim() || "";
   const prepTimeMinutes = parseIntOrDefault(formText(data, "prepTimeMinutes"), 30);
   const deliveryRadiusMi = parseFloatOrDefault(formText(data, "deliveryRadiusMi"), 8);
@@ -170,11 +169,6 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     errors.themePreset = "Invalid theme preset";
   }
 
-  // `setup` is where an approved store application starts (#554); saving the form keeps it there.
-  if (!["active", "suspended", "setup"].includes(status)) {
-    errors.status = "Status must be active, suspended or setup";
-  }
-
   if (!Number.isFinite(prepTimeMinutes) || prepTimeMinutes < 0 || prepTimeMinutes > 480) {
     errors.prepTimeMinutes = "Prep time must be 0-480 minutes";
   }
@@ -238,7 +232,6 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
       logoUrl,
       brandColor,
       themePreset,
-      status,
       hours,
       prepTimeMinutes,
       deliveryRadiusMi,
@@ -262,7 +255,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
 }
 
 const STORE_FORM_FIELDS = [
-  "slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours",
+  "slug", "name", "logoUrl", "brandColor", "themePreset", "hours",
   "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes",
   "pickupEnabled", "timezone", "storeId",
   "addressLine1", "addressLine2", "city", "state", "zip", "phone",
@@ -275,7 +268,6 @@ const storeFormSchema = z.strictObject({
   logoUrl: z.string().max(2_000).nullable(),
   brandColor: z.string().max(32).nullable(),
   themePreset: z.string().max(40).nullable(),
-  status: z.string().max(20).nullable(),
   hours: z.string().max(20_000).nullable(),
   prepTimeMinutes: z.string().max(20).nullable(),
   deliveryRadiusMi: z.string().max(20).nullable(),
@@ -470,7 +462,6 @@ export async function updateStore(
         logoUrl: values.logoUrl,
         brandColor: finalBrandColor,
         themePreset: values.themePreset,
-        status: values.status,
         hours: values.hours !== null ? values.hours : Prisma.JsonNull,
         prepTimeMinutes: values.prepTimeMinutes,
         deliveryRadiusMi: values.deliveryRadiusMi,
@@ -589,10 +580,13 @@ export async function setStoreStatus(
     if (before.status === targetStatus) {
       return { noop: true as const, storeId: before.id };
     }
+    if (before.status === "setup" && targetStatus === "active") {
+      return { error: "This store is in setup. It goes live from its checklist." as const };
+    }
 
     const store = await tx.store.update({
       where: { id: storeId },
-      data: { status: targetStatus },
+      data: { status: targetStatus === "active" ? await statusAfterSuspension(tx, storeId) : targetStatus },
     });
 
     await tx.auditLog.create({
@@ -617,6 +611,20 @@ export async function setStoreStatus(
   revalidateStore(result.store);
   if (inDirectory(result.store)) await queueStoreRequestNotices(result.store.id);
   return { success: true, storeId: result.store.id };
+}
+
+/**
+ * Suspension is separate from going live (#555): lifting it returns the store to where the suspension found it, read
+ * from that suspension's audit row. A store suspended in setup goes back to setup, never live.
+ */
+async function statusAfterSuspension(tx: Pick<Prisma.TransactionClient, "auditLog">, storeId: string): Promise<"setup" | "active"> {
+  const suspension = await tx.auditLog.findFirst({
+    where: { storeId, action: "store.suspend" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { before: true },
+  });
+  const before = suspension?.before;
+  return before && typeof before === "object" && !Array.isArray(before) && before.status === "setup" ? "setup" : "active";
 }
 
 /** Shown in the Store directory, so a waiting "tell me when a store opens" request may match it (#455). */
@@ -690,6 +698,21 @@ export async function setPilotAction(formData: FormData): Promise<void> {
   const query = result.ok ? "" : `?pilotError=${encodeURIComponent(result.error)}`;
   revalidatePath(`/admin/stores/${fields.data.storeId}`);
   redirect(`/admin/stores/${fields.data.storeId}${query}`);
+}
+
+/** Platform admin moves a store in setup live with checklist items open (#555). The reason is required and audited. */
+export async function forceGoLiveAction(formData: FormData): Promise<void> {
+  const session = await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({
+    storeId: z.string().min(1).max(200),
+    reason: z.string().max(FORCE_REASON_MAX * 2),
+  }), readFormFields(formData, ["storeId", "reason"]));
+  if (!fields.ok) redirect("/admin/stores");
+  const { storeId, reason } = fields.data;
+  const result = await forceGoLive(storeId, reason, { id: session.user.id, email: session.user.email }, new Date());
+  revalidatePath(`/admin/stores/${storeId}`);
+  revalidatePath("/admin/stores");
+  redirect(`/admin/stores/${encodeURIComponent(storeId)}${result.ok ? "?goLive=forced" : `?goLiveError=${encodeURIComponent(result.error)}`}`);
 }
 
 /** Platform admin queues the courier registration job again for one store (#526). */
