@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { storeMayUse } from "../billing/plan";
+import type { AcquisitionSource } from "../directory/attribution";
 import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
@@ -512,6 +513,7 @@ export interface RecordAuthorizedOrderInput {
   minimumOrderCents?: number;
   /** Direct place calls can set this even when the cart snapshot does not. */
   leaveAtDoor?: boolean;
+  acquisitionSource?: AcquisitionSource | null;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -708,6 +710,7 @@ export async function recordAuthorizedOrder(
           couponId,
           discountCents: currentQuote.discountCents,
           couponCustomerKey: couponId ? couponCustomerKey(couponUserId, input.contact.email) : null,
+          acquisitionSource: input.acquisitionSource ?? null,
           serviceFeeCents: currentQuote.serviceFeeCents,
           serviceFeeBps: serviceFee.rateBps,
           serviceFeeMinCents: serviceFee.minCents,
@@ -1008,6 +1011,7 @@ export async function placeOrder(
   paymentIntentId: string,
   actorUserId: string | null = null,
   leaveAtDoor = false,
+  acquisitionSource: AcquisitionSource | null = null,
 ): Promise<PlacedOrder> {
   assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
@@ -1184,6 +1188,7 @@ export async function placeOrder(
       epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
       leaveAtDoor,
+      acquisitionSource,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
         qty: line.qty,

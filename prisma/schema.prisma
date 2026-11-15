@@ -1230,6 +1230,8 @@ model Order {
   totalAuthorizedCents    Int       @map("total_authorized_cents")
   paymentIntentId         String?   @unique @map("payment_intent_id")
   sourceCartId            String?   @map("source_cart_id")
+  /// "directory" when the shopper arrived from a Store directory link within 30 days (#454); null otherwise.
+  acquisitionSource       String?   @map("acquisition_source")
   capturedAmountCents     Int?      @map("captured_amount_cents")
   refundId                String?   @map("refund_id")
   platformFeeCents        Int?      @map("platform_fee_cents")

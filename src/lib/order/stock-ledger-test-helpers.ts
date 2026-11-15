@@ -22,6 +22,7 @@ export async function countedListing(storeId: string, qty: number | null, name =
 export async function placeOrder(
   storeId: string,
   lines: Array<{ variantId: string; qty: number; substituteVariantId?: string }>,
+  acquisitionSource?: "directory" | null,
 ) {
   const fulfillment = "pickup" as const;
   const scoped = storeScoped(storeId);
@@ -55,6 +56,7 @@ export async function placeOrder(
     paymentIntentId,
     quote: computeQuote(0, orderLines.map((line) => ({ ...line, maxPerOrder: null })), CONTACT, fulfillment, ADR_0021_SERVICE_FEE),
     lines: orderLines,
+    acquisitionSource,
   };
   const { orderId } = await recordAuthorizedOrder(storeId, input);
   setAuthorizedAmount(paymentIntentId, input.quote.holdCents);

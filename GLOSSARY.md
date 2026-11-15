@@ -60,6 +60,10 @@ _Avoid_: Marketplace, combined app
 A store's entry in the Store directory: the owner's "Listed in the directory" switch (off by default; a platform admin can override it), a blurb of at most 160 characters, and up to 3 cuisine tags from a fixed list. The street address is never part of it.
 _Avoid_: Profile, store page
 
+**Directory order**:
+An order placed within 30 days of the shopper arriving on the store's site from a Store directory link (`?ref=directory`, kept in a first-party cookie that says only "directory"). The order stores `acquisitionSource = 'directory'`; the owner's dashboard counts them.
+_Avoid_: Referral, marketplace order
+
 **Near me**:
 The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
 _Avoid_: Store locator, geo search
