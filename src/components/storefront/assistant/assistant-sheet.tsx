@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { ArrowUp, FileText, Mic, Square, X } from "lucide-react";
-import { useReducedMotion } from "motion/react";
+import { useReducedMotion } from "../use-reduced-motion";
 import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
 import { QuickAddStepper } from "../quick-add-stepper";

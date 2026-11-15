@@ -134,6 +134,7 @@ export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps
     } catch (err) {
       logUnavailable(input.orderId, provider.name, "create", err);
       if (i < candidates.length - 1) {
+        await recordCourierEvent(input.storeId, input.orderId, null, "failover_triggered", { fromProvider: provider.name, reason: "create_failed" });
         await deps.emit({
           name: COURIER_FAILOVER_TRIGGERED,
           data: { storeId: input.storeId, orderId: input.orderId, fromProvider: provider.name, reason: "create_failed" },
@@ -185,7 +186,26 @@ async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDe
   if (order.store.storeDeliveryEnabled) options.push("store-delivery");
   if (order.store.pickupEnabled) options.push("pickup");
   options.push("cancel");
+  await recordCourierEvent(storeId, orderId, null, "both_failed", { options });
   await emit({ name: COURIER_BOTH_FAILED, data: { storeId, orderId, orderNumber: order.number, options } });
+}
+
+/**
+ * Failover and both-fail also land on the order's delivery events, so the courier incident log reads them from the
+ * database (#536). Keyed like their Inngest event ids: on the replaced delivery for a timeout, else on the order (and
+ * the refusing courier for a create error), so a replayed step writes each once.
+ */
+async function recordCourierEvent(
+  storeId: string,
+  orderId: string,
+  deliveryId: string | null,
+  type: "failover_triggered" | "both_failed",
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await storeScoped(storeId).deliveryEvent.createMany({
+    data: [{ storeId, orderId, deliveryId, externalEventId: deliveryId || type === "both_failed" ? type : `${type}:${payload.fromProvider}`, type, payload: payload as object }],
+    skipDuplicates: true,
+  });
 }
 
 function logUnavailable(referenceId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
@@ -410,6 +430,11 @@ export async function pushReadyTime(storeId: string, orderId: string, deps: Disp
     await scoped.delivery.updateMany({ where: { id: delivery.id, status: "cancelled" }, data: { status: "requested" } });
     return { ok: true, readyEstimateAt, courier: "kept" };
   }
+  // The platform's own cancel, so the incident log does not read the provider's echo of it as a courier cancel (#536).
+  await scoped.deliveryEvent.createMany({
+    data: [{ storeId, orderId, deliveryId: delivery.id, externalEventId: "platform_cancelled", type: "cancelled", payload: { by: "platform", reason: "ready_time_pushed" } }],
+    skipDuplicates: true,
+  });
   const result = await selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId, readyEstimateAt)) }, deps);
   return { ok: true, readyEstimateAt, courier: result.ok ? "rebooked" : "none" };
 }
@@ -528,6 +553,7 @@ export async function runCourierFailover(
     const alternates = enabledProviders(deps.providers.filter((p) => !used.some((u) => u.provider === p.name)), settings);
     if (alternates.length > 0) {
       const fromProvider = delivery.provider as DeliveryProviderName;
+      await recordCourierEvent(storeId, delivery.orderId, deliveryId, "failover_triggered", { fromProvider, reason: "assignment_timeout" });
       await deps.emit({ name: COURIER_FAILOVER_TRIGGERED, data: { storeId, orderId: delivery.orderId, fromProvider, reason: "assignment_timeout" } });
     }
     const ready = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: delivery.orderId }, select: { status: true, readyEstimateAt: true } });
