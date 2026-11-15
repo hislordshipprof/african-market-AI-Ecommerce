@@ -56,6 +56,8 @@ export interface SwapExpect {
 
 /** A dish-only request: no shopper list, so the case passes or fails on core items, not item counts. */
 export interface DishExpect {
+  /** The dish the shopper names. It must resolve from the curated recipe base (#607). */
+  name: string;
   /** Each core ingredient is met by any store A listing in options, at any pack or quantity. */
   core: Array<{ label: string; options: string[] }>;
   /** Servings are not given, so the first reply must ask or state them. */
