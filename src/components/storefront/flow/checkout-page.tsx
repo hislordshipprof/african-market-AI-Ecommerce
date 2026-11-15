@@ -1188,7 +1188,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   </p>
                 )}
               {whatsapp && (
-                <label className={styles.check}>
+                <label className={styles.choice}>
                   <input
                     type="checkbox"
                     checked={whatsapp.checked}
@@ -1196,7 +1196,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   />
                   <span>
                     Get order updates on WhatsApp
-                    <small className={styles.muted}> Instead of texts, from {settings.name}. Reply STOP to turn them off.</small>
+                    <small>Instead of texts, from {settings.name}. Reply STOP to turn them off.</small>
                   </span>
                 </label>
               )}
