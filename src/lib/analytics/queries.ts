@@ -6,7 +6,7 @@ import { rangeDays, type AnalyticsRange } from "./range";
  * one query per view, all in integer cents. Days are store days in the store's time zone.
  *
  * Money rules, from what each order stored at capture (never recomputed rates):
- * - Goods = captured − tip − delivery fee.
+ * - Goods = captured − service fee − tip − delivery fee (the service fee is the customer's separate line, D3).
  * - Card fee = the order's stored platform fee. Courier orders also pass the courier fee to the platform,
  *   capped with the card fee at captured, as at capture.
  * - Net to store = captured − card fee − courier fee − the store's share of succeeded refunds.
@@ -112,6 +112,8 @@ type MoneyRow = {
   goods: number;
   discounts: number;
   card_fee: number;
+  /** The customer's service fee the platform keeps; shown nowhere, but net to store still pays it. */
+  service_fee: number;
   courier_fee: number;
   captured: number;
   refunds: number;
@@ -120,6 +122,9 @@ type MoneyRow = {
 
 /** What the platform kept at capture: card fee plus courier fee, capped at captured (applicationFeeForCapture). */
 const APPLICATION_FEE = Prisma.sql`LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents ELSE 0 END, o.captured_amount_cents)`;
+
+/** The store's card fee: the stored platform fee is the service fee plus this (captureSplit), so take the service fee off. */
+const CARD_FEE = Prisma.sql`GREATEST(COALESCE(o.platform_fee_cents, 0) - o.service_fee_cents, 0)`;
 
 export async function salesRows(storeId: string, range: AnalyticsRange, timeZone: string): Promise<MoneyRow[]> {
   return storeScopedRawQuery<MoneyRow>(storeId, Prisma.sql`
@@ -138,7 +143,8 @@ export async function salesRows(storeId: string, range: AnalyticsRange, timeZone
            COUNT(*)::int AS orders,
            SUM(o.captured_amount_cents - o.service_fee_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
            SUM(o.discount_cents)::int AS discounts,
-           SUM(COALESCE(o.platform_fee_cents, 0))::int AS card_fee,
+           SUM(${CARD_FEE})::int AS card_fee,
+           SUM(COALESCE(o.platform_fee_cents, 0) - ${CARD_FEE})::int AS service_fee,
            SUM(${APPLICATION_FEE} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
            SUM(o.captured_amount_cents)::int AS captured,
            0 AS refunds, 0 AS refund_store_cost
@@ -148,7 +154,7 @@ export async function salesRows(storeId: string, range: AnalyticsRange, timeZone
     UNION ALL
     -- Stripe returns the fee in proportion but never more than the fee in total across partial refunds (stripe/fake.ts).
     SELECT 'refund', ${storeDay(Prisma.sql`r.created_at`, timeZone)}, r.fulfillment,
-           0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0,
            SUM(r.amount_cents)::int,
            SUM(r.amount_cents - (LEAST(r.fee_total, r.running) - LEAST(r.fee_total, r.running - r.proportional)))::int
     FROM r, b
@@ -167,7 +173,7 @@ function addRow(totals: SalesTotals, row: MoneyRow) {
   totals.cardFeeCents += row.card_fee;
   totals.courierFeeCents += row.courier_fee;
   totals.refundsCents += row.refunds;
-  totals.netCents += row.captured - row.card_fee - row.courier_fee - row.refund_store_cost;
+  totals.netCents += row.captured - row.card_fee - row.service_fee - row.courier_fee - row.refund_store_cost;
 }
 
 function finish<T extends SalesTotals>(totals: T): T {

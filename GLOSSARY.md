@@ -311,6 +311,10 @@ The capture still stands because the refund did not cover it. Staff see that the
 **Resolved manually**:
 A platform admin recorded the amount they repaid outside the app. The order becomes Cancelled. The app moves no money. The record is the amount the admin entered, plus the refunded and captured cents. If that amount does not meet the capture, the store and the platform are alerted.
 
+**Platform refund**:
+A refund a platform admin makes from the order detail (#538) when the store does not act or the problem is the courier's or the app's: an amount from 1¢ up to what is left on the payment, and a reason of up to 500 characters. It goes through the refund ledger like an issue refund and comes out of the store's transfer; on a courier order the platform keeps its fee and returns only the service fee share. A `platform_refund` audit row names the admin, the amount and the reason. The store sees "Refunded by the platform team" on the order in its inbox, and the customer gets the usual refund message once per order.
+_Avoid_: Goodwill credit, manual refund (that is Resolved manually)
+
 **RefundRequest**:
 One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
 

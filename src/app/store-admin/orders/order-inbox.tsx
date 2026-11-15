@@ -526,6 +526,9 @@ export function OrderInbox({
                 {selectedOrder.status === "CANCELLED" && selectedOrder.notes ? (
                   <p className="mt-2 text-sm text-foreground">The platform resolved this refund.</p>
                 ) : null}
+                {selectedOrder.refundedByPlatform && (
+                  <p className="mt-2 text-sm text-foreground" data-testid="refunded-by-platform">Refunded by the platform team</p>
+                )}
               </CardHeader>
               <CardContent>
                 {selectedOrder.fulfillment === "courier" && (
