@@ -5,6 +5,8 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { makeFakeStep } from "../inngest/fake-step";
 import { isRlsRejection } from "../listing/cross-store-write";
+import { fakeWhatsAppProvider, getFakeOutbox, resetFake } from "../whatsapp/fake";
+import { setWhatsAppProvider } from "../whatsapp/index";
 import { copilotDailyDigest, localClock } from "./digest";
 
 type Handler = (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
@@ -156,6 +158,68 @@ describe.skipIf(!hasDb)("copilot daily digest (lane database)", () => {
     expect(failedOnce).toBe(true);
     for (const owner of ownersC) expect(sentTo(owner)).toHaveLength(1);
     expect(sentTo(ownersC[1]!)[0]!.html).toBe(sentTo(ownersC[0]!)[0]!.html);
+  });
+
+  it("an owner who opted in gets the digest on WhatsApp once across two runs: orders, goods sales, stock changes, low and out", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    resetFake();
+    setWhatsAppProvider(fakeWhatsAppProvider);
+    try {
+      const storeId = (await raw.store.create({
+        data: { slug: `digest-wa-${RUN}`, name: "Digest WA", timezone: "America/Chicago", digestHour: 20 },
+      })).id;
+      const [optedIn, optedOut] = [`digest-wa-in-${RUN}`, `digest-wa-out-${RUN}`];
+      await raw.user.createMany({ data: [optedIn, optedOut].map((id) => ({ id, name: id, email: `${id}@example.com` })) });
+      const c = storeScoped(storeId);
+      await c.storeMembership.createMany({ data: [optedIn, optedOut].map((userId) => ({ storeId, userId, role: "owner" })) });
+      const waId = () => `1312${String(200 + Math.floor(Math.random() * 800))}${String(Math.floor(Math.random() * 10_000)).padStart(4, "0")}`;
+      const inWa = waId();
+      await c.ownerWhatsAppLink.createMany({
+        data: [
+          { storeId, userId: optedIn, phoneNumber: `+${inWa}`, waId: inWa, verified: true, optInDigest: true },
+          { storeId, userId: optedOut, phoneNumber: "+13125550100", waId: waId(), verified: true, optInDigest: false },
+        ],
+      });
+      const yam = (await c.listing.create({ data: { storeId, customName: "Yam", price: 500, stockMode: "counted", qty: 0, confidence: 1 } })).id;
+      const rice = (await c.listing.create({ data: { storeId, customName: "Rice", price: 500, stockMode: "counted", qty: 3, confidence: 1 } })).id;
+      await c.listing.create({ data: { storeId, customName: "Ugu", price: 500, stockMode: "status", status: "low", confidence: 1 } });
+      await c.stockEvent.createMany({
+        data: [
+          { storeId, listingId: yam, type: "sale", delta: -4, actorId: optedIn, createdAt: EARLIER_TODAY },
+          { storeId, listingId: rice, type: "restock", delta: 20, actorId: optedIn, createdAt: EARLIER_TODAY },
+          { storeId, listingId: rice, type: "restock", delta: 99, actorId: optedIn, createdAt: YESTERDAY },
+        ],
+      });
+      const customerId = (await c.customer.create({ data: { storeId, name: "WA Buyer", email: `wa-buyer-${RUN}@example.com` } })).id;
+      // Captured $14.50 with a $0.50 service fee and a $2.00 tip: $12.00 of goods.
+      await c.order.create({
+        data: {
+          storeId, number: 1, customerId, status: "COMPLETED", fulfillment: "pickup", subtotalCents: 1200, bufferCents: 0,
+          totalCents: 1450, totalAuthorizedCents: 1450, capturedAmountCents: 1450, serviceFeeCents: 50, tipCents: 200,
+          createdAt: EARLIER_TODAY,
+        },
+      });
+
+      await digestHandler({ step: makeFakeStep() });
+      await digestHandler({ step: makeFakeStep() });
+
+      const toStore = getFakeOutbox().map((entry) => entry.message).filter((m) => m.type === "template" && m.name === "copilot_daily_digest"
+        && m.components?.[0]?.parameters[0]?.text === "Digest WA");
+      expect(toStore).toEqual([{
+        type: "template",
+        to: inWa,
+        name: "copilot_daily_digest",
+        language: "en_US",
+        components: [{ type: "body", parameters: ["Digest WA", "2026-11-10", "1", "$12.00", "20 restocked, 4 sold online", "out: Yam; low: Rice, Ugu"]
+          .map((text) => ({ type: "text", text })) }],
+      }]);
+      expect(sentTo(optedIn)).toHaveLength(1);
+      expect(sentTo(optedOut)).toHaveLength(1);
+      const row = await storeScopedTransaction(storeId, (tx) => tx.copilotDigest.findFirstOrThrow());
+      expect(row.whatsappSentTo).toEqual([optedIn]);
+    } finally {
+      setWhatsAppProvider(null);
+    }
   });
 
   it("copilot_digests: storeScoped(B) reads none of A's digest rows, cannot insert one for A, and updates nothing", async () => {

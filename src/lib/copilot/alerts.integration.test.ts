@@ -8,6 +8,8 @@ import { makeFakeStep } from "../inngest/fake-step";
 import { PushTestSender, setPushSenderForTests } from "../push/sender";
 import { copilotOrderStockAlerts } from "./alert-functions";
 import { createOrderStockAlerts, listOpenAlerts, pushCopilotAlerts } from "./alerts";
+import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "../whatsapp/fake";
+import { setWhatsAppProvider } from "../whatsapp/index";
 
 type Handler = (ctx: { event: { data: Record<string, unknown> }; step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
 const orderAlertsHandler = (copilotOrderStockAlerts as unknown as { fn: Handler }).fn;
@@ -116,7 +118,53 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
 
   afterEach(() => {
     setPushSenderForTests(null);
+    setWhatsAppProvider(null);
     vi.unstubAllEnvs();
+  });
+
+  it("a sale that leaves a listing at the threshold sends a WhatsApp alert to the opted-in owner only: a template outside 24 hours, text inside", async () => {
+    resetFake();
+    setWhatsAppProvider(fakeWhatsAppProvider);
+    const { storeId, ownerId } = await storeWithDevices("wa");
+    const other = await storeWithDevices("wa-other");
+    const staffId = `alerts-wa-staff-${RUN}`;
+    // Verified wa_ids are unique platform-wide, so each run takes fresh ones.
+    const waId = () => `1404${String(200 + Math.floor(Math.random() * 800))}${String(Math.floor(Math.random() * 10_000)).padStart(4, "0")}`;
+    const link = (store: string, userId: string, wa: string, optInAlerts: boolean) =>
+      storeScoped(store).ownerWhatsAppLink.create({
+        data: { storeId: store, userId, phoneNumber: `+${wa}`, waId: wa, verified: true, optInAlerts },
+      });
+    const ownerWa = waId();
+    await link(storeId, ownerId, ownerWa, true);
+    await link(storeId, staffId, waId(), true);
+    await link(other.storeId, other.ownerId, waId(), true);
+
+    const yam = await counted(storeId, "Puna Yam", 7);
+    const orderId = await placeOrder([{ listingId: yam, qty: 2 }], storeId);
+    await orderAlertsHandler({ event: { data: { storeId, orderId } }, step: makeFakeStep() });
+
+    const outbox = getFakeOutbox().map((entry) => entry.message);
+    expect(outbox).toEqual([{
+      type: "template",
+      to: ownerWa,
+      name: "copilot_stock_alert",
+      language: "en_US",
+      components: [{ type: "body", parameters: [
+        { type: "text", text: "Alerts wa" },
+        { type: "text", text: expect.stringContaining("Puna Yam is running low; you have 5 left") },
+      ] }],
+    }]);
+
+    await storeScoped(storeId).ownerWhatsAppLink.updateMany({ where: { userId: ownerId }, data: { lastInboundAt: new Date() } });
+    noteInbound(ownerWa);
+    const plantain = await counted(storeId, "Plantain", 1);
+    await storeScoped(storeId).copilotAlert.create({
+      data: { storeId, kind: "sold_out", listingId: plantain, dedupeKey: `sold_out:${plantain}:wa` },
+    });
+    await pushCopilotAlerts(storeId);
+    const last = getFakeOutbox().at(-1)!.message;
+    expect(last).toMatchObject({ type: "text", to: ownerWa, body: expect.stringContaining("• Plantain is sold out") });
+    expect(getFakeOutbox().map((entry) => entry.message.to)).toEqual([ownerWa, ownerWa]);
   });
 
   it("copilot_alerts: storeScoped(B) reads none of A's alerts, cannot insert one for A, and updates nothing", async () => {

@@ -38,11 +38,53 @@ export function isOrderUpdateTemplate(name: string): boolean {
   return ORDER_UPDATE_NAMES.has(name);
 }
 
+/**
+ * Utility templates for the Store copilot (#144), sent from the platform
+ * number to an opted-in owner whose 24-hour window is closed; inside it the
+ * same words go as free text. Body variables only, each one line:
+ * - copilot_stock_alert: "{{1}}: {{2}}. Reply here or open the stock copilot."
+ *   (store name, the alert summary);
+ * - copilot_daily_digest: "{{1}}, {{2}}: {{3}} orders, {{4}} goods sales.
+ *   Stock changes: {{5}}. Low or out: {{6}}." (store name, date, orders,
+ *   goods sales, stock changes, low or out of stock).
+ */
+export const COPILOT_TEMPLATES = {
+  alert: { name: "copilot_stock_alert", language: "en_US", parameters: 2 },
+  digest: { name: "copilot_daily_digest", language: "en_US", parameters: 6 },
+} as const;
+
+/** Body variable count of a copilot template, or null for any other name. */
+export function copilotTemplateParameters(name: string): number | null {
+  return Object.values(COPILOT_TEMPLATES).find((template) => template.name === name)?.parameters ?? null;
+}
+
+/** Meta refuses a variable with a new line, a tab or more than four spaces in a row; one line, clipped. */
+export function templateText(text: string, max = 900): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
+}
+
+/** A copilot template with its body variables in order. */
+export function copilotTemplateMessage(
+  to: string,
+  template: { name: string; language: string },
+  values: string[],
+): OutboundMessage {
+  return {
+    type: "template",
+    to,
+    name: template.name,
+    language: template.language,
+    components: [{ type: "body", parameters: values.map((value) => ({ type: "text", text: templateText(value) })) }],
+  };
+}
+
 /** Templates the platform sends. The fake rejects any other name, as Meta does (132001). */
 export const APPROVED_TEMPLATES: ReadonlyArray<{ name: string; language: string }> = [
   OWNER_LINK_TEMPLATE,
   HELLO_WORLD_TEMPLATE,
   ...Object.values(ORDER_UPDATE_TEMPLATES),
+  ...Object.values(COPILOT_TEMPLATES),
 ];
 
 /** An order update: the store name in the body, the tracking path as the button's URL suffix. */
