@@ -234,17 +234,21 @@ export async function readRecipeAdminChanges(tx: Prisma.TransactionClient, recip
   return { fields };
 }
 
-/** The recipe a seeded dish key names: the row with that key, or the one an admin renamed away from it. */
-export async function findSeededRecipe(tx: Prisma.TransactionClient, key: string): Promise<{ id: string } | null> {
+/**
+ * The recipe a seeded dish key names, the row with that key or the one an admin renamed away from it, locked until
+ * the seed's transaction ends so an admin save cannot land between the read and the write.
+ */
+export async function lockSeededRecipe(tx: Prisma.TransactionClient, key: string): Promise<{ id: string } | null> {
   const byKey = await tx.recipe.findUnique({ where: { key }, select: { id: true } });
-  if (byKey) return byKey;
-  const renamed = await tx.auditLog.findFirst({
+  const renamed = byKey ? null : await tx.auditLog.findFirst({
     where: { entityType: "recipe", action: "catalog.recipe_edit", before: { path: ["key"], equals: key } },
     orderBy: { createdAt: "desc" },
     select: { entityId: true },
   });
-  if (!renamed?.entityId) return null;
-  return tx.recipe.findUnique({ where: { id: renamed.entityId }, select: { id: true } });
+  const id = byKey?.id ?? renamed?.entityId;
+  if (!id) return null;
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM recipes WHERE id = ${id} FOR UPDATE`;
+  return rows[0] ?? null;
 }
 
 /** Holds the product's row until the seed's transaction ends, so an admin save cannot land between the read and the write. */

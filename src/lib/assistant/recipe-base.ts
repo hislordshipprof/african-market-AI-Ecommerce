@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { findSeededRecipe, readRecipeAdminChanges, withoutAdminChanges } from "../../../prisma/master-catalog-upsert";
+import { lockSeededRecipe, readRecipeAdminChanges, withoutAdminChanges } from "../../../prisma/master-catalog-upsert";
 
 // No app database client here: prisma/seed.ts imports this file.
 
@@ -74,12 +74,11 @@ export async function seedRecipeBase(prisma: PrismaClient, recipes: SeedRecipe[]
     }));
     // A re-seed keeps the fields a platform admin edited on a curated dish, also after a rename moved its key (#675).
     const keptAdminChanges = await prisma.$transaction(async (tx) => {
-      const existing = await findSeededRecipe(tx, key);
+      const existing = await lockSeededRecipe(tx, key);
       if (!existing) {
         await tx.recipe.create({ data: { key, ...data, ingredients: { createMany: { data: ingredients } } } });
         return false;
       }
-      await tx.$queryRaw`SELECT 1 FROM recipes WHERE id = ${existing.id} FOR UPDATE`;
       const changes = await readRecipeAdminChanges(tx, existing.id);
       await tx.recipe.update({ where: { id: existing.id }, data: withoutAdminChanges(data, changes) });
       if (!changes.fields.has("ingredients")) {
