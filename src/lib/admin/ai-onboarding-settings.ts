@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { lockPlatformSettingsRow, platform } from "../db";
+import { lockPlatformSettingsRow, platform, platformAdmin } from "../db";
 
 /** Bounds decided in #561; the database checks hold the same ranges. */
 export const AI_ONBOARDING_LIMITS = {
@@ -87,4 +87,14 @@ export async function saveAiOnboardingSettings(tx: SettingsWriter, actor: { id: 
     },
   });
   return true;
+}
+
+/** Who saved these settings last and when, from the audit log, for the "last changed" line. Null before any save. */
+export async function lastAiOnboardingChange(): Promise<{ actorEmail: string; at: Date } | null> {
+  const row = await platformAdmin.auditLog.findFirst({
+    where: { action: AI_ONBOARDING_AUDIT_ACTION, entityType: "platform_settings", entityId: "platform" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { actorEmail: true, createdAt: true },
+  });
+  return row ? { actorEmail: row.actorEmail, at: row.createdAt } : null;
 }
