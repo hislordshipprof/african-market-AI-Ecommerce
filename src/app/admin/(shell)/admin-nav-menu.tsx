@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BellRing, Bot, ClipboardCheck, House, LogOut, Menu, MessagesSquare, Package, PackageSearch, ReceiptText, Store, Undo2, X } from "lucide-react";
+import { BellRing, Bot, ClipboardCheck, Gauge, House, LogOut, Menu, MessagesSquare, Package, PackageSearch, ReceiptText, Store, Truck, Undo2, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { ADMIN_NAV, currentNavHref, type AdminNavHref } from "./admin-nav";
 import { signOutAdmin } from "./sign-out";
@@ -16,8 +16,10 @@ const ICONS: Record<AdminNavHref, typeof House> = {
   "/admin/catalog/review": ClipboardCheck,
   "/admin/orders": Undo2,
   "/admin/orders/check": PackageSearch,
+  "/admin/couriers/incidents": Truck,
   "/admin/support": MessagesSquare,
   "/admin/ai/conversations": Bot,
+  "/admin/ai/eval-spend": Gauge,
   "/admin/billing/ledger": ReceiptText,
 };
 

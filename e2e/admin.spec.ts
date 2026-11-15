@@ -765,7 +765,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Messages", "AI conversations", "Fee ledger"];
+  const MENU = ["Home", "Stores", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger"];
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -781,8 +781,10 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin/catalog/review", "Catalog review"],
       ["/admin/orders", "Refunds"],
       ["/admin/orders/check", "Orders to check"],
+      ["/admin/couriers/incidents", "Courier incidents"],
       ["/admin/support", "Messages"],
       ["/admin/ai/conversations", "AI conversations"],
+      ["/admin/ai/eval-spend", "AI eval and spend"],
       ["/admin/billing/ledger", "Fee ledger"],
     ];
     for (const [path, current] of pages) {
@@ -894,6 +896,84 @@ test.describe("Courier settings (#535)", () => {
           },
         });
         await tx.auditLog.deleteMany({ where: { entityType: "platform_settings", createdAt: { gte: startedAt } } });
+      });
+    }
+  });
+});
+
+test.describe("Courier incident log (#536)", () => {
+  test("signed out, the list and a detail page redirect to sign-in", async ({ page }) => {
+    await page.goto("/admin/couriers/incidents");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+    await page.goto("/admin/couriers/incidents/some-order");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin finds an incident by store and kind, reads the redacted timeline, adds a note and resolves it", async ({ page }) => {
+    const number = 900_000 + Math.floor(Math.random() * 90_000);
+    const seeded = await withPlatformCatalog(async (tx) => {
+      const store = await tx.store.findFirstOrThrow({ where: { slug: "tante-marie" }, select: { id: true, name: true } });
+      const customer = await tx.customer.create({ data: { storeId: store.id, name: "Incident Shopper", phone: "+13015550199" } });
+      const order = await tx.order.create({
+        data: { storeId: store.id, customerId: customer.id, number, status: "COURIER_REQUESTED", fulfillment: "courier", subtotalCents: 4000, bufferCents: 0, totalCents: 4000, totalAuthorizedCents: 4000 },
+      });
+      const delivery = await tx.delivery.create({
+        data: { storeId: store.id, orderId: order.id, provider: "doordash", externalId: `e2e-536-${number}`, status: "cancelled", quoteFeeCents: 899 },
+      });
+      await tx.deliveryEvent.create({
+        data: {
+          storeId: store.id,
+          orderId: order.id,
+          deliveryId: delivery.id,
+          externalEventId: `DELIVERY_CANCELLED:${number}`,
+          type: "cancelled",
+          payload: { event_name: "DELIVERY_CANCELLED", cancellation_reason: "no_available_dashers", dropoff_phone_number: "+13015550199", dasher_dropoff_phone_number: "+18555550100" },
+        },
+      });
+      return { storeId: store.id, storeName: store.name, orderId: order.id, customerId: customer.id };
+    });
+    try {
+      await adminSignIn(page);
+      await page.goto("/admin/couriers/incidents");
+      await expect(page.locator("h1")).toHaveText("Courier incidents");
+      await page.getByLabel("Store").selectOption(seeded.storeId);
+      await page.getByLabel("What happened").selectOption("provider_cancelled");
+      await page.getByRole("button", { name: "Show incidents" }).click();
+      await expect(page).toHaveURL(/kind=provider_cancelled/);
+      const row = page.getByTestId(`incident-row-${number}`);
+      await expect(row).toContainText(seeded.storeName);
+      await expect(row).toContainText("Courier cancelled");
+      await expect(row).toContainText("DoorDash Drive");
+      await expect(row).toContainText("Open");
+
+      await row.getByRole("link", { name: `#${number}` }).click();
+      await expect(page.locator("h1")).toContainText(`Order #${number}`);
+      await expect(page.getByTestId("incident-timeline")).toContainText(/no available dashers/i);
+      await page.getByText("Event details").click();
+      await expect(page.getByTestId("incident-timeline")).toContainText("[redacted]");
+      await expect(page.locator("body")).not.toContainText("5550199");
+      await expect(page.locator("body")).not.toContainText("5550100");
+
+      await page.getByLabel("Note").fill("Rebooked with Uber by phone.");
+      await page.getByRole("button", { name: "Add note" }).click();
+      await expect(page.getByTestId("incident-notes")).toContainText("Rebooked with Uber by phone.");
+      await page.getByLabel("Note").fill("Delivered by the store.");
+      await page.getByRole("button", { name: "Mark resolved" }).click();
+      await expect(page.getByTestId("incident-notes")).toContainText("Delivered by the store.");
+      await expect(page.getByText("Resolved", { exact: true }).first()).toBeVisible();
+
+      await page.goto(`/admin/couriers/incidents?store=${seeded.storeId}`);
+      await expect(page.getByTestId(`incident-row-${number}`)).toContainText("Resolved");
+      const audit = await withPlatformCatalog((tx) => tx.auditLog.findMany({ where: { entityType: "courier_incident", entityId: seeded.orderId }, select: { action: true } }));
+      expect(audit.map((a) => a.action).sort()).toEqual(["courier_incident.note", "courier_incident.resolve"]);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.auditLog.deleteMany({ where: { entityType: "courier_incident", entityId: seeded.orderId } });
+        await tx.courierIncidentNote.deleteMany({ where: { orderId: seeded.orderId } });
+        await tx.deliveryEvent.deleteMany({ where: { orderId: seeded.orderId } });
+        await tx.delivery.deleteMany({ where: { orderId: seeded.orderId } });
+        await tx.order.deleteMany({ where: { id: seeded.orderId } });
+        await tx.customer.deleteMany({ where: { id: seeded.customerId } });
       });
     }
   });
