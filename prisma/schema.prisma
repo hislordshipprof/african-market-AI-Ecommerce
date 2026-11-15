@@ -112,6 +112,8 @@ model Store {
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
   whatsAppNumber        StoreWhatsAppNumber?
   whatsAppOptOuts       WhatsAppOptOut[]
+  whatsAppShopperCarts  WhatsAppShopperCart[]
+  whatsAppCheckoutLinks WhatsAppCheckoutLink[]
   driverRoutes          DriverRoute[]
   pickBatches           PickBatch[]
 
@@ -958,6 +960,8 @@ model Cart {
   aiConversations       AiConversation[]
   assistantUndoReceipts AssistantUndoReceipt[]
   guestBrowserCarts     GuestBrowserCart[]
+  whatsAppShopperCarts  WhatsAppShopperCart[]
+  whatsAppCheckoutLinks WhatsAppCheckoutLink[]
 
   @@index([storeId])
   @@index([storeId, userId])
@@ -1793,6 +1797,40 @@ model WhatsAppOptOut {
 
   @@unique([storeId, waId])
   @@map("whatsapp_opt_outs")
+}
+
+/// The cart a customer's WhatsApp chat with a store fills (#559). Keyed by an HMAC of the sender's wa_id, never the number.
+model WhatsAppShopperCart {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  senderKey String   @map("sender_key")
+  cartId    String   @map("cart_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, senderKey])
+  @@index([cartId])
+  @@map("whatsapp_shopper_carts")
+}
+
+/// A checkout link sent on WhatsApp (#559): opens the store's checkout with this cart once, within 60 minutes. Only the token's SHA-256 is kept.
+model WhatsAppCheckoutLink {
+  id        String    @id @default(cuid())
+  storeId   String    @map("store_id")
+  cartId    String    @map("cart_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([cartId])
+  @@map("whatsapp_checkout_links")
 }
 
 /// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.
