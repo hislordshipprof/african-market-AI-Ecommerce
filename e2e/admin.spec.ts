@@ -792,7 +792,8 @@ test.describe("Admin shell (authenticated)", () => {
       const menu = page.getByRole("navigation", { name: "Admin" });
       await expect(menu.getByRole("link")).toHaveText(MENU);
       await expect(menu.locator("[aria-current='page']")).toHaveText(current);
-      await expect(page.getByText("admin@platform.test")).toBeVisible();
+      // Scoped to the shell: the settings page also names the admin in its last-changed line.
+      await expect(page.locator("header").getByText(ADMIN_EMAIL)).toBeVisible();
     }
   });
 
