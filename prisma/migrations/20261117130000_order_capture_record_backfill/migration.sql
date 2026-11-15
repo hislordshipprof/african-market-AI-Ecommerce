@@ -1,4 +1,4 @@
--- Redo the capture record backfill from 20261117030000_order_capture_record (#537).
+-- Redo the capture record backfill from 20261117120000_order_capture_record (#537).
 --
 -- FORCE ROW LEVEL SECURITY applies to the table owner unless that role is a
 -- superuser or has BYPASSRLS (Neon console roles such as neondb_owner). On
