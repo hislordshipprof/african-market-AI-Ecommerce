@@ -126,7 +126,7 @@ export function assistantTools(
       execute: (input, options) => forwardToStore({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     get_recipe: tool({
-      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, notCarried, and excluded for ingredients whose every item fails the customer's saved needs. Omit servings when the customer did not say how many people; it then returns askServings.",
+      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, notCarried, similar for an ingredient with no exact item (a close item the customer must accept before it is added), and excluded for ingredients whose every item fails the customer's saved needs. Omit servings when the customer did not say how many people; it then returns askServings.",
       inputSchema: getRecipeInput,
       execute: (input, options) => getRecipe({ ...ctx, toolCallId: options.toolCallId }, input, recipeDeps),
     }),
