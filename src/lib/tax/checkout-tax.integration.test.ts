@@ -187,6 +187,31 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
     expect((order.taxLines as Array<{ amount: number }>).every((line) => line.amount === 0)).toBe(true);
   });
 
+  it("E2: a state the account is not registered in collects nothing, says why, and the order proceeds", async () => {
+    install(fakeTaxCalculator(RATES));
+    const oregon = await store("or", { state: "OR", city: "Portland", zip: "97201" });
+    await stock(oregon, foodMaster, beautyMaster);
+    const { order } = await checkout(oregon, await cart(oregon, [["beauty", 3]]));
+    expect(order).toMatchObject({ status: "AUTHORIZED", taxCents: 0 });
+    expect(order.taxLines).toEqual([{ amount: 0, rate: "0", jurisdiction: "OR", taxabilityReason: "not_collecting" }]);
+  });
+
+  it("a tax outage at placement releases the hold and places no order", async () => {
+    install(fakeTaxCalculator(RATES));
+    const cartId = await cart(tx, [["beauty", 1]]);
+    const quote = await quoteCheckout(tx, 0, cartId, CONTACT, "pickup");
+    const pi = await createPaymentIntent(tx, cartId, quote.holdCents);
+    await getCheckoutPayments().confirmPaymentIntent(pi.paymentIntentId, { payment_method: "pm_card_visa" });
+    // The pinned calculation no longer matches, so placement must ask Stripe again, and Stripe is down.
+    await storeScoped(tx).cart.update({ where: { id: cartId }, data: { taxQuoteKey: null } });
+    const create = vi.fn().mockRejectedValue(Object.assign(new Error("timeout"), { type: "StripeConnectionError" }));
+    install(stripeTaxCalculator(() => ({ tax: { calculations: { create } } }) as never));
+
+    await expect(placeOrder(tx, 0, cartId, CONTACT, "pickup", null, null, pi.paymentIntentId)).rejects.toThrow(TAX_UNAVAILABLE_MESSAGE);
+    expect((await getCheckoutPayments().retrievePaymentIntent(pi.paymentIntentId)).status).toBe("canceled");
+    expect(await storeScoped(tx).order.count({ where: { sourceCartId: cartId } })).toBe(0);
+  });
+
   it("E7: refreshing the quote reuses the pinned calculation; a basket change makes one new one", async () => {
     const fake = install(fakeTaxCalculator(RATES));
     const cartId = await cart(tx, [["beauty", 1]]);

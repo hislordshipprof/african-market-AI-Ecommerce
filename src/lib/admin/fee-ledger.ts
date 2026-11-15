@@ -56,8 +56,8 @@ type OrderFacts = {
   platformFeeCents: number | null;
   serviceFeeCents: number;
   deliveryFeeCents: number;
-  taxCents?: number;
-  taxLiableParty?: string;
+  taxCents: number;
+  taxLiableParty: string;
 };
 
 export type CaptureFacts = OrderFacts & { at: Date; refundFailed: boolean };

@@ -37,7 +37,7 @@ describe("ledger page", () => {
 describe("fee ledger CSV", () => {
   const order = {
     storeId: "s1", storeName: "=Mama Africa, Inc", orderNumber: 7, fulfillment: "courier",
-    capturedAmountCents: 7079, platformFeeCents: 384, serviceFeeCents: 180, deliveryFeeCents: 899,
+    capturedAmountCents: 7079, platformFeeCents: 384, serviceFeeCents: 180, deliveryFeeCents: 899, taxCents: 0, taxLiableParty: "platform",
   };
   const capture: CaptureFacts = { ...order, orderId: "o1", at: new Date("2026-11-03T15:00:00Z"), refundFailed: false };
   const cancel: RefundFacts = {
@@ -66,7 +66,7 @@ describe("fee ledger with sales tax (#65)", () => {
   const at = new Date("2026-11-05T15:00:00Z");
 
   it("passes the tax the platform collects through, like the courier fee: only its card fee is the platform's cost", () => {
-    const untaxed: CaptureFacts = { ...order, orderId: "o1", capturedAmountCents: 10_000, at, refundFailed: false };
+    const untaxed: CaptureFacts = { ...order, orderId: "o1", capturedAmountCents: 10_000, taxCents: 0, taxLiableParty: "platform", at, refundFailed: false };
     const taxed: CaptureFacts = { ...order, orderId: "o2", capturedAmountCents: 10_825, taxCents: 825, taxLiableParty: "platform", at, refundFailed: false };
     const [plain, withTax] = buildFeeLedger(ledgerMonth("2026-11"), [untaxed, taxed], [], []).rows;
     // $97.01 store part: card fee 281 + 30 = 311; fee 299 + 311 = 610; platform card fee 9 on the service fee.

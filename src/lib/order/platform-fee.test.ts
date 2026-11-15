@@ -53,7 +53,7 @@ describe("capture split (ADR-0021 example order)", () => {
 
 describe("store payout shown in the inbox", () => {
   it("comes from the fee stored at capture, so a courier order captured before the service fee shows what Stripe paid", () => {
-    const order = { capturedAmountCents: 7079, fulfillment: "courier", deliveryFeeCents: 899 };
+    const order = { capturedAmountCents: 7079, fulfillment: "courier", deliveryFeeCents: 899, taxCents: 0, taxLiableParty: "platform" };
     // Before #495 the stored fee was 2.9% + 30¢ of the whole capture: 235.
     expect(capturedPayout({ ...order, platformFeeCents: 235, serviceFeeCents: 0 })).toEqual({ storeCardFeeCents: 235, storeReceivesCents: 7079 - 235 - 899 });
     expect(capturedPayout({ ...order, platformFeeCents: 180 + 204, serviceFeeCents: 180 })).toEqual({ storeCardFeeCents: 204, storeReceivesCents: 5796 });
@@ -62,7 +62,7 @@ describe("store payout shown in the inbox", () => {
 });
 
 describe("application fee shown to platform admins", () => {
-  const courier = { capturedAmountCents: 7079, fulfillment: "courier", deliveryFeeCents: 899, serviceFeeCents: 180 };
+  const courier = { capturedAmountCents: 7079, fulfillment: "courier", deliveryFeeCents: 899, serviceFeeCents: 180, taxCents: 0, taxLiableParty: "platform" };
 
   it("is the stored platform fee plus the courier fee, the amount Stripe took at capture", () => {
     expect(capturedApplicationFee({ ...courier, platformFeeCents: 180 + 204 })).toBe(180 + 204 + 899);

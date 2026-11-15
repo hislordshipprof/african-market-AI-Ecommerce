@@ -9,6 +9,7 @@ const orders: PayoutOrder[] = FAKE_PAYOUT_ORDERS.map((o, i) => ({
   ...o,
   discountCents: 0,
   taxCents: 0,
+  taxLiableParty: "platform",
   id: `order_${o.key}`,
   number: 101 + i,
   paymentIntentId: fakePayoutPaymentIntentId(o.key, ACCOUNT),

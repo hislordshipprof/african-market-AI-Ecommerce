@@ -138,8 +138,8 @@ export function capturedPayout(order: {
   serviceFeeCents: number;
   fulfillment: string;
   deliveryFeeCents: number;
-  taxCents?: number;
-  taxLiableParty?: string;
+  taxCents: number;
+  taxLiableParty: string;
 }): { storeCardFeeCents: number; storeReceivesCents: number } {
   const captured = Math.max(0, order.capturedAmountCents);
   const courierFee = courierFeeCents(order);
@@ -155,8 +155,8 @@ export function capturedPayout(order: {
 }
 
 /** The order's tax that the platform keeps to remit; 0 when the store is the liable party. */
-export function platformTaxCents(order: { taxCents?: number; taxLiableParty?: string }): number {
-  return order.taxLiableParty === "store" ? 0 : Math.max(0, order.taxCents ?? 0);
+export function platformTaxCents(order: { taxCents: number; taxLiableParty: string }): number {
+  return order.taxLiableParty === "store" ? 0 : Math.max(0, order.taxCents);
 }
 
 /** The `application_fee_amount` Stripe took at capture; null before capture. */
@@ -166,8 +166,8 @@ export function capturedApplicationFee(order: {
   serviceFeeCents: number;
   fulfillment: string;
   deliveryFeeCents: number;
-  taxCents?: number;
-  taxLiableParty?: string;
+  taxCents: number;
+  taxLiableParty: string;
 }): number | null {
   if (order.capturedAmountCents === null) return null;
   const captured = Math.max(0, order.capturedAmountCents);

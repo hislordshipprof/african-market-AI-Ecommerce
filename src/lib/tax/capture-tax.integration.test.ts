@@ -146,7 +146,7 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
     // Final goods $15.00: 83 + 41 = 124 tax.
     expect(result).toEqual({ ok: true, capturedAmountCents: 1500 + 124 });
     expect(capturedPayments.get(placed.paymentIntentId)).toBe(1624);
-    expect(1624).toBeLessThanOrEqual(placed.hold);
+    expect(capturedPayments.get(placed.paymentIntentId)).toBeLessThanOrEqual(placed.hold);
     const [calculation] = calls(tax, "calculate") as Array<{ lines: Array<{ reference: string; amountCents: number }>; address: { state: string } }>;
     expect(calculation.address.state).toBe("TX");
     expect(calculation.lines).toEqual([
@@ -254,7 +254,7 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
     expect(row.taxCents).toBe(81);
     expect(lines.reduce((sum, line) => sum + line.amount, 0)).toBe(81);
     expect(result).toEqual({ ok: true, capturedAmountCents: 999 + 81 });
-    expect(999 + 81).toBeLessThanOrEqual(placed.hold);
+    expect(capturedPayments.get(placed.paymentIntentId)).toBeLessThanOrEqual(placed.hold);
   });
 
   it("a tax outage before capture fails with a retryable message and captures nothing", async () => {

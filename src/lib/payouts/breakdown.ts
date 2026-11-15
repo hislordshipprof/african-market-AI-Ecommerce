@@ -17,7 +17,7 @@ export type PayoutOrder = {
   /** Sales tax in the captured amount (#65); 0 on orders placed before Stripe Tax. */
   taxCents: number;
   /** "platform" keeps the tax out of the store's payout (ADR-0008). */
-  taxLiableParty?: string;
+  taxLiableParty: string;
 };
 
 export type PayoutOrderRow = {
