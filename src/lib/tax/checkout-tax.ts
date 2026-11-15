@@ -58,11 +58,12 @@ export function taxAddress(
   return { line1: store.addressLine1, line2: store.addressLine2, city: store.city, state: store.state, postalCode: store.zip };
 }
 
-/** Goods per line after the coupon's discount, the amounts Stripe taxes. */
+/** Goods per line after the coupon's discount, the amounts Stripe taxes; by variant, so the read order never changes the key. */
 export function taxLineInputs(lines: TaxedLine[], discountCents: number, codes: Map<string, string | null>): TaxLineInput[] {
-  const charges = lines.map((line) => line.price * line.qty);
+  const sorted = [...lines].sort((a, b) => (a.variantId < b.variantId ? -1 : a.variantId > b.variantId ? 1 : 0));
+  const charges = sorted.map((line) => line.price * line.qty);
   const discounts = allocateLineDiscounts(charges, discountCents);
-  return lines.map((line, index) => ({
+  return sorted.map((line, index) => ({
     reference: line.variantId,
     amountCents: charges[index] - discounts[index],
     taxCode: codes.get(line.variantId) ?? null,

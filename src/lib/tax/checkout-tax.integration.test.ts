@@ -134,6 +134,16 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
     expect((await getCheckoutPayments().retrievePaymentIntent(pi.paymentIntentId)).amount).toBe(order.totalAuthorizedCents);
   });
 
+  it("a basket whose lines the database returns in another order than they were added still places, taxed once", async () => {
+    const fake = install(fakeTaxCalculator(RATES));
+    const cartId = await cart(tx, [["food", 1], ["beauty", 3]]);
+    // Updating the first line writes a new row version, so a plain scan returns it after the second.
+    await storeScoped(tx).cartLine.updateMany({ where: { cartId, variantId: variants.get(tx)!.food }, data: { qty: 2 } });
+    const { order } = await checkout(tx, cartId);
+    expect(order).toMatchObject({ status: "AUTHORIZED", taxCents: 82 });
+    expect(fake.calls).toHaveLength(1);
+  });
+
   it("AC2: a Montana store collects no tax, and the zero is explained", async () => {
     install(fakeTaxCalculator(RATES));
     const { order } = await checkout(mt, await cart(mt, [["beauty", 3]]));

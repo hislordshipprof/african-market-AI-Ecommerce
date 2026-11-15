@@ -632,6 +632,7 @@ export async function recordAuthorizedOrder(
       const currentLines = await tx.cartLine.findMany({
         where: { cartId: input.cartId },
         include: { variant: { include: { listing: true } } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       });
       if (currentLines.length === 0) throw new BasketAlreadyOrderedError();
       const current = currentLines.map((line) => ({
