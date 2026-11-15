@@ -11,6 +11,7 @@ import type {
 import { ProviderStateError } from "./types";
 import { OverRefundError } from "./errors";
 import { billingObjects } from "../billing/webhook-objects";
+import { disputeObject } from "../disputes/webhook-object";
 import { fakeCheckoutHoldCents } from "./checkout-payments";
 import { defaultFakePayouts, type FakePayoutData } from "./fake-payouts";
 
@@ -353,6 +354,7 @@ const fakeStripeProvider: StripeProvider = {
       ...(refund ? { refund } : {}),
       ...(paymentIntent ? { paymentIntent } : {}),
       ...billingObjects(obj),
+      ...disputeObject(obj),
     } satisfies WebhookEvent;
   },
 
