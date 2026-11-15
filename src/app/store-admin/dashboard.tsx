@@ -11,6 +11,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
+import type { GoLiveItemView } from "@/components/go-live/go-live-items";
+import { GoLiveCard } from "./go-live-card";
 import { AlertCircle, Camera, ChartColumn, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent } from "lucide-react";
 
 interface Props {
@@ -22,6 +24,8 @@ interface Props {
   unreadMessages: number;
   /** Orders placed by shoppers who arrived from the Store directory (#454). */
   directoryOrders: number;
+  /** The go-live checklist while the store is in setup (#555); null once it is live. */
+  goLive: GoLiveItemView[] | null;
   plan: {
     name: string;
     status: string;
@@ -50,6 +54,7 @@ export function StoreAdminDashboard({
   stripeOnboardingStatus,
   unreadMessages,
   directoryOrders,
+  goLive,
   plan,
 }: Props) {
   const searchParams = useSearchParams();
@@ -87,6 +92,8 @@ export function StoreAdminDashboard({
             Manage your store and team
           </p>
         </div>
+
+        {goLive && <GoLiveCard items={goLive} isOwner={role === "owner"} />}
 
         {role === "owner" && plan.paymentFailed && (
           <div role="alert" className="mb-4 flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">

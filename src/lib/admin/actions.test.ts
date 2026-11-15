@@ -5,6 +5,7 @@ const mockCreate = vi.fn();
 const mockUpdate = vi.fn();
 const mockFindMany = vi.fn();
 const mockAuditCreate = vi.fn();
+const mockAuditFindFirst = vi.fn();
 
 vi.mock("../db", () => ({
   lockStoreAddress: async () => ({
@@ -28,6 +29,7 @@ vi.mock("../db", () => ({
     },
     auditLog: {
       create: (...args: unknown[]) => mockAuditCreate(...args),
+      findFirst: (...args: unknown[]) => mockAuditFindFirst(...args),
     },
     $queryRaw: async () => [{
       address_line1: null,
@@ -110,6 +112,16 @@ describe("createStore", () => {
     const result = await createStore({}, formData({ ...VALID_STORE, slug: "UPPER" }));
     expect(result.success).toBe(true);
     expect(mockCreate.mock.calls[0][0].data.slug).toBe("upper");
+  });
+
+  it("starts every new store in setup, whatever status the form sends (#555)", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", name: "Mama Ngozi African Market", status: "setup" });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore({}, formData({ ...VALID_STORE, status: "active" }));
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.status).toBe("setup");
   });
 
   it("rejects slug starting with hyphen", async () => {
@@ -598,6 +610,17 @@ describe("updateStore", () => {
     expect(result.submittedValues?.name).toBe("Mama Ngozi African Market");
   });
 
+  it("never changes the status: going live and suspending have their own audited actions (#555)", async () => {
+    const before = { id: "store-1", slug: "mama-ngozi", name: "Old", status: "setup", deliveryRadiusMi: 8 };
+    mockFindUnique.mockResolvedValueOnce(before);
+    mockUpdate.mockResolvedValueOnce({ ...before, deliveryRadiusMi: 8 });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await updateStore({}, formData({ ...VALID_STORE, storeId: "store-1", status: "active" }));
+    expect(result.success).toBe(true);
+    expect(mockUpdate.mock.calls[0][0].data).not.toHaveProperty("status");
+  });
+
   it("detects slug conflict on update", async () => {
     const before = { id: "store-1", slug: "old-slug", name: "Old" };
     mockFindUnique.mockResolvedValueOnce(before);
@@ -835,6 +858,30 @@ describe("setStoreStatus", () => {
     expect(result.success).toBe(true);
     const auditData = mockAuditCreate.mock.calls[0][0].data;
     expect(auditData.action).toBe("store.unsuspend");
+  });
+
+  it("lifting a suspension puts a store suspended from setup back in setup, not live (#555)", async () => {
+    const before = { id: "store-1", slug: "mama-ngozi", status: "suspended" };
+    mockFindUnique.mockResolvedValueOnce(before);
+    mockAuditFindFirst.mockResolvedValueOnce({ before: { status: "setup" } });
+    mockUpdate.mockResolvedValueOnce({ ...before, status: "setup" });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await setStoreStatus("store-1", "active");
+    expect(result.success).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledWith({ where: { id: "store-1" }, data: { status: "setup" } });
+    const auditData = mockAuditCreate.mock.calls[0][0].data;
+    expect(auditData.action).toBe("store.unsuspend");
+    expect(auditData.after).toEqual({ status: "setup" });
+  });
+
+  it("a store in setup is never made live by setStoreStatus", async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "setup" });
+
+    const result = await setStoreStatus("store-1", "active");
+    expect(result.error).toBe("This store is in setup. It goes live from its checklist.");
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockAuditCreate).not.toHaveBeenCalled();
   });
 
   it("is idempotent: setting suspended on an already-suspended store is a no-op", async () => {

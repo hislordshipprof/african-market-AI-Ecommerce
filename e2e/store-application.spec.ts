@@ -123,7 +123,7 @@ test("a store applies on /sell; a platform admin approves one into a setup store
 
     await page.getByRole("listitem").filter({ hasText: approveName }).getByRole("link", { name: "Open store" }).click();
     await expect(page.getByLabel("Slug")).toHaveValue(slug);
-    await expect(page.getByLabel("Status")).toHaveValue("setup");
+    await expect(page.getByTestId("store-status")).toContainText("Setup");
   } finally {
     await running.stop();
   }

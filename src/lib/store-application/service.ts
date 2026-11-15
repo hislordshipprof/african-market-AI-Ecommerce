@@ -189,7 +189,6 @@ export async function approveStoreApplication(id: string, rawSlug: string, actor
     logoUrl: null,
     brandColor: null,
     themePreset: "palm-and-shea",
-    status: "setup",
     hours: null,
     prepTimeMinutes: 30,
     deliveryRadiusMi: 8,
