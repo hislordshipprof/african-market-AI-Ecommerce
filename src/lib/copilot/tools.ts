@@ -44,7 +44,7 @@ export interface DraftBook {
   toolResults: string[];
   /** Rows `inventory_report` returned this turn, for the fixed reply when a number fails the check. */
   report: MovementRow[];
-  /** Listings already drafted or offered in a choice this turn. */
+  /** Listings already drafted or offered in a choice this turn; each appears in one card or choice only. */
   listingIds: Set<string>;
   run<T>(fn: () => Promise<T>): Promise<T>;
 }
@@ -298,9 +298,14 @@ async function proposeOne(
     throw new Error(CHECK_FAILED);
   }
   const draft = draftFor(listing, input);
-  if (book.listingIds.has(draft.listingId)) throw new DraftRefused(ALREADY);
+  if (book.drafts.some((drafted) => drafted.listingId === draft.listingId)) throw new DraftRefused(ALREADY);
   book.listingIds.add(draft.listingId);
   book.drafts.push(draft);
+  // A choice offered earlier this turn no longer lists the item drafted by name.
+  for (const choice of book.choices) {
+    choice.candidates = choice.candidates.filter((candidate) => candidate.listingId !== draft.listingId);
+  }
+  book.choices = book.choices.filter((choice) => choice.candidates.length > 0);
   return {
     drafted: true,
     listingId: draft.listingId,
@@ -316,11 +321,12 @@ function offerChoice(
   group: Extract<ListingSearch, { outcome: "several" }>,
   input: { kind: ProposalKind; quantity: number | null; statusValue: string | null },
 ) {
-  if (!group.listings.some((listing) => fitsStockMode(input.kind, listing.stockMode))) throw new DraftRefused(DOES_NOT_FIT);
-  if (group.listings.some((listing) => book.listingIds.has(listing.id))) throw new DraftRefused(ALREADY);
-  for (const listing of group.listings) book.listingIds.add(listing.id);
+  const open = group.listings.filter((listing) => !book.listingIds.has(listing.id));
+  if (open.length === 0) throw new DraftRefused(ALREADY);
+  if (!open.some((listing) => fitsStockMode(input.kind, listing.stockMode))) throw new DraftRefused(DOES_NOT_FIT);
+  for (const listing of open) book.listingIds.add(listing.id);
   book.choices.push({
-    candidates: group.listings.map((listing) => ({ listingId: listing.id, name: listing.name })),
+    candidates: open.map((listing) => ({ listingId: listing.id, name: listing.name })),
     kind: input.kind,
     quantity: input.quantity,
     statusValue: input.statusValue,
@@ -328,7 +334,7 @@ function offerChoice(
   });
   return {
     drafted: false,
-    ownerPicks: group.listings.map((listing) => listing.name),
+    ownerPicks: open.map((listing) => listing.name),
     note: "Nothing is drafted yet. The owner taps the right item on screen.",
   };
 }

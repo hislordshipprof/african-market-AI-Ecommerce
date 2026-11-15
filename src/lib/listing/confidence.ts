@@ -2,6 +2,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Sales and shortage rates look this far back. */
 export const CONFIDENCE_WINDOW_DAYS = 30;
+/** The stock event types computeConfidence reads; the job loads only these. */
+export const SIGNAL_EVENT_TYPES = ["recount", "restock", "adjust", "counter_sale", "sale", "short"];
 
 /** Time and sales alone stop here: a quiet owner sees Limited, not Ask store (D8). */
 const IDLE_FLOOR = 0.3;

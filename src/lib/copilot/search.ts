@@ -1,5 +1,5 @@
 import { Prisma, storeScopedRawQuery } from "../db";
-import { listingRelevanceJoin, listingRelevanceWhere } from "../storefront/search-relevance";
+import { listingRelevanceJoin, listingRelevanceWhere, nameMatches } from "../storefront/search-relevance";
 import { normalizedSearchQuery } from "../storefront/search-query";
 
 export interface ListingMatch {
@@ -56,16 +56,7 @@ export async function searchListingMatches(storeId: string, rawQuery: string): P
         WHERE l.active = true AND ${listingRelevanceWhere(query)}
       ),
       named AS (
-        SELECT m.*, (
-          LOWER(m.name) = LOWER(${query})
-          OR STARTS_WITH(LOWER(m.name), LOWER(${query}))
-          OR to_tsvector('english', m.name) @@ plainto_tsquery('english', ${query})
-          OR EXISTS (
-            SELECT 1 FROM search_words(m.name) word
-            WHERE length(word.w) >= GREATEST(3, length(${query}) - 1)
-              AND STARTS_WITH(LOWER(word.w), LOWER(${query}))
-          )
-        ) AS by_name
+        SELECT m.*, ${nameMatches(Prisma.sql`m.name`, query)} AS by_name
         FROM matches m
       ),
       strong AS (
