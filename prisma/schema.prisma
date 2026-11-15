@@ -1512,6 +1512,11 @@ model RefundRequest {
   /// #65: on a courier refund of an order whose tax the platform collects, the tax the platform returns from its
   /// application fee with the service fee share, so the store's transfer reversal never pays it.
   platformTaxShareCents Int      @default(0) @map("platform_tax_share_cents")
+  /// #671: what the Stripe Tax reversal for this refund returns, set when the request is reserved:
+  /// { mode: "full" | "flat" | "lines", totalCents, lines?: [{ reference, amountCents, taxCents }] }. Null reverses nothing.
+  taxReversal          Json?     @map("tax_reversal")
+  /// #671: the Stripe Tax reversal transaction, once made; null with a plan is pending for the sweep.
+  taxReversalId        String?   @map("tax_reversal_id")
   feeRefundId          String?   @map("fee_refund_id")
   /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
   succeededAt          DateTime? @map("succeeded_at")
@@ -1760,6 +1765,8 @@ model OrderLine {
   substitutedUnitPriceCents Int?     @map("substituted_unit_price_cents")
   /// This line's share of the order's coupon discount, written at capture (#557); an issue refund deducts it.
   discountCents             Int      @default(0) @map("discount_cents")
+  /// This line's sales tax from the final calculation, written at capture (#671); a refund of the line returns it.
+  taxCents                  Int      @default(0) @map("tax_cents")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @default(now()) @updatedAt @map("updated_at")
 

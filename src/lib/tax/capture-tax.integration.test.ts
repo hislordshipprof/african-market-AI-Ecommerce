@@ -158,6 +158,9 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
     ]);
     const row = await stored(placed.id);
     expect(row).toMatchObject({ status: "AWAITING_PICKUP", taxCents: 124, taxCalculationId: "taxcalc_fake_1", taxTransactionId: "tax_txn_fake_1" });
+    // #671: each line keeps its own tax, so a refund of it returns exactly that.
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: placed.id } });
+    expect(Object.fromEntries(lines.map((line) => [line.id, line.taxCents]))).toEqual({ [placed.lineIds[0]]: 83, [placed.lineIds[1]]: 41 });
   });
 
   it("taxes each line after its share of the coupon discount", async () => {
@@ -186,7 +189,7 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
 
   it("E10: a failed tax transaction leaves the capture standing and pending, and the sweep records it", async () => {
     const tax = fakeTaxCalculator(RATES);
-    setTaxCalculatorForTests({ calculate: tax.calculate, recordTransaction: async () => { throw new Error("Stripe 500"); } });
+    setTaxCalculatorForTests({ ...tax, calculate: tax.calculate, recordTransaction: async () => { throw new Error("Stripe 500"); } });
     const placed = await order({ taxCents: 83, taxCalculationId: "taxcalc_checkout", lines: [{ price: 1000, qty: 1, status: "picked", qtyPicked: 1 }] });
 
     expect(await markReady(storeId, placed.id)).toEqual({ ok: true, capturedAmountCents: 1083 });
@@ -259,6 +262,7 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
 
   it("a tax outage before capture fails with a retryable message and captures nothing", async () => {
     setTaxCalculatorForTests({
+      ...fakeTaxCalculator(),
       calculate: async () => { throw new TaxUnavailableError(new Error("timeout")); },
       recordTransaction: async () => ({ id: "unused" }),
     });
@@ -276,6 +280,7 @@ describe.skipIf(!hasDb)("tax at capture (#65 E9–E14, lane DB)", () => {
     const placed = await order({ taxCents: 124, taxCalculationId: "taxcalc_checkout", lines: [{ price: 1000, qty: 1, status: "picked", qtyPicked: 1 }, { price: 500, qty: 1, status: "picked", qtyPicked: 1 }] });
     // Staff mark a line short while Stripe works out the tax.
     setTaxCalculatorForTests({
+      ...fakeTaxCalculator(),
       calculate: async (input) => {
         await storeScoped(storeId).orderLine.update({ where: { id: placed.lineIds[0] }, data: { status: "refunded", qtyPicked: 0 } });
         return tax.calculate(input);

@@ -19,7 +19,7 @@ describe.skipIf(!liveSandbox || !key.startsWith("sk_test_"))("Stripe Tax sandbox
     if (!active) console.warn(`Stripe Tax sandbox skipped: settings ${settings.status}; turn on Tax with a head office and add a Texas registration in the test dashboard.`);
   }));
 
-  it("taxes a Texas beauty line and records a transaction once per reference", sandbox.test(async (ctx) => {
+  it("taxes a Texas beauty line, records a transaction once per reference, and reverses the food line once", sandbox.test(async (ctx) => {
     if (!active) ctx.skip();
     const tax = stripeTaxCalculator(() => client);
     const reference = `order_sandbox_${Date.now()}`;
@@ -35,5 +35,13 @@ describe.skipIf(!liveSandbox || !key.startsWith("sk_test_"))("Stripe Tax sandbox
     const first = await tax.recordTransaction({ calculationId: calculation.id!, reference, liableParty: "platform", stripeAccount: null });
     const again = await tax.recordTransaction({ calculationId: calculation.id!, reference, liableParty: "platform", stripeAccount: null });
     expect(again.id).toBe(first.id);
+
+    // #671: each line carries its own tax; refunding the exempt food line reverses no tax, once per reference.
+    const food = calculation.lineTaxes.find((line) => line.reference === "food")!;
+    expect(food.taxCents).toBe(0);
+    const reversal = { transactionId: first.id, reference: `${reference}-refund_1`, liableParty: "platform" as const, stripeAccount: null };
+    const plan = { mode: "lines" as const, totalCents: 2000, lines: [{ reference: "food", amountCents: 2000, taxCents: 0 }] };
+    const reversed = await tax.reverseTransaction({ ...reversal, plan });
+    expect((await tax.reverseTransaction({ ...reversal, plan })).id).toBe(reversed.id);
   }));
 });
