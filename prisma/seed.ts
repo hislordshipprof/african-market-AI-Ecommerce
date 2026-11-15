@@ -207,7 +207,10 @@ async function seedCategoryMetadata() {
     { id: "cat_seasonings_sauces", name: "Seasonings & Sauces", slug: "seasonings-and-sauces", localName: "OBE · DINDIN", imageUrl: categoryPhotos["spices-and-seasonings"], sortOrder: 17 },
   ];
 
+  // Stripe tax codes (#65), as the sales_tax migration sets them on existing databases.
+  const taxCodes: Record<string, string> = { snacks: "txcd_40070005", drinks: "txcd_41040008", beauty: "txcd_32050025", household: "txcd_99999999" };
   for (const cat of categories) {
+    const taxCode = taxCodes[cat.slug] ?? "txcd_40040000";
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
@@ -219,6 +222,7 @@ async function seedCategoryMetadata() {
           localName: cat.localName || null,
           imageUrl: cat.imageUrl,
           sortOrder: cat.sortOrder,
+          taxCode,
         },
         create: {
           id: cat.id,
@@ -227,6 +231,7 @@ async function seedCategoryMetadata() {
           localName: cat.localName || null,
           imageUrl: cat.imageUrl,
           sortOrder: cat.sortOrder,
+          taxCode,
         },
       });
     });

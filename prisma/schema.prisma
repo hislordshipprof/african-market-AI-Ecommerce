@@ -29,6 +29,8 @@ model Store {
   city                      String?
   state                     String?
   zip                       String?
+  /// Who collects sales tax on this store's orders (ADR-0008): "platform" (marketplace facilitator) or "store".
+  taxLiableParty            String   @default("platform") @map("tax_liable_party")
   /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
   phone                     String?
   lat                       Float?
@@ -408,6 +410,8 @@ model Category {
   imageUrl  String?  @map("image_url")
   sortOrder Int      @map("sort_order")
   parentId  String?  @map("parent_id")
+  /// Stripe tax code (#65); null falls back to the parent's, then the Stripe account's preset.
+  taxCode   String?  @map("tax_code")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1036,6 +1040,12 @@ model Cart {
   courierProvider       String?   @map("courier_provider")
   courierQuoteKey       String?   @map("courier_quote_key")
   courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
+  /// The Stripe Tax calculation last shown at checkout (#65), for the basket and address in taxQuoteKey.
+  taxCents              Int?      @map("tax_cents")
+  taxLines              Json?     @map("tax_lines")
+  taxLiableParty        String?   @map("tax_liable_party")
+  taxCalculationId      String?   @map("tax_calculation_id")
+  taxQuoteKey           String?   @map("tax_quote_key")
   /// The one store coupon code the shopper entered (#557), upper-case. Checked on every quote and at placement.
   couponCode            String?   @map("coupon_code")
   source                String    @default("manual")
@@ -1385,6 +1395,14 @@ model Order {
   driverRouteId           String?   @map("driver_route_id")
   /// The open pick batch this order is in (#564); cleared when staff leave the batch.
   pickBatchId             String?   @map("pick_batch_id")
+  /// Sales tax (#65, ADR-0008): Stripe Tax's rounded total, its lines, who collects it, and the
+  /// calculation it came from (the checkout's, replaced by the final one at capture).
+  taxCents                Int       @default(0) @map("tax_cents")
+  taxLines                Json      @default("[]") @map("tax_lines")
+  taxLiableParty          String    @default("platform") @map("tax_liable_party")
+  taxCalculationId        String?   @map("tax_calculation_id")
+  /// The Stripe tax transaction recorded after capture; null with a captured order means it is pending.
+  taxTransactionId        String?   @map("tax_transaction_id")
   /// Checkout opt-in to WhatsApp order updates (#560); NULL keeps SMS.
   whatsappOptInAt         DateTime? @map("whatsapp_opt_in_at")
   createdAt               DateTime  @default(now()) @map("created_at")
@@ -1439,6 +1457,11 @@ model RefundRequest {
   providerStatus       String?   @map("provider_status")
   /// #495: on a courier issue refund, the service fee part the platform returns from its application fee.
   serviceFeeShareCents Int       @default(0) @map("service_fee_share_cents")
+  /// #65: the sales tax paid on the goods this refund returns.
+  taxShareCents        Int       @default(0) @map("tax_share_cents")
+  /// #65: on a courier refund of an order whose tax the platform collects, the tax the platform returns from its
+  /// application fee with the service fee share, so the store's transfer reversal never pays it.
+  platformTaxShareCents Int      @default(0) @map("platform_tax_share_cents")
   feeRefundId          String?   @map("fee_refund_id")
   /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
   succeededAt          DateTime? @map("succeeded_at")
