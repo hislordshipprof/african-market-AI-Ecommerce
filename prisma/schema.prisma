@@ -1281,6 +1281,9 @@ model Order {
   readyPushedAt           DateTime? @map("ready_pushed_at")
   completedAt             DateTime? @map("completed_at")
   cancelledAt             DateTime? @map("cancelled_at")
+  /// Fee ledger (#546): the confirmed capture and when, written once by a trigger and never cleared.
+  captureConfirmedAt      DateTime? @map("capture_confirmed_at")
+  confirmedCaptureCents   Int?      @map("confirmed_capture_cents")
   inngestEventSentAt      DateTime? @map("inngest_event_sent_at")
   trackingToken           String?   @unique @map("tracking_token")
   /// When the acceptance alert and auto-cancel start counting. NULL means created_at (orders before #167).
@@ -1327,8 +1330,7 @@ model Order {
   @@index([storeId, sourceCartId, createdAt])
   @@index([storeId, createdAt])
   @@index([customerId])
-  @@index([readyAt])
-  @@index([cancelledAt])
+  @@index([captureConfirmedAt])
   @@map("orders")
 }
 
