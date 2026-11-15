@@ -1,5 +1,6 @@
 import {
   BellRing,
+  CookingPot,
   Bot,
   CopyCheck,
   ClipboardCheck,
@@ -29,6 +30,7 @@ export const ADMIN_NAV = [
   { href: "/admin/store-requests", label: "Store requests", icon: BellRing },
   { href: "/admin/catalog/products", label: "Products", icon: Package },
   { href: "/admin/catalog/categories", label: "Categories", icon: FolderTree },
+  { href: "/admin/catalog/recipes", label: "Recipes", icon: CookingPot },
   { href: "/admin/catalog/review", label: "Catalog review", icon: ClipboardCheck },
   { href: "/admin/catalog/duplicates", label: "Duplicates", icon: CopyCheck },
   { href: "/admin/orders", label: "Refunds", icon: Undo2 },

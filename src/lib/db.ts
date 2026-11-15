@@ -348,6 +348,8 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "platformSettings",
   "productProposal",
   "productSynonym",
+  "recipe",
+  "recipeIngredient",
   "refundRequest",
   "stockProposal",
   "store",
@@ -1419,6 +1421,16 @@ export async function productSynonymsWithSharedNames(
     WHERE ps.product_id = ${productId}
     ORDER BY lower(ps.term), ps.id`;
   return rows.map(({ also_names, ...row }) => ({ ...row, alsoNames: also_names }));
+}
+
+/** Row-lock a recipe of the recipe base for an admin edit, curate or delete. */
+export async function lockRecipeRow(tx: Pick<PrismaClient, "$queryRaw">, recipeId: string) {
+  await tx.$queryRaw`SELECT 1 FROM recipes WHERE id = ${recipeId} FOR UPDATE`;
+}
+
+/** Serializes recipe edits that change which names answer to which dish, so two saves cannot claim one name. */
+export async function lockRecipeNames(tx: Pick<PrismaClient, "$executeRaw">) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('recipe-base-names'))`;
 }
 
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
