@@ -96,8 +96,15 @@ _Avoid_: Waitlist, lead form, store suggestion
 ## Catalog
 
 **Master product**:
-A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected or archived. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
+A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected, archived or merged. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
 _Avoid_: Deleting a master product
+
+**Duplicate pair**:
+Two master products in the same category that may be the same product, proposed by the duplicate scan and judged by Claude as same, different or unsure. A platform admin merges the pair or marks it not a duplicate; a pair marked not a duplicate is never proposed again.
+
+**Merged product**:
+A master product folded into another by a duplicate merge. Its listings (every store's, none deleted), synonyms, recipe links and ingredient links moved to the product kept, and it points at that product. It is read-only and never matched or proposed again. A merge cannot be undone in the admin console; the audit log keeps the record.
+_Avoid_: Deleted product, duplicate removed
 
 **Synonym**:
 Another name a shopper searches for a master product: a local name ("egusi" in Yoruba), a regional name or a spelling ("garri"). It may carry an ISO 639 language code and a region. One product never has the same term twice; two products may share one ("agushi" names whole and ground egusi), and the admin editor warns when they do.

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { MathUtils, TextureLoader, Vector2, type ShaderMaterial } from "three";
+import type { StaticImageData } from "next/image";
 import type { StoryScene } from "./scenes";
 
 // Offsets are in photo widths at the near plane. The poster's 3% overscan hides the
@@ -59,14 +60,16 @@ const FRAGMENT = /* glsl */ `
 
 function DepthPlane({
   scene,
+  poster,
   onReady,
   onContextLost,
 }: {
   scene: StoryScene;
+  poster: StaticImageData;
   onReady: () => void;
   onContextLost: () => void;
 }) {
-  const [photo, depth] = useLoader(TextureLoader, [scene.posterWide.src, scene.depth.src]);
+  const [photo, depth] = useLoader(TextureLoader, [poster.src, scene.depth.src]);
   const material = useRef<ShaderMaterial>(null);
   const canvas = useThree((state) => state.gl.domElement);
   const target = useRef({ x: 0, y: 0 });
@@ -125,7 +128,7 @@ function DepthPlane({
     );
 
     const viewAspect = state.size.width / state.size.height;
-    const photoAspect = scene.posterWide.width / scene.posterWide.height;
+    const photoAspect = poster.width / poster.height;
     shader.uniforms.uCover.value.set(
       Math.min(viewAspect / photoAspect, 1),
       Math.min(photoAspect / viewAspect, 1),
@@ -149,6 +152,7 @@ function DepthPlane({
 
 export default function DepthScene(props: {
   scene: StoryScene;
+  poster: StaticImageData;
   onReady: () => void;
   onContextLost: () => void;
 }) {
