@@ -23,7 +23,7 @@ const SENDS_PER_NUMBER_PER_HOUR = 3;
 
 export interface OwnerLinkView {
   phoneNumber: string;
-  /** Number the last code was sent to; equals phoneNumber until a verified owner changes number. */
+  /** Number a live or last-sent code is for; null after verification or a failed send. */
   pendingPhoneNumber: string | null;
   verified: boolean;
   verifiedAt: Date | null;
@@ -122,15 +122,16 @@ export function getOwnerLink(storeId: string, userId: string): Promise<OwnerLink
 }
 
 /**
- * The store and owner membership for a verified WhatsApp number (E.164 or
- * wa_id). Null for an unknown, unverified, or no-longer-owner number.
+ * The store and owner membership for a verified WhatsApp number, matched on
+ * Meta's wa_id (E.164 or digits). Null for an unknown, unverified, or
+ * no-longer-owner number.
  */
 export async function resolveOwnerByPhone(
   phone: string,
 ): Promise<{ storeId: string; userId: string; membership: { role: string } } | null> {
   const digits = phone.replace(/\D/g, "");
   if (!/^\d{8,15}$/.test(digits)) return null;
-  const link = await platformAdminTransaction((tx) => findVerifiedOwnerLink(tx, digits));
+  const link = await platformAdminTransaction((tx) => findVerifiedOwnerLink(tx, { waId: digits, bsuid: null }));
   if (!link) return null;
   return { storeId: link.storeId, userId: link.userId, membership: { role: link.role } };
 }

@@ -72,6 +72,7 @@ export function CustomerSignIn({ storeName, linkError = null }: Props) {
                   required
                   autoComplete="email"
                   placeholder="you@example.com"
+                  className="min-h-[44px] md:text-base"
                   defaultValue={state.email}
                   aria-invalid={state.status === "error" ? true : undefined}
                   aria-describedby={state.status === "error" ? "customer-sign-in-error" : undefined}

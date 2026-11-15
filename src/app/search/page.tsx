@@ -29,17 +29,22 @@ export default async function SearchPage({
         <h2 className="sf-page-title">
           {tooLong ? SEARCH_QUERY_TOO_LONG : q ? `Results for "${q}"` : "What's cooking?"}
         </h2>
-        <p className="sf-page-intro">
-          Search the names you know. Ugu, egusi, garri — you’re in the right
-          place.
-        </p>
+        {!q && (
+          <p className="sf-page-intro">
+            Search the names you know. Ugu, egusi, garri — you’re in the right
+            place.
+          </p>
+        )}
         {tooLong ? (
           <p className="sf-page-intro" role="status">
             {SEARCH_QUERY_TOO_LONG}. Use 200 characters or fewer.
           </p>
         ) : q ? (
           <div className="sf-section">
-            <p className="sf-result-count" role="status">
+            <p
+              className={results.length ? "sf-result-count" : "sr-only"}
+              role="status"
+            >
               {results.length} {results.length === 1 ? "listing" : "listings"}{" "}
               in this store
             </p>
