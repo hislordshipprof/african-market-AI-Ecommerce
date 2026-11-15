@@ -240,7 +240,7 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     expect(await applicationsFor(app.email)).toHaveLength(2);
   });
 
-  it("deletes rejected applications 12 months after the decision and keeps everything else", async () => {
+  it("with the default 12-month retention, deletes rejected applications past it and keeps everything else", async () => {
     const oldRejected = await pending();
     const recentRejected = await pending();
     const oldPending = await pending();
