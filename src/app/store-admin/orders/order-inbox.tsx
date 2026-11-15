@@ -33,6 +33,7 @@ import {
   HandMetal,
   Package,
   RefreshCw,
+  ShieldAlert,
   Truck,
   ShoppingBag,
   UserCheck,
@@ -80,6 +81,7 @@ const STATUS_CONFIG: Record<
   PICKED_UP: { label: "Courier picked up", variant: "secondary", icon: Truck },
   OUT_FOR_DELIVERY: { label: "Out for delivery", variant: "secondary", icon: Truck },
   DELIVERED: { label: "Delivered", variant: "outline", icon: CheckCircle2 },
+  COMPLETED: { label: "Completed", variant: "outline", icon: CheckCircle2 },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
   PARTIALLY_REFUNDED: { label: "Partly refunded", variant: "outline", icon: RefreshCw },
   REFUNDED: { label: "Refunded", variant: "outline", icon: CheckCircle2 },
@@ -109,6 +111,16 @@ function AccountBadge() {
       <span className="sr-only">Linked to a customer </span>
       Account
     </span>
+  );
+}
+
+/** An open card dispute (#539), next to the order's status. */
+function DisputedBadge() {
+  return (
+    <Badge variant="destructive" data-testid="disputed-badge">
+      <ShieldAlert data-icon="inline-start" aria-hidden="true" />
+      Disputed
+    </Badge>
   );
 }
 
@@ -486,14 +498,17 @@ export function OrderInbox({
                   <CardTitle className="text-lg font-bold tabular-nums">
                     Order #{selectedOrder.number}
                   </CardTitle>
-                  <Badge
-                    variant={
-                      STATUS_CONFIG[selectedOrder.status]?.variant ?? "outline"
-                    }
-                  >
-                    {STATUS_CONFIG[selectedOrder.status]?.label ??
-                      selectedOrder.status}
-                  </Badge>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    {selectedOrder.disputed && <DisputedBadge />}
+                    <Badge
+                      variant={
+                        STATUS_CONFIG[selectedOrder.status]?.variant ?? "outline"
+                      }
+                    >
+                      {STATUS_CONFIG[selectedOrder.status]?.label ??
+                        selectedOrder.status}
+                    </Badge>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   <span>
@@ -526,6 +541,14 @@ export function OrderInbox({
                 {selectedOrder.status === "CANCELLED" && selectedOrder.notes ? (
                   <p className="mt-2 text-sm text-foreground">The platform resolved this refund.</p>
                 ) : null}
+                {selectedOrder.refundedByPlatform && (
+                  <p className="mt-2 text-sm text-foreground" data-testid="refunded-by-platform">Refunded by the platform team</p>
+                )}
+                {selectedOrder.disputed && (
+                  <p className="mt-2 text-sm text-foreground" data-testid="order-disputed">
+                    The customer disputed this card payment with their bank. The platform team answers the dispute and covers it if it is lost, so your payout is not changed. We may ask you for proof of pickup or delivery.
+                  </p>
+                )}
               </CardHeader>
               <CardContent>
                 {selectedOrder.fulfillment === "courier" && (
@@ -816,6 +839,7 @@ export function OrderInbox({
                               >
                                 {config?.label ?? order.status}
                               </Badge>
+                              {order.disputed && <DisputedBadge />}
                               {order.hasAccount && <AccountBadge />}
                             </div>
                             <div className="mt-0.5 flex items-baseline gap-1 text-xs text-muted-foreground">

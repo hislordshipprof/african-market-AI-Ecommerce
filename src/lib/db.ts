@@ -332,6 +332,7 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "aiReviewFlag",
   "attributeProposal",
   "auditLog",
+  "catalogDuplicatePair",
   "category",
   "copilotConversation",
   "courierIncidentNote",
@@ -340,6 +341,8 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "masterProduct",
   "masterProductIngredient",
   "order",
+  "paymentDispute",
+  "paymentDisputeEvent",
   "platformSettings",
   "productSynonym",
   "refundRequest",
@@ -385,6 +388,7 @@ const STORE_SCOPED_TX_MODELS = [
   "copilotClientMessage",
   "copilotConversation",
   "copilotDigest",
+  "copilotWeeklyReport",
   "customer",
   "delivery",
   "deliveryEvent",
@@ -405,6 +409,7 @@ const STORE_SCOPED_TX_MODELS = [
   "orderPushSubscription",
   "ownerReport",
   "ownerReportItem",
+  "paymentDispute",
   "paymentIntentRelease",
   "pickBatch",
   "platformSettings",
@@ -1032,7 +1037,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
-                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
+                  OR (provider_status = 'succeeded' AND (service_fee_share_cents > 0 OR platform_tax_share_cents > 0) AND fee_refund_id IS NULL)
               ))
               AND store_id IN (${Prisma.join(storeIds)})
             ORDER BY updated_at ASC
@@ -1064,7 +1069,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
-                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
+                  OR (provider_status = 'succeeded' AND (service_fee_share_cents > 0 OR platform_tax_share_cents > 0) AND fee_refund_id IS NULL)
               )
             ORDER BY updated_at ASC
             LIMIT 50
@@ -1417,6 +1422,134 @@ export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, 
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
 }
 
+
+/** Serialises catalog duplicate scans for the rest of the transaction (#542). */
+export async function lockDuplicateScan(tx: RawTx): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('catalog_duplicate_scan'))`;
+}
+
+export type DuplicateCandidate = { a_id: string; b_id: string; sim: number; shared: number; score: number };
+
+/**
+ * Candidate duplicate pairs (#542): active or in-review products in the same category whose names are
+ * alike (ADR-0022 trigram similarity) or that share a name or synonym, compared whole and case-folded.
+ * A pair already dismissed or merged is left out. Best first: name similarity plus 0.15 per shared term, up to 3.
+ */
+export async function duplicateCandidates(tx: RawTx, minSimilarity: number, max: number): Promise<DuplicateCandidate[]> {
+  return tx.$queryRaw<DuplicateCandidate[]>`
+    WITH live AS (
+      SELECT id, name, category_id FROM master_products
+      WHERE status IN ('active', 'needs_review') AND category_id IS NOT NULL
+    ),
+    terms AS (
+      SELECT l.id, LOWER(ps.term) AS t FROM live l JOIN product_synonyms ps ON ps.product_id = l.id
+      UNION SELECT id, LOWER(name) FROM live
+    ),
+    shared AS (
+      SELECT a.id AS a_id, b.id AS b_id, COUNT(DISTINCT ta.t)::int AS shared
+      FROM live a
+      JOIN live b ON b.category_id = a.category_id AND a.id < b.id
+      JOIN terms ta ON ta.id = a.id
+      JOIN terms tb ON tb.id = b.id AND tb.t = ta.t
+      GROUP BY a.id, b.id
+    ),
+    pairs AS (
+      SELECT a.id AS a_id, b.id AS b_id, search_similarity(LOWER(a.name), LOWER(b.name)) AS sim, COALESCE(s.shared, 0) AS shared
+      FROM live a
+      JOIN live b ON b.category_id = a.category_id AND a.id < b.id
+      LEFT JOIN shared s ON s.a_id = a.id AND s.b_id = b.id
+    )
+    SELECT p.a_id, p.b_id, p.sim, p.shared, (p.sim + 0.15 * LEAST(p.shared, 3))::real AS score
+    FROM pairs p
+    WHERE (p.sim >= ${minSimilarity} OR p.shared > 0)
+      AND NOT EXISTS (
+        SELECT 1 FROM catalog_duplicate_pairs d
+        WHERE d.product_a_id = p.a_id AND d.product_b_id = p.b_id AND d.status <> 'open'
+      )
+    ORDER BY score DESC, p.a_id, p.b_id
+    LIMIT ${max}
+  `;
+}
+
+/** Open pairs become exactly the candidates; a pair already judged keeps its verdict. */
+export async function replaceOpenDuplicatePairs(tx: RawTx, candidates: DuplicateCandidate[]): Promise<void> {
+  const aIds = candidates.map((row) => row.a_id);
+  const bIds = candidates.map((row) => row.b_id);
+  await tx.$executeRaw`
+    DELETE FROM catalog_duplicate_pairs d
+    WHERE d.status = 'open'
+      AND NOT EXISTS (SELECT 1 FROM unnest(${aIds}::text[], ${bIds}::text[]) AS c(a, b) WHERE c.a = d.product_a_id AND c.b = d.product_b_id)
+  `;
+  // Key-share locks hold the products until commit; one deleted since the candidate read is skipped.
+  await tx.$executeRaw`
+    WITH kept AS (SELECT id FROM master_products WHERE id = ANY(${[...aIds, ...bIds]}::text[]) FOR KEY SHARE)
+    INSERT INTO catalog_duplicate_pairs (id, product_a_id, product_b_id, name_similarity, shared_terms, score, updated_at)
+    SELECT gen_random_uuid()::text, c.a, c.b, c.sim, c.shared, c.score, now()
+    FROM unnest(${aIds}::text[], ${bIds}::text[], ${candidates.map((row) => row.sim)}::real[],
+      ${candidates.map((row) => row.shared)}::int[], ${candidates.map((row) => row.score)}::real[]) AS c(a, b, sim, shared, score)
+    WHERE c.a IN (SELECT id FROM kept) AND c.b IN (SELECT id FROM kept)
+    ON CONFLICT (product_a_id, product_b_id) DO UPDATE
+      SET name_similarity = EXCLUDED.name_similarity, shared_terms = EXCLUDED.shared_terms, score = EXCLUDED.score, updated_at = now()
+  `;
+}
+
+/** Writes verdicts onto open pairs that have none yet. */
+export async function writeDuplicateVerdicts(tx: RawTx, verdicts: Array<{ id: string; verdict: string; reason: string }>): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE catalog_duplicate_pairs d
+    SET verdict = v.verdict, verdict_reason = v.reason, judged_at = now(), updated_at = now()
+    FROM unnest(${verdicts.map((row) => row.id)}::text[], ${verdicts.map((row) => row.verdict)}::text[], ${verdicts.map((row) => row.reason)}::text[]) AS v(id, verdict, reason)
+    WHERE d.id = v.id AND d.status = 'open' AND d.verdict IS NULL
+  `;
+}
+
+/** Listings per store for each master product; platform-admin transactions only. */
+export async function listingCountsByStore(tx: RawTx, productIds: string[]) {
+  return tx.$queryRaw<Array<{ product_id: string; store_id: string; store_name: string; listings: number }>>`
+    SELECT l.master_product_id AS product_id, s.id AS store_id, s.name AS store_name, COUNT(*)::int AS listings
+    FROM listings l JOIN stores s ON s.id = l.store_id
+    WHERE l.master_product_id = ANY(${productIds}::text[])
+    GROUP BY l.master_product_id, s.id, s.name
+    ORDER BY s.name, s.id
+  `;
+}
+
+/** Adds the source product's ingredient links to the target, skipping links it already has. */
+export async function copyMasterProductIngredients(tx: RawTx, fromId: string, toId: string): Promise<void> {
+  await tx.$executeRaw`
+    INSERT INTO master_product_ingredients (product_id, ingredient_id)
+    SELECT ${toId}, ingredient_id FROM master_product_ingredients WHERE product_id = ${fromId}
+    ON CONFLICT DO NOTHING
+  `;
+}
+
+/** Moves every listing of one master product to another, in every store. Nothing is deleted. */
+export async function repointListings(tx: RawTx, fromId: string, toId: string) {
+  return tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+    UPDATE listings SET master_product_id = ${toId}, updated_at = now()
+    WHERE master_product_id = ${fromId}
+    RETURNING id, store_id
+  `;
+}
+
+export async function repointRecipeIngredients(tx: RawTx, fromId: string, toId: string) {
+  return tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE recipe_ingredients SET master_product_id = ${toId} WHERE master_product_id = ${fromId} RETURNING id
+  `;
+}
+
+/** Pending shelf-photo drafts matched to, or offering, the source product now point at the target. */
+export async function repointPendingListingDrafts(tx: RawTx, fromId: string, toId: string) {
+  return tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE listing_drafts
+    SET master_product_id = CASE WHEN master_product_id = ${fromId} THEN ${toId} ELSE master_product_id END,
+      candidate_ids = ARRAY(SELECT DISTINCT unnest(array_replace(candidate_ids, ${fromId}, ${toId}))),
+      updated_at = now()
+    WHERE status = 'pending' AND (master_product_id = ${fromId} OR ${fromId} = ANY(candidate_ids))
+    RETURNING id
+  `;
+}
+
 /**
  * Row-lock the cart so concurrent mutations of its lines serialize. Needed
  * because FOR UPDATE on cart_lines cannot lock a line that does not exist yet.
@@ -1657,7 +1790,7 @@ export async function claimConversationLease(
 }
 
 /**
- * Deletes one batch of actions older than the naive timestamp.
+ * Deletes one batch of actions older than the naive timestamp, only in `storeIds` when given (a test seam).
  * The batch key is written in the same transaction, so a replay returns the
  * committed count instead of deleting the next batch.
  */
@@ -1665,12 +1798,14 @@ export function deleteExpiredAssistantActions(
   cutoff: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_actions
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
         ORDER BY created_at, id
         LIMIT ${batchSize}
         FOR UPDATE SKIP LOCKED
@@ -1695,12 +1830,14 @@ export function deleteExpiredAssistantConversations(
   now: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_conversations
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
           AND (in_flight_until IS NULL OR in_flight_until <= ${now})
         ORDER BY created_at, id
         LIMIT ${batchSize}
@@ -1725,12 +1862,14 @@ export function deleteExpiredReviewFlags(
   cutoff: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_review_flags
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
         ORDER BY created_at, id
         LIMIT ${batchSize}
         FOR UPDATE SKIP LOCKED
@@ -1873,16 +2012,24 @@ export async function releaseInboundWhatsAppMessage(messageId: string): Promise<
 
 export type OwnerLinkCodeOutcome =
   | { kind: "no_pending" }
-  | { kind: "wrong_or_expired" }
+  | { kind: "wrong_or_expired"; candidates: Array<{ storeId: string; userId: string }> }
   | { kind: "verified"; storeId: string; userId: string; storeName: string };
 
+/** A WhatsApp sender: the phone-number wa_id, the business-scoped user id (BSUID), or both. */
+export interface WhatsAppSenderIds {
+  waId: string | null;
+  bsuid: string | null;
+}
+
 /**
- * Tries a 6-digit code against the codes sent to this sender (newest first,
- * at most five rows, at any store, verified rows included when they are
- * changing number). The code decides the store. A match moves the pending
- * number into the link and verifies it in one UPDATE guarded by the database
- * clock; any other verified link for the same sender is deleted first, with
- * an audit row on the store that lost it.
+ * Tries a 6-digit code against the live codes sent to this sender (newest
+ * first, at most five rows, at any store, verified rows included when they
+ * are changing number) whose member is still the store's owner. An expired
+ * code, or one for a member no longer owner, is not a candidate. The code
+ * decides the store. A match moves the pending number into the link, records
+ * the sender's BSUID, and verifies it in one UPDATE guarded by the database
+ * clock; any other verified link for the same wa_id or BSUID is deleted
+ * first, with an audit row on the store that lost it.
  *
  * A miss counts an attempt on each candidate and voids a code at the limit,
  * unless `countMisses` is false. The inbound path passes false when the
@@ -1893,34 +2040,41 @@ export type OwnerLinkCodeOutcome =
  */
 export async function verifyOwnerLinkByCode(
   tx: RawTx,
-  waId: string,
+  sender: { waId: string; bsuid: string | null },
   code: string,
   options: { countMisses: boolean } = { countMisses: true },
 ): Promise<OwnerLinkCodeOutcome> {
+  const { waId, bsuid } = sender;
   const candidates = await tx.$queryRaw<Array<{
     id: string;
     store_id: string;
     user_id: string;
     verification_code_hash: string | null;
-    live: boolean;
   }>>`
-    SELECT id, store_id, user_id, verification_code_hash,
-      (verification_expires_at > (now() AT TIME ZONE 'UTC')) AS live
-    FROM owner_whatsapp_links
-    WHERE pending_wa_id = ${waId} AND verification_code_hash IS NOT NULL
-    ORDER BY updated_at DESC, id
+    SELECT l.id, l.store_id, l.user_id, l.verification_code_hash
+    FROM owner_whatsapp_links l
+    WHERE l.pending_wa_id = ${waId} AND l.verification_code_hash IS NOT NULL
+      AND l.verification_expires_at > (now() AT TIME ZONE 'UTC')
+      AND EXISTS (
+        SELECT 1 FROM store_memberships m
+        WHERE m.store_id = l.store_id AND m.user_id = l.user_id AND m.role = 'owner'
+      )
+    ORDER BY l.updated_at DESC, l.id
     LIMIT 5
-    FOR UPDATE
+    FOR UPDATE OF l
   `;
   if (candidates.length === 0) return { kind: "no_pending" };
 
-  const matches = candidates.map((row) =>
+  const match = candidates.find((row) =>
     linkCodeMatches({ storeId: row.store_id, userId: row.user_id, codeHash: row.verification_code_hash }, code),
   );
-  const match = candidates.find((row, index) => matches[index] && row.live === true);
+  const missed: OwnerLinkCodeOutcome = {
+    kind: "wrong_or_expired",
+    candidates: candidates.map((row) => ({ storeId: row.store_id, userId: row.user_id })),
+  };
 
   if (!match) {
-    if (!options.countMisses) return { kind: "wrong_or_expired" };
+    if (!options.countMisses) return missed;
     const ids = candidates.map((row) => row.id);
     await tx.$executeRaw`
       UPDATE owner_whatsapp_links
@@ -1940,12 +2094,12 @@ export async function verifyOwnerLinkByCode(
         updated_at = (now() AT TIME ZONE 'UTC')
       WHERE id IN (${Prisma.join(ids)})
     `;
-    return { kind: "wrong_or_expired" };
+    return missed;
   }
 
   const replaced = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
     DELETE FROM owner_whatsapp_links
-    WHERE wa_id = ${waId} AND verified AND id <> ${match.id}
+    WHERE verified AND id <> ${match.id} AND (wa_id = ${waId} OR bsuid = ${bsuid})
     RETURNING id, store_id
   `;
   const updated = await tx.$queryRaw<Array<{ store_id: string; user_id: string }>>`
@@ -1954,6 +2108,7 @@ export async function verifyOwnerLinkByCode(
       verified_at = (now() AT TIME ZONE 'UTC'),
       phone_number = pending_phone_number,
       wa_id = pending_wa_id,
+      bsuid = ${bsuid},
       pending_phone_number = NULL,
       pending_wa_id = NULL,
       verification_code_hash = NULL,
@@ -1967,7 +2122,7 @@ export async function verifyOwnerLinkByCode(
     RETURNING store_id, user_id
   `;
   const row = updated[0];
-  if (!row) return { kind: "wrong_or_expired" };
+  if (!row) return missed;
 
   const owner = await tx.$queryRaw<Array<{ email: string; name: string }>>`
     SELECT u.email, s.name
@@ -1990,26 +2145,51 @@ export async function verifyOwnerLinkByCode(
 }
 
 /**
- * The verified link for a sender whose membership is still `owner`. Matches
- * Meta's wa_id, or the E.164 number the owner entered.
+ * The verified link for a sender whose membership is still `owner`, matched
+ * on Meta's wa_id or the sender's BSUID (each unique among verified links).
+ * A wa_id match wins over a BSUID match.
  */
 export async function findVerifiedOwnerLink(
   tx: RawTx,
-  waId: string,
-): Promise<{ storeId: string; userId: string; role: string; storeName: string } | null> {
-  const e164 = `+${waId}`;
-  const rows = await tx.$queryRaw<Array<{ store_id: string; user_id: string; role: string; name: string }>>`
-    SELECT l.store_id, l.user_id, m.role, s.name
+  sender: WhatsAppSenderIds,
+): Promise<{ linkId: string; storeId: string; userId: string; role: string; storeName: string; bsuid: string | null } | null> {
+  const { waId, bsuid } = sender;
+  const rows = await tx.$queryRaw<Array<{
+    id: string;
+    store_id: string;
+    user_id: string;
+    role: string;
+    name: string;
+    bsuid: string | null;
+  }>>`
+    SELECT l.id, l.store_id, l.user_id, m.role, s.name, l.bsuid
     FROM owner_whatsapp_links l
     JOIN store_memberships m ON m.store_id = l.store_id AND m.user_id = l.user_id
     JOIN stores s ON s.id = l.store_id
-    WHERE l.verified AND (l.wa_id = ${waId} OR l.phone_number = ${e164}) AND m.role = 'owner'
-    ORDER BY l.verified_at DESC
+    WHERE l.verified AND (l.wa_id = ${waId} OR l.bsuid = ${bsuid}) AND m.role = 'owner'
+    ORDER BY (l.wa_id = ${waId}) IS TRUE DESC, l.verified_at DESC
     LIMIT 1
   `;
   const row = rows[0];
   if (!row) return null;
-  return { storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name };
+  return { linkId: row.id, storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name, bsuid: row.bsuid };
+}
+
+/**
+ * Records the BSUID Meta sent with a verified owner's message, for links
+ * verified before it was stored. Skipped when another verified link already
+ * holds it (the owner re-verifies to move it).
+ */
+export async function recordOwnerLinkBsuid(tx: RawTx, linkId: string, bsuid: string): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE owner_whatsapp_links
+    SET bsuid = ${bsuid}, updated_at = (now() AT TIME ZONE 'UTC')
+    WHERE id = ${linkId} AND verified AND bsuid IS DISTINCT FROM ${bsuid}
+      AND NOT EXISTS (
+        SELECT 1 FROM owner_whatsapp_links other
+        WHERE other.verified AND other.bsuid = ${bsuid} AND other.id <> ${linkId}
+      )
+  `;
 }
 
 /**
@@ -2396,6 +2576,26 @@ export async function claimStripeBillingEvent(
     ON CONFLICT (id) DO NOTHING
     RETURNING id`;
   return rows.length > 0;
+}
+
+/** Records a charge.dispute.* event id (#539). False means it was already applied. */
+export async function claimPaymentDisputeEvent(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  eventId: string,
+  stripeDisputeId: string,
+  type: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO payment_dispute_events (id, stripe_dispute_id, type)
+    VALUES (${eventId}, ${stripeDisputeId}, ${type})
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+/** Locks a dispute's row until the transaction ends, so two of its events apply one after the other. */
+export async function lockPaymentDispute(tx: Pick<PrismaClient, "$queryRaw">, stripeDisputeId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM payment_disputes WHERE stripe_dispute_id = ${stripeDisputeId} FOR UPDATE`;
 }
 
 /** Adds one assistant chat to the store's month unless it is at `cap`. Null when capped. */

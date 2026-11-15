@@ -5,7 +5,7 @@ const orderInclude = {
   coupon: { select: { code: true } },
   lines: {
     include: {
-      listingVariant: { include: { listing: true } },
+      listingVariant: { include: { listing: { include: { masterProduct: { select: { name: true } } } } } },
     },
   },
   issueReports: { select: { state: true, amountCents: true } },

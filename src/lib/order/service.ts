@@ -2,11 +2,11 @@ import { Prisma, type Order, type OrderLine } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
+import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
-import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
+import { captureSplit, courierFeeCents, orderServiceFeeSettings, platformTaxCents } from "./platform-fee";
 import { couponTerms } from "../coupon/discount";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
@@ -14,7 +14,10 @@ import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking,
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { captureCharge } from "./substitution-pricing";
+import { finalizeTaxForCapture, recordTaxTransaction, type FinalTax } from "../tax/capture-tax";
+import { TaxLocationError, TaxUnavailableError } from "../tax/calculator";
 import { recordCapture } from "./capture-record";
+import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -337,6 +340,8 @@ const ORDER_WITH_LINES = {
   },
 } as const;
 
+const PLATFORM_REFUNDED_STATUSES: OrderStatus[] = ["PARTIALLY_REFUNDED", "REFUNDED"];
+
 export async function getStoreOrders(storeId: string) {
   const orders = await storeScopedTransaction(storeId, async (tx) => {
     const resolved = await tx.auditLog.findMany({
@@ -344,18 +349,39 @@ export async function getStoreOrders(storeId: string) {
       select: { entityId: true },
     });
     const resolvedIds = resolved.map((row) => row.entityId);
-    return tx.order.findMany({
+    const platformRefunded = await tx.auditLog.findMany({
+      where: { action: PLATFORM_REFUND_ACTION, entityType: "order" },
+      select: { entityId: true },
+    });
+    const platformRefundedIds = platformRefunded.map((row) => row.entityId);
+    // #539: an order with an open card dispute stays in the inbox, badged, whatever its status.
+    const openDisputes = await tx.paymentDispute.findMany({
+      where: { orderId: { not: null }, status: { notIn: [...CLOSED_DISPUTE_STATUSES] } },
+      select: { orderId: true },
+    });
+    const disputedIds = openDisputes.map((row) => row.orderId!);
+    const rows = await tx.order.findMany({
       where: {
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           ...(resolvedIds.length > 0
             ? [{ id: { in: resolvedIds }, status: "CANCELLED" as const }]
             : []),
+          // #538: the store sees a refund the platform team made.
+          ...(platformRefundedIds.length > 0
+            ? [{ id: { in: platformRefundedIds }, status: { in: PLATFORM_REFUNDED_STATUSES } }]
+            : []),
+          ...(disputedIds.length > 0 ? [{ id: { in: disputedIds } }] : []),
         ],
       },
       include: ORDER_WITH_LINES,
       orderBy: { createdAt: "desc" },
     });
+    return rows.map((row) => ({
+      ...row,
+      refundedByPlatform: platformRefundedIds.includes(row.id) && (PLATFORM_REFUNDED_STATUSES as string[]).includes(row.status),
+      disputed: disputedIds.includes(row.id),
+    }));
   });
   // This payload reaches a client component. A user id is the same at every store, so it
   // would let two stores' admins match one person: send only whether an account is linked.
@@ -980,20 +1006,62 @@ function couponMetadata(couponId: string | null | undefined): Record<string, str
 
 /** The application fee for a stored capture amount; the service fee was stored with it. */
 function applicationFeeFor(
-  order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number },
+  order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number; taxCents: number; taxLiableParty: string },
   capturedCents: number,
 ): number {
   return captureSplit({
     capturedCents,
     serviceFeeCents: order.serviceFeeCents,
     courierFeeCents: courierFeeCents(order),
+    platformTaxCents: platformTaxCents(order),
   }).applicationFeeCents;
+}
+
+const ORDER_CHANGED_DURING_CAPTURE = "Order changed during capture, try again";
+
+type ReadyDb = Pick<Prisma.TransactionClient, "storeCoupon">;
+
+/** The capture charge for the final lines. The coupon's value cannot change once an order used it (#556), so it is read as placed. */
+async function readyCharge(db: ReadyDb, order: Order, lines: OrderLine[]) {
+  const couponRow = order.couponId ? await db.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+  const coupon = couponRow ? couponTerms(couponRow) : null;
+  return captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order), coupon });
+}
+
+/** What the final tax was calculated on; phase 1 checks it under the lock. */
+function chargedLinesKey(lines: OrderLine[]): string {
+  return JSON.stringify([...lines]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((l) => [l.id, l.status, l.qtyOrdered, l.qtyPicked, l.unitPriceCents, l.substitutedUnitPriceCents]));
+}
+
+/**
+ * Final tax for a PICKING order whose lines are all resolved, worked out before the lock because it
+ * calls Stripe (#65). Null when phase 1 will not capture from the lines anyway.
+ */
+async function readyTax(storeId: string, orderId: string): Promise<{ ok: true; tax: FinalTax | null; linesKey: string } | { ok: false; error: string }> {
+  const db = storeScoped(storeId);
+  const order = await db.order.findUnique({ where: { id: orderId } });
+  if (!order || order.status !== "PICKING") return { ok: true, tax: null, linesKey: "" };
+  const lines = await db.orderLine.findMany({ where: { orderId } });
+  if (lines.some((l) => !RESOLVED_LINE_STATUSES.includes(l.status as OrderLineStatus))) return { ok: true, tax: null, linesKey: "" };
+  const charge = await readyCharge(db, order, lines);
+  try {
+    return { ok: true, tax: await finalizeTaxForCapture(order, lines, charge.lineDiscountsCents), linesKey: chargedLinesKey(lines) };
+  } catch (error) {
+    if (error instanceof TaxLocationError || error instanceof TaxUnavailableError) return { ok: false, error: error.message };
+    throw error;
+  }
 }
 
 export async function markReady(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true; capturedAmountCents: number; voided?: boolean } | { ok: false; error: string }> {
+  // Phase 0: final tax on the picked lines; never capture untaxed (#65).
+  const finalTax = await readyTax(storeId, orderId);
+  if (!finalTax.ok) return finalTax;
+
   // Phase 1: claim with CAPTURING inside transaction (blocks concurrent changes)
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
@@ -1027,12 +1095,15 @@ export async function markReady(
       return { ok: false as const, error: "Cannot mark ready: unresolved order lines remain" };
     }
 
+    // The tax was calculated on these lines before the lock; any change since means calculating again.
+    if (!finalTax.tax || finalTax.linesKey !== chargedLinesKey(lines)) {
+      return { ok: false as const, error: ORDER_CHANGED_DURING_CAPTURE };
+    }
+    const tax = finalTax.tax;
+
     // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
-    // The coupon's value cannot change once an order used it (#556), so it is read as placed.
-    const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
-    const coupon = couponRow ? couponTerms(couponRow) : null;
-    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order), coupon });
-    const capturedAmountCents = charge.amountCents;
+    const charge = await readyCharge(tx, order, lines);
+    const capturedAmountCents = charge.amountCents + tax.taxCents;
 
     if (!order.paymentIntentId) {
       return { ok: false as const, error: "Order has no payment intent" };
@@ -1070,6 +1141,7 @@ export async function markReady(
       capturedCents: capturedAmountCents,
       serviceFeeCents: charge.serviceFeeCents,
       courierFeeCents: courierFeeCents(order),
+      platformTaxCents: platformTaxCents({ taxCents: tax.taxCents, taxLiableParty: order.taxLiableParty }),
     });
     const fee = split.applicationFeeCents;
 
@@ -1081,6 +1153,9 @@ export async function markReady(
         serviceFeeCents: charge.serviceFeeCents,
         platformFeeCents: split.platformFeeCents,
         discountCents: charge.discountCents,
+        taxCents: tax.taxCents,
+        taxLines: tax.lines as unknown as Prisma.InputJsonValue,
+        taxCalculationId: tax.calculationId,
       },
     });
     for (const [index, line] of lines.entries()) {
@@ -1239,6 +1314,8 @@ export async function markReady(
   if (!finalize.ok) return finalize;
   if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
   if (courierReady) scheduleCourierDispatch(storeId, orderId);
+  // Outside any transaction; a failure leaves it pending for the sweep (E10).
+  await recordTaxTransaction(storeId, orderId);
 
   return { ok: true, capturedAmountCents: finalize.capturedAmountCents };
 }

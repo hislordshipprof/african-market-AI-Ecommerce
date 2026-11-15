@@ -18,7 +18,11 @@ export interface ListRow {
   description?: string;
 }
 
-/** `to` is the recipient's number in E.164 or its wa_id (digits only). */
+/**
+ * `to` is the recipient's number in E.164 or its wa_id (digits only), or a
+ * business-scoped user id for a free-form message (Meta refuses it for
+ * authentication templates).
+ */
 export type OutboundMessage =
   | { type: "text"; to: string; body: string }
   | { type: "interactive"; to: string; body: string; buttons: ReplyButton[] }

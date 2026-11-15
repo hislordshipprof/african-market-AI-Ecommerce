@@ -96,8 +96,15 @@ _Avoid_: Waitlist, lead form, store suggestion
 ## Catalog
 
 **Master product**:
-A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected or archived. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
+A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected, archived or merged. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review. A re-seed of the catalog keeps what an admin changed (#613).
 _Avoid_: Deleting a master product
+
+**Duplicate pair**:
+Two master products in the same category that may be the same product, proposed by the duplicate scan and judged by Claude as same, different or unsure. A platform admin merges the pair or marks it not a duplicate; a pair marked not a duplicate is never proposed again.
+
+**Merged product**:
+A master product folded into another by a duplicate merge. Its listings (every store's, none deleted), synonyms, recipe links and ingredient links moved to the product kept, and it points at that product. It is read-only and never matched or proposed again. A merge cannot be undone in the admin console; the audit log keeps the record.
+_Avoid_: Deleted product, duplicate removed
 
 **Synonym**:
 Another name a shopper searches for a master product: a local name ("egusi" in Yoruba), a regional name or a spelling ("garri"). It may carry an ISO 639 language code and a region. One product never has the same term twice; two products may share one ("agushi" names whole and ground egusi), and the admin editor warns when they do.
@@ -199,6 +206,9 @@ _Avoid_: Store AI, store assistant
 **Daily digest**:
 The Store copilot's end-of-day summary for a store owner.
 
+**Weekly report**:
+The Store copilot's Monday email to a store owner about the store week just ended (Monday to Sunday, store time), against the week before. The last 8 are on the copilot page.
+
 **Copilot alert**:
 A stock alert the Store copilot raises for the store owner: sold out, running low (a counted listing at 5 or fewer, or a status listing marked low), or an order that needs a low or ask-store item. Owners only; at most 2 pushes per store per hour.
 
@@ -206,7 +216,7 @@ A stock alert the Store copilot raises for the store owner: sold out, running lo
 A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
 
 **Linked WhatsApp number**:
-The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number, or by Meta's business-scoped user id (BSUID) when the owner has adopted a WhatsApp username and Meta omits the number.
 
 **WhatsApp checkout link**:
 The link the Shopper assistant sends on WhatsApp when a customer is ready to check out. It opens the store's normal checkout with the cart the chat filled, works once and for 60 minutes, and places nothing: the customer pays on that page, as a guest or signed in. A used or expired link shows "This checkout link has expired".
@@ -308,12 +318,24 @@ The capture still stands because the refund did not cover it. Staff see that the
 **Resolved manually**:
 A platform admin recorded the amount they repaid outside the app. The order becomes Cancelled. The app moves no money. The record is the amount the admin entered, plus the refunded and captured cents. If that amount does not meet the capture, the store and the platform are alerted.
 
+**Platform refund**:
+A refund a platform admin makes from the order detail (#538) when the store does not act or the problem is the courier's or the app's: an amount from 1¢ up to what is left on the payment, and a reason of up to 500 characters. It goes through the refund ledger like an issue refund and comes out of the store's transfer; on a courier order the platform keeps its fee and returns only the service fee share and, when the platform collected the tax, the tax share (#65). A `platform_refund` audit row names the admin, the amount and the reason. The store sees "Refunded by the platform team" on the order in its inbox, and the customer gets the usual refund message once per order.
+_Avoid_: Goodwill credit, manual refund (that is Resolved manually)
+
+**Dispute**:
+A customer asked their bank to reverse a card payment (#539). Stripe calls an early one an inquiry (status `warning_…`) and a formal one a chargeback. On our destination charges Stripe takes the disputed amount and its fee (US $15) from the platform balance, and the platform absorbs a lost dispute in v1; the store's payout is not touched, and recovering it from the store is a later manual decision. The `charge.dispute.*` webhooks are the only writer of the `payment_disputes` row: amount (may be less than the order), reason, status, evidence due date, outcome (won, lost or inquiry closed) and Stripe's fee. The store's owners get one push and the order shows Disputed in the store inbox while the dispute is open. A dispute whose charge matches no order is kept with no order and emailed to platform admins. Platform admins see open disputes on the Disputes page, soonest deadline first, and submit evidence in the Stripe Dashboard, not in the app.
+_Avoid_: Chargeback (as the general term), claim
+
 **RefundRequest**:
-One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
+One refund the app asked Stripe for. The row stores the key, the amount, the fee flag, and its service fee share and tax share (#65). Stripe's refund object is the source of truth for what happened to the money.
 
 **Fee ledger**:
 The platform admin's monthly report of what the platform keeps (#546), at `/admin/billing/ledger`, built from our order and refund rows, not from Stripe. Each captured order is a row: captured amount, service fee, courier fee passed through, the platform's card fee share, the application fee, and the platform net (service fee less the platform's card fee share). An order counts in the month its capture was confirmed; a cancel, refund or manual repayment never changes that row. A refund that returns fee is a negative row in the UTC month it succeeded, and a manual repayment is its own row in the month it was recorded. Months are UTC calendar months.
 _Avoid_: Commission report
+
+**Sales tax**:
+The tax Stripe Tax works out for an order (#65, ADR-0008), shown before Pay as "Estimated tax" (Ready works it out again on the picked goods) and kept on the order with its lines and the **tax liable party**: `platform` (the default; the platform collects and remits as marketplace facilitator, so the tax is kept out of the store's payout) or `store`. Pickup is taxed at the store's address, delivery at the delivery address. Worked out again on the picked goods at Ready, and recorded as a Stripe tax transaction after capture.
+_Avoid_: VAT
 
 **Open request**:
 A RefundRequest that is still unanswered: reserved, unknown, or created at the provider but not yet succeeded, failed or canceled. Manual repayment waits until no request is open.
@@ -322,7 +344,7 @@ A RefundRequest that is still unanswered: reserved, unknown, or created at the p
 An open refund request that was still unknown 23 hours after it was created, and was not in the middle of a replay. The platform alert is written in the same locked transaction, so a failed insert does not leave the request abandoned. A refund that shows up later is still recorded, and the reconcile cron keeps matching it without sending the request again. A replay stays open until the provider answers, including on another server. Abandonment re-reads the current row under the store lock and does not overwrite a live reservation. This window is a coordinator default, pending owner confirmation.
 
 **Issue report**:
-A customer's one report of a problem with a finished order, made from the tracking link within 48 hours of completion: missing, damaged, wrong or poor freshness, with the items and quantities, an optional note and one photo. Its amount is the picked quantity times the unit price of the chosen items, never fees or tip. At or under the store's auto-refund limit it is refunded to the card at once (auto refunded); above it, it waits for the store (in review). Its states are auto refunded, in review, approved, declined and refund failed. A second problem goes through the store, not a second report.
+A customer's one report of a problem with a finished order, made from the tracking link within 48 hours of completion: missing, damaged, wrong or poor freshness, with the items and quantities, an optional note and one photo. Its amount is the picked quantity times the unit price of the chosen items, less their coupon share, plus their service fee share and the sales tax paid on them (#65); never tip or delivery. At or under the store's auto-refund limit it is refunded to the card at once (auto refunded); above it, it waits for the store (in review). Its states are auto refunded, in review, approved, declined and refund failed. A second problem goes through the store, not a second report.
 
 **Partly refunded** / **Refunded**:
 Order statuses after delivery, set only from money: Partly refunded while the succeeded refunds are below the capture, Refunded when they equal it. A reported problem alone does not change the order's status. A failed issue refund marks the issue refund failed and alerts the store and the platform; the order never becomes Refund failed, which is only for cancellations.

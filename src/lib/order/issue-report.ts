@@ -4,9 +4,9 @@ import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { deliveryProofBucket, issuePhotoKey, uploadIssuePhoto } from "../r2";
 import { money } from "../format";
 import { prepareProofPhoto } from "./delivery-proof";
-import { evaluateOrderRefundStateAfterCommit, recordIssueRefundNotStarted, submitRefund } from "./refund-requests";
+import { evaluateOrderRefundStateAfterCommit, recordIssueRefundNotStarted, submitRefund, taxRefundedCents } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
-import { serviceFeeRefundCents } from "./platform-fee";
+import { refundOfGoodsCents } from "./platform-fee";
 import { lineChargeCents, type ChargeLine } from "./substitution-pricing";
 import { lineDiscountShareCents } from "../coupon/discount";
 
@@ -64,12 +64,15 @@ type OrderWithLines = ReportableOrder & {
   capturedAmountCents: number | null;
   tipCents: number;
   deliveryFeeCents: number;
+  taxCents: number;
   lines: Array<ChargeLine & { id: string; discountCents: number }>;
+  refundRequests: Array<{ state: string; providerStatus: string | null; taxShareCents: number }>;
 };
 
 /**
  * Picked quantity × unit price for the chosen lines, less each line's share of the coupon discount (#557),
- * plus the service fee on those goods; tip and delivery are never part of it. Null when a line is not this order's.
+ * plus the service fee and the sales tax on those goods (#65); tip and delivery are never part of it.
+ * Null when a line is not this order's.
  */
 function issueAmountCents(order: OrderWithLines, chosen: IssueReportInput["lines"]): number | null {
   if (chosen.length === 0) return null;
@@ -84,7 +87,7 @@ function issueAmountCents(order: OrderWithLines, chosen: IssueReportInput["lines
     const goods = pick.qty * line.unitPriceCents;
     total += goods - lineDiscountShareCents({ discountCents: line.discountCents, chargeCents: lineChargeCents(line) }, goods);
   }
-  return total > 0 ? total + serviceFeeRefundCents(total, order) : null;
+  return total > 0 ? refundOfGoodsCents(total, order, taxRefundedCents(order.refundRequests)) : null;
 }
 
 function refusal(
@@ -100,7 +103,11 @@ function refusal(
   return { amount };
 }
 
-const orderForIssue = { lines: true, issueReports: { select: { id: true } } } as const;
+const orderForIssue = {
+  lines: true,
+  issueReports: { select: { id: true } },
+  refundRequests: { select: { state: true, providerStatus: true, taxShareCents: true } },
+} as const;
 
 /**
  * The customer's one report for an order, by tracking token. At or under the store's limit it is

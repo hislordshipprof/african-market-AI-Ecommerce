@@ -180,7 +180,11 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
    * Service-fee orders (ADR-0021, captureSplit). The card fee is the store's 2.9% + 30¢ on what it keeps; the customer's service fee is not part of it.
    * E1 pickup 11-02  goods 1500 + service fee 99 = captured 1599; card fee round(1500 x 2.9%) + 30 = 74; platform fee stored 99 + 74 = 173; net 1599 - 173 = 1426
    * E2 courier 11-03 goods 2000 + service fee 99 + courier fee 500 = captured 2599; card fee 58 + 30 = 88; platform fee stored 99 + 88 = 187; net 2599 - 187 - 500 = 1912
+<<<<<<< HEAD
    * Card fee 74 + 88 = 162, courier 500, net 3338.
+=======
+   * Card fee 74 + 88 = 162, courier 500, net 3338. Goods leave out the service fee (decision 2026-11-15-03): 1500 + 2000 = 3500.
+>>>>>>> origin/main
    */
   async function seedStoreE() {
     await asStore(storeE, async (tx) => {
@@ -285,12 +289,21 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     expect(edges.sales.totals).toMatchObject({ refundsCents: 500, courierFeeCents: 941, netCents: -471 });
   });
 
+<<<<<<< HEAD
   it("the card fee leaves out the customer's service fee, and net to store is unchanged by it", () => {
     expect(serviceFee.sales.totals).toMatchObject({ orders: 2, cardFeeCents: 162, courierFeeCents: 500, netCents: 3338 });
     const byDay = Object.fromEntries(serviceFee.sales.days.map((d) => [d.day, d]));
     expect(byDay["2026-11-02"]).toMatchObject({ cardFeeCents: 74, courierFeeCents: 0, netCents: 1426 });
     expect(byDay["2026-11-03"]).toMatchObject({ cardFeeCents: 88, courierFeeCents: 500, netCents: 1912 });
     expect(analyticsCsv("sales", serviceFee, USAGE).split("\r\n")).toContain("2026-11-02,1,15.99,15.99,0.00,0.00,0.74,0.00,14.26");
+=======
+  it("goods and the card fee leave out the customer's service fee, and net to store is unchanged by it", () => {
+    expect(serviceFee.sales.totals).toMatchObject({ orders: 2, goodsCents: 3500, averageOrderCents: 1750, cardFeeCents: 162, courierFeeCents: 500, netCents: 3338 });
+    const byDay = Object.fromEntries(serviceFee.sales.days.map((d) => [d.day, d]));
+    expect(byDay["2026-11-02"]).toMatchObject({ goodsCents: 1500, cardFeeCents: 74, courierFeeCents: 0, netCents: 1426 });
+    expect(byDay["2026-11-03"]).toMatchObject({ goodsCents: 2000, cardFeeCents: 88, courierFeeCents: 500, netCents: 1912 });
+    expect(analyticsCsv("sales", serviceFee, USAGE).split("\r\n")).toContain("2026-11-02,1,15.00,15.00,0.00,0.00,0.74,0.00,14.26");
+>>>>>>> origin/main
   });
 
   it("exports a negative amount as a plain number a spreadsheet can sum", () => {

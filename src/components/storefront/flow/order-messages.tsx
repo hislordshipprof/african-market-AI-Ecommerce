@@ -101,25 +101,27 @@ export function OrderMessages({
           ))}
         </ol>
       )}
-      <form onSubmit={send} style={{ display: "grid", gap: "0.5rem" }}>
+      <form onSubmit={send} className="flow-fields" style={{ marginTop: 16 }}>
         {messages.length === 0 && (
-          <>
+          <div className="flow-field">
             <label htmlFor="order-message-topic">What is it about?</label>
             <select id="order-message-topic" value={topic} onChange={(event) => setTopic(event.target.value as SupportTopic)}>
               {TOPICS.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
-          </>
+          </div>
         )}
-        <label htmlFor="order-message">Your message</label>
-        <textarea
-          id="order-message"
-          value={draft}
-          maxLength={1000}
-          rows={3}
-          onChange={(event) => setDraft(event.target.value)}
-        />
+        <div className="flow-field">
+          <label htmlFor="order-message">Your message</label>
+          <textarea
+            id="order-message"
+            value={draft}
+            maxLength={1000}
+            rows={3}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        </div>
         {error && <p role="alert">{error}</p>}
         <Button type="submit" disabled={pending || !draft.trim()}>
           {pending ? "Sending…" : "Send"}

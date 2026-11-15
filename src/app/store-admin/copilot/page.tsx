@@ -5,12 +5,14 @@ import { listOpenAlerts } from "@/lib/copilot/alerts";
 import { loadDigestHour } from "@/lib/copilot/digest";
 import { listPendingOwnerReports } from "@/lib/copilot/owner-report";
 import { inventoryReport } from "@/lib/copilot/inventory-report";
+import { listWeeklyReports } from "@/lib/copilot/weekly-report";
 import { loadCopilotPanel } from "@/lib/copilot/turn";
 import { AlertsPanel } from "./alerts-panel";
 import { CopilotPanel } from "./copilot-panel";
 import { DigestSetting } from "./digest-setting";
 import { OwnerReportPanel } from "./owner-report-panel";
 import { StockMovement } from "./stock-movement";
+import { WeeklyReports } from "./weekly-reports";
 import { ReorderPanel } from "./reorder-panel";
 import { reorderSuggestions } from "@/lib/copilot/reorder";
 import { loadReorderList, reorderText } from "@/lib/copilot/reorder-list";
@@ -19,7 +21,7 @@ import { storeMayUse } from "@/lib/billing/plan";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
-  const [panel, alerts, digestHour, reports, reportsAllowed, movement, reorderAllowed] = await Promise.all([
+  const [panel, alerts, digestHour, reports, reportsAllowed, movement, reorderAllowed, weekly] = await Promise.all([
     loadCopilotPanel(session.store.id, session.user.id),
     listOpenAlerts(session.store.id),
     loadDigestHour(session.store.id),
@@ -27,6 +29,7 @@ export default async function CopilotPage() {
     storeMayUse(session.store.id, "copilot-reports"),
     inventoryReport(session.store.id),
     storeMayUse(session.store.id, "reorder-suggestions"),
+    listWeeklyReports(session.store.id),
   ]);
   const [reorder, savedList] = reorderAllowed
     ? await Promise.all([reorderSuggestions(session.store.id), loadReorderList(session.store.id)])
@@ -97,6 +100,7 @@ export default async function CopilotPage() {
             />
           )}
         </section>
+        <WeeklyReports reports={weekly} />
         <DigestSetting hour={digestHour} />
       </main>
     </div>
