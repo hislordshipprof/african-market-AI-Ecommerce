@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "@/lib/system-actor";
 import { platformFeeLedger } from "./fee-ledger-query";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -25,6 +26,7 @@ afterAll(async () => {
   if (!hasDb) return;
   await asPlatformAdmin(async (tx) => {
     await tx.refundRequest.deleteMany({ where: { storeId: { in: storeIds } } });
+    await tx.auditLog.deleteMany({ where: { storeId: { in: storeIds } } });
     await tx.order.deleteMany({ where: { storeId: { in: storeIds } } });
     await tx.customer.deleteMany({ where: { storeId: { in: storeIds } } });
     await tx.store.deleteMany({ where: { id: { in: storeIds } } });
@@ -42,7 +44,7 @@ afterAll(async () => {
  * A2 pickup at 2030-01-31 23:59:59.999: goods 2000 + tip 300 + service 99 = 2399.
  *    store card fee round(66.7) + 30 = 97; platform fee 196 = application fee; platform card fee round(2.871) = 3; net 96.
  *    Issue refund 1030 created 2030-01-31, succeeded 2030-02-03: fee back round(196 × 1030 / 2399) = 84 (February).
- * A3 courier, cancelled after capture (capture nulled): goods 3000 + courier 750 + service 99 = 3849.
+ * A3 courier, cancelled after capture (the order's capture is cleared; its capture record is not): goods 3000 + courier 750 + service 99 = 3849.
  *    store card fee 87 + 30 = 117; platform fee 216; application fee 966; platform card fee 3 + round(21.75) = 25; net 74.
  *    Cancel refund 3849 returns the whole fee 966, of which 750 is the courier fee: net −216.
  * A4 courier issue refund: goods 5000 + courier 899 + service 150 = 6049.
@@ -107,11 +109,14 @@ describe.skipIf(!hasDb)("platform fee ledger (lane DB)", () => {
         amountCents: 1030, refundApplicationFee: true, createdAt: at("2030-01-31T23:59:59.999Z"), succeededAt: at("2030-02-03T09:00:00Z"),
       });
       const a3 = await order(storeA, customerA.id, 3, {
-        fulfillment: "courier", capturedAmountCents: null, serviceFeeCents: 99, deliveryFeeCents: 750, platformFeeCents: 216,
-        status: "CANCELLED", readyAt: at("2030-01-20T14:00:00Z"), cancelledAt: at("2030-01-20T15:00:00Z"), createdAt: at("2030-01-20T13:00:00Z"),
+        fulfillment: "courier", capturedAmountCents: 3849, serviceFeeCents: 99, deliveryFeeCents: 750, platformFeeCents: 216,
+        status: "READY", readyAt: at("2030-01-20T14:00:00Z"), createdAt: at("2030-01-20T13:00:00Z"),
       });
       await refund(storeA, a3.id, "a3", {
         amountCents: 3849, refundApplicationFee: true, createdAt: at("2030-01-20T14:55:00Z"), succeededAt: at("2030-01-20T14:56:00Z"),
+      });
+      await tx.order.update({
+        where: { id: a3.id }, data: { status: "CANCELLED", capturedAmountCents: null, cancelledAt: at("2030-01-20T15:00:00Z") },
       });
       const a4 = await order(storeA, customerA.id, 4, {
         fulfillment: "courier", capturedAmountCents: 6049, serviceFeeCents: 150, deliveryFeeCents: 899, platformFeeCents: 325,
@@ -129,11 +134,12 @@ describe.skipIf(!hasDb)("platform fee ledger (lane DB)", () => {
       });
       const a8 = await order(storeA, customerA.id, 8, {
         fulfillment: "pickup", capturedAmountCents: null, serviceFeeCents: 99, platformFeeCents: 184,
-        status: "CANCELLED", readyAt: null, cancelledAt: at("2030-01-28T10:00:00Z"), createdAt: at("2030-01-28T08:00:00Z"),
+        status: "CANCELLING", readyAt: null, createdAt: at("2030-01-28T08:00:00Z"),
       });
       await refund(storeA, a8.id, "a8", {
         amountCents: 2000, refundApplicationFee: true, createdAt: at("2030-01-28T09:58:00Z"), succeededAt: at("2030-01-28T09:59:00Z"),
       });
+      await tx.order.update({ where: { id: a8.id }, data: { status: "CANCELLED", cancelledAt: at("2030-01-28T10:00:00Z") } });
       await order(storeA, customerA.id, 10, {
         fulfillment: "pickup", capturedAmountCents: 2000, serviceFeeCents: 99, platformFeeCents: 186,
         readyAt: at("2029-12-31T23:59:59.999Z"), createdAt: at("2029-12-31T20:00:00Z"),
@@ -237,6 +243,67 @@ describe.skipIf(!hasDb)("platform fee ledger (lane DB)", () => {
     });
     const march = await platformFeeLedger("2030-03");
     expect(march.rows.filter((row) => row.storeId === storeA && row.kind === "refund").map((row) => row.feeRefundedCents)).toEqual([-93, -92]);
+  });
+
+  it("keeps the original capture after a manual repayment and shows the repayment as its own row", async () => {
+    // Pickup, captured 1000 on 2030-04-02, platform fee 60. Cancel refund 400 returns round(60 × 400 / 1000) = 24.
+    // C1: the rest (600) repaid by hand on 2030-04-10. C2: all 1000 repaid by hand, no Stripe refund.
+    const ids = await asPlatformAdmin(async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeB, name: "Repay Customer" } });
+      const make = (number: number) => tx.order.create({
+        data: {
+          storeId: storeB, customerId: customer.id, number, subtotalCents: 1000, bufferCents: 0, totalAuthorizedCents: 1000,
+          fulfillment: "pickup", status: "READY", capturedAmountCents: 1000, serviceFeeCents: 30, platformFeeCents: 60,
+          readyAt: at("2030-04-02T12:00:00Z"),
+        },
+      });
+      const c1 = await make(51);
+      const c2 = await make(52);
+      await tx.order.updateMany({ where: { id: { in: [c1.id, c2.id] } }, data: { status: "REFUND_FAILED" } });
+      await tx.refundRequest.create({
+        data: {
+          storeId: storeB, orderId: c1.id, paymentIntentId: "pi_c1", key: `${RUN}-c1`, amountCents: 400,
+          refundApplicationFee: true, state: "CREATED", providerStatus: "succeeded",
+          createdAt: at("2030-04-05T10:00:00Z"), succeededAt: at("2030-04-05T10:00:00Z"),
+        },
+      });
+      return { c1: c1.id, c2: c2.id };
+    });
+    const april = () => platformFeeLedger("2030-04");
+    const captureRows = async () =>
+      (await april()).rows.filter((row) => row.kind === "capture" && (row.id === ids.c1 || row.id === ids.c2));
+    const before = await captureRows();
+    expect(before.map((row) => [row.orderNumber, row.capturedCents, row.applicationFeeCents])).toEqual([
+      [51, 1000, 60],
+      [52, 1000, 60],
+    ]);
+
+    // What refund-resolution records: the order is cancelled, its capture cleared, the repayment audited.
+    await asPlatformAdmin(async (tx) => {
+      for (const [orderId, repaidCents] of [[ids.c1, 600], [ids.c2, 1000]] as const) {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: "CANCELLED", cancelledAt: at("2030-04-10T09:00:00Z"), capturedAmountCents: null },
+        });
+        await tx.auditLog.create({
+          data: {
+            storeId: storeB, actorId: SYSTEM_ACTOR_ID, actorEmail: SYSTEM_ACTOR_EMAIL, action: "refund_resolved_manually",
+            entityType: "order", entityId: orderId, createdAt: at("2030-04-10T09:00:00Z"),
+            after: { repaidCents, capturedCents: 1000, refundedCents: 1000 - repaidCents },
+          },
+        });
+      }
+    });
+
+    // Amounts and date stay as captured; only the refund failed marker clears once resolved.
+    expect(before.every((row) => row.refundFailed)).toBe(true);
+    expect(await captureRows()).toEqual(before.map((row) => ({ ...row, refundFailed: false })));
+    const rows = (await april()).rows.filter((row) => row.storeId === storeB && row.orderNumber >= 51 && row.kind !== "capture");
+    expect(rows.map((row) => [row.orderNumber, row.kind, row.capturedCents, row.feeRefundedCents, row.platformNetCents])).toEqual([
+      [51, "refund", -400, -24, -24],
+      [51, "repayment", -600, 0, 0],
+      [52, "repayment", -1000, 0, 0],
+    ]);
   });
 
   it("stamps a refund's success time once, in UTC, whatever path records it", async () => {

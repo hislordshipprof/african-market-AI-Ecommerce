@@ -400,6 +400,9 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const updated = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(updated?.status).toBe("CANCELLED");
     expect(updated?.capturedAmountCents).toBeNull();
+    // The fee ledger's capture record is append-only: the repayment never changes it.
+    expect(updated?.confirmedCaptureCents).toBe(1000);
+    expect(updated?.captureConfirmedAt).toEqual(before?.captureConfirmedAt);
     expect(updated?.notes).toBe("Paid customer by Zelle 11/05");
     const audit = await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: orderId, action: "refund_resolved_manually" },

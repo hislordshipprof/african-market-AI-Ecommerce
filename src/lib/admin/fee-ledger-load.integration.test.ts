@@ -85,7 +85,7 @@ describe.skipIf(!hasDb)("platform fee ledger at 20,000 orders a month (lane DB)"
       if (process.env.LEDGER_PLAN) console.log(text);
       return text;
     };
-    expect(await plan(captureFactsSql(month))).toMatch(/Index Scan using orders_ready_at_idx|Bitmap Index Scan on orders_ready_at_idx/);
+    expect(await plan(captureFactsSql(month))).toMatch(/orders_capture_confirmed_at_idx/);
     expect(await plan(refundFactsSql(month))).toMatch(/refund_requests_succeeded_at_idx/);
   }, 30_000);
 });

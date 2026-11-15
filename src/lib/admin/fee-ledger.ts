@@ -5,9 +5,9 @@ import { captureSplit, courierFeeCents } from "@/lib/order/platform-fee";
  * Platform fee ledger (#546, ADR-0021): what the platform keeps per captured order, from our tables.
  * All amounts are integer cents; months are UTC calendar months.
  *
- * - A capture row is dated when the capture was confirmed (ready_at), or when the order was cancelled for a
- *   capture first seen at cancel. A capture the order no longer stores (a full cancel clears it) is the sum of
- *   its succeeded refunds.
+ * - A capture row comes from the order's capture record (confirmed_capture_cents, capture_confirmed_at), which a
+ *   trigger writes once when the capture is confirmed and nothing clears: a cancel, a full refund or a manual
+ *   repayment leaves it as it was. A capture whose cancel refund failed stays a capture row, marked refund failed.
  * - Application fee = the stored platform fee (service fee + the store's card fee) + the courier fee, capped at
  *   the capture, as sent to Stripe. Card fee share = the platform's part of the card-fee split.
  *   Net = application fee − courier fee − the store's card fee − the platform's card fee share.
@@ -16,6 +16,8 @@ import { captureSplit, courierFeeCents } from "@/lib/order/platform-fee";
  *   (Stripe's rule); a courier issue refund returns its service fee share once that fee refund is made.
  *   Stripe keeps its card fee on a refund. The courier part of a returned fee goes back to the customer, so
  *   it reverses the courier pass-through and is not a platform loss.
+ * - A manual repayment is its own row in the month it was recorded: the amount repaid comes off the capture.
+ *   It moves no money through Stripe, so no fee comes back and the platform net does not change.
  */
 
 export type LedgerMonth = { key: string; label: string; startsAt: Date; endsAt: Date };
@@ -56,7 +58,9 @@ type OrderFacts = {
   deliveryFeeCents: number;
 };
 
-export type CaptureFacts = OrderFacts & { at: Date; succeededRefundsCents: number };
+export type CaptureFacts = OrderFacts & { at: Date; refundFailed: boolean };
+
+export type RepaymentFacts = OrderFacts & { repaymentId: string; at: Date; repaidCents: number };
 
 export type RefundFacts = OrderFacts & {
   refundId: string;
@@ -79,7 +83,8 @@ export type LedgerAmounts = {
 };
 
 export type LedgerRow = LedgerAmounts & {
-  kind: "capture" | "refund";
+  kind: "capture" | "refund" | "repayment";
+  refundFailed: boolean;
   id: string;
   at: Date;
   storeId: string;
@@ -135,6 +140,7 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
   for (const orderRefunds of byOrder.values()) {
     orderRefunds.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.refundId.localeCompare(b.refundId));
     const order = orderRefunds[0];
+    // An order still cancelling has no capture record yet: a refund at cancel returns the whole capture.
     const captured = order.capturedAmountCents ?? orderRefunds.reduce((sum, r) => sum + r.amountCents, 0);
     if (captured <= 0) continue;
     const money = orderMoney(order, captured);
@@ -155,6 +161,7 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
         : 0;
       rows.push({
         kind: "refund",
+        refundFailed: false,
         id: refund.refundId,
         at: refund.succeededAt,
         storeId: refund.storeId,
@@ -173,14 +180,22 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
   return rows;
 }
 
+const KIND_ORDER: Record<LedgerRow["kind"], number> = { capture: 0, refund: 1, repayment: 2 };
+
 /** The month's rows, oldest first, with totals per store and for the month. */
-export function buildFeeLedger(month: LedgerMonth, captures: CaptureFacts[], refunds: RefundFacts[]): FeeLedger {
+export function buildFeeLedger(
+  month: LedgerMonth,
+  captures: CaptureFacts[],
+  refunds: RefundFacts[],
+  repayments: RepaymentFacts[],
+): FeeLedger {
   const rows: LedgerRow[] = [];
   for (const capture of captures) {
-    const captured = capture.capturedAmountCents ?? capture.succeededRefundsCents;
+    const captured = capture.capturedAmountCents ?? 0;
     if (captured <= 0) continue;
     rows.push({
       kind: "capture",
+      refundFailed: capture.refundFailed,
       id: capture.orderId,
       at: capture.at,
       storeId: capture.storeId,
@@ -192,11 +207,31 @@ export function buildFeeLedger(month: LedgerMonth, captures: CaptureFacts[], ref
     });
   }
   rows.push(...refundRows(refunds, month));
+  for (const repayment of repayments) {
+    if (!(repayment.repaidCents > 0)) continue;
+    rows.push({
+      kind: "repayment",
+      refundFailed: false,
+      id: repayment.repaymentId,
+      at: repayment.at,
+      storeId: repayment.storeId,
+      storeName: repayment.storeName,
+      orderNumber: repayment.orderNumber,
+      capturedCents: -repayment.repaidCents,
+      serviceFeeCents: 0,
+      courierFeeCents: 0,
+      platformCardFeeCents: 0,
+      applicationFeeCents: 0,
+      feeRefundedCents: 0,
+      platformNetCents: 0,
+    });
+  }
   rows.sort((a, b) =>
     a.at.getTime() - b.at.getTime()
     || a.storeName.localeCompare(b.storeName)
     || a.orderNumber - b.orderNumber
-    || (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === "capture" ? -1 : 1));
+    || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]
+    || a.id.localeCompare(b.id));
 
   const total = emptyTotals();
   const stores = new Map<string, StoreLedgerTotals>();
@@ -225,8 +260,12 @@ export function ledgerPage(rowCount: number, input: string | undefined) {
   return { number, count, from, to: Math.min(rowCount, from + LEDGER_PAGE_SIZE) };
 }
 
-/** Row labels the page and the CSV share. */
-export const ROW_LABELS: Record<LedgerRow["kind"], string> = { capture: "Order", refund: "Refund" };
+/** The row label the page and the CSV share. */
+export function rowLabel(row: Pick<LedgerRow, "kind" | "refundFailed">): string {
+  if (row.kind === "repayment") return "Manual repayment";
+  if (row.kind === "refund") return "Refund";
+  return row.refundFailed ? "Order, refund failed" : "Order";
+}
 
 export function ordersLabel(orders: number): string {
   return `${orders} ${orders === 1 ? "order" : "orders"}`;
@@ -251,7 +290,7 @@ export function feeLedgerCsv(ledger: FeeLedger): string {
   const month = ledger.month.key;
   return toCsv([
     ["Month (UTC)", "Date (UTC)", "Store", "Order", "Row", ...AMOUNT_COLUMNS.map(([, label]) => label)],
-    ...ledger.rows.map((row) => [month, utcDate(row.at), row.storeName, `#${row.orderNumber}`, ROW_LABELS[row.kind], ...amounts(row)]),
+    ...ledger.rows.map((row) => [month, utcDate(row.at), row.storeName, `#${row.orderNumber}`, rowLabel(row), ...amounts(row)]),
     ...ledger.stores.map((store) => [month, null, store.storeName, null, `Store total (${ordersLabel(store.orders)})`, ...amounts(store)]),
     [month, null, "All stores", null, `Month total (${ordersLabel(ledger.total.orders)})`, ...amounts(ledger.total)],
   ]);

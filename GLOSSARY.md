@@ -266,7 +266,7 @@ A platform admin recorded the amount they repaid outside the app. The order beco
 One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
 
 **Fee ledger**:
-The platform admin's monthly report of what the platform keeps (#546), at `/admin/billing/ledger`, built from our order and refund rows, not from Stripe. Each captured order is a row: captured amount, service fee, courier fee passed through, the platform's card fee share, the application fee, and the platform net (service fee less the platform's card fee share). A refund that returns fee is a negative row in the UTC month it succeeded. Months are UTC calendar months.
+The platform admin's monthly report of what the platform keeps (#546), at `/admin/billing/ledger`, built from our order and refund rows, not from Stripe. Each captured order is a row: captured amount, service fee, courier fee passed through, the platform's card fee share, the application fee, and the platform net (service fee less the platform's card fee share). An order counts in the month its capture was confirmed; a cancel, refund or manual repayment never changes that row. A refund that returns fee is a negative row in the UTC month it succeeded, and a manual repayment is its own row in the month it was recorded. Months are UTC calendar months.
 _Avoid_: Commission report
 
 **Open request**:

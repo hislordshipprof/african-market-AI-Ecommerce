@@ -1,9 +1,11 @@
 import { Prisma, platformAdminRawQuery } from "../db";
-import { buildFeeLedger, ledgerMonth, type CaptureFacts, type FeeLedger, type LedgerMonth, type RefundFacts } from "./fee-ledger";
+import {
+  buildFeeLedger, ledgerMonth, type CaptureFacts, type FeeLedger, type LedgerMonth, type RefundFacts, type RepaymentFacts,
+} from "./fee-ledger";
 
 const ORDER_FACTS = Prisma.sql`
   o.id AS "orderId", o.store_id AS "storeId", s.name AS "storeName", o.number AS "orderNumber", o.fulfillment,
-  o.captured_amount_cents AS "capturedAmountCents", o.platform_fee_cents AS "platformFeeCents",
+  o.confirmed_capture_cents AS "capturedAmountCents", o.platform_fee_cents AS "platformFeeCents",
   o.service_fee_cents AS "serviceFeeCents", o.delivery_fee_cents AS "deliveryFeeCents"`;
 
 /** UTC month bounds as timestamps, matching the UTC values Prisma stores in timestamp(3) columns. */
@@ -11,20 +13,14 @@ function bounds(month: LedgerMonth) {
   return { lo: month.startsAt.toISOString().slice(0, 10), hi: month.endsAt.toISOString().slice(0, 10) };
 }
 
-/** Orders captured in the month: by orders_ready_at_idx, or orders_cancelled_at_idx for a capture first seen at cancel. */
+/** Orders whose capture was confirmed in the month (orders_capture_confirmed_at_idx). */
 export function captureFactsSql(month: LedgerMonth): Prisma.Sql {
   const { lo, hi } = bounds(month);
   return Prisma.sql`
-    SELECT ${ORDER_FACTS}, COALESCE(o.ready_at, o.cancelled_at) AS at,
-           CASE WHEN o.captured_amount_cents IS NULL THEN COALESCE((
-             SELECT SUM(r.amount_cents) FROM refund_requests r
-             WHERE r.order_id = o.id AND r.store_id = o.store_id AND r.provider_status = 'succeeded'
-           ), 0) ELSE 0 END::int AS "succeededRefundsCents"
+    SELECT ${ORDER_FACTS}, o.capture_confirmed_at AS at, o.status = 'REFUND_FAILED' AS "refundFailed"
     FROM orders o
     JOIN stores s ON s.id = o.store_id
-    WHERE o.status <> 'CAPTURING'
-      AND ((o.ready_at >= ${lo}::timestamp AND o.ready_at < ${hi}::timestamp)
-        OR (o.ready_at IS NULL AND o.cancelled_at >= ${lo}::timestamp AND o.cancelled_at < ${hi}::timestamp))`;
+    WHERE o.capture_confirmed_at >= ${lo}::timestamp AND o.capture_confirmed_at < ${hi}::timestamp`;
 }
 
 /**
@@ -47,12 +43,25 @@ export function refundFactsSql(month: LedgerMonth): Prisma.Sql {
       )`;
 }
 
+/** Manual repayments recorded in the month (audit_logs action, created_at index). */
+export function repaymentFactsSql(month: LedgerMonth): Prisma.Sql {
+  const { lo, hi } = bounds(month);
+  return Prisma.sql`
+    SELECT ${ORDER_FACTS}, a.id AS "repaymentId", a.created_at AS at, (a.after->>'repaidCents')::int AS "repaidCents"
+    FROM audit_logs a
+    JOIN orders o ON o.id = a.entity_id AND o.store_id = a.store_id
+    JOIN stores s ON s.id = o.store_id
+    WHERE a.action = 'refund_resolved_manually' AND a.entity_type = 'order'
+      AND a.created_at >= ${lo}::timestamp AND a.created_at < ${hi}::timestamp`;
+}
+
 /** One UTC month of the platform fee ledger, across stores. Callers check the platform admin first. */
 export async function platformFeeLedger(monthKey: string): Promise<FeeLedger> {
   const month = ledgerMonth(monthKey);
-  const [captures, refunds] = await Promise.all([
+  const [captures, refunds, repayments] = await Promise.all([
     platformAdminRawQuery<CaptureFacts>(captureFactsSql(month)),
     platformAdminRawQuery<RefundFacts>(refundFactsSql(month)),
+    platformAdminRawQuery<RepaymentFacts>(repaymentFactsSql(month)),
   ]);
-  return buildFeeLedger(month, captures, refunds);
+  return buildFeeLedger(month, captures, refunds, repayments);
 }

@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import {
   AMOUNT_COLUMNS,
-  ROW_LABELS,
+  rowLabel,
   ledgerPage,
   ordersLabel,
   parseLedgerMonth,
@@ -157,7 +157,7 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
                   <td className="whitespace-nowrap px-2.5 py-3 tabular-nums text-muted-foreground">{utcDate(row.at)}</td>
                   <td className="px-2.5 py-3 text-foreground">{row.storeName}</td>
                   <td className="whitespace-nowrap px-2.5 py-3 text-foreground">#{row.orderNumber}</td>
-                  <td className="px-2.5 py-3 text-foreground">{ROW_LABELS[row.kind]}</td>
+                  <td className="px-2.5 py-3 text-foreground">{rowLabel(row)}</td>
                   <AmountCells values={row} />
                 </tr>
               ))}

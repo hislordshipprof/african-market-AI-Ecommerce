@@ -39,14 +39,14 @@ describe("fee ledger CSV", () => {
     storeId: "s1", storeName: "=Mama Africa, Inc", orderNumber: 7, fulfillment: "courier",
     capturedAmountCents: 7079, platformFeeCents: 384, serviceFeeCents: 180, deliveryFeeCents: 899,
   };
-  const capture: CaptureFacts = { ...order, orderId: "o1", at: new Date("2026-11-03T15:00:00Z"), succeededRefundsCents: 0 };
+  const capture: CaptureFacts = { ...order, orderId: "o1", at: new Date("2026-11-03T15:00:00Z"), refundFailed: false };
   const cancel: RefundFacts = {
     ...order, orderId: "o1", refundId: "r1", amountCents: 7079, refundApplicationFee: true, serviceFeeShareCents: 0,
     feeShareReturned: false, createdAt: new Date("2026-11-04T10:00:00Z"), succeededAt: new Date("2026-11-04T10:00:00Z"),
   };
 
   it("has one line per screen row, then each store's total and the month's, in dollars", () => {
-    const csv = feeLedgerCsv(buildFeeLedger(ledgerMonth("2026-11"), [capture], [cancel]));
+    const csv = feeLedgerCsv(buildFeeLedger(ledgerMonth("2026-11"), [capture], [cancel], []));
     expect(csv.split("\r\n")).toEqual([
       "Month (UTC),Date (UTC),Store,Order,Row,Captured,Service fee,Courier fee passed through,Card fee share (platform),Application fee,Fee refunded,Platform net",
       `2026-11,2026-11-03,"'=Mama Africa, Inc",#7,Order,70.79,1.80,8.99,0.31,12.83,0.00,1.49`,
