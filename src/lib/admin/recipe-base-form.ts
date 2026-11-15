@@ -10,7 +10,7 @@ export const RECIPE_ORIGIN_LABELS: Record<RecipeOrigin, string> = { curated: "Cu
 export const RECIPE_PAGE_SIZE = 25;
 export const MAX_RECIPE_INGREDIENTS = 50;
 
-/** Every recipe action refuses with this when the row moved on since the admin loaded it. */
+/** Save, mark curated and delete refuse with this when the editable fields changed since the admin loaded them. */
 export const STALE_RECIPE_MESSAGE = "Someone else changed this dish after you opened it. Reload the page to see their changes, then make yours again.";
 
 export const recipeFiltersSchema = z.strictObject({

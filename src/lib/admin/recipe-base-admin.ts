@@ -192,8 +192,9 @@ async function audit(tx: Tx, session: Session, action: string, recipeId: string,
 const CHECK_FIELDS = "Check the highlighted fields";
 
 /**
- * Saves the editor form. The key is the folded name; neither it nor an other name may be one another dish
- * already answers to (#25's key rules), so get_recipe never has to choose between two dishes for one name.
+ * Saves the editor form. Neither the key nor an other name may be one another dish already answers to (#25's key
+ * rules), so get_recipe never has to choose between two dishes for one name. The key moves only with a rename, to the
+ * folded new name, and the old key stays as an other name: every term that found the dish still finds it.
  */
 export async function saveRecipe(_prev: RecipeSaveState, form: FormData): Promise<RecipeSaveState> {
   const session = await requirePlatformAdmin();
@@ -209,10 +210,8 @@ export async function saveRecipe(_prev: RecipeSaveState, form: FormData): Promis
     return { ok: false, message: CHECK_FIELDS, fieldErrors };
   }
   const { recipeId, version: loaded, name, servings, ingredients } = parsed.data;
-  const key = dishKey(name);
-  const aliases = foldAliases(parsed.data.aliases, key);
 
-  return platformAdminTransaction(async (tx): Promise<RecipeSaveState> => {
+  const saved = await platformAdminTransaction(async (tx): Promise<RecipeSaveState> => {
     await lockRecipeNames(tx);
     await lockRecipeRow(tx, recipeId);
     const recipe = await tx.recipe.findUnique({ where: { id: recipeId }, include: recipeWithRows });
@@ -220,6 +219,11 @@ export async function saveRecipe(_prev: RecipeSaveState, form: FormData): Promis
     const before = snapshot(recipe);
     // The form holds every field as it was loaded; saving it over a newer row would undo the other admin's change.
     if (version(before) !== loaded) return { ok: false, message: STALE_RECIPE_MESSAGE };
+
+    // A looked-up dish is keyed by the term the shopper asked for, not its folded name, so only a rename moves the key.
+    const renamed = dishKey(name) !== dishKey(recipe.name);
+    const key = renamed ? dishKey(name) : recipe.key;
+    const aliases = foldAliases(renamed ? `${parsed.data.aliases}\n${recipe.key}` : parsed.data.aliases, key);
 
     const terms = [key, ...aliases];
     const others = await tx.recipe.findMany({
@@ -252,34 +256,43 @@ export async function saveRecipe(_prev: RecipeSaveState, form: FormData): Promis
       servings,
       ingredients: ingredients.map((row) => ({ ...row, qty: row.qty === null ? null : new Prisma.Decimal(row.qty).toString() })),
     };
-    if (version(after) === loaded && key === recipe.key) return { ok: true, message: "No changes to save", version: loaded };
+    if (version(after) === loaded) return { ok: true, message: "No changes to save", version: loaded };
 
     await tx.recipe.update({ where: { id: recipeId }, data: { key, name, aliases, servings } });
     await tx.recipeIngredient.deleteMany({ where: { recipeId } });
     await tx.recipeIngredient.createMany({
       data: after.ingredients.map((row, position) => ({ recipeId, position, ...row })),
     });
-    await audit(tx, session, "catalog.recipe_edit", recipeId, before, after);
+    await audit(tx, session, "catalog.recipe_edit", recipeId, { key: recipe.key, ...before }, { key, ...after });
     return { ok: true, message: "Saved", version: version(after) };
+  }).catch((error: unknown) => {
+    // A shopper's lookup can save a dish under the new name after the check above; it then owns the name.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return null;
+    throw error;
   });
+  return saved ?? { ok: false, message: CHECK_FIELDS, fieldErrors: { name: "Another dish already answers to this name" } };
 }
 
 export type RecipeActionState = { ok?: boolean; message?: string };
 
-const idForm = (form: FormData) => parseInput(idSchema, form.get("recipeId"));
+const actionFormSchema = z.object({ recipeId: idSchema, version: z.string().min(1).max(200) });
+const actionForm = (form: FormData) =>
+  parseInput(actionFormSchema, { recipeId: form.get("recipeId"), version: form.get("version") });
 
 /** Marks a looked-up dish curated: when several dishes answer one name, get_recipe prefers a curated one. */
 export async function markRecipeCurated(_prev: RecipeActionState, form: FormData): Promise<RecipeActionState> {
   const session = await requirePlatformAdmin();
-  const id = idForm(form);
-  if (!id.ok) return { ok: false, message: "Dish not found" };
+  const parsed = actionForm(form);
+  if (!parsed.ok) return { ok: false, message: "Dish not found" };
+  const { recipeId, version: loaded } = parsed.data;
   return platformAdminTransaction(async (tx): Promise<RecipeActionState> => {
-    await lockRecipeRow(tx, id.data);
-    const recipe = await tx.recipe.findUnique({ where: { id: id.data }, select: { origin: true } });
+    await lockRecipeRow(tx, recipeId);
+    const recipe = await tx.recipe.findUnique({ where: { id: recipeId }, include: recipeWithRows });
     if (!recipe) return { ok: false, message: "Dish not found" };
+    if (version(snapshot(recipe)) !== loaded) return { ok: false, message: STALE_RECIPE_MESSAGE };
     if (recipe.origin === "curated") return { ok: false, message: "This dish is already curated" };
-    await tx.recipe.update({ where: { id: id.data }, data: { origin: "curated" } });
-    await audit(tx, session, "catalog.recipe_curate", id.data, { origin: recipe.origin }, { origin: "curated" });
+    await tx.recipe.update({ where: { id: recipeId }, data: { origin: "curated" } });
+    await audit(tx, session, "catalog.recipe_curate", recipeId, { origin: recipe.origin }, { origin: "curated" });
     return { ok: true, message: "Marked curated" };
   });
 }
@@ -290,15 +303,18 @@ export async function markRecipeCurated(_prev: RecipeActionState, form: FormData
  */
 export async function deleteRecipe(_prev: RecipeActionState, form: FormData): Promise<RecipeActionState> {
   const session = await requirePlatformAdmin();
-  const id = idForm(form);
-  if (!id.ok) return { ok: false, message: "Dish not found" };
+  const parsed = actionForm(form);
+  if (!parsed.ok) return { ok: false, message: "Dish not found" };
+  const { recipeId, version: loaded } = parsed.data;
   return platformAdminTransaction(async (tx): Promise<RecipeActionState> => {
-    await lockRecipeRow(tx, id.data);
-    const recipe = await tx.recipe.findUnique({ where: { id: id.data }, include: recipeWithRows });
+    await lockRecipeRow(tx, recipeId);
+    const recipe = await tx.recipe.findUnique({ where: { id: recipeId }, include: recipeWithRows });
     if (!recipe) return { ok: false, message: "Dish not found" };
+    // Deleting a dish someone fixed since this page loaded would throw their fix away unseen.
+    if (version(snapshot(recipe)) !== loaded) return { ok: false, message: STALE_RECIPE_MESSAGE };
     if (recipe.origin !== "lookup") return { ok: false, message: "Only a looked-up dish can be deleted. Edit a curated dish instead." };
-    await tx.recipe.delete({ where: { id: id.data } });
-    await audit(tx, session, "catalog.recipe_delete", id.data, {
+    await tx.recipe.delete({ where: { id: recipeId } });
+    await audit(tx, session, "catalog.recipe_delete", recipeId, {
       key: recipe.key,
       cuisine: recipe.cuisine,
       sourceUrl: recipe.sourceUrl,

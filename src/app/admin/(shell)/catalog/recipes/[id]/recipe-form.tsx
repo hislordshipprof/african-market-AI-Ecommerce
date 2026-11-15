@@ -57,7 +57,7 @@ export function RecipeForm({ recipe, products }: Pick<RecipeEditor, "recipe" | "
     <form ref={formRef} onSubmit={submit} noValidate autoComplete="off" className="mt-4 grid gap-4">
       <input type="hidden" name="recipeId" value={recipe.id} />
 
-      <Field id="name" label="Name" hint={`Shoppers find it by this name. Today it answers to “${recipe.key}”.`} error={error("name")}>
+      <Field id="name" label="Name" hint={`Shoppers find it by this name. Today it answers to “${recipe.key}”; a rename keeps that as an other name.`} error={error("name")}>
         <input id="name" name="name" defaultValue={recipe.name} required maxLength={200} className={FIELD} {...described("name", "name", true)} />
       </Field>
 

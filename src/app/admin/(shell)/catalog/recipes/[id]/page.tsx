@@ -59,7 +59,7 @@ export default async function RecipeEditorPage(props: { params: Promise<{ id: st
           <p className="mt-1 text-sm text-muted-foreground">
             Mark it curated once the ingredients are right. Delete it if the lookup got the dish wrong: the next shopper who asks for it gets a fresh lookup.
           </p>
-          <LookupActions recipeId={recipe.id} name={recipe.name} />
+          <LookupActions recipeId={recipe.id} version={recipe.version} name={recipe.name} />
         </section>
       )}
     </div>

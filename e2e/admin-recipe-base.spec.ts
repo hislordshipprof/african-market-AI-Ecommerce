@@ -116,7 +116,7 @@ test.describe("Recipe base admin", () => {
     await expect(page.getByRole("status")).toHaveText("Saved");
 
     const saved = await asAdmin((tx) => tx.recipe.findUniqueOrThrow({ where: { id: ids["red red"] }, include: { ingredients: { orderBy: { position: "asc" } } } }));
-    expect(saved).toMatchObject({ key: `${RUN} red red stew`, aliases: [`${RUN} gob3`], servings: 4 });
+    expect(saved).toMatchObject({ key: `${RUN} red red stew`, aliases: [`${RUN} gob3`, `${RUN} red red`], servings: 4 });
     expect(saved.ingredients.map((row) => [row.name, row.masterProductId, row.qty?.toString() ?? null, row.unit])).toEqual([
       ["beans", ids.product, "2", "cup"],
       ["ripe plantain", null, null, null],

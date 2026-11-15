@@ -6,7 +6,8 @@ import { deleteRecipe, markRecipeCurated, type RecipeActionState } from "@/lib/a
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
-export function LookupActions({ recipeId, name }: { recipeId: string; name: string }) {
+/** `version` is the editable fields' version the page loaded; both actions refuse once another admin's save moved it on. */
+export function LookupActions({ recipeId, version, name }: { recipeId: string; version: string; name: string }) {
   const router = useRouter();
   const [curateState, curate, curating] = useActionState<RecipeActionState, FormData>(markRecipeCurated, {});
   const [deleteState, remove, deleting] = useActionState<RecipeActionState, FormData>(deleteRecipe, {});
@@ -25,6 +26,7 @@ export function LookupActions({ recipeId, name }: { recipeId: string; name: stri
       <div className="flex flex-wrap gap-3">
         <form action={curate}>
           <input type="hidden" name="recipeId" value={recipeId} />
+          <input type="hidden" name="version" value={version} />
           <button
             type="submit"
             disabled={curating || deleting}
@@ -40,6 +42,7 @@ export function LookupActions({ recipeId, name }: { recipeId: string; name: stri
           }}
         >
           <input type="hidden" name="recipeId" value={recipeId} />
+          <input type="hidden" name="version" value={version} />
           <button
             type="submit"
             disabled={curating || deleting}
