@@ -79,49 +79,62 @@ const NOTICE_ROWS: Array<{ key: keyof Notices; label: string; hint: string }> = 
 function NoticeSettings({ initial }: { initial: Notices }) {
   const router = useRouter();
   const [notices, setNotices] = useState(initial);
-  const [saving, startTransition] = useTransition();
+  const [savingKey, setSavingKey] = useState<keyof Notices | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   function change(key: keyof Notices, checked: boolean) {
     const previous = notices;
     const next = { ...notices, [key]: checked };
     setNotices(next);
+    setSavingKey(key);
+    setSaved(false);
     setError(null);
     startTransition(async () => {
       const result = await updateWhatsAppNoticesAction(next);
+      setSavingKey(null);
       if ("error" in result) {
         setNotices(previous);
         setError(result.error);
         return;
       }
+      setSaved(true);
       router.refresh();
     });
   }
 
   return (
-    <fieldset className="space-y-3 border-t border-border pt-4">
-      <legend className="sr-only">Store copilot messages on WhatsApp</legend>
-      <p className="text-sm font-medium text-foreground">Also send me on WhatsApp</p>
-      {NOTICE_ROWS.map((row) => (
-        <div key={row.key} className="flex min-h-11 items-center justify-between gap-4">
-          <div className="min-w-0">
-            <label htmlFor={`notice-${row.key}`} className="text-sm text-foreground">{row.label}</label>
-            <p id={`notice-${row.key}-hint`} className="text-xs text-muted-foreground">{row.hint}</p>
-          </div>
-          <Switch
-            id={`notice-${row.key}`}
-            checked={notices[row.key]}
-            onCheckedChange={(checked) => change(row.key, checked)}
-            disabled={saving}
-            aria-describedby={`notice-${row.key}-hint`}
-          />
-        </div>
-      ))}
-      <p className="text-xs text-muted-foreground">
-        Reply to any of them with a stock report, like &ldquo;restocked 20 bags of egusi&rdquo;. You confirm each change with a tap.
-      </p>
-      {error && <ErrorNote message={error} />}
-    </fieldset>
+    <div className="border-t border-border pt-4">
+      <fieldset className="space-y-1">
+        <legend className="mb-2 text-sm font-medium text-foreground">Also send me on WhatsApp</legend>
+        {NOTICE_ROWS.map((row) => (
+          <label
+            key={row.key}
+            htmlFor={`notice-${row.key}`}
+            className="flex min-h-14 cursor-pointer items-center justify-between gap-4 rounded-lg py-2"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm text-foreground">{row.label}</span>
+              <span id={`notice-${row.key}-hint`} className="block text-xs text-muted-foreground">{row.hint}</span>
+            </span>
+            <Switch
+              id={`notice-${row.key}`}
+              checked={notices[row.key]}
+              onCheckedChange={(checked) => change(row.key, checked)}
+              disabled={savingKey === row.key}
+              aria-describedby={`notice-${row.key}-hint`}
+              className="after:-inset-y-3.5 data-unchecked:border-border"
+            />
+          </label>
+        ))}
+        <p className="pt-1 text-xs text-muted-foreground">
+          Reply to an alert or the digest with a stock report, like &ldquo;restocked 20 bags of egusi&rdquo;. You confirm each change with a tap.
+        </p>
+        <p role="status" className="min-h-5 text-xs text-success">{saved && !error ? "Saved" : ""}</p>
+        {error && <ErrorNote message={error} />}
+      </fieldset>
+    </div>
   );
 }
 
