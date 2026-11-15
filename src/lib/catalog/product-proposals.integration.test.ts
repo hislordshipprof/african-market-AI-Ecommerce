@@ -74,6 +74,8 @@ import { searchListings } from "../storefront/service";
 import { approveProductProposal, listProductProposals, rejectProductProposal } from "../admin/product-proposals";
 import { listStoreProposals } from "./product-proposals";
 import { authPost } from "../test-auth";
+import { GET as getShelfPhoto } from "../../app/api/listing-photo/[draftId]/route";
+import { GET as getProposalPhoto } from "../../app/api/admin/product-proposals/[id]/photo/route";
 
 const RUN = `t553-${Date.now()}`;
 const TAG = `zp${Date.now().toString(36)}`;
@@ -331,5 +333,18 @@ describe.skipIf(!hasDb)("product proposals from unmatched shelf items (real auth
 
     as(cookies.outsider, slugB);
     await expect(rejectProductProposal({ proposalId: proposal.id, reason: "" })).rejects.toThrow(/NEXT_REDIRECT/);
+
+    // The shelf photo the owner crops from is served only to its own store's members.
+    const shelfPhoto = (draftId: string) => getShelfPhoto(new Request("http://localhost/"), { params: Promise.resolve({ draftId }) });
+    expect((await shelfPhoto(drafts.Ehuru!)).status).toBe(404);
+    as(cookies.owner, slugA);
+    const own = await shelfPhoto(drafts.Ehuru!);
+    expect([own.status, own.headers.get("cache-control")]).toEqual([200, "private, no-store"]);
+
+    // The proposal's crop is served only to platform admins.
+    const cropPhoto = () => getProposalPhoto(new Request("http://localhost/"), { params: Promise.resolve({ id: proposal.id }) });
+    expect((await cropPhoto()).status).toBe(401);
+    as(cookies.admin);
+    expect((await cropPhoto()).status).toBe(200);
   });
 });
