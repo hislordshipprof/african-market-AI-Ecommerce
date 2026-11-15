@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { WhatsAppApiError } from "./errors";
-import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "./fake";
-import { ownerLinkCodeMessage } from "./templates";
+import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake, revokeFakeTemplate } from "./fake";
+import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage, ownerLinkCodeMessage } from "./templates";
 
 const TO = "14045550123";
 
@@ -49,5 +49,19 @@ describe("fake WhatsApp provider", () => {
     expect(outbox.map((entry) => entry.message.type)).toEqual(["template", "text", "interactive", "media"]);
     expect(outbox[0].result.waId).toBe(TO);
     expect(new Set(outbox.map((entry) => entry.result.messageId)).size).toBe(4);
+  });
+
+  it("takes an order update with a store name and a path suffix, from the store's number, until its approval is withdrawn (#560)", async () => {
+    const template = ORDER_UPDATE_TEMPLATES.placed;
+    expect(await rejectionCode(fakeWhatsAppProvider.send(orderUpdateMessage(TO, template, "Ada", "https://evil.example/x")))).toBe(132000);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(orderUpdateMessage(TO, template, "Ada", "/order/tok")))).toBe(132000);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(orderUpdateMessage(TO, template, " ", "order/tok")))).toBe(132000);
+    await fakeWhatsAppProvider.send(orderUpdateMessage(TO, template, "Ada", "order/tok"), { phoneNumberId: "1234567890", accessToken: "t" });
+    expect(getFakeOutbox().map((entry) => entry.from)).toEqual(["1234567890"]);
+    revokeFakeTemplate(template.name);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(orderUpdateMessage(TO, template, "Ada", "order/tok")))).toBe(132001);
+    resetFake();
+    await fakeWhatsAppProvider.send(orderUpdateMessage(TO, template, "Ada", "order/tok"));
+    expect(getFakeOutbox()[0].from).toBeNull();
   });
 });

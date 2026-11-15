@@ -119,6 +119,14 @@ function invalid(message: string, code?: string, statusCode = 400): CheckoutProv
   return new CheckoutProviderError("StripeInvalidRequestError", message, code, statusCode);
 }
 
+/** Stripe's own test-mode values; the fake checks them so tests meet the errors Stripe would raise. */
+const MIN_USD_AMOUNT_CENTS = 50;
+const AMENDABLE_STATUSES = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
+
+function assertAmount(amount: number): void {
+  if (amount < MIN_USD_AMOUNT_CENTS) throw invalid("Amount must be at least $0.50 USD", "amount_too_small");
+}
+
 function hashParams(params: unknown): string {
   return createHash("sha256").update(JSON.stringify(params)).digest("hex");
 }
@@ -161,6 +169,12 @@ export function expireFakeIdempotency(): void {
 
 export function failNextFakeCustomerCreate(kind: "timeout" | "500"): void {
   ledger.failNext = kind;
+}
+
+/** The amount a fake checkout intent holds, or null when it holds nothing; the capture fake reads it. */
+export function fakeCheckoutHoldCents(id: string): number | null {
+  const intent = intents.get(id);
+  return intent?.status === "requires_capture" ? intent.amount : null;
 }
 
 export function seedFakeCard(card: NormalizedCard): void {
@@ -291,6 +305,7 @@ const fakeMethods: CheckoutPayments = {
         throw invalid(`No such customer: '${customerId}'`, "resource_missing", 404);
       }
     }
+    assertAmount(Number(params.amount));
     const paymentMethodId = emptyToNull(params.payment_method);
     if (paymentMethodId) assertPaymentMethodUsable(paymentMethodId, customerId);
     const id = `pi_fake_${process.pid}_${randomBytes(8).toString("hex")}`;
@@ -326,9 +341,27 @@ const fakeMethods: CheckoutPayments = {
       }
       if (!intent.customer && next) intent.customer = next;
     }
-    if ("amount" in params && params.amount != null) intent.amount = Number(params.amount);
+    if ("amount" in params && params.amount != null) {
+      if (!AMENDABLE_STATUSES.has(intent.status)) {
+        throw invalid(
+          `This PaymentIntent's amount could not be updated because it has a status of ${intent.status}. You may only update the amount of a PaymentIntent with one of the following statuses: requires_payment_method, requires_confirmation, requires_action.`,
+          "payment_intent_unexpected_state",
+        );
+      }
+      assertAmount(Number(params.amount));
+      intent.amount = Number(params.amount);
+      if (intent.status === "requires_action") intent.status = "requires_confirmation";
+    }
     if ("setup_future_usage" in params) intent.setup_future_usage = emptyToNull(params.setup_future_usage);
-    if ("payment_method" in params) intent.payment_method = emptyToNull(params.payment_method);
+    if ("payment_method" in params) {
+      if (!AMENDABLE_STATUSES.has(intent.status)) {
+        throw invalid(
+          `You cannot provide a new payment method to a PaymentIntent when it has a status of ${intent.status}.`,
+          "payment_intent_unexpected_state",
+        );
+      }
+      intent.payment_method = emptyToNull(params.payment_method);
+    }
     if (params.metadata && typeof params.metadata === "object") {
       intent.metadata = { ...intent.metadata, ...(params.metadata as Record<string, string>) };
     }
@@ -368,7 +401,7 @@ const fakeMethods: CheckoutPayments = {
     const card = rememberCard(paymentMethodId, null);
     if (card.behavior === "decline") {
       intent.status = "requires_payment_method";
-      throw invalid("Your card was declined.", "card_declined", 402);
+      throw new CheckoutProviderError("StripeCardError", "Your card was declined.", "card_declined", 402);
     }
     if (intent.setup_future_usage && intent.customer) {
       ledger.cardSeq += 1;
