@@ -301,6 +301,12 @@ A 4-digit code the courier must get from the customer at the door. Required for 
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
 
+**Courier settings**:
+The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+
+**Assignment timeout**:
+How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.
+
 **Courier**:
 A driver from a courier company. Not a user of the platform.
 _Avoid_: Driver (reserve for the store's own driver)
