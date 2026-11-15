@@ -6,10 +6,10 @@ import { resolveDirectUrl } from "../env";
 
 // Replays every migration into a scratch schema with orders RLS still forced,
 // as the migrating role (app_owner on lanes and CI). Rows that existed before #537 are seeded
-// just before 20261116190000_order_capture_record, then read back as app_user with platform-admin visibility.
+// just before 20261117030000_order_capture_record, then read back as app_user with platform-admin visibility.
 
 const MIGRATIONS = path.resolve(__dirname, "../../../prisma/migrations");
-const CAPTURE_MIGRATION = "20261116190000_order_capture_record";
+const CAPTURE_MIGRATION = "20261117030000_order_capture_record";
 const SCHEMA = `tmp_t537_capture_${process.pid}`;
 const REPLAY_LOCK = 199031030;
 const READY_AT = "2026-03-10 15:40:00";
