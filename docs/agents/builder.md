@@ -71,7 +71,7 @@ While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts 
 If something fails and you cannot fix it, report it as failing with the output. Never report a check you did not run.
 
 ### Model lists in `src/lib/db.ts`
-Add a new model to `PlatformAdminTxModels`, `StoreScopedTxModels` and similar lists in its sorted (alphabetical) position, one per line, not at the end: appended members make every two such tickets conflict.
+Add a new model by adding one line, in its sorted (alphabetical) position, to the matching array in `src/lib/db.ts`: `CUSTOMER_SCOPED_TX_MODELS`, `PLATFORM_ADMIN_TX_MODELS` or `STORE_SCOPED_TX_MODELS` (what `customerScopedTransaction`, `platformAdminTransaction` and `storeScopedTransaction` hand to the callback), and `STORE_SCOPED_MODELS` (what `storeScoped()` wraps). The types and the callback objects are derived from these arrays; edit nothing else there. Never append at the end: two tickets that append conflict.
 
 ### No agent reviews its own work
 Don't run the code review on your own code. After you push, `scripts/build-ticket.sh` runs `scripts/review-ticket.sh`: a fresh session that never saw your reasoning reviews the diff, plus a second reviewer for money, auth and external-provider tickets. Its findings come back to you as a fix round. Reproduce each finding before changing code, and say so with evidence when one does not reproduce.
