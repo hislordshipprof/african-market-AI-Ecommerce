@@ -84,7 +84,7 @@ export function RecipeForm({ recipe, products }: Pick<RecipeEditor, "recipe" | "
             const id = (name: string) => `ingredient-${row.uid}-${name}`;
             const mapped = row.masterProductId ? productNames.get(row.masterProductId.trim()) : undefined;
             return (
-              <li key={row.uid} className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-[1fr_1fr_6rem_6rem_auto] sm:items-start">
+              <li key={row.uid} className="grid grid-cols-2 gap-3 rounded-lg border border-border p-3 sm:grid-cols-[1fr_1fr_6rem_6rem_auto] sm:items-start [&>*:nth-child(-n+2)]:col-span-2 sm:[&>*:nth-child(-n+2)]:col-span-1">
                 <Field id={id("name")} label="Ingredient" error={error(field("name"))}>
                   <input id={id("name")} name="ingredientName" value={row.name} onChange={(event) => update(row.uid, { name: event.target.value })} maxLength={100} className={FIELD} {...described(field("name"), id("name"))} />
                 </Field>
@@ -116,7 +116,7 @@ export function RecipeForm({ recipe, products }: Pick<RecipeEditor, "recipe" | "
                   type="button"
                   onClick={() => setRows((all) => all.filter((item) => item.uid !== row.uid))}
                   disabled={rows.length === 1}
-                  className={`${QUIET_BUTTON} justify-self-start sm:mt-[1.625rem]`}
+                  className={`${QUIET_BUTTON} col-span-2 justify-self-start sm:col-span-1 sm:mt-[1.625rem]`}
                 >
                   <X aria-hidden className="size-4" /> Remove<span className="sr-only"> {row.name || `ingredient ${index + 1}`}</span>
                 </button>
