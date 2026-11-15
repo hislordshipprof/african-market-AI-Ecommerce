@@ -13,9 +13,10 @@ import { captureSplit, courierFeeCents, platformTaxCents } from "@/lib/order/pla
  *   Net = application fee − courier fee − the store's card fee − the platform's card fee share.
  * - A refund row is dated when the refund succeeded and shown only when it returns fee: a refund with
  *   refund_application_fee returns the fee in proportion, never more than the fee across the order's refunds
- *   (Stripe's rule); a courier issue refund returns its service fee share once that fee refund is made.
+ *   (Stripe's rule); a courier refund after delivery returns its service fee share, and its share of the tax the
+ *   platform collected (#65), once that fee refund is made.
  *   Stripe keeps its card fee on a refund. The courier part of a returned fee goes back to the customer, so
- *   it reverses the courier pass-through and is not a platform loss.
+ *   it reverses the courier pass-through and is not a platform loss; so does the tax part of a returned fee.
  * - A manual repayment is its own row in the month it was recorded: the amount repaid comes off the capture.
  *   It moves no money through Stripe, so no fee comes back and the platform net does not change.
  */
@@ -69,6 +70,7 @@ export type RefundFacts = OrderFacts & {
   amountCents: number;
   refundApplicationFee: boolean;
   serviceFeeShareCents: number;
+  platformTaxShareCents: number;
   feeShareReturned: boolean;
   createdAt: Date;
   succeededAt: Date;
@@ -156,7 +158,7 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
       if (refund.refundApplicationFee) {
         fee = Math.min(Math.round((money.applicationFeeCents * refund.amountCents) / captured), left);
       } else if (refund.feeShareReturned) {
-        fee = Math.min(refund.serviceFeeShareCents, left);
+        fee = Math.min(refund.serviceFeeShareCents + refund.platformTaxShareCents, left);
       }
       returned += fee;
       const inMonth = refund.succeededAt >= month.startsAt && refund.succeededAt < month.endsAt;
@@ -165,7 +167,7 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
         ? Math.round((fee * cents) / money.applicationFeeCents)
         : 0);
       const courierBack = share(money.courierFeeCents);
-      const taxBack = share(platformTax);
+      const taxBack = refund.refundApplicationFee ? share(platformTax) : Math.min(refund.platformTaxShareCents, fee);
       rows.push({
         kind: "refund",
         refundFailed: false,

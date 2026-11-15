@@ -42,7 +42,7 @@ describe("fee ledger CSV", () => {
   const capture: CaptureFacts = { ...order, orderId: "o1", at: new Date("2026-11-03T15:00:00Z"), refundFailed: false };
   const cancel: RefundFacts = {
     ...order, orderId: "o1", refundId: "r1", amountCents: 7079, refundApplicationFee: true, serviceFeeShareCents: 0,
-    feeShareReturned: false, createdAt: new Date("2026-11-04T10:00:00Z"), succeededAt: new Date("2026-11-04T10:00:00Z"),
+    platformTaxShareCents: 0, feeShareReturned: false, createdAt: new Date("2026-11-04T10:00:00Z"), succeededAt: new Date("2026-11-04T10:00:00Z"),
   };
 
   it("has one line per screen row, then each store's total and the month's, in dollars", () => {
@@ -76,10 +76,21 @@ describe("fee ledger with sales tax (#65)", () => {
 
     const cancel: RefundFacts = {
       ...taxed, refundId: "r1", amountCents: 10_825, refundApplicationFee: true, serviceFeeShareCents: 0,
-      feeShareReturned: false, createdAt: at, succeededAt: at,
+      platformTaxShareCents: 0, feeShareReturned: false, createdAt: at, succeededAt: at,
     };
     const refund = buildFeeLedger(ledgerMonth("2026-11"), [], [cancel], []).rows[0];
     // The tax goes back with the refund and was never the platform's: only the 610 fee leaves its net.
     expect(refund).toMatchObject({ feeRefundedCents: -1435, platformNetCents: -610 });
+  });
+
+  it("a courier refund's returned tax share passes back through: only its service fee share leaves the platform net (B5)", () => {
+    // $20 goods + 60¢ fee + $1.65 platform tax + $8.99 courier; all the goods refunded, fee share and tax share returned.
+    const courier = { ...order, fulfillment: "courier", deliveryFeeCents: 899, serviceFeeCents: 60, capturedAmountCents: 3124, taxCents: 165, taxLiableParty: "platform" };
+    const refund: RefundFacts = {
+      ...courier, orderId: "o3", refundId: "r3", amountCents: 2225, refundApplicationFee: false, serviceFeeShareCents: 60,
+      platformTaxShareCents: 165, feeShareReturned: true, createdAt: at, succeededAt: at,
+    };
+    const [row] = buildFeeLedger(ledgerMonth("2026-11"), [], [refund], []).rows;
+    expect(row).toMatchObject({ capturedCents: -2225, courierFeeCents: 0, feeRefundedCents: -225, platformNetCents: -60 });
   });
 });
