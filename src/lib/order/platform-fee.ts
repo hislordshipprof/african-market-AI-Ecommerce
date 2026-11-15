@@ -143,6 +143,19 @@ export function capturedPayout(order: {
   };
 }
 
+/** The `application_fee_amount` Stripe took at capture; null before capture. */
+export function capturedApplicationFee(order: {
+  capturedAmountCents: number | null;
+  platformFeeCents: number | null;
+  serviceFeeCents: number;
+  fulfillment: string;
+  deliveryFeeCents: number;
+}): number | null {
+  if (order.capturedAmountCents === null) return null;
+  const captured = Math.max(0, order.capturedAmountCents);
+  return captured - capturedPayout({ ...order, capturedAmountCents: captured }).storeReceivesCents;
+}
+
 /** The card fee rate as the store sees it, e.g. "2.9% + 30¢". */
 export const CARD_FEE_LABEL = `${CARD_FEE_BPS / 100}% + ${CARD_FEE_FIXED_CENTS}¢`;
 

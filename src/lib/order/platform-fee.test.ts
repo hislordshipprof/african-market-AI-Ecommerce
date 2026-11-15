@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ADR_0021_SERVICE_FEE, capturedPayout, captureSplit, maxGoodsWithin, NO_SERVICE_FEE, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
+import { ADR_0021_SERVICE_FEE, capturedApplicationFee, capturedPayout, captureSplit, maxGoodsWithin, NO_SERVICE_FEE, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
 
 describe("service fee (ADR-0021)", () => {
   it("is 3% of goods, held to the $0.99 minimum and the $2.99 maximum", () => {
@@ -58,6 +58,27 @@ describe("store payout shown in the inbox", () => {
     expect(capturedPayout({ ...order, platformFeeCents: 235, serviceFeeCents: 0 })).toEqual({ storeCardFeeCents: 235, storeReceivesCents: 7079 - 235 - 899 });
     expect(capturedPayout({ ...order, platformFeeCents: 180 + 204, serviceFeeCents: 180 })).toEqual({ storeCardFeeCents: 204, storeReceivesCents: 5796 });
     expect(capturedPayout({ ...order, platformFeeCents: null, serviceFeeCents: 180 })).toEqual({ storeCardFeeCents: 204, storeReceivesCents: 5796 });
+  });
+});
+
+describe("application fee shown to platform admins", () => {
+  const courier = { capturedAmountCents: 7079, fulfillment: "courier", deliveryFeeCents: 899, serviceFeeCents: 180 };
+
+  it("is the stored platform fee plus the courier fee, the amount Stripe took at capture", () => {
+    expect(capturedApplicationFee({ ...courier, platformFeeCents: 180 + 204 })).toBe(180 + 204 + 899);
+  });
+
+  it("keeps store delivery's fee out: the store keeps it", () => {
+    expect(capturedApplicationFee({ ...courier, fulfillment: "store-delivery", platformFeeCents: 180 + 227 })).toBe(407);
+  });
+
+  it("works out an order captured before the fee was stored", () => {
+    expect(capturedApplicationFee({ ...courier, platformFeeCents: null })).toBe(7079 - 5796);
+  });
+
+  it("never exceeds the capture, and is unknown before capture", () => {
+    expect(capturedApplicationFee({ ...courier, capturedAmountCents: 900, platformFeeCents: 180 + 30 })).toBe(900);
+    expect(capturedApplicationFee({ ...courier, capturedAmountCents: null, platformFeeCents: null })).toBeNull();
   });
 });
 

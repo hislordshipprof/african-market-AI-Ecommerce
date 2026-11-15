@@ -15,8 +15,9 @@ function age(minutes: number): string {
   return hours < 48 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-export default async function SupportQueuePage() {
-  const { threads, hidden } = await listEscalatedThreads();
+export default async function SupportQueuePage({ searchParams }: { searchParams: Promise<{ thread?: string | string[] }> }) {
+  const { thread: selected } = await searchParams;
+  const { threads, hidden } = await listEscalatedThreads(typeof selected === "string" ? selected : undefined);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -30,7 +31,7 @@ export default async function SupportQueuePage() {
       ) : (
         <ul className="space-y-4">
           {threads.map((thread) => (
-            <li key={thread.id} className="rounded-lg border border-input bg-card p-4">
+            <li key={thread.id} id={`thread-${thread.id}`} className="scroll-mt-20 rounded-lg border border-input bg-card p-4">
               <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
                 <span className="font-medium text-foreground">{thread.storeName}</span>
                 <span className="text-foreground">Order #{thread.orderNumber}</span>
