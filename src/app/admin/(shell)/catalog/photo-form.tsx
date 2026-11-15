@@ -2,14 +2,20 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { uploadMasterProductImage, type ImageState } from "@/lib/admin/master-catalog";
+
+type ImageState = { ok?: boolean; message?: string };
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
-export function PhotoForm({ productId }: { productId: string }) {
+/** A product's or a category's photo upload; the server action checks, re-encodes and stores it. */
+export function PhotoForm({ field, id, upload }: {
+  field: "productId" | "categoryId";
+  id: string;
+  upload: (prev: ImageState, form: FormData) => Promise<ImageState>;
+}) {
   const router = useRouter();
   const form = useRef<HTMLFormElement>(null);
-  const [state, action, uploading] = useActionState<ImageState, FormData>(uploadMasterProductImage, {});
+  const [state, action, uploading] = useActionState<ImageState, FormData>(upload, {});
 
   useEffect(() => {
     if (state.ok) {
@@ -20,7 +26,7 @@ export function PhotoForm({ productId }: { productId: string }) {
 
   return (
     <form ref={form} action={action} className="grid min-w-0 flex-1 gap-3">
-      <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name={field} value={id} />
       <div className="grid gap-1.5">
         <label htmlFor="image" className="text-sm font-medium text-foreground">New photo</label>
         <input
