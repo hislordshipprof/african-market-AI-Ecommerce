@@ -38,7 +38,8 @@ import {
 import { readAiOnboardingSettings, turnCostFlagMicros } from "../admin/ai-onboarding-settings";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
-import { acceptanceForTurn, shownProductIds } from "./shown";
+import { acceptanceForTurn, shownProducts } from "./shown";
+import { itemHandles, type ItemHandles } from "./handles";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
@@ -242,7 +243,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
       acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
     };
-    const tools = assistantTools(turnCtx, { lookupModel: model, onlineLookup: options.onlineRecipeLookup });
+    const handles = itemHandles(store.id, turn.id);
+    const tools = assistantTools(turnCtx, { lookupModel: model, onlineLookup: options.onlineRecipeLookup }, handles);
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
       const current = withUser.find((message) => message.id === parsed.id);
@@ -250,6 +252,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     }
     const sentHistory = retryVisible(history, parsed.id, alreadyThere);
     let modelMessages: ModelMessage[];
+    let shown: string[];
     try {
       let attachmentIndex = 0;
       modelMessages = await convertToModelMessages(withoutReasoning(sentHistory), {
@@ -262,6 +265,9 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         },
       });
       if (prepared.length > 0) overlayCurrentFiles(modelMessages, sentHistory, parsed.id, scrubbed, prepared);
+      modelMessages = await handlesInToolCalls(modelMessages, handles);
+      shown = (await handles.toModel(shownProducts(sentHistory)) as ReturnType<typeof shownProducts>)
+        .map((row) => `${row.item}: ${row.variantId}`);
     } catch {
       console.error("[assistant] message could not be prepared", turn.id);
       await releaseLease(store.id, turn.id);
@@ -276,7 +282,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
           content: ASSISTANT_STATIC_PROMPT,
           providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
         },
-        { role: "system", content: storeContextMessage(store, at, shownProductIds(sentHistory)) },
+        { role: "system", content: storeContextMessage(store, at, shown) },
         ...modelMessages,
       ],
       allowSystemInMessages: true,
@@ -362,7 +368,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         while (true) {
           const next = await reader.read();
           if (next.done) break;
-          const outgoing = scrubOutboundChunk(next.value);
+          const outgoing = await idsInToolInput(scrubOutboundChunk(next.value), handles);
           if (!outgoing) continue;
           takeReply(outgoing);
           writer.write(outgoing as typeof next.value);
@@ -632,6 +638,25 @@ function completedAssistant(messages: UIMessage[], clientId: string): UIMessage 
   const assistant = span.find((message) => message.role === "assistant");
   if (assistant && replyStatus(assistant) === "complete") return assistant;
   return null;
+}
+
+/** History keeps ids, as the tools and the customer's screen use them; the model sees their handles. */
+async function handlesInToolCalls(messages: ModelMessage[], handles: ItemHandles): Promise<ModelMessage[]> {
+  return Promise.all(messages.map(async (message) => {
+    if (message.role !== "assistant" || typeof message.content === "string") return message;
+    const content = await Promise.all(message.content.map(async (part) => (
+      part.type === "tool-call" ? { ...part, input: await handles.toModel(part.input) } : part
+    )));
+    return { ...message, content } as ModelMessage;
+  }));
+}
+
+/** The model's tool input names handles; the stream and the saved transcript keep ids, also for a call the schema refused. */
+async function idsInToolInput(value: unknown, handles: ItemHandles): Promise<unknown> {
+  if (!value || typeof value !== "object") return value;
+  const part = value as { type?: string; input?: unknown };
+  if (part.type !== "tool-input-available" && part.type !== "tool-input-error") return value;
+  return { ...part, input: await handles.toIds(part.input) };
 }
 
 function scrubOutboundChunk(value: unknown): unknown {

@@ -139,6 +139,9 @@ _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 **Choice chips**:
 The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
 
+**Item handle**:
+A short name such as `i3` (listing), `v12` (variant) or `c2` (cart line) that the Shopper assistant's tools show the model in place of a long id, and take back as input (#597). Each conversation keeps its own handles, so one never resolves in another conversation or store; an unknown handle is refused, never guessed.
+
 **Shopper constraint**:
 An allergen to avoid, a dietary claim that must hold, or an ingredient to avoid, taken from the customer's words and saved on the conversation (#485). The Shopper assistant checks them on Product attributes only, never by matching product names: search leaves out an excluded listing, and add and swap refuse one with the reason. A constraint is hard: it gates search, recipes, add and swap. An ingredient term that names only a form of a known Ingredient, such as fresh tomato, triggers the clarify rule; one close to no known Ingredient is not saved, and the assistant says once that it can't check it. While any is saved, the store's own swap is not used: a may-be-unavailable line with no backup that passes gets Exact item only, a refund, including lines already in the cart (owner, 2026-11-12).
 

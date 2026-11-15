@@ -152,13 +152,9 @@ export function replyCountsAsEmpty(message: ShownMessage): boolean {
 const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products"]);
 const SHOWN_ID_LIMIT = 60;
 
-/**
- * One line per product variant a read tool showed in this chat, newest last.
- * The model miscopies long ids from deep in the history; this short table is
- * a clean place to copy them from.
- */
-export function shownProductIds(messages: readonly ShownMessage[]): string[] {
-  const rows = new Map<string, string>();
+/** One row per product variant a read tool showed in this chat, newest last, for a short table in the prompt. */
+export function shownProducts(messages: readonly ShownMessage[]): Array<{ item: string; variantId: string }> {
+  const rows = new Map<string, { item: string; variantId: string }>();
   for (const message of messages) {
     for (const part of message.parts) {
       const name = toolNameOf(part);
@@ -174,7 +170,7 @@ export function shownProductIds(messages: readonly ShownMessage[]): string[] {
           if (typeof variant.variantId !== "string") continue;
           const label = typeof variant.label === "string" ? `, ${variant.label}` : "";
           rows.delete(variant.variantId);
-          rows.set(variant.variantId, `${product.name}${label}: ${variant.variantId}`);
+          rows.set(variant.variantId, { item: `${product.name}${label}`, variantId: variant.variantId });
         }
       }
     }
