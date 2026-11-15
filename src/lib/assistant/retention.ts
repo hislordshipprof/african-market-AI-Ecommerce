@@ -18,15 +18,17 @@ export interface RetentionResult {
 /**
  * Deletes shopper transcripts strictly older than 90 days, then AI review flags (#544) older than 90 days.
  * A shopper conversation's flags go with it by foreign key.
+ * `storeIds` limits the sweep to those stores; it is a test seam, production passes none (#672).
  * The clock is read only inside the cutoff step. Dates are bound parameters
  * against timestamp(3) columns, so the session TimeZone cannot move the cutoff.
  */
 export async function runAssistantRetention(
   step: AssistantStep,
-  options?: { batchSize?: number; maxBatches?: number },
+  options?: { batchSize?: number; maxBatches?: number; storeIds?: string[] },
 ): Promise<RetentionResult> {
   const batchSize = options?.batchSize ?? 1000;
   const maxBatches = options?.maxBatches ?? 400;
+  const storeIds = options?.storeIds ?? null;
   if (1 + maxBatches * 2 + FLAG_BATCHES > 1000) {
     throw new Error("assistant retention step ceiling");
   }
@@ -46,7 +48,7 @@ export async function runAssistantRetention(
     "ai_actions",
     batchSize,
     maxBatches,
-    (batch) => deleteExpiredAssistantActions(cutoff, batchSize, `${bounds.runId}:actions:${batch}`),
+    (batch) => deleteExpiredAssistantActions(cutoff, batchSize, `${bounds.runId}:actions:${batch}`, storeIds),
   );
   const conversationsDeleted = await deleteInBatches(
     step,
@@ -54,7 +56,7 @@ export async function runAssistantRetention(
     "ai_conversations",
     batchSize,
     maxBatches,
-    (batch) => deleteExpiredAssistantConversations(cutoff, now, batchSize, `${bounds.runId}:conversations:${batch}`),
+    (batch) => deleteExpiredAssistantConversations(cutoff, now, batchSize, `${bounds.runId}:conversations:${batch}`, storeIds),
   );
   const flagsDeleted = await deleteInBatches(
     step,
@@ -62,7 +64,7 @@ export async function runAssistantRetention(
     "ai_review_flags",
     batchSize,
     FLAG_BATCHES,
-    (batch) => deleteExpiredReviewFlags(cutoff, batchSize, `${bounds.runId}:flags:${batch}`),
+    (batch) => deleteExpiredReviewFlags(cutoff, batchSize, `${bounds.runId}:flags:${batch}`, storeIds),
   );
   return { actionsDeleted, conversationsDeleted, flagsDeleted };
 }
