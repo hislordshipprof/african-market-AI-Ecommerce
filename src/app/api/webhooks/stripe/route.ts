@@ -10,6 +10,7 @@ import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/strip
 import type { RefundResult } from "@/lib/stripe/types";
 import { parseInput } from "@/lib/security/parse-input";
 import { applyBillingEvent, isBillingEvent } from "@/lib/billing/service";
+import { applyDisputeEvent, isDisputeEvent } from "@/lib/disputes/service";
 
 const webhookEventSchema = z.looseObject({
   type: z.string().min(1).max(200),
@@ -42,6 +43,18 @@ const webhookEventSchema = z.looseObject({
     id: z.string().min(1).max(200),
     status: z.string().min(1).max(40),
     cancellationReason: z.string().max(100).nullable(),
+  }).optional(),
+  dispute: z.looseObject({
+    id: z.string().min(1).max(200),
+    chargeId: z.string().min(1).max(200),
+    paymentIntentId: z.string().min(1).max(200).nullable(),
+    amountCents: z.number().int().nonnegative(),
+    currency: z.string().min(1).max(10),
+    reason: z.string().min(1).max(100),
+    status: z.string().min(1).max(40),
+    evidenceDueBy: z.number().int().nonnegative().nullable(),
+    livemode: z.boolean(),
+    feeCents: z.number().int(),
   }).optional(),
 });
 
@@ -143,6 +156,15 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error(err);
       return NextResponse.json({ error: "Billing event could not be recorded" }, { status: 500 });
+    }
+  }
+
+  if (isDisputeEvent(verified)) {
+    try {
+      await applyDisputeEvent(verified);
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ error: "Dispute could not be recorded" }, { status: 500 });
     }
   }
 
