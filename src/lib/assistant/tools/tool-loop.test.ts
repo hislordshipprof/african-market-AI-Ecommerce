@@ -112,7 +112,7 @@ describe.skipIf(!hasDb)("assistant tool loop", () => {
     });
     await result.consumeStream();
     expect(prompts).toHaveLength(2);
-    expect(JSON.stringify(prompts[1])).toContain("variant_not_found");
+    expect(JSON.stringify(prompts[1])).toContain("unknown_handle");
     expect(await storeScoped(storeA).cartLine.count({ where: { cartId } })).toBe(0);
     const action = await storeScoped(storeA).aiAction.findFirst({
       where: { conversationId, tool: "add_to_cart" },
