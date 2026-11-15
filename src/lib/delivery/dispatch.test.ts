@@ -757,7 +757,7 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     return { fake, provider: new DoorDashDriveProvider({ env: keys, fetch: fake.fetch }) };
   };
 
-  async function readyOrder(opts: { plan?: "pro" | "starter"; totalCents?: number; frozen?: boolean; status?: string } = {}) {
+  async function readyOrder(opts: { plan?: "pro" | "starter"; subtotalCents?: number; totalCents?: number; frozen?: boolean; status?: string } = {}) {
     raw ??= testPrismaClient();
     const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const store = await raw.store.create({
@@ -769,11 +769,12 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     const customer = await scoped.customer.create({ data: { storeId: store.id, name: "Flow Buyer", email: `flow-${stamp}@example.com`, phone: "+13015550199" } });
     const listing = await scoped.listing.create({ data: { storeId: store.id, customName: "Goat meat", price: 6000, stockMode: "counted", qty: 5, frozen: opts.frozen ?? false } });
     const variant = await scoped.listingVariant.create({ data: { listingId: listing.id, label: "2 lb", price: 6000, weightG: 900 } });
-    const totalCents = opts.totalCents ?? 6000;
+    const subtotalCents = opts.subtotalCents ?? 6000;
+    const totalCents = opts.totalCents ?? subtotalCents;
     const order = await scoped.order.create({
       data: {
         storeId: store.id, customerId: customer.id, status: opts.status ?? "READY", fulfillment: "courier", number: 9,
-        subtotalCents: 6000, bufferCents: 0, totalCents, totalAuthorizedCents: totalCents,
+        subtotalCents, bufferCents: 0, totalCents, totalAuthorizedCents: totalCents,
         deliveryLine1: "1100 Wayne Ave", deliveryCity: "Silver Spring", deliveryState: "MD", deliveryZip: "20910",
         lines: { create: [{ listingVariantId: variant.id, qtyOrdered: 1, unitPriceCents: 6000, status: "picked" }] },
       },
@@ -811,15 +812,25 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).status).toBe("COURIER_REQUESTED");
   });
 
-  it("AC6/AC7: a frozen order, or one above $150, gets a PIN at delivery creation; $150 exactly does not", async () => {
-    const cases = [{ frozen: true }, { totalCents: 15_001 }, { totalCents: 15_000 }];
+  it("#683: a frozen order, or one whose goods are above $150, gets a PIN at delivery creation; $150.00 and $149.99 do not", async () => {
+    const cases = [{ frozen: true }, { subtotalCents: 15_001 }, { subtotalCents: 15_000 }, { subtotalCents: 14_999 }];
     const pins = [];
     for (const opts of cases) {
       const { storeId, orderId } = await readyOrder(opts);
       await dispatchReadyOrder(storeId, orderId, { providers: [doordashFake().provider], emit, settings });
       pins.push((await storeScoped(storeId).delivery.findFirstOrThrow({ where: { orderId } })).pin);
     }
-    expect(pins).toEqual([expect.stringMatching(/^\d{4}$/), expect.stringMatching(/^\d{4}$/), null]);
+    expect(pins).toEqual([expect.stringMatching(/^\d{4}$/), expect.stringMatching(/^\d{4}$/), null, null]);
+  });
+
+  it("#683: the goods value decides the PIN, not the total: $140 of goods with a $160 total gets none, $151 of goods under a $149 total gets one", async () => {
+    const pins = [];
+    for (const opts of [{ subtotalCents: 14_000, totalCents: 16_000 }, { subtotalCents: 15_100, totalCents: 14_900 }]) {
+      const { storeId, orderId } = await readyOrder(opts);
+      await dispatchReadyOrder(storeId, orderId, { providers: [doordashFake().provider], emit, settings });
+      pins.push((await storeScoped(storeId).delivery.findFirstOrThrow({ where: { orderId } })).pin);
+    }
+    expect(pins).toEqual([null, expect.stringMatching(/^\d{4}$/)]);
   });
 
   it("a retried dispatch books no second courier, only re-sends the timer event", async () => {

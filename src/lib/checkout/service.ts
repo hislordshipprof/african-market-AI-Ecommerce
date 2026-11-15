@@ -23,7 +23,7 @@ import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-que
 import { pinnedCheckoutTax, quoteCheckoutTax, TaxLocationError, TaxUnavailableError, type CheckoutTax, type DeliveryAddressFields } from "../tax/checkout-tax";
 import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
-import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCourier } from "../delivery/dispatch";
+import { buildCourierRequest, courierProviders, quoteCourier } from "../delivery/dispatch";
 import { checkCourierEligibility } from "../delivery/eligibility";
 import { anyCourierEnabled, readCourierSettings, type CourierSettings } from "../delivery/courier-settings";
 import { courierOffered } from "../delivery/courier-offered";
@@ -336,7 +336,7 @@ async function courierQuoteFor(
   }, {
     orderValueCents: cart.subtotalCents,
     tipCents: 0,
-    pinRequired: cart.lines.some((line) => line.variant.listing.frozen) || cart.subtotalCents > PIN_ABOVE_TOTAL_CENTS,
+    hasFrozenLine: cart.lines.some((line) => line.variant.listing.frozen),
   });
   const quoted = await quoteCourier({ referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders(), settings);
   await storeScoped(store.id).cart.update({

@@ -96,7 +96,7 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     await raw.$disconnect();
   }, 30_000);
 
-  async function seed(opts: { plan?: "pro" | "starter"; registered?: boolean; phone?: string | null; weightG?: number; frozen?: boolean; perishable?: boolean; slots?: SlotSchedule } = {}) {
+  async function seed(opts: { priceCents?: number; plan?: "pro" | "starter"; registered?: boolean; phone?: string | null; weightG?: number; frozen?: boolean; perishable?: boolean; slots?: SlotSchedule } = {}) {
     const stamp = crypto.randomUUID().slice(0, 8);
     const store = await raw.store.create({
       data: {
@@ -124,9 +124,9 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     await platformAdminTransaction((tx) => tx.storeSubscription.create({ data: { storeId: store.id, plan: opts.plan ?? "pro", status: "active" } }));
     const scoped = storeScoped(store.id);
     const listing = await scoped.listing.create({
-      data: { storeId: store.id, customName: "Goat meat", price: 4000, stockMode: "unlimited", frozen: opts.frozen ?? false, perishable: opts.perishable ?? false },
+      data: { storeId: store.id, customName: "Goat meat", price: opts.priceCents ?? 4000, stockMode: "unlimited", frozen: opts.frozen ?? false, perishable: opts.perishable ?? false },
     });
-    const variant = await scoped.listingVariant.create({ data: { listingId: listing.id, label: "2 lb", price: 4000, weightG: opts.weightG ?? 900 } });
+    const variant = await scoped.listingVariant.create({ data: { listingId: listing.id, label: "2 lb", price: opts.priceCents ?? 4000, weightG: opts.weightG ?? 900 } });
     const cart = await scoped.cart.create({ data: { storeId: store.id } });
     await scoped.cartLine.create({ data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" } });
     return { store, cart };
@@ -207,6 +207,18 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     expect(atDoor.problems).toEqual([expect.objectContaining({ code: "ineligible", message: expect.stringMatching(/hand-to-hand/) })]);
     const handoff = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [uber] });
     expect(handoff.problems).toEqual([]);
+  });
+
+  it("#683: the quote asks for a PIN on goods above $150 and frozen goods, by the goods value and not the total", async () => {
+    const pins: (string | null)[] = [];
+    for (const opts of [{ priceCents: 14_999 }, { priceCents: 15_000 }, { priceCents: 15_001 }, { priceCents: 4000, frozen: true }]) {
+      const { store, cart } = await seed(opts);
+      const uber = new StubCourier("uber", 749);
+      await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [uber] });
+      pins.push(uber.requests[0].dropoffPin ?? null);
+    }
+    // $149.99 of goods plus the courier fee and service fee totals over $150, and still gets no PIN.
+    expect(pins).toEqual([null, null, expect.stringMatching(/^\d{4}$/), expect.stringMatching(/^\d{4}$/)]);
   });
 
   it("AC2: Pay asks again; a changed fee or no courier is shown before any hold", async () => {
