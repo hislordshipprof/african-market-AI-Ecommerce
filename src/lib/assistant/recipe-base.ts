@@ -47,7 +47,7 @@ export interface SeedRecipe {
 }
 
 /** Seeds the curated base. Fails when a row names a master product that does not exist. */
-export async function seedRecipeBase(prisma: PrismaClient, recipes: SeedRecipe[]): Promise<number> {
+export async function seedRecipeBase(prisma: PrismaClient, recipes: SeedRecipe[], log: (line: string) => void = console.log): Promise<number> {
   const ids = [...new Set(recipes.flatMap((recipe) => recipe.ingredients.flatMap((row) => row.masterProductId ?? [])))];
   const found = await prisma.masterProduct.findMany({ where: { id: { in: ids } }, select: { id: true } });
   const known = new Set(found.map((row) => row.id));
