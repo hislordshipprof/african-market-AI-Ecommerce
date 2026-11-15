@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { findCourierIncidentEvents, findCourierIncidentNotes, findCourierIncidentRows, type CourierIncidentRaw } from "../db";
 import type { DeliveryProviderName } from "../delivery/provider";
 
 /**
@@ -11,6 +11,8 @@ export const INCIDENT_KINDS = ["failover", "both_failed", "provider_cancelled", 
 export type IncidentKind = (typeof INCIDENT_KINDS)[number];
 export const INCIDENT_PROVIDERS = ["doordash", "uber"] as const satisfies readonly DeliveryProviderName[];
 export const PAGE_SIZE = 50;
+/** courier_incident_notes_body_check allows 1 to 1000 characters. */
+export const NOTE_MAX = 1000;
 
 export interface IncidentFilters {
   storeId?: string;
@@ -40,13 +42,7 @@ export interface IncidentRow {
   deliveryStatus: string | null;
 }
 
-type Queryable = Pick<Prisma.TransactionClient, "$queryRaw">;
-
-type RawRow = Omit<IncidentRow, "state" | "providers" | "kinds"> & {
-  providers: string[] | null;
-  kinds: string[];
-  resolvedAt: Date | null;
-};
+type Queryable = Parameters<typeof findCourierIncidentRows>[0];
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)_([A-Za-z0-9-]{1,64})$/;
 
@@ -82,85 +78,19 @@ export async function findCourierIncidents(
   const cursor = filters.after ? decodeCursor(filters.after) : null;
   const from = filters.from ? utcDay(filters.from) : null;
   const to = filters.to ? utcDay(filters.to) : null;
-  const eventScope = [
-    filters.storeId ? Prisma.sql`AND e.store_id = ${filters.storeId}` : Prisma.empty,
-    filters.orderId ? Prisma.sql`AND e.order_id = ${filters.orderId}` : Prisma.empty,
-  ];
-  const where = [
-    filters.provider ? Prisma.sql`AND ${filters.provider} = ANY(p.providers)` : Prisma.empty,
-    filters.kind ? Prisma.sql`AND ${filters.kind} = ANY(i.kinds)` : Prisma.empty,
-    from ? Prisma.sql`AND i.opened_at >= ${from}::timestamp(3)` : Prisma.empty,
-    to ? Prisma.sql`AND i.opened_at < ${new Date(to.getTime() + DAY_MS)}::timestamp(3)` : Prisma.empty,
-    cursor ? Prisma.sql`AND (i.opened_at, i.order_id) < (${cursor.at}::timestamp(3), ${cursor.orderId})` : Prisma.empty,
-  ];
 
-  const raw = await tx.$queryRaw<RawRow[]>`
-    WITH signals AS (
-      SELECT e.store_id, e.order_id, e.created_at AS at,
-        CASE
-          WHEN e.type = 'failover_triggered' THEN 'failover'
-          WHEN e.type = 'both_failed' THEN 'both_failed'
-          WHEN e.type = 'returned'
-            OR (e.type = 'cancelled' AND COALESCE(e.payload->>'cancellation_reason', e.payload->>'reason') = 'failed_to_return')
-            THEN 'returned'
-          -- A cancel the platform made itself (failover replaced the delivery, or the order was cancelled) is not the provider's.
-          WHEN e.type = 'cancelled' AND o.status <> 'CANCELLED' AND NOT EXISTS (
-              SELECT 1 FROM delivery_events f
-              WHERE f.store_id = e.store_id AND f.order_id = e.order_id AND f.delivery_id = e.delivery_id AND f.type = 'failover_triggered'
-            ) THEN 'provider_cancelled'
-          -- The deadline the assignment timer uses: the later of the timeout after booking and the ready time.
-          WHEN e.type = 'courier_assigned'
-            AND e.created_at > GREATEST(d.created_at + make_interval(secs => ps.courier_assignment_timeout_s), d.pickup_ready_at)
-            THEN 'assigned_late'
-          WHEN e.type = 'delivered' AND d.proof_url IS NULL AND d.pin IS NULL THEN 'delivered_no_proof'
-        END AS kind
-      FROM delivery_events e
-      JOIN orders o ON o.id = e.order_id AND o.store_id = e.store_id
-      LEFT JOIN deliveries d ON d.id = e.delivery_id AND d.store_id = e.store_id
-      CROSS JOIN (SELECT courier_assignment_timeout_s FROM platform_settings WHERE id = 'platform') ps
-      WHERE e.type IN ('failover_triggered', 'both_failed', 'cancelled', 'returned', 'courier_assigned', 'delivered')
-        ${eventScope[0]} ${eventScope[1]}
-    ),
-    incidents AS (
-      SELECT store_id, order_id, min(at) AS opened_at, max(at) AS last_at, array_agg(DISTINCT kind ORDER BY kind) AS kinds
-      FROM signals
-      WHERE kind IS NOT NULL
-      GROUP BY store_id, order_id
-    )
-    SELECT i.order_id AS "orderId", i.store_id AS "storeId", s.name AS "storeName", o.number AS "orderNumber",
-      o.status AS "orderStatus", p.providers, i.kinds, i.opened_at AS "openedAt", i.last_at AS "lastAt",
-      r.resolved_at AS "resolvedAt", ld.status AS "deliveryStatus"
-    FROM incidents i
-    JOIN orders o ON o.id = i.order_id AND o.store_id = i.store_id
-    JOIN stores s ON s.id = i.store_id
-    LEFT JOIN LATERAL (
-      SELECT array_agg(provider ORDER BY first_at) AS providers
-      FROM (
-        SELECT provider, min(at) AS first_at
-        FROM (
-          SELECT d.provider, d.created_at AS at FROM deliveries d WHERE d.store_id = i.store_id AND d.order_id = i.order_id
-          UNION ALL
-          -- A create error leaves no delivery row; its failover event names the courier that refused.
-          SELECT f.payload->>'fromProvider', f.created_at FROM delivery_events f
-          WHERE f.store_id = i.store_id AND f.order_id = i.order_id AND f.type = 'failover_triggered' AND f.delivery_id IS NULL
-        ) tried
-        WHERE provider IS NOT NULL
-        GROUP BY provider
-      ) firsts
-    ) p ON true
-    LEFT JOIN LATERAL (
-      SELECT max(n.created_at) AS resolved_at FROM courier_incident_notes n
-      WHERE n.store_id = i.store_id AND n.order_id = i.order_id AND n.resolves
-    ) r ON true
-    LEFT JOIN LATERAL (
-      SELECT d.status FROM deliveries d WHERE d.store_id = i.store_id AND d.order_id = i.order_id ORDER BY d.created_at DESC LIMIT 1
-    ) ld ON true
-    WHERE true ${where[0]} ${where[1]} ${where[2]} ${where[3]} ${where[4]}
-    ORDER BY i.opened_at DESC, i.order_id DESC
-    LIMIT ${pageSize + 1}
-  `;
+  const raw = await findCourierIncidentRows(tx, {
+    storeId: filters.storeId,
+    orderId: filters.orderId,
+    provider: filters.provider,
+    kind: filters.kind,
+    from: from ?? undefined,
+    toExclusive: to ? new Date(to.getTime() + DAY_MS) : undefined,
+    cursor: cursor ?? undefined,
+    limit: pageSize + 1,
+  });
 
-  const rows = raw.slice(0, pageSize).map(({ resolvedAt, providers, kinds, ...row }): IncidentRow => ({
+  const rows = raw.slice(0, pageSize).map(({ resolvedAt, providers, kinds, ...row }: CourierIncidentRaw): IncidentRow => ({
     ...row,
     providers: (providers ?? []) as DeliveryProviderName[],
     kinds: kinds as IncidentKind[],
@@ -198,4 +128,72 @@ export function redactCourierPayload(value: unknown, key = ""): unknown {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactCourierPayload(v, k)]));
   }
   return value;
+}
+
+/** Order and store ids are cuids or UUIDs; anything else never reaches a query. */
+const ID = /^[A-Za-z0-9-]{1,64}$/;
+
+export function isIncidentId(value: string): boolean {
+  return ID.test(value);
+}
+
+/** The list's filters from the URL. A value that is not exactly one of the allowed ones is dropped. */
+export function incidentFiltersFromSearchParams(params: Record<string, string | string[] | undefined>): IncidentFilters {
+  const one = (key: string) => {
+    const value = params[key];
+    return typeof value === "string" && value !== "" ? value : undefined;
+  };
+  const filters: IncidentFilters = {};
+  const store = one("store");
+  if (store && ID.test(store)) filters.storeId = store;
+  const provider = one("provider");
+  if (provider && (INCIDENT_PROVIDERS as readonly string[]).includes(provider)) filters.provider = provider as DeliveryProviderName;
+  const kind = one("kind");
+  if (kind && (INCIDENT_KINDS as readonly string[]).includes(kind)) filters.kind = kind as IncidentKind;
+  const from = one("from");
+  if (from && utcDay(from)) filters.from = from;
+  const to = one("to");
+  if (to && utcDay(to)) filters.to = to;
+  const after = one("after");
+  if (after && decodeCursor(after)) filters.after = after;
+  return filters;
+}
+
+export interface IncidentEvent {
+  id: string;
+  type: string;
+  at: Date;
+  provider: DeliveryProviderName | null;
+  /** Redacted (redactCourierPayload) before it leaves this module. */
+  payload: unknown;
+}
+
+export interface IncidentNote {
+  id: string;
+  authorEmail: string;
+  body: string;
+  resolves: boolean;
+  createdAt: Date;
+}
+
+export interface IncidentDetail {
+  incident: IncidentRow;
+  events: IncidentEvent[];
+  notes: IncidentNote[];
+}
+
+/** One incident with its order's whole delivery timeline and the admins' notes; null when the order has no incident. */
+export async function findCourierIncidentDetail(tx: Queryable, orderId: string): Promise<IncidentDetail | null> {
+  if (!ID.test(orderId)) return null;
+  const [incident] = (await findCourierIncidents(tx, { orderId }, 1)).rows;
+  if (!incident) return null;
+  const [events, notes] = [
+    await findCourierIncidentEvents(tx, incident.storeId, orderId),
+    await findCourierIncidentNotes(tx, incident.storeId, orderId),
+  ];
+  return {
+    incident,
+    events: events.map((e) => ({ ...e, provider: e.provider as DeliveryProviderName | null, payload: redactCourierPayload(e.payload) })),
+    notes,
+  };
 }

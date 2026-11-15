@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redactCourierPayload } from "./courier-incidents-query";
+import { incidentFiltersFromSearchParams, redactCourierPayload } from "./courier-incidents-query";
 
 const R = "[redacted]";
 
@@ -69,5 +69,31 @@ describe("redactCourierPayload (#536 AC3)", () => {
   it("dates, ids and amounts are not mistaken for phone numbers", () => {
     const payload = { created_at: "2026-11-14 15:10:00", support_reference: 1234567, fee: 1234567890, id: "del_2026111415" };
     expect(redactCourierPayload(payload)).toEqual(payload);
+  });
+});
+
+describe("incidentFiltersFromSearchParams (#536 AC2)", () => {
+  it("keeps only exact allowed values: a near miss, a pattern or an impossible date is dropped", () => {
+    expect(
+      incidentFiltersFromSearchParams({
+        store: "cmwh614qk00065o0m6m511q78",
+        provider: "uber",
+        kind: "assigned_late",
+        from: "2026-03-01",
+        to: "2026-03-31",
+        after: "2026-03-10T12:30:00.000Z_cmwh614qk00065o0m6m511q78",
+      }),
+    ).toEqual({
+      storeId: "cmwh614qk00065o0m6m511q78",
+      provider: "uber",
+      kind: "assigned_late",
+      from: "2026-03-01",
+      to: "2026-03-31",
+      after: "2026-03-10T12:30:00.000Z_cmwh614qk00065o0m6m511q78",
+    });
+    expect(
+      incidentFiltersFromSearchParams({ store: "abc%", provider: "Uber", kind: "failover%", from: "2026-02-30", to: "03/31/2026", after: "2026-03-10_x' OR '1'='1" }),
+    ).toEqual({});
+    expect(incidentFiltersFromSearchParams({ store: ["a", "b"], provider: "" })).toEqual({});
   });
 });

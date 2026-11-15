@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScopedTransaction } from "../db";
-import { findCourierIncidents, type IncidentFilters } from "./courier-incidents-query";
+import { applyCourierWebhook } from "../delivery/webhook";
+import type { DeliveryWebhookEvent } from "../delivery/provider";
+import { findCourierIncidentDetail, findCourierIncidents, type IncidentFilters } from "./courier-incidents-query";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t536-${Date.now().toString(36)}`;
@@ -239,5 +241,30 @@ describe.skipIf(!hasDb)("courier incident log (#536)", () => {
 
     expect((await asA({})).rows.map((r) => [r.storeId, r.orderNumber])).toEqual([[a.storeId, mine.number]]);
     expect((await asA({ storeId: b.storeId })).rows).toEqual([]);
+  });
+
+  it("AC5: a replayed courier webhook adds no second incident row and no second timeline event", async () => {
+    const store = await newStore(`Replay ${RUN}`);
+    const { orderId, number } = await store.order({ status: "COURIER_REQUESTED", deliveries: [{ provider: "uber", status: "requested", minutes: 0 }] });
+    const event: DeliveryWebhookEvent = {
+      provider: "uber",
+      externalDeliveryId: `${RUN}-${orderId}-0`,
+      externalEventId: `evt-${RUN}`,
+      type: "cancelled",
+      occurredAt: at(12),
+      trackingUrl: null,
+      actualFeeCents: null,
+      courier: null,
+      proof: { photoUrl: null, pinEntered: null },
+      payload: { kind: "event.delivery_status", status: "canceled", data: { undeliverable_reason: "customer_unavailable" } },
+    };
+
+    expect(await applyCourierWebhook(event)).toBe("recorded");
+    expect(await applyCourierWebhook(event)).toBe("duplicate");
+
+    const { rows } = await list({ storeId: store.storeId });
+    expect(rows.map((r) => [r.orderNumber, r.kinds])).toEqual([[number, ["provider_cancelled"]]]);
+    const detail = await platformAdminTransaction((tx) => findCourierIncidentDetail(tx, orderId));
+    expect(detail?.events.filter((e) => e.type === "cancelled")).toHaveLength(1);
   });
 });
