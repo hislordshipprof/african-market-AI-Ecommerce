@@ -63,7 +63,10 @@ export default async function StorefrontPage() {
         <EmptyState
           title="Opening soon"
           description="We're getting the shelves ready. Online ordering opens soon."
-        />
+        >
+          {/* No "Explore the aisles" link: nothing can be bought until the store goes live. */}
+          <></>
+        </EmptyState>
       </main>
     );
   const [categories, banners, collections, rails] = await Promise.all([

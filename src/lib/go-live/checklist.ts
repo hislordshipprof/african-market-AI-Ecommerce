@@ -84,7 +84,7 @@ export async function readGoLiveChecklist(storeId: string, now: Date): Promise<G
       done: store.pickupEnabled || storeDelivery || courier,
       detail: [store.pickupEnabled && "Pickup", storeDelivery && "Store delivery", courier && "Courier delivery"].filter(Boolean).join(", ") || "Nothing is on yet",
     },
-    { key: "listings", done: priced >= floor, detail: `${priced} of ${floor}` },
+    { key: "listings", done: priced >= floor, detail: priced >= floor ? `${priced} listed` : `${priced} of ${floor}` },
     { key: "weights", done: needWeight === 0, detail: needWeight === 0 ? "Every active listing has a weight" : `${plural(needWeight, "listing needs", "listings need")} a weight` },
     {
       key: "plan",
