@@ -77,10 +77,11 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
     setLeaving(from);
     setChanged(true);
   }
+  const safeIndex = banners.length ? index % banners.length : 0;
+  useEffect(() => { indexRef.current = safeIndex; }, [safeIndex]);
   if (!banners.length) return null;
-  const safeIndex = index % banners.length;
   const banner = banners[safeIndex];
-  indexRef.current = safeIndex;
+  const leavingIndex = leaving === null ? null : leaving % banners.length;
   const go = (next: number) => {
     const target = (next + banners.length) % banners.length;
     elapsed.current = 0; setProgress(0);
@@ -131,8 +132,9 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
           const next = { ArrowRight: safeIndex + 1, ArrowLeft: safeIndex - 1, Home: 0, End: banners.length - 1 }[e.key];
           if (next !== undefined) { e.preventDefault(); go(next); }
         }}>
-        {leaving !== null && leaving !== safeIndex && slide(leaving % banners.length, "leaving")}
-        {slide(safeIndex, "current")}
+        {/* One keyed list, so the outgoing slide keeps its element (and its animations) while it fades. */}
+        {(leavingIndex !== null && leavingIndex !== safeIndex ? [leavingIndex, safeIndex] : [safeIndex])
+          .map(i => slide(i, i === safeIndex ? "current" : "leaving"))}
         {banners.length > 1 && <div className="sf-hero-controls sf-container">
           <div className="sf-hero-dots">{banners.map((b, i) => <button key={b.id} type="button" className="sf-hero-dot" data-testid="carousel-dot" aria-current={i === safeIndex ? "true" : undefined} aria-label={`Go to slide ${i + 1}`} onClick={() => go(i)}><span><i style={{ transform: `scaleX(${i === safeIndex ? (reduced ? 1 : progress) : 0})` }} /></span></button>)}</div>
           <span className="sr-only" aria-live={running ? "off" : "polite"}>Slide {safeIndex + 1} of {banners.length}: {banner.title}</span>

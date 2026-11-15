@@ -11,22 +11,17 @@ export function ProductListMotion({
   className,
   itemClassName,
   as = "div",
-  contents = false,
 }: {
   children: ReactNode;
   className?: string;
   itemClassName?: string;
   as?: "div" | "ul";
-  contents?: boolean;
 }) {
   const reduced = useReducedMotion();
   const Container = as;
   const Item = as === "ul" ? m.li : m.div;
   const content = (
-    <Container
-      className={className}
-      style={contents ? { display: "contents" } : undefined}
-    >
+    <Container className={className}>
       <AnimatePresence initial={false}>{Children.toArray(children).map((child, index) => (
         <Item
           key={
@@ -37,7 +32,7 @@ export function ProductListMotion({
           className={itemClassName}
           data-sf-reveal
           style={{ "--sf-reveal-delay": `${Math.min(index, 7) * 30}ms` } as CSSProperties}
-          layout={reduced || contents ? false : "position"}
+          layout={reduced ? false : "position"}
           exit={{ opacity: 0 }}
           initial={false}
           transition={
