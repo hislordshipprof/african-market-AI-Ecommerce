@@ -155,6 +155,7 @@ const STORE_SCOPED_MODELS = [
   "ownerReportItem",
   "ownerWhatsAppLink",
   "pickBatch",
+  "productProposal",
   "pushSubscription",
   "refundRequest",
   "reorderList",
@@ -338,12 +339,14 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "courierIncidentNote",
   "ingredient",
   "ingredientSynonym",
+  "listing",
   "masterProduct",
   "masterProductIngredient",
   "order",
   "paymentDispute",
   "paymentDisputeEvent",
   "platformSettings",
+  "productProposal",
   "productSynonym",
   "refundRequest",
   "stockProposal",
@@ -413,6 +416,7 @@ const STORE_SCOPED_TX_MODELS = [
   "paymentIntentRelease",
   "pickBatch",
   "platformSettings",
+  "productProposal",
   "pushSubscription",
   "refundRequest",
   "reorderList",
@@ -1422,6 +1426,10 @@ export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, 
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
 }
 
+/** Serializes reviews of one product proposal (#553), so a second approve or reject sees the first. */
+export async function lockProductProposalRow(tx: Pick<PrismaClient, "$queryRaw">, proposalId: string) {
+  await tx.$queryRaw`SELECT 1 FROM product_proposals WHERE id = ${proposalId} FOR UPDATE`;
+}
 
 /** Serialises catalog duplicate scans for the rest of the transaction (#542). */
 export async function lockDuplicateScan(tx: RawTx): Promise<void> {
