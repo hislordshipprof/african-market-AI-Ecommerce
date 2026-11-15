@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { quotedFrom } from "../email/from";
-import { renderEmail, renderSms, smsStoreName, type NotifyOrder } from "./messages";
+import { renderEmail, renderSms, renderWhatsApp, smsStoreName, type NotifyOrder } from "./messages";
 
 const URL = "https://adas.markets.example/order/tok_abc";
 
 function order(status: string, capturedAmountCents: number | null = 2500): NotifyOrder {
   return {
     id: "order1",
+    storeId: "store1",
     number: 1042,
     status,
     fulfillment: "store-delivery",
@@ -64,5 +65,43 @@ describe("store name in headers and SMS", () => {
   it("a tab or newline between words becomes one space, not a joined word", () => {
     expect(smsStoreName('"Best"\tMarket')).toBe('"Best" Market');
     expect(quotedFrom("Best\nMarket", "orders@example.com")).toBe('"Best Market" <orders@example.com>');
+  });
+});
+
+describe("renderWhatsApp (#560)", () => {
+  const sender = { phoneNumberId: "1234567890", accessToken: "token" };
+  const name = (rendered: ReturnType<typeof renderWhatsApp>) => (rendered?.whatsapp?.message as { name: string }).name;
+
+  it("uses one template per event, with the store name and the tracking path only", () => {
+    const placed = renderWhatsApp(order("AUTHORIZED"), "placed", URL, "+13014482210", sender)!;
+    expect(placed.whatsapp!.sender).toBe(sender);
+    expect(placed.whatsapp!.message).toEqual({
+      type: "template",
+      to: "+13014482210",
+      name: "order_placed",
+      language: "en_US",
+      components: [
+        { type: "body", parameters: [{ type: "text", text: "Ada's Market" }] },
+        { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: "order/tok_abc" }] },
+      ],
+    });
+    expect(JSON.stringify(placed)).not.toContain("order1");
+    expect(JSON.stringify(placed)).not.toContain("1042");
+
+    const events = ["accepted", "out_for_delivery", "delivered", "completed", "cancelled", "refunded"] as const;
+    expect(events.map((event) => name(renderWhatsApp(order("ACCEPTED"), event, URL, "+1", sender)))).toEqual([
+      "order_accepted", "order_out_for_delivery", "order_delivered", "order_completed", "order_cancelled", "order_refund_issued",
+    ]);
+    expect(name(renderWhatsApp(order("READY"), "ready", URL, "+1", sender))).toBe("order_ready_delivery");
+    expect(name(renderWhatsApp({ ...order("AWAITING_PICKUP"), fulfillment: "pickup" }, "ready", URL, "+1", sender))).toBe("order_ready_pickup");
+    const prompt = renderWhatsApp(order("SUBSTITUTION_PENDING"), "substitution", `${URL}/substitutions`, "+1", sender)!;
+    expect(name(prompt)).toBe("order_substitution_prompt");
+    expect(JSON.stringify(prompt)).toContain('"order/tok_abc/substitutions"');
+  });
+
+  it("keeps the query of a link served with ?store=, and refuses a link with no path", () => {
+    const local = renderWhatsApp(order("AUTHORIZED"), "placed", "http://localhost:3000/order/tok_abc?store=adas", "+1", sender)!;
+    expect(JSON.stringify(local)).toContain('"order/tok_abc?store=adas"');
+    expect(renderWhatsApp(order("AUTHORIZED"), "placed", "https://adas.markets.example", "+1", sender)).toBeNull();
   });
 });

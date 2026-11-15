@@ -35,6 +35,7 @@ import {
   ASSISTANT_DISABLED_STATUS,
   assistantChatEnabled,
 } from "./contract";
+import { TURN_COST_FLAG_MICROS } from "../admin/ai-review";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
 import { acceptanceForTurn, shownProducts } from "./shown";
@@ -69,6 +70,8 @@ const RESTING_MESSAGE = "The helper is resting right now. You can still shop and
 export interface ChatHandlerOptions {
   model?: LanguageModel;
   now?: () => Date;
+  /** False never looks a dish up online; the #146 eval runs on the seeded recipe base only (#607). */
+  onlineRecipeLookup?: boolean;
   /** Test seam. Runs after the unlocked transcript read and before classification. */
   afterSnapshot?: (messages: UIMessage[]) => Promise<void>;
 }
@@ -241,7 +244,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
     };
     const handles = itemHandles(store.id, turn.id);
-    const tools = assistantTools(turnCtx, { lookupModel: model }, handles);
+    const tools = assistantTools(turnCtx, { lookupModel: model, onlineLookup: options.onlineRecipeLookup }, handles);
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
       const current = withUser.find((message) => message.id === parsed.id);
@@ -335,6 +338,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         await persistTurn({
           storeId: store.id,
           conversationId: turn.id,
+          turnId: parsed.id,
           messages,
           result,
           modelId,
@@ -426,6 +430,7 @@ async function turnFinishedNormally(result: { finishReason: PromiseLike<string> 
 async function persistTurn(args: {
   storeId: string;
   conversationId: string;
+  turnId: string;
   messages: UIMessage[];
   result: { steps: PromiseLike<Array<{ usage: unknown }>> };
   modelId: ReturnType<typeof assistantModelId>;
@@ -463,6 +468,22 @@ async function persistTurn(args: {
   } catch (error) {
     console.error("[assistant] transcript not saved", args.conversationId, error);
     await releaseLease(args.storeId, args.conversationId);
+    return;
+  }
+  // AI oversight (#544) flags a costly turn for platform review.
+  if (cost > BigInt(TURN_COST_FLAG_MICROS)) {
+    await storeScoped(args.storeId).aiAction.create({
+      data: {
+        storeId: args.storeId,
+        conversationId: args.conversationId,
+        tool: "turn_cost",
+        input: {},
+        output: { costMicros: Number(cost), turn: args.turnId },
+        ok: true,
+      },
+    }).catch((error: unknown) => {
+      console.error("[assistant] turn cost not saved", args.conversationId, error);
+    });
   }
 }
 

@@ -29,6 +29,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 const hasDb = !!process.env.DATABASE_URL;
+// Rate rows live in the database and some windows last an hour, so a fixed ip keeps its count from
+// earlier runs and other files. Every ip this file sends is made unique to this run.
+const runTag = randomUUID().slice(0, 8);
+const runIp = (ip: string) => `${ip}-${runTag}`;
 const KEY = "sk-ant-test";
 
 describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
@@ -90,7 +94,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       steps: [{ kind: "text", text: "hello", inputTokens: 20, outputTokens: 2 }],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    const response = await handler(post(slugA, "hi", "203.0.113.100"));
+    const response = await handler(post(slugA, "hi", runIp("203.0.113.100")));
     expect(response.status).toBe(200);
     await response.text();
     const body = fake.requests[0]?.body;
@@ -121,8 +125,8 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       model: createAssistantModel({ fetch: second.fetch }),
       now: () => new Date("2034-06-02T15:00:00Z"),
     });
-    await (await today(post(slugA, "one", "203.0.113.101"))).text();
-    await (await later(post(slugB, "two", "203.0.113.102"))).text();
+    await (await today(post(slugA, "one", runIp("203.0.113.101")))).text();
+    await (await later(post(slugB, "two", runIp("203.0.113.102")))).text();
     const staticA = JSON.stringify(first.requests[0]?.body).match(/You are the helper[\s\S]*?Rule 40:[^"]+/)?.[0];
     const staticB = JSON.stringify(second.requests[0]?.body).match(/You are the helper[\s\S]*?Rule 40:[^"]+/)?.[0];
     expect(staticA).toBeTruthy();
@@ -157,7 +161,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
         ],
       });
       const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-      const response = await handler(post(slugA, "price this", "203.0.113.103"));
+      const response = await handler(post(slugA, "price this", runIp("203.0.113.103")));
       await response.text();
       expect(await dayTotal()).toBeGreaterThan(before);
     } finally {
@@ -176,7 +180,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       steps: [{ kind: "error", inputTokens: 10, outputTokens: 1 }],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    const response = await handler(post(slugA, "keep the question", "203.0.113.104"));
+    const response = await handler(post(slugA, "keep the question", runIp("203.0.113.104")));
     const body = await response.text();
     expect(body).toContain("Sorry, something went wrong. Please try again.");
     expect(body).not.toContain("Overloaded");
@@ -202,7 +206,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       host: "prov.test",
       origin: "http://prov.test",
       "x-store-slug": slugA,
-      "x-forwarded-for": "203.0.113.110",
+      "x-forwarded-for": runIp("203.0.113.110"),
     };
     const fileResponse = await handler(new Request("http://prov.test/api/assistant/chat", {
       method: "POST",
@@ -251,7 +255,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     expect(textBody).not.toContain("\"type\":\"document\"");
   });
 
-  function message(id: string, text: string, cookie?: string, slug = slugA, ip = "203.0.113.180") {
+  function message(id: string, text: string, cookie?: string, slug = slugA, ip = runIp("203.0.113.180")) {
     return new Request("http://prov.test/api/assistant/chat", {
       method: "POST",
       headers: {
@@ -350,7 +354,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       ],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    const first = await handler(message("egusi-turn-1", "add egusi", open.cookie, slugA, "203.0.113.181"));
+    const first = await handler(message("egusi-turn-1", "add egusi", open.cookie, slugA, runIp("203.0.113.181")));
     expect(first.status).toBe(200);
     const cookie = open.cookie;
     const turn1 = await first.text();
@@ -378,7 +382,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     expect(sent[2]).toContain("2198");
     const line = await storeScoped(storeA).cartLine.findFirst({ where: { cartId, variantId: egusi.variantId } });
     await updateLineQty(storeA, cartId, line!.id, 1, null);
-    const second = await handler(message("egusi-turn-2", "what is in the cart", cookie, slugA, "203.0.113.181"));
+    const second = await handler(message("egusi-turn-2", "what is in the cart", cookie, slugA, runIp("203.0.113.181")));
     const turn2 = await second.text();
     expect(turn2).toContain("$10.99");
     expect(turn2).toContain("I couldn't confirm that price.");
@@ -396,7 +400,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     expect(JSON.stringify(fake.requests[3]?.body)).toContain("tool_result");
     expect(JSON.stringify(fake.requests[3]?.body)).toContain("2198");
     await storeScoped(storeA).listingVariant.update({ where: { id: egusi.variantId }, data: { price: 899 } });
-    const third = await handler(message("egusi-turn-3", "what does it cost now", cookie, slugA, "203.0.113.181"));
+    const third = await handler(message("egusi-turn-3", "what does it cost now", cookie, slugA, runIp("203.0.113.181")));
     const turn3 = await third.text();
     expect(turn3).toContain("$8.99");
     expect(turn3).toContain("I couldn't confirm that price.");
@@ -417,7 +421,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       steps: [{ kind: "text", text: "Ready." }],
     });
     const opener = createChatHandler({ model: createAssistantModel({ fetch: opened.fetch }) });
-    const first = await opener(message("window-open-1", "hello", undefined, slugA, "203.0.113.190"));
+    const first = await opener(message("window-open-1", "hello", undefined, slugA, runIp("203.0.113.190")));
     const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
     await first.text();
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
@@ -447,7 +451,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       steps: [{ kind: "text", text: "That old price is $77.77." }],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: quoted.fetch }) });
-    const response = await handler(message("window-turn-2", "repeat the old price", cookie, slugA, "203.0.113.190"));
+    const response = await handler(message("window-turn-2", "repeat the old price", cookie, slugA, runIp("203.0.113.190")));
     const body = await response.text();
     expect(body).toContain("I couldn't confirm that price.");
     expect(body).not.toContain("77.77");
@@ -474,7 +478,7 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       steps: [{ kind: "text", text: "The broken tool price is $42.42." }],
     });
     const again = await createChatHandler({ model: createAssistantModel({ fetch: broken.fetch }) })(
-      message("window-turn-3", "repeat the broken price", cookie, slugA, "203.0.113.190"),
+      message("window-turn-3", "repeat the broken price", cookie, slugA, runIp("203.0.113.190")),
     );
     const brokenBody = await again.text();
     expect(brokenBody).toContain("I couldn't confirm that price.");
@@ -534,36 +538,36 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
         return inner.fetch(input, init);
       };
       const handler = createChatHandler({ model: createAssistantModel({ fetch: fetchImpl }) });
-      const opened = await handler(message("reprice-turn-1", "show both", open.cookie, store.slug, "203.0.113.191"));
+      const opened = await handler(message("reprice-turn-1", "show both", open.cookie, store.slug, runIp("203.0.113.191")));
       const cookie = open.cookie;
       const turn1 = await opened.text();
       expect(turn1).toContain("$10.99");
       const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
       await settled(store.id, cartId);
-      const turn2 = await (await handler(message("reprice-turn-2", "reprice egusi", cookie, store.slug, "203.0.113.191"))).text();
+      const turn2 = await (await handler(message("reprice-turn-2", "reprice egusi", cookie, store.slug, runIp("203.0.113.191")))).text();
       expect(turn2).toContain("$8.99");
       expect(turn2).toContain("$7.50");
       expect(turn2).toContain("$10.99");
       await settled(store.id, cartId);
-      const turn3 = await (await handler(message("reprice-turn-3", "reprice palm", cookie, store.slug, "203.0.113.191"))).text();
+      const turn3 = await (await handler(message("reprice-turn-3", "reprice palm", cookie, store.slug, runIp("203.0.113.191")))).text();
       expect(turn3).toContain("$14.99");
       expect(turn3).toContain("I couldn't confirm that price.");
       expect(turn3).not.toContain("10.99");
       await settled(store.id, cartId);
-      const turn4 = await (await handler(message("reprice-turn-4", "minimum", cookie, store.slug, "203.0.113.191"))).text();
+      const turn4 = await (await handler(message("reprice-turn-4", "minimum", cookie, store.slug, runIp("203.0.113.191")))).text();
       expect(turn4).toContain("$7.99");
       expect(turn4).toContain("$5.00");
       expect(turn4).toContain("I couldn't confirm that price.");
       expect(turn4).not.toContain("6.66");
       await settled(store.id, cartId);
-      const turn5 = await (await handler(message("reprice-turn-5", "summary", cookie, store.slug, "203.0.113.191"))).text();
+      const turn5 = await (await handler(message("reprice-turn-5", "summary", cookie, store.slug, runIp("203.0.113.191")))).text();
       expect(turn5).toContain("In the cart.");
       await settled(store.id, cartId);
       const summary = await storeScoped(store.id).aiAction.findFirst({
         where: { tool: "get_cart_summary", conversation: { cartId } },
       });
       expect(JSON.stringify(summary?.output)).toContain(egusi.variantId);
-      const turn6 = await (await handler(message("reprice-turn-6", "quote summary", cookie, store.slug, "203.0.113.191"))).text();
+      const turn6 = await (await handler(message("reprice-turn-6", "quote summary", cookie, store.slug, runIp("203.0.113.191")))).text();
       expect(turn6).toContain("$6.40");
       expect(turn6).toContain("I couldn't confirm that price.");
       expect(turn6).not.toContain("8.99");
@@ -598,8 +602,8 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     const handlerA = createChatHandler({ model: createAssistantModel({ fetch: fakeA.fetch }) });
     const handlerB = createChatHandler({ model: createAssistantModel({ fetch: fakeB.fetch }) });
     const [bodyA, bodyB] = await Promise.all([
-      handlerA(message("iso-turn-a1", "price", openA.cookie, slugA, "203.0.113.192")).then((response) => response.text()),
-      handlerB(message("iso-turn-b1", "price", openB.cookie, slugB, "203.0.113.193")).then((response) => response.text()),
+      handlerA(message("iso-turn-a1", "price", openA.cookie, slugA, runIp("203.0.113.192"))).then((response) => response.text()),
+      handlerB(message("iso-turn-b1", "price", openB.cookie, slugB, runIp("203.0.113.193"))).then((response) => response.text()),
     ]);
     expect(bodyA).toContain("$10.99");
     expect(bodyA).toContain("$10.00");

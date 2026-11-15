@@ -6,6 +6,7 @@ import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
 import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
+import { EARTH_RADIUS_MI } from "./address/geo";
 import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
 
 /** One TTL for preview cleanup and the import-token claim. */
@@ -78,6 +79,8 @@ export const platform = {
   productSynonym: wrapPlatformDelegate(prisma.productSynonym),
   recipe: wrapPlatformDelegate(prisma.recipe),
   platformSettings: wrapPlatformDelegate(prisma.platformSettings),
+  gazetteerZip: wrapPlatformDelegate(prisma.gazetteerZip),
+  gazetteerPlace: wrapPlatformDelegate(prisma.gazetteerPlace),
 };
 
 function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
@@ -125,9 +128,11 @@ export function storeScoped(storeId: string) {
     substitutionRequest: wrapDelegate(storeId, prisma.substitutionRequest),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
+    aiReviewFlag: wrapDelegate(storeId, prisma.aiReviewFlag),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
     ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
+    whatsAppOptOut: wrapDelegate(storeId, prisma.whatsAppOptOut),
     copilotConversation: wrapDelegate(storeId, prisma.copilotConversation),
     copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
     stockProposal: wrapDelegate(storeId, prisma.stockProposal),
@@ -136,15 +141,19 @@ export function storeScoped(storeId: string) {
     ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
     reorderList: wrapDelegate(storeId, prisma.reorderList),
     reorderListItem: wrapDelegate(storeId, prisma.reorderListItem),
+    driverRoute: wrapDelegate(storeId, prisma.driverRoute),
+    pickBatch: wrapDelegate(storeId, prisma.pickBatch),
     listingDraft: wrapDelegate(storeId, prisma.listingDraft),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     delivery: wrapDelegate(storeId, prisma.delivery),
     deliveryEvent: wrapDelegate(storeId, prisma.deliveryEvent),
     pushSubscription: wrapDelegate(storeId, prisma.pushSubscription),
+    orderPushSubscription: wrapDelegate(storeId, prisma.orderPushSubscription),
     supportThread: wrapDelegate(storeId, prisma.supportThread),
     supportMessage: wrapDelegate(storeId, prisma.supportMessage),
     storeSubscription: wrapDelegate(storeId, prisma.storeSubscription),
     assistantChatMonth: wrapDelegate(storeId, prisma.assistantChatMonth),
+    storeCoupon: wrapDelegate(storeId, prisma.storeCoupon),
   };
 }
 
@@ -293,7 +302,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "aiReviewFlag" | "copilotConversation" | "stockProposal" | "supportThread" | "supportMessage" | "storeSubscription" | "platformSettings" | "courierIncidentNote" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -319,9 +328,14 @@ export async function platformAdminTransaction<T>(
       attributeProposal: tx.attributeProposal,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
+      aiReviewFlag: tx.aiReviewFlag,
+      copilotConversation: tx.copilotConversation,
+      stockProposal: tx.stockProposal,
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
       storeSubscription: tx.storeSubscription,
+      platformSettings: tx.platformSettings,
+      courierIncidentNote: tx.courierIncidentNote,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -335,7 +349,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "driverRoute" | "pickBatch" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "orderPushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "storeCoupon" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -373,11 +387,14 @@ export async function storeScopedTransaction<T>(
       ownerReportItem: tx.ownerReportItem,
       reorderList: tx.reorderList,
       reorderListItem: tx.reorderListItem,
+      driverRoute: tx.driverRoute,
+      pickBatch: tx.pickBatch,
       listingDraft: tx.listingDraft,
       notificationLog: tx.notificationLog,
       delivery: tx.delivery,
       deliveryEvent: tx.deliveryEvent,
       pushSubscription: tx.pushSubscription,
+      orderPushSubscription: tx.orderPushSubscription,
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
       listingAttributes: tx.listingAttributes,
@@ -386,6 +403,7 @@ export async function storeScopedTransaction<T>(
       ingredient: tx.ingredient,
       ingredientSynonym: tx.ingredientSynonym,
       platformSettings: tx.platformSettings,
+      storeCoupon: tx.storeCoupon,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -547,6 +565,11 @@ export async function lockStoreAddress(
     state: row.state,
     zip: row.zip,
   };
+}
+
+/** Locks the one platform settings row, so a concurrent settings save waits for this one (#535). */
+export async function lockPlatformSettingsRow(tx: Pick<PrismaClient, "$queryRaw">): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM platform_settings WHERE id = 'platform' FOR UPDATE`;
 }
 
 /** Locks the store and returns the delivery settings read under that lock. */
@@ -1232,6 +1255,13 @@ export async function findOrderAlertRows(opts: {
   };
 }
 
+/** Stores with a listing on this master product, active or not: the storefronts its edits reach. */
+export async function storesListingMasterProduct(tx: Pick<PrismaClient, "$queryRaw">, productId: string): Promise<string[]> {
+  const rows = await tx.$queryRaw<Array<{ store_id: string }>>`
+    SELECT DISTINCT store_id FROM listings WHERE master_product_id = ${productId}`;
+  return rows.map((row) => row.store_id);
+}
+
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
@@ -1280,6 +1310,15 @@ export async function claimImportRow(
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+/** A read as the platform admin, for queries Prisma's query API cannot express. */
+export async function platformAdminRawQuery<T>(sql: Prisma.Sql): Promise<T[]> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    return tx.$queryRaw<T[]>(sql);
+  });
 }
 
 export async function storeScopedRawQuery<T>(
@@ -1528,6 +1567,34 @@ export function deleteExpiredAssistantConversations(
   );
 }
 
+/**
+ * Deletes one batch of AI review flags (#544) older than the naive timestamp. Shopper flags already went with
+ * their conversation; this removes copilot flags, whose conversations have no retention job.
+ */
+export function deleteExpiredReviewFlags(
+  cutoff: string,
+  batchSize: number,
+  batchKey: string,
+): Promise<number> {
+  return deleteExpiredBatch(batchKey, (tx) =>
+    tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH doomed AS (
+        SELECT id FROM ai_review_flags
+        WHERE created_at < ${cutoff}
+        ORDER BY created_at, id
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      ),
+      removed AS (
+        DELETE FROM ai_review_flags
+        WHERE id IN (SELECT id FROM doomed)
+        RETURNING id
+      )
+      SELECT count(*)::int AS deleted FROM removed
+    `,
+  );
+}
+
 async function deleteExpiredBatch(
   batchKey: string,
   remove: (tx: Pick<PrismaClient, "$queryRaw" | "$executeRaw">) => Promise<Array<{ deleted: number }>>,
@@ -1607,6 +1674,18 @@ export async function claimAssistantCapDay(day: string): Promise<boolean> {
   });
 }
 
+/** Ledger days from `last` back `days` days, newest first, for the admin eval and spend page (#545). */
+export async function listAssistantSpendDays(last: string, days: number): Promise<Array<{ day: Date; cost: bigint; alerted: boolean }>> {
+  return appUserQuery((tx) =>
+    tx.$queryRaw<Array<{ day: Date; cost: bigint; alerted: boolean }>>`
+      SELECT day, cost_micros AS cost, cap_alerted_at IS NOT NULL AS alerted
+      FROM assistant_spend_days
+      WHERE day <= CAST(${last} AS date) AND day > CAST(${last} AS date) - ${days}::int
+      ORDER BY day DESC
+    `,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // WhatsApp inbound (#143). Called inside one platformAdminTransaction, so the
 // claim and the verification write commit or roll back together. Each query
@@ -1635,6 +1714,11 @@ export async function claimInboundWhatsAppMessage(tx: RawTx, messageId: string):
     )
   `;
   return true;
+}
+
+/** Undoes a committed claim whose handling failed, so Meta's redelivery is handled. */
+export async function releaseInboundWhatsAppMessage(messageId: string): Promise<void> {
+  await platformAdminTransaction((tx) => tx.$executeRaw`DELETE FROM whatsapp_inbound_messages WHERE id = ${messageId}`);
 }
 
 export type OwnerLinkCodeOutcome =
@@ -1895,6 +1979,244 @@ export async function readOwnerLink(storeId: string, userId: string): Promise<{
   };
 }
 
+// ---------------------------------------------------------------------------
+// Store WhatsApp numbers (#558). The business token is ciphertext sealed by
+// src/lib/whatsapp/token-box.ts; nothing here returns it.
+
+export interface StoreWhatsAppNumberRow {
+  wabaId: string;
+  phoneNumberId: string;
+  displayNumber: string | null;
+  status: "pending" | "registered" | "failed" | "disconnected";
+  coexistence: boolean;
+  failureCode: string | null;
+  updatedAt: Date;
+}
+
+/** The phone_number_id is held by another store's pending or registered row, or this store has a link in flight. */
+export class StoreWhatsAppNumberTakenError extends Error {
+  constructor() {
+    super("WhatsApp number is linked to another store");
+    this.name = "StoreWhatsAppNumberTakenError";
+  }
+}
+
+/** A raw-query unique violation on the platform-wide phone_number_id index. */
+function isPhoneNumberIdTaken(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  const cause = (error.meta as { driverAdapterError?: { cause?: { originalCode?: unknown; constraint?: { index?: unknown } } } } | undefined)
+    ?.driverAdapterError?.cause;
+  return cause?.originalCode === "23505" && cause.constraint?.index === "store_whatsapp_numbers_phone_number_id_key";
+}
+
+/**
+ * Starts a link under the store row's lock. The same ids already registered
+ * return "linked" untouched (a retry keeps the token). Otherwise the row goes
+ * `pending` with these ids, its token cleared, plus an audit row; committed
+ * before Meta is called. A pending row younger than LINK_IN_FLIGHT is another
+ * link still running and refuses this one; an older one is a run that died,
+ * which the owner links again.
+ */
+export async function beginStoreWhatsAppNumberLink(input: {
+  storeId: string;
+  actorId: string;
+  actorEmail: string;
+  wabaId: string;
+  phoneNumberId: string;
+  coexistence: boolean;
+}): Promise<"begun" | "linked"> {
+  try {
+    return await storeScopedTransaction(input.storeId, async (tx) => {
+      const existing = await tx.$queryRaw<Array<{ status: string; waba_id: string; phone_number_id: string; coexistence: boolean }>>`
+        SELECT status, waba_id, phone_number_id, coexistence FROM store_whatsapp_numbers
+        WHERE store_id = ${input.storeId}
+        FOR UPDATE
+      `;
+      const row = existing[0];
+      if (row?.status === "registered" && row.waba_id === input.wabaId
+        && row.phone_number_id === input.phoneNumberId && row.coexistence === input.coexistence) {
+        return "linked";
+      }
+      // Provider calls are 5 at most, each with a 10 s timeout, so a live link is pending well under this.
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        INSERT INTO store_whatsapp_numbers (
+          id, store_id, waba_id, phone_number_id, display_number, status, coexistence,
+          business_token, failure_code, created_at, updated_at
+        ) VALUES (
+          ${crypto.randomUUID()}, ${input.storeId}, ${input.wabaId}, ${input.phoneNumberId}, NULL, 'pending',
+          ${input.coexistence}, NULL, NULL, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
+        )
+        ON CONFLICT (store_id) DO UPDATE SET
+          waba_id = EXCLUDED.waba_id,
+          phone_number_id = EXCLUDED.phone_number_id,
+          display_number = NULL,
+          status = 'pending',
+          coexistence = EXCLUDED.coexistence,
+          business_token = NULL,
+          failure_code = NULL,
+          updated_at = EXCLUDED.updated_at
+        WHERE store_whatsapp_numbers.status <> 'pending'
+          OR store_whatsapp_numbers.updated_at < EXCLUDED.updated_at - ${LINK_IN_FLIGHT}::interval
+        RETURNING id
+      `;
+      const id = rows[0]?.id;
+      if (!id) throw new StoreWhatsAppNumberTakenError();
+      await tx.auditLog.create({
+        data: {
+          storeId: input.storeId,
+          actorId: input.actorId,
+          actorEmail: input.actorEmail,
+          action: "whatsapp_number.link",
+          entityType: "store_whatsapp_number",
+          entityId: id,
+          after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, coexistence: input.coexistence },
+        },
+      });
+      return "begun";
+    });
+  } catch (error) {
+    if (isPhoneNumberIdTaken(error)) throw new StoreWhatsAppNumberTakenError();
+    throw error;
+  }
+}
+
+const LINK_IN_FLIGHT = "2 minutes";
+
+/**
+ * Finishes a pending link. Keyed on the phone id, so a newer link for another
+ * number is never overwritten. False when no pending row matched: the link was
+ * superseded or disconnected meanwhile, so the caller must not report success.
+ */
+export async function finishStoreWhatsAppNumberLink(
+  storeId: string,
+  phoneNumberId: string,
+  result:
+    | { status: "registered"; displayNumber: string; sealedToken: string }
+    | { status: "failed"; failureCode: string },
+): Promise<boolean> {
+  const updated = await storeScopedTransaction(storeId, (tx) =>
+    result.status === "registered"
+      ? tx.$executeRaw`
+          UPDATE store_whatsapp_numbers
+          SET status = 'registered', display_number = ${result.displayNumber},
+            business_token = ${result.sealedToken}, failure_code = NULL, updated_at = (now() AT TIME ZONE 'UTC')
+          WHERE store_id = ${storeId} AND phone_number_id = ${phoneNumberId} AND status = 'pending'
+        `
+      : tx.$executeRaw`
+          UPDATE store_whatsapp_numbers
+          SET status = 'failed', business_token = NULL, failure_code = ${result.failureCode},
+            updated_at = (now() AT TIME ZONE 'UTC')
+          WHERE store_id = ${storeId} AND phone_number_id = ${phoneNumberId} AND status = 'pending'
+        `,
+  );
+  return updated === 1;
+}
+
+/** Marks the store's number disconnected and drops its token, with an audit row when one existed. */
+export async function disconnectStoreWhatsAppNumberRow(storeId: string, actorId: string, actorEmail: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      UPDATE store_whatsapp_numbers
+      SET status = 'disconnected', business_token = NULL, updated_at = (now() AT TIME ZONE 'UTC')
+      WHERE store_id = ${storeId} AND status <> 'disconnected'
+      RETURNING id
+    `;
+    if (!rows[0]) return;
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId,
+        actorEmail,
+        action: "whatsapp_number.disconnect",
+        entityType: "store_whatsapp_number",
+        entityId: rows[0].id,
+      },
+    });
+  });
+}
+
+export async function readStoreWhatsAppNumber(storeId: string): Promise<StoreWhatsAppNumberRow | null> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.$queryRaw<Array<{
+      waba_id: string;
+      phone_number_id: string;
+      display_number: string | null;
+      status: StoreWhatsAppNumberRow["status"];
+      coexistence: boolean;
+      failure_code: string | null;
+      updated_at: Date;
+    }>>`
+      SELECT waba_id, phone_number_id, display_number, status, coexistence, failure_code, updated_at
+      FROM store_whatsapp_numbers
+      WHERE store_id = ${storeId}
+    `,
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    wabaId: row.waba_id,
+    phoneNumberId: row.phone_number_id,
+    displayNumber: row.display_number,
+    status: row.status,
+    coexistence: row.coexistence,
+    failureCode: row.failure_code,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** The store a registered number belongs to, by exact phone_number_id. Inside the inbound platformAdminTransaction. */
+export async function findStoreByWhatsAppPhoneNumberId(
+  tx: RawTx,
+  phoneNumberId: string,
+): Promise<{ storeId: string } | null> {
+  const rows = await tx.$queryRaw<Array<{ store_id: string }>>`
+    SELECT store_id FROM store_whatsapp_numbers
+    WHERE phone_number_id = ${phoneNumberId} AND status = 'registered'
+  `;
+  return rows[0] ? { storeId: rows[0].store_id } : null;
+}
+
+/** The store's registered number and its sealed token, for sending from it (#560). Only src/lib/whatsapp opens the token. */
+export async function readStoreWhatsAppSender(
+  storeId: string,
+): Promise<{ phoneNumberId: string; sealedToken: string } | null> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.$queryRaw<Array<{ phone_number_id: string; business_token: string | null }>>`
+      SELECT phone_number_id, business_token FROM store_whatsapp_numbers
+      WHERE store_id = ${storeId} AND status = 'registered'
+    `,
+  );
+  const row = rows[0];
+  return row?.business_token ? { phoneNumberId: row.phone_number_id, sealedToken: row.business_token } : null;
+}
+
+/** True when the store has a registered number, so checkout offers WhatsApp updates (#560). Pass the order's transaction to read under it. */
+export async function storeHasWhatsAppNumber(storeId: string, tx?: Pick<PrismaClient, "$queryRaw">): Promise<boolean> {
+  const read = (client: Pick<PrismaClient, "$queryRaw">) => client.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM store_whatsapp_numbers WHERE store_id = ${storeId} AND status = 'registered'
+  `;
+  const rows = tx ? await read(tx) : await storeScopedTransaction(storeId, read);
+  return rows.length > 0;
+}
+
+/** A customer sent STOP to this store's number (#560). A repeat is a no-op. */
+export async function recordWhatsAppOptOut(storeId: string, waId: string): Promise<void> {
+  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+    INSERT INTO whatsapp_opt_outs (id, store_id, wa_id, created_at)
+    VALUES (${crypto.randomUUID()}, ${storeId}, ${waId}, (now() AT TIME ZONE 'UTC'))
+    ON CONFLICT (store_id, wa_id) DO NOTHING
+  `);
+}
+
+/** Exact wa_id match at this store only. */
+export async function isWhatsAppOptedOut(storeId: string, waId: string): Promise<boolean> {
+  const row = await storeScoped(storeId).whatsAppOptOut.findUnique({
+    where: { storeId_waId: { storeId, waId } },
+    select: { id: true },
+  });
+  return row !== null;
+}
+
 /** Creates the store's billing row if missing and locks it for this transaction (#494). */
 export async function lockStoreSubscriptionRow(tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">, storeId: string): Promise<void> {
   await tx.$executeRaw`INSERT INTO store_subscriptions (store_id) VALUES (${storeId}) ON CONFLICT (store_id) DO NOTHING`;
@@ -1937,6 +2259,22 @@ export async function incrementAssistantChatMonth(
   return rows[0]?.chats ?? null;
 }
 
+export type AssistantChatMonthRow = { storeId: string; storeName: string; chats: number; subscriptionPlan: string | null; subscriptionStatus: string | null };
+
+/** Every store with chats in the month, with its subscription, for the platform admin (#545). */
+export async function listAssistantChatMonthRows(month: string): Promise<AssistantChatMonthRow[]> {
+  return platformAdminTransaction((tx) =>
+    tx.$queryRaw<AssistantChatMonthRow[]>`
+      SELECT m.store_id AS "storeId", s.name AS "storeName", m.chats,
+             sub.plan AS "subscriptionPlan", sub.status AS "subscriptionStatus"
+      FROM assistant_chat_months m
+      JOIN stores s ON s.id = m.store_id
+      LEFT JOIN store_subscriptions sub ON sub.store_id = m.store_id
+      WHERE m.month = CAST(${month} AS date) AND m.chats > 0
+    `,
+  );
+}
+
 /** Marks the month's owner warning sent. False when it already was. */
 export async function claimAssistantChatWarning(
   tx: Pick<PrismaClient, "$queryRaw">,
@@ -1948,4 +2286,260 @@ export async function claimAssistantChatWarning(
     WHERE store_id = ${storeId} AND month = ${month}::date AND warned_at IS NULL
     RETURNING store_id`;
   return rows.length > 0;
+}
+
+/** Great-circle miles from the point to the row's lat/lng columns, in SQL (no PostGIS, ADR-0012). */
+function haversineMilesSql(point: { lat: number; lng: number }, alias: "s" | "z"): Prisma.Sql {
+  const lat = Prisma.raw(`${alias}.lat`);
+  const lng = Prisma.raw(`${alias}.lng`);
+  return Prisma.sql`(2 * ${EARTH_RADIUS_MI}::float8 * asin(sqrt(LEAST(1,
+    power(sin(radians(${lat} - ${point.lat}::float8) / 2), 2)
+    + cos(radians(${point.lat}::float8)) * cos(radians(${lat})) * power(sin(radians(${lng} - ${point.lng}::float8) / 2), 2)))))`;
+}
+
+/** Listed, active, located stores nearest the point first (Store directory near me, #452). */
+export function listedStoresByDistance(
+  point: { lat: number; lng: number },
+  limit: number,
+): Promise<{ slug: string; distance: number }[]> {
+  return appUserQuery((tx) => tx.$queryRaw<{ slug: string; distance: number }[]>`
+    SELECT slug, distance FROM (
+      SELECT s.slug, ${haversineMilesSql(point, "s")} AS distance
+      FROM stores s
+      WHERE s.listed AND s.status = 'active' AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+    ) d
+    ORDER BY distance, slug
+    LIMIT ${limit}`);
+}
+
+/** True when the point is within some Gazetteer ZIP's reach; bandDeg bounds the latitude scan (#452). */
+export async function pointWithinZipReach(point: { lat: number; lng: number }, bandDeg: number): Promise<boolean> {
+  const rows = await appUserQuery((tx) => tx.$queryRaw<{ hit: number }[]>`
+    SELECT 1 AS hit FROM gazetteer_zips z
+    WHERE z.lat BETWEEN ${point.lat - bandDeg}::float8 AND ${point.lat + bandDeg}::float8
+      AND ${haversineMilesSql(point, "z")} <= z.reach_mi
+    LIMIT 1`);
+  return rows.length > 0;
+}
+
+/** One courier incident row as the incident log query returns it (#536). */
+export type CourierIncidentRaw = {
+  orderId: string;
+  storeId: string;
+  storeName: string;
+  orderNumber: number;
+  orderStatus: string;
+  providers: string[] | null;
+  kinds: string[];
+  openedAt: Date;
+  lastAt: Date;
+  resolvedAt: Date | null;
+  deliveryStatus: string | null;
+};
+
+type RawQueryable = Pick<Prisma.TransactionClient, "$queryRaw">;
+
+/**
+ * The courier incident log (#536): incidents derived on read from delivery_events, one row per order, newest first,
+ * in one query. Every filter compares exactly. What `tx` may see decides the stores: RLS applies.
+ */
+export async function findCourierIncidentRows(
+  tx: RawQueryable,
+  q: {
+    storeId?: string;
+    orderId?: string;
+    provider?: string;
+    kind?: string;
+    from?: Date;
+    toExclusive?: Date;
+    cursor?: { at: Date; orderId: string };
+    limit: number;
+  },
+): Promise<CourierIncidentRaw[]> {
+  const eventScope = [
+    q.storeId ? Prisma.sql`AND e.store_id = ${q.storeId}` : Prisma.empty,
+    q.orderId ? Prisma.sql`AND e.order_id = ${q.orderId}` : Prisma.empty,
+  ];
+  const where = [
+    q.provider ? Prisma.sql`AND ${q.provider} = ANY(p.providers)` : Prisma.empty,
+    q.kind ? Prisma.sql`AND ${q.kind} = ANY(i.kinds)` : Prisma.empty,
+    q.from ? Prisma.sql`AND i.opened_at >= ${q.from}::timestamp(3)` : Prisma.empty,
+    q.toExclusive ? Prisma.sql`AND i.opened_at < ${q.toExclusive}::timestamp(3)` : Prisma.empty,
+    q.cursor ? Prisma.sql`AND (i.opened_at, i.order_id) < (${q.cursor.at}::timestamp(3), ${q.cursor.orderId})` : Prisma.empty,
+  ];
+  return tx.$queryRaw<CourierIncidentRaw[]>`
+    WITH signals AS (
+      SELECT e.store_id, e.order_id, e.created_at AS at,
+        CASE
+          WHEN e.type = 'failover_triggered' THEN 'failover'
+          WHEN e.type = 'both_failed' THEN 'both_failed'
+          WHEN e.type = 'returned'
+            OR (e.type = 'cancelled' AND COALESCE(e.payload->>'cancellation_reason', e.payload->>'reason') = 'failed_to_return')
+            THEN 'returned'
+          -- A cancel the platform made itself (failover replaced the delivery, a pushed ready time rebooked it, or the
+          -- order was cancelled) is not the provider's.
+          WHEN e.type = 'cancelled' AND o.status <> 'CANCELLED' AND NOT EXISTS (
+              SELECT 1 FROM delivery_events f
+              WHERE f.store_id = e.store_id AND f.order_id = e.order_id AND f.delivery_id = e.delivery_id
+                AND (f.type = 'failover_triggered' OR (f.type = 'cancelled' AND f.payload->>'by' = 'platform'))
+            ) THEN 'provider_cancelled'
+          -- The deadline the assignment timer uses: the later of the timeout after booking and the ready time.
+          WHEN e.type = 'courier_assigned'
+            AND e.created_at > GREATEST(d.created_at + make_interval(secs => ps.courier_assignment_timeout_s), d.pickup_ready_at)
+            THEN 'assigned_late'
+          WHEN e.type = 'delivered' AND d.proof_url IS NULL AND d.pin IS NULL THEN 'delivered_no_proof'
+        END AS kind
+      FROM delivery_events e
+      JOIN orders o ON o.id = e.order_id AND o.store_id = e.store_id
+      LEFT JOIN deliveries d ON d.id = e.delivery_id AND d.store_id = e.store_id
+      CROSS JOIN (SELECT courier_assignment_timeout_s FROM platform_settings WHERE id = 'platform') ps
+      WHERE e.type IN ('failover_triggered', 'both_failed', 'cancelled', 'returned', 'courier_assigned', 'delivered')
+        AND o.fulfillment = 'courier'
+        ${eventScope[0]} ${eventScope[1]}
+    ),
+    incidents AS (
+      SELECT store_id, order_id, min(at) AS opened_at, max(at) AS last_at, array_agg(DISTINCT kind ORDER BY kind) AS kinds
+      FROM signals
+      WHERE kind IS NOT NULL
+      GROUP BY store_id, order_id
+    )
+    SELECT i.order_id AS "orderId", i.store_id AS "storeId", s.name AS "storeName", o.number AS "orderNumber",
+      o.status AS "orderStatus", p.providers, i.kinds, i.opened_at AS "openedAt", i.last_at AS "lastAt",
+      r.resolved_at AS "resolvedAt", ld.status AS "deliveryStatus"
+    FROM incidents i
+    JOIN orders o ON o.id = i.order_id AND o.store_id = i.store_id
+    JOIN stores s ON s.id = i.store_id
+    LEFT JOIN LATERAL (
+      SELECT array_agg(provider ORDER BY first_at) AS providers
+      FROM (
+        SELECT provider, min(at) AS first_at
+        FROM (
+          SELECT d.provider, d.created_at AS at FROM deliveries d WHERE d.store_id = i.store_id AND d.order_id = i.order_id
+          UNION ALL
+          -- A create error leaves no delivery row; its failover event names the courier that refused.
+          SELECT f.payload->>'fromProvider', f.created_at FROM delivery_events f
+          WHERE f.store_id = i.store_id AND f.order_id = i.order_id AND f.type = 'failover_triggered' AND f.delivery_id IS NULL
+        ) tried
+        WHERE provider IS NOT NULL
+        GROUP BY provider
+      ) firsts
+    ) p ON true
+    LEFT JOIN LATERAL (
+      SELECT max(n.created_at) AS resolved_at FROM courier_incident_notes n
+      WHERE n.store_id = i.store_id AND n.order_id = i.order_id AND n.resolves
+    ) r ON true
+    LEFT JOIN LATERAL (
+      SELECT d.status FROM deliveries d WHERE d.store_id = i.store_id AND d.order_id = i.order_id ORDER BY d.created_at DESC LIMIT 1
+    ) ld ON true
+    WHERE true ${where[0]} ${where[1]} ${where[2]} ${where[3]} ${where[4]}
+    ORDER BY i.opened_at DESC, i.order_id DESC
+    LIMIT ${q.limit}
+  `;
+}
+
+/** Every delivery event on one order, oldest first, with its courier (#536). Payloads are raw: redact before render. */
+export async function findCourierIncidentEvents(tx: RawQueryable, storeId: string, orderId: string) {
+  return tx.$queryRaw<Array<{ id: string; type: string; at: Date; payload: unknown; provider: string | null }>>`
+    SELECT e.id, e.type, e.created_at AS at, e.payload, COALESCE(d.provider, e.payload->>'fromProvider') AS provider
+    FROM delivery_events e
+    LEFT JOIN deliveries d ON d.id = e.delivery_id AND d.store_id = e.store_id
+    WHERE e.store_id = ${storeId} AND e.order_id = ${orderId}
+    ORDER BY e.created_at, e.id
+  `;
+}
+
+/** The admins' notes on one courier incident, oldest first (#536). */
+export async function findCourierIncidentNotes(tx: RawQueryable, storeId: string, orderId: string) {
+  return tx.$queryRaw<Array<{ id: string; authorEmail: string; body: string; resolves: boolean; createdAt: Date }>>`
+    SELECT id, author_email AS "authorEmail", body, resolves, created_at AS "createdAt"
+    FROM courier_incident_notes
+    WHERE store_id = ${storeId} AND order_id = ${orderId}
+    ORDER BY created_at, id
+  `;
+}
+
+/** Great-circle miles between two rows' lat/lng columns, in SQL (#455). */
+function haversineColumnsSql(a: "z", b: "s"): Prisma.Sql {
+  const [aLat, aLng, bLat, bLng] = [`${a}.lat`, `${a}.lng`, `${b}.lat`, `${b}.lng`].map((c) => Prisma.raw(c));
+  return Prisma.sql`(2 * ${EARTH_RADIUS_MI}::float8 * asin(sqrt(LEAST(1,
+    power(sin(radians(${bLat} - ${aLat}) / 2), 2)
+    + cos(radians(${aLat})) * cos(radians(${bLat})) * power(sin(radians(${bLng} - ${aLng}) / 2), 2)))))`;
+}
+
+/** A shopper's "tell me when a store opens" request (#455). The insert policy lets any app_user add one; a repeat is ignored. */
+export async function insertDirectoryStoreRequest(row: { id: string; zip: string; email: string | null; phone: string | null; consentText: string }): Promise<void> {
+  await appUserQuery((tx) => tx.$executeRaw`
+    INSERT INTO directory_store_requests (id, zip, email, phone, consent_text)
+    VALUES (${row.id}, ${row.zip}, ${row.email}, ${row.phone}, ${row.consentText})
+    ON CONFLICT DO NOTHING`);
+}
+
+export interface DirectoryRequestMatch {
+  id: string;
+  zip: string;
+  email: string | null;
+  phone: string | null;
+  storeId: string;
+  slug: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  distance: number;
+}
+
+/** Waiting requests with a listed, active store within `miles` of their ZIP, each with its nearest such store, in id order after the cursor. */
+export function findDirectoryRequestMatches(afterId: string, miles: number, limit: number): Promise<DirectoryRequestMatch[]> {
+  return platformAdminRawQuery<DirectoryRequestMatch>(Prisma.sql`
+    SELECT DISTINCT ON (r.id) r.id, r.zip, r.email, r.phone, s.id AS "storeId", s.slug, s.name, s.city, s.state,
+      ${haversineColumnsSql("z", "s")} AS distance
+    FROM directory_store_requests r
+    JOIN gazetteer_zips z ON z.zip = r.zip
+    JOIN stores s ON s.listed AND s.status = 'active' AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+      AND s.lat BETWEEN z.lat - ${miles / 69}::float8 AND z.lat + ${miles / 69}::float8
+    WHERE r.notified_at IS NULL AND r.id > ${afterId} AND ${haversineColumnsSql("z", "s")} <= ${miles}::float8
+    ORDER BY r.id, distance, s.slug
+    LIMIT ${limit}`);
+}
+
+/** The one message went out: keep the ZIP and dates, erase the contact. False when another run got there first. */
+export async function markDirectoryRequestNotified(id: string, storeId: string): Promise<boolean> {
+  const rows = await platformAdminRawQuery<{ id: string }>(Prisma.sql`
+    UPDATE directory_store_requests SET notified_at = now(), notified_store_id = ${storeId}, email = NULL, phone = NULL
+    WHERE id = ${id} AND notified_at IS NULL
+    RETURNING id`);
+  return rows.length > 0;
+}
+
+export interface DirectoryRequestCount {
+  zip: string;
+  waiting: number;
+  notified: number;
+  latest: Date;
+}
+
+/** Request counts per ZIP (#455). Never returns a contact. */
+export function directoryRequestCounts(): Promise<DirectoryRequestCount[]> {
+  return platformAdminRawQuery<DirectoryRequestCount>(Prisma.sql`
+    SELECT r.zip,
+      count(*) FILTER (WHERE r.notified_at IS NULL)::int AS waiting,
+      count(*) FILTER (WHERE r.notified_at IS NOT NULL)::int AS notified,
+      max(r.created_at) AS latest
+    FROM directory_store_requests r
+    GROUP BY r.zip`);
+}
+
+/** For each ZIP, the nearest Gazetteer place in the given state (a nearest place anywhere can be across a state line). */
+export async function nearestPlacesInState(zips: { zip: string; state: string }[]): Promise<Map<string, string>> {
+  if (zips.length === 0) return new Map();
+  const rows = await appUserQuery((tx) => tx.$queryRaw<{ zip: string; name: string }[]>`
+    SELECT q.zip, p.name
+    FROM unnest(${zips.map((z) => z.zip)}::text[], ${zips.map((z) => z.state)}::text[]) AS q(zip, state)
+    JOIN gazetteer_zips z ON z.zip = q.zip
+    JOIN LATERAL (
+      SELECT g.name FROM gazetteer_places g
+      WHERE g.state = q.state
+      ORDER BY power(g.lat - z.lat, 2) + power((g.lng - z.lng) * cos(radians(z.lat)), 2)
+      LIMIT 1
+    ) p ON true`);
+  return new Map(rows.map((row) => [row.zip, row.name]));
 }

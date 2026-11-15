@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useState, useTransition, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, CheckCircle2, MessageCircle, Store } from "lucide-react";
@@ -28,6 +28,8 @@ interface Props {
   storeSlug: string;
   configured: boolean;
   state: LinkState;
+  /** The store's own number for customers (#558), below the owner's link. */
+  children?: ReactNode;
 }
 
 function ErrorNote({ message }: { message: string }) {
@@ -61,7 +63,7 @@ function ReplySteps({ display }: { display: string }) {
   );
 }
 
-export function WhatsAppLinkForm({ storeName, storeSlug, configured, state }: Props) {
+export function WhatsAppLinkForm({ storeName, storeSlug, configured, state, children }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -277,6 +279,7 @@ export function WhatsAppLinkForm({ storeName, storeSlug, configured, state }: Pr
             )}
           </CardContent>
         </Card>
+        {children}
       </main>
     </div>
   );

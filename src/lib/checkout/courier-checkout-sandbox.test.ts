@@ -4,6 +4,7 @@ import { platform, platformAdminTransaction, storeScoped } from "../db";
 import { writeGeocodeCache } from "../address/cache";
 import { registerStoreCouriers } from "../delivery/courier-registration";
 import { dispatchReadyOrder } from "../delivery/dispatch";
+import { readCourierSettings } from "../delivery/courier-settings";
 import { DoorDashDriveProvider } from "../delivery/doordash";
 import { fakeDoorDash } from "../delivery/doordash-fake";
 import { UberDirectProvider } from "../delivery/uber-direct";
@@ -101,7 +102,7 @@ describe.skipIf(!hasKeys || !process.env.DATABASE_URL || process.env.COURIER_CHE
       expect(order).toMatchObject({ fulfillment: "courier", deliveryFeeCents: atPay.courierFeeCents, totalAuthorizedCents: atPay.holdCents });
 
       await storeScoped(storeId).order.update({ where: { id: order.id }, data: { status: "READY" } });
-      const dispatched = await dispatchReadyOrder(storeId, order.id, { providers: couriers, emit: async () => {} });
+      const dispatched = await dispatchReadyOrder(storeId, order.id, { providers: couriers, emit: async () => {}, settings: () => readCourierSettings() });
       const delivery = await storeScoped(storeId).delivery.findFirst({ where: { orderId: order.id } });
       console.log(JSON.stringify({
         event: "uber_direct_sandbox_courier_checkout",

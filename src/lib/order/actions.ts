@@ -15,8 +15,22 @@ import {
   cancelOrder,
 } from "./service";
 import { STORE_CANCEL_REASONS } from "./constants";
+import {
+  BATCH_LINE_DONE,
+  BATCH_NOT_FOUND,
+  BATCH_ORDERS_NOT_BATCHABLE,
+  BATCH_SIZE,
+  ORDER_IN_BATCH,
+  UNITS_FOUND_PREFIX,
+  leaveBatch,
+  pickBatchLine,
+  readPickBatch,
+  startBatch,
+  startBatchPacking,
+} from "./batch";
 import { courierProviders, pushReadyTime, READY_ALREADY_PUSHED, READY_NOT_PUSHABLE } from "../delivery/dispatch";
 import { emitCourierEvent } from "../delivery/courier-functions";
+import { readCourierSettings } from "../delivery/courier-settings";
 import {
   DELIVERY_PROOF_MAX_BYTES,
   PROOF_PHOTO_MISSING,
@@ -57,6 +71,11 @@ const ALLOWED_STAFF_ERRORS = new Set([
   "Quantity found must be a whole number below the quantity ordered",
   READY_ALREADY_PUSHED,
   READY_NOT_PUSHABLE,
+  BATCH_SIZE,
+  BATCH_ORDERS_NOT_BATCHABLE,
+  BATCH_NOT_FOUND,
+  BATCH_LINE_DONE,
+  ORDER_IN_BATCH,
   STORE_DELIVERY_ONLY,
   PROOF_PHOTO_MISSING,
   PROOF_PHOTO_NOT_IMAGE,
@@ -84,6 +103,7 @@ function isAllowListed(message: string): boolean {
     message.startsWith("Line already resolved") ||
     message.startsWith("Retrying in ") ||
     message.startsWith("Capture amount ") ||
+    message.startsWith(UNITS_FOUND_PREFIX) ||
     message.startsWith(ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX)
   );
 }
@@ -188,7 +208,7 @@ export async function pushReadyTimeAction(orderId: string) {
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("pushReadyTime", id.data, () =>
-    pushReadyTime(session.store.id, id.data, { providers: courierProviders(), emit: emitCourierEvent }),
+    pushReadyTime(session.store.id, id.data, { providers: courierProviders(), emit: emitCourierEvent, settings: () => readCourierSettings() }),
   );
 }
 
@@ -220,6 +240,55 @@ export async function markDeliveredAction(form: FormData) {
   return runStaffAction("markDelivered", id.data, async () =>
     markDelivered(session.store.id, id.data, file ? new Uint8Array(await file.arrayBuffer()) : null),
   );
+}
+
+const batchOrderIdsSchema = z.array(orderIdSchema).min(1).max(10);
+
+/** Batch picking (#564): 2-4 Accepted orders of the session's store picked together. */
+export async function startBatchAction(orderIds: string[]) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const ids = parseInput(batchOrderIdsSchema, orderIds);
+  if (!ids.ok) return { ok: false as const, error: BATCH_SIZE };
+  return runStaffAction("startBatch", ids.data.join(","), () => startBatch(session.store.id, ids.data));
+}
+
+export async function readBatchAction(batchId: string) {
+  const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, batchId);
+  if (!id.ok) return null;
+  return readPickBatch(session.store.id, id.data);
+}
+
+/** "Start packing": books the courier for courier orders (#562). */
+export async function startBatchPackingAction(batchId: string) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const id = parseInput(orderIdSchema, batchId);
+  if (!id.ok) return { ok: false as const, error: BATCH_NOT_FOUND };
+  return runStaffAction("startBatchPacking", id.data, () => startBatchPacking(session.store.id, id.data));
+}
+
+export async function pickBatchLineAction(batchId: string, listingVariantId: string, unitsFound: number) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const id = parseInput(orderIdSchema, batchId);
+  const variant = parseInput(orderIdSchema, listingVariantId);
+  const found = parseInput(z.number().int().min(0).max(100_000), unitsFound);
+  if (!id.ok) return { ok: false as const, error: BATCH_NOT_FOUND };
+  if (!variant.ok) return { ok: false as const, error: BATCH_LINE_DONE };
+  if (!found.ok) return { ok: false as const, error: `${UNITS_FOUND_PREFIX}the number ordered` };
+  return runStaffAction("pickBatchLine", id.data, () =>
+    pickBatchLine(session.store.id, id.data, variant.data, found.data),
+  );
+}
+
+export async function leaveBatchAction(batchId: string) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const id = parseInput(orderIdSchema, batchId);
+  if (!id.ok) return { ok: false as const, error: BATCH_NOT_FOUND };
+  return runStaffAction("leaveBatch", id.data, () => leaveBatch(session.store.id, id.data));
 }
 
 const storeCancelSchema = z.object({

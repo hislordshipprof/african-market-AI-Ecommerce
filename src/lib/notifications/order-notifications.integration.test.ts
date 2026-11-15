@@ -8,7 +8,7 @@ import { setStripeProvider } from "../stripe/index";
 import { fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { clearTestSentSms, getTestSentSms, setSmsSenderForTests, SmsTestSender } from "../notifications/sms";
-import { NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
+import { DEFAULT_CHANNEL_KINDS, NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
 import { notificationChannels } from "./channels";
 import { findOrderForTracking } from "../notifications/lookup";
 import { ProviderSendError } from "../notifications/provider-error";
@@ -168,7 +168,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     const pending = await storeScoped(storeId).notificationLog.findMany({
       where: { orderId, event, status: "pending" },
     });
-    expect(pending.map((row) => row.channel).sort()).toEqual([...NOTIFICATION_CHANNEL_KINDS].sort());
+    expect(pending.map((row) => row.channel).sort()).toEqual([...DEFAULT_CHANNEL_KINDS].sort());
     await handler({
       event: { data: { storeId, orderId, event } },
       step: makeFakeStep({ attempts }),
@@ -322,7 +322,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(smsKeys).toEqual([smsKeys[0], smsKeys[0]]);
     expect(emailKeys[0]).toMatch(/^notif_[A-Za-z0-9_-]+$/);
     const rows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: again, event: "placed" } });
-    expect(rows.map((row) => row.status).sort()).toEqual(["sent", "sent"]);
+    expect(rows.map((row) => row.status).sort()).toEqual(["sent", "sent", "skipped"]);
     expect(getTestSentEmails()).toHaveLength(1);
     expect(getTestSentSms()).toHaveLength(1);
   });
@@ -341,7 +341,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
 
     await handler({ event: { data: { storeId, orderId, event: "placed" } }, step: makeFakeStep() });
     const rows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId, event: "placed" } });
-    expect(rows.map((row) => `${row.status} ${row.reason ?? ""}`)).toEqual(["sent ", "sent "]);
+    expect(rows.map((row) => `${row.status} ${row.reason ?? ""}`).sort()).toEqual(["sent ", "sent ", "skipped no_subscription"]);
     expect(getTestSentEmails()).toHaveLength(1);
     expect(getTestSentSms()).toHaveLength(1);
 
@@ -353,7 +353,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     });
     await handler({ event: { data: { storeId, orderId: stale, event: "placed" } }, step: makeFakeStep() });
     const staleRows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: stale, event: "placed" } });
-    expect(staleRows.map((row) => `${row.status} ${row.reason}`)).toEqual(["failed expired", "failed expired"]);
+    expect(staleRows.map((row) => `${row.status} ${row.reason}`)).toEqual(DEFAULT_CHANNEL_KINDS.map(() => "failed expired"));
   });
 
   it("each writer schedules `order-notify-<event>-<orderId>` after its rows are committed", async () => {
@@ -369,7 +369,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
         const rows = await storeScoped(storeId).notificationLog.findMany({
           where: { orderId: event.data?.orderId, event: event.data?.event as NotifyEvent },
         });
-        expect(rows).toHaveLength(2);
+        expect(rows).toHaveLength(DEFAULT_CHANNEL_KINDS.length);
         expect(rows.every((row) => row.status === "pending")).toBe(true);
         expect(event.id).toBe(`order-notify-${event.data?.event}-${event.data?.orderId}`);
         seen.push(event.data?.event ?? "");

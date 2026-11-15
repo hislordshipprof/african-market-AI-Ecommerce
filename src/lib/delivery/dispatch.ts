@@ -1,13 +1,11 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { storeMayUse } from "../billing/plan";
 import { storeScoped } from "../db";
+import { anyCourierEnabled, enabledProviders, preferredProvider, type CourierSelectionMode, type CourierSettings } from "./courier-settings";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
 import { orderReadyEstimate, READY_PUSH_MINUTES } from "./ready-estimate";
 import { DeliveryProviderError, type CreatedDelivery, type DeliveryAddress, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
-
-/** Spec §9, §11.2: no courier assigned this long after the delivery was created → switch provider. */
-export const COURIER_ASSIGNMENT_TIMEOUT_MS = 600_000;
 
 /** Spec §11.3: above this order total, or with any frozen item, the courier checks a PIN at drop-off. */
 export const PIN_ABOVE_TOTAL_CENTS = 15_000;
@@ -49,8 +47,11 @@ export type CourierEvent =
   | { name: typeof COURIER_BOTH_FAILED; data: { storeId: string; orderId: string; orderNumber: number; options: Array<"store-delivery" | "pickup" | "cancel"> } };
 
 export interface DispatchDeps {
+  /** Every adapter. The settings decide which may be quoted; a live delivery is cancelled with its own adapter. */
   providers: DeliveryProvider[];
   emit: (event: CourierEvent) => Promise<void>;
+  /** The courier settings (#535), read each time dispatch or failover runs. */
+  settings: () => Promise<CourierSettings>;
   now?: () => Date;
 }
 
@@ -84,10 +85,10 @@ function quoteWith(input: QuoteInput, provider: DeliveryProvider): Promise<Candi
 }
 
 /**
- * Quotes every provider at once; live quotes come back cheapest first. A provider that cannot quote (missing keys,
- * HTTP error) or quotes an expired price is unavailable.
+ * Quotes every provider at once; live quotes come back cheapest first, or with the mode's provider first. A provider
+ * that cannot quote (missing keys, HTTP error) or quotes an expired price is unavailable.
  */
-async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], now: () => Date): Promise<Candidate[]> {
+async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], mode: CourierSelectionMode, now: () => Date): Promise<Candidate[]> {
   const settled = await Promise.all(
     providers.map(async (provider) => {
       try {
@@ -98,25 +99,31 @@ async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], now:
       }
     }),
   );
+  const first = preferredProvider(mode);
+  const rank = (c: Candidate) => (c.provider.name === first ? 0 : 1);
   return settled
     .filter((c): c is Candidate => c !== null && c.quote.expiresAt > now())
-    .sort((a, b) => a.quote.feeCents - b.quote.feeCents);
+    .sort((a, b) => rank(a) - rank(b) || a.quote.feeCents - b.quote.feeCents);
 }
 
 export type CheckoutCourierQuote = { provider: DeliveryProviderName; courierProvider: CourierBrand; feeCents: number; expiresAt: Date };
 
-/** The fee checkout shows (#527): the same selection dispatch books from, with nothing booked. */
-export async function quoteCheapestCourier(input: QuoteInput, providers: DeliveryProvider[], now: () => Date = () => new Date()): Promise<CheckoutCourierQuote | null> {
-  const [cheapest] = await liveQuotes(input, providers, now);
-  if (!cheapest) return null;
-  return { provider: cheapest.provider.name, courierProvider: courierBrand(cheapest.provider.name), feeCents: cheapest.quote.feeCents, expiresAt: cheapest.quote.expiresAt };
+/** The fee checkout shows (#527): the same selection dispatch books from (#535), with nothing booked. */
+export async function quoteCourier(input: QuoteInput, providers: DeliveryProvider[], settings: CourierSettings, now: () => Date = () => new Date()): Promise<CheckoutCourierQuote | null> {
+  if (!anyCourierEnabled(settings, input.referenceId)) return null;
+  const [chosen] = await liveQuotes(input, enabledProviders(providers, settings), settings.selectionMode, now);
+  if (!chosen) return null;
+  return { provider: chosen.provider.name, courierProvider: courierBrand(chosen.provider.name), feeCents: chosen.quote.feeCents, expiresAt: chosen.quote.expiresAt };
 }
 
-/** Books the cheapest live quote. A create error moves straight to the next cheapest. */
+/** Books the first live quote in the settings' order. A create error moves straight to the next one. */
 export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
   const now = deps.now ?? (() => new Date());
+  const settings = await deps.settings();
   const quoteInput = { ...input, referenceId: input.orderId };
-  const candidates = await liveQuotes(quoteInput, deps.providers, now);
+  const candidates = anyCourierEnabled(settings, input.orderId)
+    ? await liveQuotes(quoteInput, enabledProviders(deps.providers, settings), settings.selectionMode, now)
+    : [];
 
   for (const [i, candidate] of candidates.entries()) {
     const { provider } = candidate;
@@ -127,6 +134,7 @@ export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps
     } catch (err) {
       logUnavailable(input.orderId, provider.name, "create", err);
       if (i < candidates.length - 1) {
+        await recordCourierEvent(input.storeId, input.orderId, null, "failover_triggered", { fromProvider: provider.name, reason: "create_failed" });
         await deps.emit({
           name: COURIER_FAILOVER_TRIGGERED,
           data: { storeId: input.storeId, orderId: input.orderId, fromProvider: provider.name, reason: "create_failed" },
@@ -178,7 +186,26 @@ async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDe
   if (order.store.storeDeliveryEnabled) options.push("store-delivery");
   if (order.store.pickupEnabled) options.push("pickup");
   options.push("cancel");
+  await recordCourierEvent(storeId, orderId, null, "both_failed", { options });
   await emit({ name: COURIER_BOTH_FAILED, data: { storeId, orderId, orderNumber: order.number, options } });
+}
+
+/**
+ * Failover and both-fail also land on the order's delivery events, so the courier incident log reads them from the
+ * database (#536). Keyed like their Inngest event ids: on the replaced delivery for a timeout, else on the order (and
+ * the refusing courier for a create error), so a replayed step writes each once.
+ */
+async function recordCourierEvent(
+  storeId: string,
+  orderId: string,
+  deliveryId: string | null,
+  type: "failover_triggered" | "both_failed",
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await storeScoped(storeId).deliveryEvent.createMany({
+    data: [{ storeId, orderId, deliveryId, externalEventId: deliveryId || type === "both_failed" ? type : `${type}:${payload.fromProvider}`, type, payload: payload as object }],
+    skipDuplicates: true,
+  });
 }
 
 function logUnavailable(referenceId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
@@ -403,6 +430,11 @@ export async function pushReadyTime(storeId: string, orderId: string, deps: Disp
     await scoped.delivery.updateMany({ where: { id: delivery.id, status: "cancelled" }, data: { status: "requested" } });
     return { ok: true, readyEstimateAt, courier: "kept" };
   }
+  // The platform's own cancel, so the incident log does not read the provider's echo of it as a courier cancel (#536).
+  await scoped.deliveryEvent.createMany({
+    data: [{ storeId, orderId, deliveryId: delivery.id, externalEventId: "platform_cancelled", type: "cancelled", payload: { by: "platform", reason: "ready_time_pushed" } }],
+    skipDuplicates: true,
+  });
   const result = await selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId, readyEstimateAt)) }, deps);
   return { ok: true, readyEstimateAt, courier: result.ok ? "rebooked" : "none" };
 }
@@ -459,11 +491,17 @@ export async function runCourierFailover(
   deps: DispatchDeps,
 ): Promise<void> {
   const { storeId, deliveryId } = target;
-  const deadlineIso = (await step.run("courier-timer-plan", () => assignmentDeadline(storeId, deliveryId))) as string | null;
+  // The timeout is read once, when the timer starts; a later settings change does not move this delivery's deadline.
+  const plan = (await step.run("courier-timer-plan", async () => {
+    const { assignmentTimeoutSeconds } = await deps.settings();
+    const timeoutMs = assignmentTimeoutSeconds * 1000;
+    return { timeoutMs, deadlineIso: await assignmentDeadline(storeId, deliveryId, timeoutMs) };
+  })) as { timeoutMs: number; deadlineIso: string | null };
+  const deadlineIso = plan.deadlineIso;
   if (!deadlineIso) return;
   await step.sleepUntil("courier-assignment-timeout", new Date(deadlineIso));
   // The store's one push (#562) can move the ready time, and so the deadline, while the timer sleeps.
-  const pushedIso = (await step.run("courier-timer-replan", () => assignmentDeadline(storeId, deliveryId))) as string | null;
+  const pushedIso = (await step.run("courier-timer-replan", () => assignmentDeadline(storeId, deliveryId, plan.timeoutMs))) as string | null;
   if (pushedIso && pushedIso > deadlineIso) await step.sleepUntil("courier-assignment-timeout-pushed", new Date(pushedIso));
 
   const claimed = (await step.run("courier-claim", async () => {
@@ -511,15 +549,17 @@ export async function runCourierFailover(
       await deps.emit({ name: COURIER_DELIVERY_CREATED, data: { storeId, deliveryId: live.id } });
       return;
     }
-    const alternates = deps.providers.filter((p) => !used.some((u) => u.provider === p.name));
+    const settings = await deps.settings();
+    const alternates = enabledProviders(deps.providers.filter((p) => !used.some((u) => u.provider === p.name)), settings);
     if (alternates.length > 0) {
       const fromProvider = delivery.provider as DeliveryProviderName;
+      await recordCourierEvent(storeId, delivery.orderId, deliveryId, "failover_triggered", { fromProvider, reason: "assignment_timeout" });
       await deps.emit({ name: COURIER_FAILOVER_TRIGGERED, data: { storeId, orderId: delivery.orderId, fromProvider, reason: "assignment_timeout" } });
     }
     const ready = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: delivery.orderId }, select: { status: true, readyEstimateAt: true } });
     // Still packing: the replacement keeps the order's ready time. Once Ready, it comes as soon as possible.
     const pickupReadyAt = PACKING_STATUSES.includes(ready.status) && ready.readyEstimateAt && ready.readyEstimateAt > (deps.now ?? (() => new Date()))() ? ready.readyEstimateAt : null;
-    await selectAndDispatch({ storeId, orderId: delivery.orderId, ...(await courierRequest(storeId, delivery.orderId, pickupReadyAt)) }, { ...deps, providers: alternates });
+    await selectAndDispatch({ storeId, orderId: delivery.orderId, ...(await courierRequest(storeId, delivery.orderId, pickupReadyAt)) }, { ...deps, providers: alternates, settings: async () => settings });
   });
 }
 
@@ -527,10 +567,10 @@ export async function runCourierFailover(
  * No courier assigned this long after booking switches provider. A courier booked for a ready time (#562) is not
  * expected before then, so its deadline is the later of the two.
  */
-async function assignmentDeadline(storeId: string, deliveryId: string): Promise<string | null> {
+async function assignmentDeadline(storeId: string, deliveryId: string, timeoutMs: number): Promise<string | null> {
   const delivery = await storeScoped(storeId).delivery.findUnique({ where: { id: deliveryId }, select: { createdAt: true, pickupReadyAt: true } });
   if (!delivery) return null;
-  const deadline = Math.max(delivery.createdAt.getTime() + COURIER_ASSIGNMENT_TIMEOUT_MS, delivery.pickupReadyAt?.getTime() ?? 0);
+  const deadline = Math.max(delivery.createdAt.getTime() + timeoutMs, delivery.pickupReadyAt?.getTime() ?? 0);
   return new Date(deadline).toISOString();
 }
 

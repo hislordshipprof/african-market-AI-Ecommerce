@@ -1,10 +1,15 @@
 export const ADMIN_NAV = [
   { href: "/admin", label: "Home" },
   { href: "/admin/stores", label: "Stores" },
+  { href: "/admin/store-requests", label: "Store requests" },
+  { href: "/admin/catalog/products", label: "Products" },
   { href: "/admin/catalog/review", label: "Catalog review" },
   { href: "/admin/orders", label: "Refunds" },
   { href: "/admin/orders/check", label: "Orders to check" },
+  { href: "/admin/couriers/incidents", label: "Courier incidents" },
   { href: "/admin/support", label: "Messages" },
+  { href: "/admin/ai/conversations", label: "AI conversations" },
+  { href: "/admin/ai/eval-spend", label: "AI eval and spend" },
 ] as const;
 
 export type AdminNavHref = (typeof ADMIN_NAV)[number]["href"];

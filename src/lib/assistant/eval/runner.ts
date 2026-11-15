@@ -363,6 +363,7 @@ async function oneAttempt(
   const handler = createChatHandler({
     model: createAssistantModel({ fetch: fetchImpl }),
     now: () => options.now,
+    onlineRecipeLookup: false,
   });
   const ip = `2001:db8:${stores.runId.slice(0, 4)}:${index}:${attempt}`;
   let cookie: string | null = null;

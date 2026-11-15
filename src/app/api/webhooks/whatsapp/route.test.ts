@@ -6,7 +6,12 @@ vi.mock("@/lib/whatsapp/inbound", () => ({
   handleInboundMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/whatsapp/store-inbound", () => ({
+  handleStoreInboundMessage: vi.fn().mockResolvedValue({ kind: "customer", storeId: "s" }),
+}));
+
 import { handleInboundMessage } from "@/lib/whatsapp/inbound";
+import { handleStoreInboundMessage } from "@/lib/whatsapp/store-inbound";
 import { GET, POST } from "./route";
 
 const SECRET = "route-test-app-secret";
@@ -32,6 +37,7 @@ describe("WhatsApp webhook route", () => {
     vi.stubEnv("WHATSAPP_VERIFY_TOKEN", VERIFY);
     vi.stubEnv("WHATSAPP_PHONE_NUMBER_ID", PHONE_ID);
     vi.mocked(handleInboundMessage).mockClear();
+    vi.mocked(handleStoreInboundMessage).mockClear();
   });
 
   afterEach(() => {
@@ -115,6 +121,62 @@ describe("WhatsApp webhook route", () => {
     });
     const res = await post(raw, signWhatsAppBody(raw, SECRET));
     expect(res.status).toBe(200);
+    expect(handleInboundMessage).not.toHaveBeenCalled();
+  });
+
+  it("routes by metadata.phone_number_id: the platform number to the owner path, any other number to the store path", async () => {
+    const STORE_PHONE_ID = "2233445566";
+    const change = (phoneNumberId: string | undefined, id: string) => ({
+      field: "messages",
+      value: {
+        messaging_product: "whatsapp",
+        ...(phoneNumberId ? { metadata: { phone_number_id: phoneNumberId } } : {}),
+        messages: [{ from: "14045550123", id, timestamp: "1762700000", type: "text", text: { body: "hi" } }],
+      },
+    });
+    const raw = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "1", changes: [change(PHONE_ID, "wamid.owner"), change(STORE_PHONE_ID, "wamid.customer"), change(undefined, "wamid.none")] }],
+    });
+    const res = await post(raw, signWhatsAppBody(raw, SECRET));
+    expect(res.status).toBe(200);
+    expect(handleInboundMessage).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(handleInboundMessage).mock.calls[0][0].id).toBe("wamid.owner");
+    expect(handleStoreInboundMessage).toHaveBeenCalledTimes(1);
+    expect(handleStoreInboundMessage).toHaveBeenCalledWith(STORE_PHONE_ID, {
+      id: "wamid.customer",
+      from: "14045550123",
+      fromUserId: null,
+      type: "text",
+      text: "hi",
+    });
+  });
+
+  it("a store message is still checked against the signature first, and a handler failure answers 500", async () => {
+    const raw = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "1", changes: [{ field: "messages", value: {
+        metadata: { phone_number_id: "2233445566" },
+        messages: [{ from: "14045550123", id: "wamid.c2", type: "text", text: { body: "hi" } }],
+      } }] }],
+    });
+    expect((await post(raw, signWhatsAppBody(raw, "wrong"))).status).toBe(401);
+    expect(handleStoreInboundMessage).not.toHaveBeenCalled();
+    vi.mocked(handleStoreInboundMessage).mockRejectedValueOnce(new Error("db down"));
+    expect((await post(raw, signWhatsAppBody(raw, SECRET))).status).toBe(500);
+  });
+
+  it("store numbers still route when the platform number is not configured", async () => {
+    vi.stubEnv("WHATSAPP_PHONE_NUMBER_ID", "");
+    const raw = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "1", changes: [{ field: "messages", value: {
+        metadata: { phone_number_id: "2233445566" },
+        messages: [{ from: "14045550123", id: "wamid.c3", type: "text", text: { body: "hi" } }],
+      } }] }],
+    });
+    expect((await post(raw, signWhatsAppBody(raw, SECRET))).status).toBe(200);
+    expect(handleStoreInboundMessage).toHaveBeenCalledTimes(1);
     expect(handleInboundMessage).not.toHaveBeenCalled();
   });
 });
