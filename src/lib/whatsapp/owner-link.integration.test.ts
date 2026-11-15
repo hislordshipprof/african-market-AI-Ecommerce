@@ -27,7 +27,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { POST } from "@/app/api/webhooks/whatsapp/route";
-import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { startWhatsAppLinkAction } from "./actions";
 import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "./fake";
@@ -38,12 +37,12 @@ import { setWhatsAppProvider } from "./index";
 import { getOwnerLink, NOT_SET_UP_ERROR, resolveOwnerByPhone, SEND_FAILED_ERROR } from "./owner-link";
 import { signWhatsAppBody } from "./signature";
 import type { OutboundMessage } from "./types";
+import { authPost, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
 
 const SECRET = "owner-link-test-secret";
 const PHONE_NUMBER_ID = "5550001234";
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-wa`;
 const password = "WhatsAppPass-123!";
 const emailA = `wa-a-${suffix}@test.example`;
@@ -58,16 +57,6 @@ function randomUsNumber(): { typed: string; e164: string; digits: string } {
   const line = String(Math.floor(Math.random() * 10_000)).padStart(4, "0");
   const digits = `1404${exchange}${line}`;
   return { typed: `(404) ${exchange}-${line}`, e164: `+${digits}`, digits };
-}
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
 }
 
 async function signUp(email: string, name: string): Promise<string> {

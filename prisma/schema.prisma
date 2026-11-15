@@ -82,6 +82,7 @@ model Store {
   coupons               StoreCoupon[]
   deliveries            Delivery[]
   refundRequests        RefundRequest[]
+  paymentDisputes       PaymentDispute[]
   issueReports          IssueReport[]
   substitutionRequests  SubstitutionRequest[]
   listingImports        ListingImport[]
@@ -1369,6 +1370,7 @@ model Order {
   customer             Customer              @relation(fields: [customerId, storeId], references: [id, storeId])
   lines                OrderLine[]
   refundRequests       RefundRequest[]
+  paymentDisputes      PaymentDispute[]
   issueReports         IssueReport[]
   notificationLogs     NotificationLog[]
   pushSubscriptions    OrderPushSubscription[]
@@ -1896,6 +1898,53 @@ model StripeBillingEvent {
 
   @@index([storeId])
   @@map("stripe_billing_events")
+}
+
+/// A card dispute (chargeback or inquiry) from Stripe's charge.dispute.* webhooks (#539). Store and order are
+/// null when the charge maps to no order; the platform is alerted. The platform absorbs a lost dispute in v1.
+model PaymentDispute {
+  id              String    @id @default(cuid())
+  storeId         String?   @map("store_id")
+  orderId         String?   @map("order_id")
+  stripeDisputeId String    @unique @map("stripe_dispute_id")
+  chargeId        String    @map("charge_id")
+  paymentIntentId String?   @map("payment_intent_id")
+  /// What the cardholder disputes; may be less than the order (a partial dispute).
+  amountCents     Int       @map("amount_cents")
+  currency        String
+  reason          String
+  /// Stripe's status, e.g. needs_response, under_review, warning_needs_response, won, lost, warning_closed.
+  status          String
+  evidenceDueBy   DateTime? @map("evidence_due_by") @db.Timestamptz(6)
+  /// won, lost or warning_closed once Stripe closes the dispute.
+  outcome         String?
+  /// Stripe's dispute fees net of any returned, from the dispute's balance transactions.
+  feeCents        Int       @default(0) @map("fee_cents")
+  livemode        Boolean   @default(false)
+  /// Stripe `created` of the newest event applied; an older one arriving late is skipped.
+  lastEventAt     DateTime  @map("last_event_at") @db.Timestamptz(6)
+  /// When the store owners (or, with no order, the platform) were told. Null after a crash means tell on retry.
+  notifiedAt      DateTime? @map("notified_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order? @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Restrict)
+
+  @@index([storeId, orderId])
+  @@index([status, evidenceDueBy])
+  @@map("payment_disputes")
+}
+
+/// One row per charge.dispute.* event applied; a replayed event id is a no-op (#539).
+model PaymentDisputeEvent {
+  id              String   @id
+  stripeDisputeId String   @map("stripe_dispute_id")
+  type            String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([stripeDisputeId])
+  @@map("payment_dispute_events")
 }
 
 /// Shopper assistant chats per store per calendar month (UTC), for the plan cap.

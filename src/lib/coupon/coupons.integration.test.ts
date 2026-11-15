@@ -22,12 +22,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { generateTOTP } from "../../../e2e/totp";
-import { auth } from "../auth";
 import { authPrisma, storeScoped, storeScopedTransaction } from "../db";
 import { createCouponAction, setCouponActiveAction, updateCouponAction } from "./actions";
 import { listCoupons } from "./service";
+import { authPost } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t556-${Date.now()}`;
 const password = "Coupon-556-Owner!";
 const hasDb = !!process.env.DATABASE_URL;
@@ -44,12 +43,6 @@ function cookiesOf(res: Response, prior = ""): string {
     if (eq > 0) jar.set(pair.slice(0, eq), pair.slice(eq + 1));
   }
   return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
 }
 
 async function signIn(email: string, twoFactor: boolean): Promise<string> {

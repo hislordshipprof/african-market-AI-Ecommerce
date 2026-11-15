@@ -23,12 +23,11 @@ vi.mock("next/navigation", () => ({
 
 import AiOnboardingSettingsPage from "@/app/admin/(shell)/settings/ai-onboarding/page";
 import { saveAiOnboardingSettingsAction } from "./ai-onboarding-settings-actions";
-import { auth } from "../auth";
 import { authPrisma, platformAdmin } from "../db";
 import { lastAiOnboardingChange, readAiOnboardingSettings, type AiOnboardingSettings } from "./ai-onboarding-settings";
 import { withAiOnboardingSettings } from "./platform-settings-test-lock";
+import { authPost, collectCookies } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-aio561`;
 const password = "GuardPass-123!";
 const emails = {
@@ -38,16 +37,6 @@ const emails = {
 };
 const storeId = crypto.randomUUID();
 type Field = keyof AiOnboardingSettings;
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 async function signUpAndIn(email: string): Promise<{ userId: string; cookies: string }> {
   const signedUp = await authPost("/sign-up/email", { email, password, name: "Settings 561" });

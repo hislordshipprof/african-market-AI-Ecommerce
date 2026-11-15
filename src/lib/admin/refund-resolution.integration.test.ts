@@ -26,7 +26,6 @@ vi.mock("../inngest/notify", async (importOriginal) => ({
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { generateTOTP } from "../../../e2e/totp";
-import { auth } from "../auth";
 import { authPrisma, findStuckTransitionalOrders, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
 import { scheduleOrderNotification } from "../inngest/notify";
@@ -40,8 +39,8 @@ import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction 
 import { listOrdersToCheck } from "./orders-to-check";
 import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 import { parseRepaidDollars } from "./repaid-dollars";
+import { authPost } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t264-${Date.now()}`;
 const password = "RefundResolve-186!";
 const hasDb = !!process.env.DATABASE_URL;
@@ -84,14 +83,6 @@ class CookieJar {
   header(): string {
     return [...this.jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
   }
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }),
-  );
 }
 
 async function signInWithTotp(email: string): Promise<string> {
