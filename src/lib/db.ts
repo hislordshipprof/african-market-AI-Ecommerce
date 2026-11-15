@@ -2242,3 +2242,83 @@ export async function pointWithinZipReach(point: { lat: number; lng: number }, b
     LIMIT 1`);
   return rows.length > 0;
 }
+
+/** Great-circle miles between two rows' lat/lng columns, in SQL (#455). */
+function haversineColumnsSql(a: "z", b: "s"): Prisma.Sql {
+  const [aLat, aLng, bLat, bLng] = [`${a}.lat`, `${a}.lng`, `${b}.lat`, `${b}.lng`].map((c) => Prisma.raw(c));
+  return Prisma.sql`(2 * ${EARTH_RADIUS_MI}::float8 * asin(sqrt(LEAST(1,
+    power(sin(radians(${bLat} - ${aLat}) / 2), 2)
+    + cos(radians(${aLat})) * cos(radians(${bLat})) * power(sin(radians(${bLng} - ${aLng}) / 2), 2)))))`;
+}
+
+/** A shopper's "tell me when a store opens" request (#455). The insert policy lets any app_user add one; a repeat is ignored. */
+export async function insertDirectoryStoreRequest(row: { id: string; zip: string; email: string | null; phone: string | null; consentText: string }): Promise<void> {
+  await appUserQuery((tx) => tx.$executeRaw`
+    INSERT INTO directory_store_requests (id, zip, email, phone, consent_text)
+    VALUES (${row.id}, ${row.zip}, ${row.email}, ${row.phone}, ${row.consentText})
+    ON CONFLICT DO NOTHING`);
+}
+
+export interface DirectoryRequestMatch {
+  id: string;
+  zip: string;
+  email: string | null;
+  phone: string | null;
+  storeId: string;
+  slug: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  distance: number;
+}
+
+/** Waiting requests with a listed, active store within `miles` of their ZIP, each with its nearest such store, in id order after the cursor. */
+export function findDirectoryRequestMatches(afterId: string, miles: number, limit: number): Promise<DirectoryRequestMatch[]> {
+  return platformAdminRawQuery<DirectoryRequestMatch>(Prisma.sql`
+    SELECT DISTINCT ON (r.id) r.id, r.zip, r.email, r.phone, s.id AS "storeId", s.slug, s.name, s.city, s.state,
+      ${haversineColumnsSql("z", "s")} AS distance
+    FROM directory_store_requests r
+    JOIN gazetteer_zips z ON z.zip = r.zip
+    JOIN stores s ON s.listed AND s.status = 'active' AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+      AND s.lat BETWEEN z.lat - ${miles / 69}::float8 AND z.lat + ${miles / 69}::float8
+    WHERE r.notified_at IS NULL AND r.id > ${afterId} AND ${haversineColumnsSql("z", "s")} <= ${miles}::float8
+    ORDER BY r.id, distance, s.slug
+    LIMIT ${limit}`);
+}
+
+/** The one message went out: keep the ZIP and dates, erase the contact. False when another run got there first. */
+export async function markDirectoryRequestNotified(id: string, storeId: string): Promise<boolean> {
+  const rows = await platformAdminRawQuery<{ id: string }>(Prisma.sql`
+    UPDATE directory_store_requests SET notified_at = now(), notified_store_id = ${storeId}, email = NULL, phone = NULL
+    WHERE id = ${id} AND notified_at IS NULL
+    RETURNING id`);
+  return rows.length > 0;
+}
+
+export interface DirectoryRequestArea {
+  zip: string;
+  place: string | null;
+  state: string | null;
+  waiting: number;
+  notified: number;
+  latest: Date;
+}
+
+/** Request counts per ZIP, named by the nearest Gazetteer place (#455). Never returns a contact. */
+export function directoryRequestAreas(): Promise<DirectoryRequestArea[]> {
+  return platformAdminRawQuery<DirectoryRequestArea>(Prisma.sql`
+    SELECT r.zip, p.name AS place, p.state,
+      count(*) FILTER (WHERE r.notified_at IS NULL)::int AS waiting,
+      count(*) FILTER (WHERE r.notified_at IS NOT NULL)::int AS notified,
+      max(r.created_at) AS latest
+    FROM directory_store_requests r
+    JOIN gazetteer_zips z ON z.zip = r.zip
+    LEFT JOIN LATERAL (
+      SELECT g.name, g.state FROM gazetteer_places g
+      WHERE g.lat BETWEEN z.lat - 1 AND z.lat + 1
+      ORDER BY power(g.lat - z.lat, 2) + power((g.lng - z.lng) * cos(radians(z.lat)), 2)
+      LIMIT 1
+    ) p ON true
+    GROUP BY r.zip, p.name, p.state
+    ORDER BY p.state NULLS LAST, waiting DESC, r.zip`);
+}

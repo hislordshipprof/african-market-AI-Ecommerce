@@ -312,6 +312,22 @@ model GazetteerPlace {
   @@map("gazetteer_places")
 }
 
+/// "Tell me when a store opens near me" (#455). Foreign keys, checks and RLS live in its migration.
+model DirectoryStoreRequest {
+  id              String    @id
+  zip             String
+  email           String?
+  phone           String?
+  consentText     String    @map("consent_text")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  notifiedAt      DateTime? @map("notified_at")
+  notifiedStoreId String?   @map("notified_store_id")
+
+  @@unique([zip, email])
+  @@unique([zip, phone])
+  @@map("directory_store_requests")
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   storeId    String?  @map("store_id")

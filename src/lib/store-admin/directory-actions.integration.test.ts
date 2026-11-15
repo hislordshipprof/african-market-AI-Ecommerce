@@ -3,7 +3,14 @@ import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 
-const state = vi.hoisted(() => ({ headers: new Headers(), userId: "", revalidated: [] as string[] }));
+const state = vi.hoisted(() => ({ headers: new Headers(), userId: "", revalidated: [] as string[], queued: [] as string[] }));
+
+vi.mock("../directory/store-requests", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../directory/store-requests")>()),
+  queueStoreRequestNotices: async (storeId: string) => {
+    state.queued.push(storeId);
+  },
+}));
 
 vi.mock("next/headers", () => ({ headers: async () => state.headers }));
 vi.mock("next/cache", () => ({
@@ -67,6 +74,7 @@ describe.skipIf(!hasDb)("updateDirectoryListing (lane database)", () => {
 
   beforeEach(() => {
     state.revalidated = [];
+    state.queued = [];
   });
 
   // Audit rows are append-only, so the run's stores stay; RUN keeps them apart from other files.
@@ -99,6 +107,8 @@ describe.skipIf(!hasDb)("updateDirectoryListing (lane database)", () => {
       after: { listed: true, listingBlurb: "Fresh yam, egusi and stockfish every Friday.", cuisineTags: ["west-african", "caribbean"] },
     });
     expect(state.revalidated).toContain("store-directory");
+    // Going into the directory runs the "tell me when a store opens" notices (#455).
+    expect(state.queued).toEqual([ids.a]);
   });
 
   it("writes no audit row when nothing changed", async () => {
@@ -106,6 +116,7 @@ describe.skipIf(!hasDb)("updateDirectoryListing (lane database)", () => {
     const before = (await audits(ids.a)).length;
     await updateDirectoryListing({ listed: true, blurb: "Fresh yam, egusi and stockfish every Friday.", cuisineTags: ["west-african", "caribbean"] });
     expect((await audits(ids.a)).length).toBe(before);
+    expect(state.queued).toEqual([]);
   });
 
   it("turns the listing off and clears the blurb", async () => {
@@ -113,6 +124,7 @@ describe.skipIf(!hasDb)("updateDirectoryListing (lane database)", () => {
     expect(await updateDirectoryListing({ listed: false, blurb: "   ", cuisineTags: [] })).toEqual({ ok: true });
     expect(await store(ids.a)).toEqual({ listed: false, listingBlurb: null, cuisineTags: [] });
     expect(state.revalidated).toContain("store-directory");
+    expect(state.queued).toEqual([]);
   });
 
   it("takes 160 characters and refuses 161, counting characters not UTF-16 units", async () => {
