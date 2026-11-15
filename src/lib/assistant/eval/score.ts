@@ -219,6 +219,18 @@ function clarifyFromTools(input: ScoreInput, binding: CatalogBinding): ClarifyCl
   return { options: options.sort(), choices: offered.size > 0 ? [...offered.values()] : [] };
 }
 
+/** One quantity check per requirement: rules for alternative packs of the same requirement count once, met by any of them. */
+export function quantityScore(evalCase: EvalCase, cart: CartSnapshotLine[]): { checks: number; hits: number } {
+  const checks = new Map<number | string, boolean>();
+  for (const rule of evalCase.qty ?? []) {
+    const group = evalCase.mustHave.findIndex((item) => item.options.some((option) => option.listingKey === rule.listingKey && option.variantKeys.includes(rule.variantKey)));
+    const id = group >= 0 ? group : `${rule.listingKey}:${rule.variantKey}`;
+    const met = cart.some((line) => line.key === rule.listingKey && line.variantKey === rule.variantKey && line.qty >= rule.min && line.qty <= rule.max);
+    checks.set(id, (checks.get(id) ?? false) || met);
+  }
+  return { checks: checks.size, hits: [...checks.values()].filter(Boolean).length };
+}
+
 /** Core ingredients missing from a dish cart. The gate recomputes these from the committed cart. */
 export function dishCartMisses(evalCase: EvalCase, cart: CartSnapshotLine[]): string[] {
   if (!evalCase.dish) return [];
