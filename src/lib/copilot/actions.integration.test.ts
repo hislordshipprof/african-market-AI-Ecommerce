@@ -563,6 +563,60 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     }
   }, 60_000);
 
+  it("a stale choice refuses the tap: expired, offered again later, a newer proposal, inactive or mode changed (#406)", async () => {
+    const ofadaId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Ofada Rice", price: 500, stockMode: "counted", qty: 9 },
+    })).id;
+    const offer = async (conversationId?: string) => {
+      script([
+        { kind: "tool", toolName: "find_listings", toolInput: { query: "rice" } },
+        { kind: "tool", toolName: "propose_stock_change", toolInput: { listingId: riceId, kind: "restock", quantity: 4 } },
+        { kind: "text", text: "Pick the rice below." },
+      ]);
+      const messageId = crypto.randomUUID();
+      const sent = await sendCopilotMessage({ conversationId, messageId, text: "got 4 rice" });
+      if (!sent.ok) throw new Error(sent.code);
+      expect(sent.choices).toHaveLength(1);
+      return { conversationId: sent.conversationId, messageId };
+    };
+    const proposals = () => storeScoped(storeAId).stockProposal.count({ where: { listingId: { in: [riceId, ofadaId] } } });
+    try {
+      const expired = await offer();
+      const row = await storeScoped(storeAId).copilotConversation.findUniqueOrThrow({ where: { id: expired.conversationId } });
+      const aged = (row.messages as Array<{ choices?: Array<{ expiresAt: string }> }>).map((message) => ({
+        ...message,
+        ...(message.choices ? { choices: message.choices.map((choice) => ({ ...choice, expiresAt: "2000-01-01T00:00:00.000Z" })) } : {}),
+      }));
+      await storeScoped(storeAId).copilotConversation.update({ where: { id: expired.conversationId }, data: { messages: aged } });
+      const before = await proposals();
+      expect(await chooseProposalListing({ ...expired, listingId: riceId })).toEqual({ ok: false, code: "expired" });
+
+      const first = await offer();
+      const later = await offer(first.conversationId);
+      expect(await chooseProposalListing({ ...first, listingId: riceId })).toEqual({ ok: false, code: "stale" });
+
+      const old = await offer();
+      script([
+        { kind: "tool", toolName: "find_listings", toolInput: { query: "ofada rice" } },
+        { kind: "tool", toolName: "propose_stock_change", toolInput: { listingId: ofadaId, kind: "recount", quantity: 15 } },
+        { kind: "text", text: "Ofada counted at 15." },
+      ]);
+      const counted = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "counted 15 ofada" });
+      expect(counted).toMatchObject({ ok: true, proposals: [expect.objectContaining({ listingId: ofadaId })] });
+      expect(await chooseProposalListing({ ...old, listingId: ofadaId })).toEqual({ ok: false, code: "stale" });
+      expect(await proposals()).toBe(before + 1);
+
+      await storeScoped(storeAId).listing.update({ where: { id: riceId }, data: { stockMode: "status", status: "in_stock" } });
+      await storeScoped(storeAId).listing.update({ where: { id: ofadaId }, data: { active: false } });
+      expect(await chooseProposalListing({ ...later, listingId: riceId })).toEqual({ ok: false, code: "stale" });
+      expect(await chooseProposalListing({ ...later, listingId: ofadaId })).toEqual({ ok: false, code: "stale" });
+      expect(await proposals()).toBe(before + 1);
+    } finally {
+      await storeScoped(storeAId).listing.update({ where: { id: riceId }, data: { stockMode: "counted", status: null } });
+      await storeScoped(storeAId).listing.update({ where: { id: ofadaId }, data: { active: false } });
+    }
+  }, 60_000);
+
   it("a turn that uses every step but ends on its own does not say to send the rest (#406)", async () => {
     const search = { kind: "tool" as const, toolName: "find_listings", toolInput: { query: "gari" } };
     script([search, search, search, search, search, { kind: "text", text: "Gari is listed." }]);
