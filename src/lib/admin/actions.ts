@@ -14,6 +14,7 @@ import { parseInput, readFormField, readFormFields } from "../security/parse-inp
 import { getAddressProvider } from "../address/provider";
 import { setPilot } from "../billing/service";
 import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
+import { queueStoreRequestNotices } from "../directory/store-requests";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -666,6 +667,7 @@ export async function updateStore(
     revalidateStore({ id: before.id, slug: before.slug });
   }
   await queueCourierRegistration(store);
+  if (inDirectory(store) && !inDirectory(before)) await queueStoreRequestNotices(store.id);
 
   return {
     success: true,
@@ -723,7 +725,13 @@ export async function setStoreStatus(
   if ("noop" in result) return { success: true, storeId: result.storeId };
 
   revalidateStore(result.store);
+  if (inDirectory(result.store)) await queueStoreRequestNotices(result.store.id);
   return { success: true, storeId: result.store.id };
+}
+
+/** Shown in the Store directory, so a waiting "tell me when a store opens" request may match it (#455). */
+function inDirectory(store: { listed: boolean; status: string }): boolean {
+  return store.listed && store.status === "active";
 }
 
 export async function listStores() {

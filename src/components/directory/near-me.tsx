@@ -5,6 +5,7 @@ import { LocateFixed } from "lucide-react";
 import { directoryLink } from "@/lib/directory/attribution";
 import { NEARBY_MILES } from "@/lib/directory/distance";
 import { StoreCard, type CardStore } from "./store-card";
+import { StoreRequestForm } from "./store-request-form";
 import styles from "./directory.module.css";
 
 export type StateGroup = { code: string; name: string; href: string; stores: { slug: string; name: string; city: string | null; href: string }[] };
@@ -113,6 +114,7 @@ export function NearMe({ states, children }: { states: StateGroup[]; children: R
       </div>
 
       {view.kind === "stores" ? <Results answer={view} /> : null}
+      {view.kind === "stores" && !view.nearby ? <StoreRequestForm zip={view.label && /^\d{5}$/.test(view.label) ? view.label : null} /> : null}
       {view.kind === "outside" || (view.kind === "stores" && !view.nearby) ? <StateList states={states} /> : null}
       {view.kind === "stores" || view.kind === "outside" ? null : children}
     </>

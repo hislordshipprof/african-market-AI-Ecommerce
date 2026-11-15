@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 import { storeOwnerSignIn } from "./store-owner-auth";
+import { generateTOTP } from "./totp";
 
 // Both tests read Mama Ngozi's listing and the second changes it, so they never overlap.
 test.describe.configure({ mode: "serial" });
@@ -462,4 +463,77 @@ test("store cards: open now or opens at from the browser clock, distance, pickup
   } finally {
     await running.stop();
   }
+});
+
+async function clearStoreRequests(zip: string, marker: string): Promise<void> {
+  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+  if (!url) return;
+  const prisma = new PrismaClient({ adapter: new PrismaPg(url) });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`DELETE FROM directory_store_requests WHERE zip = ${zip} AND email = ${`${marker}@example.com`}`;
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+test("no store nearby: the shopper asks to hear when one opens, and platform admins see the request by area (#455)", async ({ browser, page }) => {
+  test.setTimeout(240_000);
+  const marker = `e2e455-${Date.now().toString(36)}`;
+  const port = await reservePort(laneSmokePort());
+  const root = `http://localhost:${port}`;
+  const running = await rootServer(port);
+  try {
+    const context = await browser.newContext();
+    const shopper = await context.newPage();
+    await shopper.goto(`${root}/`);
+    await shopper.getByLabel("ZIP code or city").fill("10001");
+    await shopper.getByRole("button", { name: "Find stores" }).click();
+    await expect(shopper.getByRole("heading", { name: "No stores within 50 miles of 10001" })).toBeVisible();
+    const panel = shopper.getByRole("region", { name: "Tell me when a store opens near me" });
+    await expect(panel.getByLabel("ZIP code", { exact: true })).toHaveValue("10001");
+    await panel.getByLabel("Email or mobile number").fill(`${marker}@example.com`);
+    await shoot(shopper, "455-request-form", "Tell me when a store opens near me");
+
+    // Consent is required: the browser holds the form until the box is ticked.
+    await panel.getByRole("button", { name: "Notify me" }).click();
+    await expect(panel.getByRole("status")).toHaveCount(0);
+    await panel.getByRole("checkbox").check();
+    await panel.getByRole("button", { name: "Notify me" }).click();
+    await expect(panel.getByRole("status")).toHaveText("Thanks. We'll send you one message when a store opens within 50 miles of 10001.");
+    await shoot(shopper, "455-request-done", "Tell me when a store opens near me");
+
+    // A wrong number is refused in words.
+    await shopper.reload();
+    await shopper.getByLabel("ZIP code or city").fill("10001");
+    await shopper.getByRole("button", { name: "Find stores" }).click();
+    const again = shopper.getByRole("region", { name: "Tell me when a store opens near me" });
+    await again.getByLabel("Email or mobile number").fill("12345");
+    await again.getByRole("checkbox").check();
+    await again.getByRole("button", { name: "Notify me" }).click();
+    await expect(again.getByText("Enter an email or a US mobile number.")).toBeVisible();
+    await context.close();
+  } finally {
+    await running.stop();
+  }
+
+  await page.goto("/admin/sign-in");
+  await page.getByLabel("Email").fill("admin@platform.test");
+  await page.getByLabel("Password").fill(process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!");
+  await page.click("button[type='submit']");
+  await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByLabel("Verification code").fill(generateTOTP(process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP"));
+  await page.click("button[type='submit']");
+  await page.waitForURL("**/admin", { timeout: 15000 });
+  await page.getByRole("link", { name: "Store requests" }).first().click();
+  await expect(page.getByRole("heading", { name: "Store requests", level: 1 })).toBeVisible();
+  const ny = page.getByRole("region", { name: "New York" });
+  const row = ny.getByRole("row").filter({ hasText: "10001" });
+  await expect(row).toBeVisible();
+  await expect(page.getByText(`${marker}@example.com`)).toHaveCount(0);
+  await shoot(page, "455-admin-requests", "Store requests");
+  await clearStoreRequests("10001", marker);
 });

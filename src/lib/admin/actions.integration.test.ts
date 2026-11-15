@@ -28,6 +28,7 @@ import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
 import { inngest } from "../inngest/client";
+import { STORE_LISTED } from "../directory/store-requests";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-hrs`;
@@ -138,19 +139,29 @@ describe("store hours schema", () => {
 
   it("platform admin overrides the directory listing from the store form, with an audit row (#450)", async () => {
     revalidated.length = 0;
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
+    const listedEvents = () => send.mock.calls.filter(([payload]) => (payload as { name?: string }).name === STORE_LISTED);
     const listed = storeForm(storeId, storedShape);
     listed.set("listed", "on");
     expect(await updateStore({}, listed)).toMatchObject({ success: true, storeId });
     expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.listed).toBe(true);
     expect(revalidated).toContain("store-directory");
+    // Going into the directory runs the "tell me when a store opens" notices (#455); staying in does not.
+    expect(listedEvents()).toEqual([[{ name: STORE_LISTED, data: { storeId } }]]);
+    expect(await updateStore({}, listed)).toMatchObject({ success: true, storeId });
+    expect(listedEvents()).toHaveLength(1);
+    send.mockRestore();
+    vi.unstubAllEnvs();
 
     expect(await updateStore({}, storeForm(storeId, storedShape))).toMatchObject({ success: true, storeId });
     expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.listed).toBe(false);
     const audits = await storeScopedTransaction(storeId, (tx) =>
-      tx.auditLog.findMany({ where: { action: "store.update" }, orderBy: { createdAt: "desc" }, take: 2 }),
+      tx.auditLog.findMany({ where: { action: "store.update" }, orderBy: { createdAt: "desc" }, take: 3 }),
     );
     expect(audits.map((row) => [(row.before as { listed: boolean }).listed, (row.after as { listed: boolean }).listed])).toEqual([
       [true, false],
+      [true, true],
       [false, true],
     ]);
   });
