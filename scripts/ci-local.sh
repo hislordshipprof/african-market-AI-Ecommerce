@@ -249,6 +249,8 @@ fi
 run_unit pnpm test --retry=1
 step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
   step build pnpm build || fail build "failed twice in a row"; }
+# Storefront home first-load JS budget (#629): fails with size, budget and the largest chunks (scripts/js-budget.json).
+step js-budget node scripts/js-budget.mjs || fail js-budget "storefront home first-load JS is over its budget"
 if ! step e2e pnpm test:e2e --retries=1; then
   if tr -d ' \r\n' 2>/dev/null < test-results/.last-run.json | grep -q '"failedTests":\["'; then
     echo "== local-ci: rerunning only the failed e2e tests"
