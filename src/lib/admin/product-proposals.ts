@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { uploadCatalogPhoto } from "../catalog-image";
-import { lockListingRow, lockMasterProductRow, platformAdminTransaction } from "../db";
+import { lockListingRow, lockMasterProductRow, lockProductProposalRow, platformAdminTransaction } from "../db";
 import { readPrivatePhoto } from "../r2";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
@@ -116,7 +116,7 @@ export async function approveProductProposal(input: unknown): Promise<ProposalAc
   }
 
   const result = await platformAdminTransaction(async (tx): Promise<ProposalActionResult> => {
-    await tx.$queryRaw`SELECT 1 FROM product_proposals WHERE id = ${decision.proposalId} FOR UPDATE`;
+    await lockProductProposalRow(tx, decision.proposalId);
     const proposal = await tx.productProposal.findUnique({ where: { id: decision.proposalId } });
     if (!proposal) return { error: NOT_FOUND };
     if (proposal.status !== "pending") return { error: ALREADY_REVIEWED };
@@ -204,7 +204,7 @@ export async function rejectProductProposal(input: unknown): Promise<ProposalAct
   const reason = parsed.data.reason || null;
 
   return platformAdminTransaction(async (tx): Promise<ProposalActionResult> => {
-    await tx.$queryRaw`SELECT 1 FROM product_proposals WHERE id = ${proposalId} FOR UPDATE`;
+    await lockProductProposalRow(tx, proposalId);
     const proposal = await tx.productProposal.findUnique({ where: { id: proposalId } });
     if (!proposal) return { error: NOT_FOUND };
     if (proposal.status !== "pending") return { error: ALREADY_REVIEWED };

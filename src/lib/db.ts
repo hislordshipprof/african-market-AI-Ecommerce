@@ -1424,6 +1424,11 @@ export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, 
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
 }
 
+/** Serializes reviews of one product proposal (#553), so a second approve or reject sees the first. */
+export async function lockProductProposalRow(tx: Pick<PrismaClient, "$queryRaw">, proposalId: string) {
+  await tx.$queryRaw`SELECT 1 FROM product_proposals WHERE id = ${proposalId} FOR UPDATE`;
+}
+
 /**
  * Row-lock the cart so concurrent mutations of its lines serialize. Needed
  * because FOR UPDATE on cart_lines cannot lock a line that does not exist yet.

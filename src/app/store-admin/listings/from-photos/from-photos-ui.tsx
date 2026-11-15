@@ -13,7 +13,9 @@ import { Input } from "@/components/ui/input";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { dismissListingDrafts, publishListingDrafts, uploadShelfPhoto } from "@/lib/listing/photo-draft-actions";
+import type { StoreProposalRow } from "@/lib/catalog/product-proposals";
 import type { DraftCard, PublishRefusal } from "@/lib/listing/photo-drafts";
+import { SuggestionFields, SuggestionList, type SuggestionState } from "./catalog-suggestion";
 
 const BATCH_MAX = 10;
 const PRICE_RE = /^\$?\s*(\d{1,5})(?:\.(\d{1,2}))?$/;
@@ -44,6 +46,14 @@ interface RowState {
   selected: boolean;
   /** A `several` pick: a master product id, "new" for a new item, or "" for none yet. */
   pick: string;
+  /** Also suggest a new item for the shared catalog (#553). */
+  suggest: boolean;
+  suggestion: SuggestionState;
+}
+
+/** The draft lists as the store's own item: nothing in the catalog matched, or the owner picked "a new item". */
+function listsAsNew(draft: DraftCard, row: RowState): boolean {
+  return draft.match === "none" || (draft.match === "several" && row.pick === "new");
 }
 
 function initialRow(draft: DraftCard): RowState {
@@ -52,6 +62,8 @@ function initialRow(draft: DraftCard): RowState {
     confirmed: false,
     selected: draft.match !== "already_listed",
     pick: "",
+    suggest: false,
+    suggestion: { name: draft.extractedName, localName: "", size: draft.extractedSize ?? "", categoryId: "", crop: null },
   };
 }
 
@@ -61,9 +73,11 @@ interface Props {
   isOwner: boolean;
   readOnly: boolean;
   drafts: DraftCard[];
+  proposals: StoreProposalRow[];
+  categories: Array<{ id: string; name: string }>;
 }
 
-export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts }: Props) {
+export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, proposals, categories }: Props) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
@@ -123,13 +137,30 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts }
       toast.error("Select at least one item to publish.");
       return;
     }
+    const unnamed = selected.find((draft) => rowOf(draft).suggest && listsAsNew(draft, rowOf(draft)) && !rowOf(draft).suggestion.name.trim());
+    if (unnamed) {
+      toast.error(`${unnamed.extractedName}: give the catalog suggestion a product name.`);
+      return;
+    }
     const picks = selected.map((draft) => {
       const row = rowOf(draft);
+      const { name, localName, size, categoryId, crop } = row.suggestion;
       return {
         draftId: draft.id,
         priceCents: priceToCents(row.price) ?? 0,
         priceConfirmed: row.confirmed,
         ...(draft.match === "several" && row.pick ? { masterProductId: row.pick === "new" ? null : row.pick } : {}),
+        ...(row.suggest && listsAsNew(draft, row)
+          ? {
+            proposal: {
+              name: name.trim(),
+              localName: localName.trim() || null,
+              size: size.trim() || null,
+              categoryId: categoryId || null,
+              crop: crop ? { x: crop.x, y: crop.y, width: crop.width, height: crop.height } : null,
+            },
+          }
+          : {}),
       };
     });
     startTransition(async () => {
@@ -145,8 +176,9 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts }
         toast.error(response.message);
         return;
       }
-      const { listingIds, refused } = response.result;
+      const { listingIds, refused, proposed } = response.result;
       if (listingIds.length > 0) toast.success(`Published ${listingIds.length} ${listingIds.length === 1 ? "listing" : "listings"}.`);
+      if (proposed > 0) toast.success(`Suggested ${proposed} ${proposed === 1 ? "item" : "items"} for the shared catalog.`);
       const names = new Map(drafts.map((draft) => [draft.id, draft.extractedName]));
       for (const refusal of refused) toast.error(`${names.get(refusal.draftId) ?? "An item"}: ${REFUSAL_TEXT[refusal.reason]}.`);
       router.refresh();
@@ -264,11 +296,21 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts }
           ) : (
             <ul className="divide-y divide-[var(--color-line)] overflow-hidden rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]">
               {toReview.map((draft) => (
-                <DraftRow key={draft.id} draft={draft} row={rowOf(draft)} isOwner={isOwner} disabled={isPending} onChange={(patch) => setRow(draft, patch)} />
+                <DraftRow
+                  key={draft.id}
+                  draft={draft}
+                  row={rowOf(draft)}
+                  isOwner={isOwner}
+                  disabled={isPending}
+                  categories={categories}
+                  onChange={(patch) => setRow(draft, patch)}
+                />
               ))}
             </ul>
           )}
         </section>
+
+        <SuggestionList proposals={proposals} />
 
         {listed.length > 0 && (
           <section aria-labelledby="already-listed" className="mt-8">
@@ -306,18 +348,22 @@ function DraftRow({
   row,
   isOwner,
   disabled,
+  categories,
   onChange,
 }: {
   draft: DraftCard;
   row: RowState;
   isOwner: boolean;
   disabled: boolean;
+  categories: Array<{ id: string; name: string }>;
   onChange: (patch: Partial<RowState>) => void;
 }) {
   const priceId = `price-${draft.id}`;
   const readFromPhoto = draft.priceReadCents !== null;
+  const canSuggest = isOwner && listsAsNew(draft, row);
   return (
-    <li className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center">
+    <li className="px-4 py-4">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         {isOwner && (
           <input
@@ -405,6 +451,31 @@ function DraftRow({
       {!isOwner && draft.priceReadCents !== null && (
         <p className="text-sm text-[var(--color-muted)]">Tag: ${centsToInput(draft.priceReadCents)}</p>
       )}
+    </div>
+    {canSuggest && (
+      <div className="mt-3 sm:pl-8">
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-5 accent-[var(--color-primary)]"
+            checked={row.suggest}
+            onChange={(event) => onChange({ suggest: event.target.checked })}
+            disabled={disabled}
+          />
+          Also suggest it for the shared catalog
+        </label>
+        {row.suggest && (
+          <SuggestionFields
+            draftId={draft.id}
+            itemName={draft.extractedName}
+            value={row.suggestion}
+            categories={categories}
+            disabled={disabled}
+            onChange={(patch) => onChange({ suggestion: { ...row.suggestion, ...patch } })}
+          />
+        )}
+      </div>
+    )}
     </li>
   );
 }

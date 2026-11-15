@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { storeScoped } from "../db";
+import { platform, storeScoped } from "../db";
 import { productProposalPhotoKey, readPrivatePhoto, uploadProductProposalPhoto } from "../r2";
 
 /** The part of the shelf photo the owner framed, as fractions of its width and height. */
@@ -84,4 +84,18 @@ export async function listStoreProposals(storeId: string): Promise<StoreProposal
     masterProductName: row.masterProduct?.name ?? null,
     createdAt: row.createdAt.toISOString(),
   }));
+}
+
+/** The category tree, flat, for the owner's "suggested category" pick: parents first, each child after its parent. */
+export async function listProposalCategories(): Promise<Array<{ id: string; name: string }>> {
+  const rows = await platform.category.findMany({
+    select: { id: true, name: true, parentId: true },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+  });
+  const names = new Map(rows.map((row) => [row.id, row.name]));
+  const parents = rows.filter((row) => !row.parentId);
+  return parents.flatMap((parent) => [
+    { id: parent.id, name: parent.name },
+    ...rows.filter((row) => row.parentId === parent.id).map((child) => ({ id: child.id, name: `${names.get(parent.id)} › ${child.name}` })),
+  ]);
 }
