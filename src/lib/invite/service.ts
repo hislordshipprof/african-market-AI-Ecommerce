@@ -39,82 +39,90 @@ export interface CreateInviteInput {
   storeName: string;
 }
 
+type InviteTx = Parameters<Parameters<typeof platformAdminTransaction>[0]>[0];
+
 export async function createInvite(input: CreateInviteInput): Promise<{ id: string; tokenHash: string }> {
+  const recorded = await platformAdminTransaction((tx) => recordInvite(tx, input));
+  await sendInviteEmail(input, recorded);
+  return { id: recorded.id, tokenHash: recorded.tokenHash };
+}
+
+export type RecordedInvite = { id: string; tokenHash: string; rawToken: string };
+
+/** The invite rows and their audit row, inside the caller's platform-admin transaction. Send the email after it commits. */
+export async function recordInvite(tx: InviteTx, input: CreateInviteInput): Promise<RecordedInvite> {
   const email = normalizeEmail(input.email);
   const { raw, hash } = generateToken();
   const expiresAt = new Date(Date.now() + INVITE_EXPIRY_HOURS * 60 * 60 * 1000);
 
-  const invite = await platformAdminTransaction(async (tx) => {
-    const existing = await tx.storeMembership.findFirst({
-      where: { storeId: input.storeId, user: { email } },
+  const existing = await tx.storeMembership.findFirst({
+    where: { storeId: input.storeId, user: { email } },
+  });
+  if (existing) {
+    throw new Error("User is already a member of this store");
+  }
+
+  if (input.role === "staff") {
+    await lockStoreRow(tx, input.storeId);
+    const subscription = await tx.storeSubscription.findUnique({
+      where: { storeId: input.storeId },
+      select: { plan: true, status: true },
     });
-    if (existing) {
-      throw new Error("User is already a member of this store");
+    const limit = staffLimit(effectivePlan(subscription));
+    if (limit !== null) {
+      const [staff, invited] = await Promise.all([
+        tx.storeMembership.count({ where: { storeId: input.storeId, role: { not: "owner" } } }),
+        tx.storeInvite.count({
+          where: { storeId: input.storeId, role: "staff", usedAt: null, expiresAt: { gt: new Date() }, email: { not: email } },
+        }),
+      ]);
+      if (staff + invited >= limit) throw new Error(STAFF_LIMIT_MESSAGE);
     }
+  }
 
-    if (input.role === "staff") {
-      await lockStoreRow(tx, input.storeId);
-      const subscription = await tx.storeSubscription.findUnique({
-        where: { storeId: input.storeId },
-        select: { plan: true, status: true },
-      });
-      const limit = staffLimit(effectivePlan(subscription));
-      if (limit !== null) {
-        const [staff, invited] = await Promise.all([
-          tx.storeMembership.count({ where: { storeId: input.storeId, role: { not: "owner" } } }),
-          tx.storeInvite.count({
-            where: { storeId: input.storeId, role: "staff", usedAt: null, expiresAt: { gt: new Date() }, email: { not: email } },
-          }),
-        ]);
-        if (staff + invited >= limit) throw new Error(STAFF_LIMIT_MESSAGE);
-      }
-    }
-
-    const pendingInvite = await tx.storeInvite.findFirst({
-      where: { storeId: input.storeId, email, usedAt: null, expiresAt: { gt: new Date() } },
+  const pendingInvite = await tx.storeInvite.findFirst({
+    where: { storeId: input.storeId, email, usedAt: null, expiresAt: { gt: new Date() } },
+  });
+  if (pendingInvite) {
+    await tx.storeInvite.update({
+      where: { id: pendingInvite.id },
+      data: { usedAt: new Date() },
     });
-    if (pendingInvite) {
-      await tx.storeInvite.update({
-        where: { id: pendingInvite.id },
-        data: { usedAt: new Date() },
-      });
-    }
+  }
 
-    const created = await tx.storeInvite.create({
-      data: {
-        storeId: input.storeId,
-        email,
-        role: input.role,
-        tokenHash: hash,
-        expiresAt,
-        invitedById: input.invitedById,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        storeId: input.storeId,
-        actorId: input.invitedById,
-        actorEmail: input.actorEmail,
-        action: "invite.create",
-        entityType: "store_invite",
-        entityId: created.id,
-        after: { email, role: input.role },
-      },
-    });
-
-    return created;
+  const created = await tx.storeInvite.create({
+    data: {
+      storeId: input.storeId,
+      email,
+      role: input.role,
+      tokenHash: hash,
+      expiresAt,
+      invitedById: input.invitedById,
+    },
   });
 
-  const inviteUrl = `${input.baseUrl}/invite/${raw}?store=${input.storeSlug}`;
+  await tx.auditLog.create({
+    data: {
+      storeId: input.storeId,
+      actorId: input.invitedById,
+      actorEmail: input.actorEmail,
+      action: "invite.create",
+      entityType: "store_invite",
+      entityId: created.id,
+      after: { email, role: input.role },
+    },
+  });
 
+  return { id: created.id, tokenHash: hash, rawToken: raw };
+}
+
+export async function sendInviteEmail(input: CreateInviteInput, invite: RecordedInvite): Promise<void> {
+  const inviteUrl = `${input.baseUrl}/invite/${invite.rawToken}?store=${input.storeSlug}`;
   await sendEmail({
-    to: email,
+    to: normalizeEmail(input.email),
     subject: `You're invited to ${input.storeName}`,
     html: buildInviteHtml(input.storeName, input.role, inviteUrl),
   });
-
-  return { id: invite.id, tokenHash: hash };
 }
 
 function buildInviteHtml(storeName: string, role: string, url: string): string {
