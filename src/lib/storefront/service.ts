@@ -529,6 +529,16 @@ export interface StoreProfile {
   prepTimeMinutes: number;
 }
 
+const DEFAULT_DELIVERY_RADIUS_MI = 8;
+
+/** A Decimal, number or numeric string as a finite number; anything else is the schema default. */
+function deliveryRadiusOrDefault(raw: unknown): number {
+  if (raw === null || raw === undefined) return DEFAULT_DELIVERY_RADIUS_MI;
+  const text = String(raw).trim();
+  const n = text === "" ? NaN : Number(text);
+  return Number.isFinite(n) ? n : DEFAULT_DELIVERY_RADIUS_MI;
+}
+
 export function extractStoreProfile(store: {
   ownerName: string | null;
   ownerStory: string | null;
@@ -548,7 +558,7 @@ export function extractStoreProfile(store: {
     deliveryInfo: store.deliveryInfo,
     hours: store.hours,
     pickupEnabled: store.pickupEnabled,
-    deliveryRadiusMi: Number(store.deliveryRadiusMi),
+    deliveryRadiusMi: deliveryRadiusOrDefault(store.deliveryRadiusMi),
     prepTimeMinutes: store.prepTimeMinutes,
   };
 }
