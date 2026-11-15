@@ -282,6 +282,16 @@ describe("recipe base admin (real sessions, lane DB)", () => {
       expect(await audits(id, "catalog.recipe_edit")).toHaveLength(0);
     });
 
+    it("refuses a name with no letter or digit, writing nothing", async () => {
+      const id = recipes.suya;
+      const before = await readRecipe(id);
+      const auditsBefore = await audits(id, "catalog.recipe_edit");
+      const result = await saveRecipe({}, editorForm(id, await versionOf(id), { name: "!!! ???" }));
+      expect(result.fieldErrors?.name).toBe("The name needs a letter or a digit");
+      expect(await readRecipe(id)).toEqual(before);
+      expect(await audits(id, "catalog.recipe_edit")).toEqual(auditsBefore);
+    });
+
     it("refuses a rename to a name a shopper's lookup saved after the name check, as a field error", async () => {
       await makeRecipe("kenkey", { origin: "lookup" });
       const id = recipes.kenkey;
