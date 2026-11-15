@@ -13,6 +13,7 @@ import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking,
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { captureCharge } from "./substitution-pricing";
+import { recordCapture } from "./capture-record";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -123,6 +124,8 @@ async function finalizeCancelledOrder(
     from?: TransitionalStatus[];
     refundId?: string | null;
     after?: Prisma.InputJsonValue;
+    /** Stripe captured this much before the cancel refunded it. */
+    capturedCents?: number;
   },
 ): Promise<{ wrote: boolean }> {
   const from = options?.from ?? ["CAPTURING", "CANCELLING"];
@@ -143,6 +146,7 @@ async function finalizeCancelledOrder(
         ...(options?.refundId ? { refundId: options.refundId } : {}),
       },
     });
+    if (options?.capturedCents != null) await recordCapture(tx, orderId, options.capturedCents, null);
     if (!existing) {
       await tx.auditLog.create({
         data: systemAuditData(storeId, orderId, action, options?.after ?? {}),
@@ -691,6 +695,8 @@ async function persistRefundFailure(
           : {}),
       },
     });
+    const known = current.capturedAmountCents ?? restoredCapture;
+    if (known != null) await recordCapture(tx, orderId, known, null);
     const prior = await tx.auditLog.findMany({
       where: orderAuditWhere(orderId, "refund_failed"),
     });
@@ -752,6 +758,8 @@ async function settleCapturedRefund(
       from: ["CANCELLING"],
       refundId: decision.refundId,
       after: { refundId: decision.refundId, amountRefunded: decision.amountRefunded },
+      // A settled refund covers the whole capture (canonicalSucceededSettlement).
+      capturedCents: decision.amountRefunded,
     });
     return { outcome: "refunded" };
   }
@@ -917,6 +925,7 @@ export async function markTerminalRefundFailure(input: {
     await lockStoreRow(tx, order.storeId);
     const row = await tx.order.findUnique({ where: { id: order.id } });
     if (!row || (row.status !== "CANCELLING" && row.status !== "CANCELLED")) return;
+    await recordCapture(tx, order.id, captured, null);
     const manual = await tx.auditLog.findFirst({
       where: orderAuditWhere(order.id, "refund_resolved_manually"),
     });
@@ -1200,10 +1209,9 @@ export async function markReady(
         status: validation.newStatus,
         readyAt: now,
         capturedAmountCents: captureResult.amountCaptured,
-        captureCents: captureResult.amountCaptured,
-        capturedAt: now,
       },
     });
+    await recordCapture(tx, orderId, captureResult.amountCaptured, now);
     await settleCapturedStock(tx, storeId, orderId);
     notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
     courierReady = order.fulfillment === "courier";
@@ -1660,10 +1668,9 @@ async function finalizeCaptureFromSweep(
         status: newStatus,
         readyAt: now,
         capturedAmountCents,
-        captureCents: capturedAmountCents,
-        capturedAt: now,
       },
     });
+    await recordCapture(tx, orderId, capturedAmountCents, now);
     await tx.auditLog.create({
       data: systemAuditData(storeId, orderId, "reconcile_capture", {}),
     });

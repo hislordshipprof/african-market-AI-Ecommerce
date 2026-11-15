@@ -1529,6 +1529,8 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("REFUND_FAILED");
+    expect(updated!.capturedAmountCents).toBe(5000);
+    expect(updated!.captureCents).toBe(5000);
     const alerts = await storeScoped(storeId).auditLog.findMany({
       where: { entityId: order.id, action: "refund_failed" },
     });
@@ -1750,6 +1752,8 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
     expect(updated!.capturedAmountCents).toBeNull();
+    // The refund proves Stripe captured 5500; the capture record keeps it (#537).
+    expect(updated!.captureCents).toBe(5500);
 
     expect(refundedPayments.has(order.paymentIntentId!)).toBe(true);
 
@@ -3236,6 +3240,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("REFUND_FAILED");
     expect(updated!.refundId).toBe(refund.refundId);
     expect(updated!.capturedAmountCents).toBe(order.totalAuthorizedCents);
+    expect(updated!.captureCents).toBe(order.totalAuthorizedCents);
   });
 
   it("webhook refund.canceled moves a captured cancellation to REFUND_FAILED and restores the amount", async () => {

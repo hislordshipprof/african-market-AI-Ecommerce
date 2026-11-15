@@ -1282,6 +1282,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(stored?.status).toBe("CANCELLED");
     expect(stored?.capturedAmountCents).toBeNull();
+    expect(stored?.captureCents).toBe(1000);
   });
 
   it("a counted refund failing after manual resolution alerts without reopening", async () => {
