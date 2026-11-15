@@ -2,7 +2,9 @@ import { providerSinkMode, sendEmail } from "../email/send";
 import { productionRuntime } from "../inngest/event-key";
 import { ProviderSendError } from "./provider-error";
 import { normalizeUsPhone } from "./phone";
-import { renderEmail, renderSms, renderWhatsApp, type NotifyOrder, type RenderedMessage } from "./messages";
+import { pushSender } from "../push/sender";
+import { pushToOrder } from "../push/order-subscriptions";
+import { renderEmail, renderPush, renderSms, renderWhatsApp, type NotifyOrder, type RenderedMessage } from "./messages";
 import { smsSender, type SmsSender } from "./sms";
 import { getWhatsAppProvider } from "../whatsapp/index";
 import { whatsappErrorCode } from "../whatsapp/errors";
@@ -205,5 +207,22 @@ export const whatsappChannel: NotificationChannel = {
   },
 };
 
-/** WhatsApp runs before SMS, so SMS can see whether it went (#560). */
-export const notificationChannels: NotificationChannel[] = [emailChannel, whatsappChannel, smsChannel];
+/** Web push to the devices that opted in on the tracking page (#563). */
+export const pushChannel: NotificationChannel = {
+  kind: "push",
+  prepare(order, event, url, env) {
+    if (!pushSender(env)) return { outcome: "skipped", reason: "push_not_configured" };
+    return { outcome: "ready", message: renderPush(order, event, url) };
+  },
+  async send(message) {
+    if (!message.push) return { outcome: "skipped", reason: "no_subscription" };
+    const { storeId, orderId, message: payload } = message.push;
+    const result = await pushToOrder(storeId, orderId, payload);
+    if (result.sent > 0) return { outcome: "sent", providerMessageId: `push:${result.sent}` };
+    if (result.failed > 0) return throwIfRetryable({ outcome: "failed", reason: "push_failed", retryable: result.retryable });
+    return { outcome: "skipped", reason: "no_subscription" };
+  },
+};
+
+/** WhatsApp runs before SMS, so SMS can see whether it went (#560). Push runs last (#563). */
+export const notificationChannels: NotificationChannel[] = [emailChannel, whatsappChannel, smsChannel, pushChannel];
