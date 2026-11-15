@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  readStoreWhatsAppSender,
   beginStoreWhatsAppNumberLink,
   disconnectStoreWhatsAppNumberRow,
   finishStoreWhatsAppNumberLink,
@@ -11,7 +12,8 @@ import { readWhatsAppConfig } from "./config";
 import { WhatsAppNotConfiguredError, whatsappErrorCode } from "./errors";
 import { getWhatsAppProvider, whatsappProviderKind } from "./index";
 import { normalizeOwnerPhone, PHONE_FORMAT_ERROR } from "./phone";
-import { hasTokenKey, sealBusinessToken } from "./token-box";
+import { hasTokenKey, openBusinessToken, sealBusinessToken } from "./token-box";
+import type { WhatsAppSender } from "./types";
 
 export const IDS_FORMAT_ERROR = "Enter the WhatsApp Business account id and phone number id as digits";
 export const PLATFORM_NUMBER_ERROR = "That is the platform's own WhatsApp number. Link the store's number instead.";
@@ -126,4 +128,21 @@ export async function disconnectStoreNumber(actor: StoreNumberActor): Promise<{ 
   await disconnectStoreWhatsAppNumberRow(actor.storeId, actor.actorId, actor.actorEmail);
   logLink("whatsapp_number_disconnected", actor.storeId);
   return { ok: true };
+}
+
+/**
+ * The store's registered number and its business token, for sending order
+ * updates from it (#560). Null when the store has no registered number or the
+ * token cannot be opened (key rotated or missing); the caller falls back to SMS.
+ */
+export async function storeWhatsAppSender(storeId: string): Promise<WhatsAppSender | null> {
+  const row = await readStoreWhatsAppSender(storeId);
+  if (!row) return null;
+  try {
+    const accessToken = openBusinessToken(row.sealedToken, { storeId, phoneNumberId: row.phoneNumberId });
+    return { phoneNumberId: row.phoneNumberId, accessToken };
+  } catch {
+    console.error(JSON.stringify({ event: "whatsapp_token_unreadable", storeId }));
+    return null;
+  }
 }

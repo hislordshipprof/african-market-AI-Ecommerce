@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { storeMayUse } from "../billing/plan";
 import type { AcquisitionSource } from "../directory/attribution";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS, storeHasWhatsAppNumber } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
@@ -496,6 +496,8 @@ export interface RecordAuthorizedOrderInput {
   minimumOrderCents?: number;
   /** Direct place calls can set this even when the cart snapshot does not. */
   leaveAtDoor?: boolean;
+  /** The checkout's WhatsApp updates tick (#560); kept only when the store has a registered number. */
+  whatsappUpdates?: boolean;
   acquisitionSource?: AcquisitionSource | null;
 }
 
@@ -664,6 +666,7 @@ export async function recordAuthorizedOrder(
         },
       });
       const nextNumber = await getNextOrderNumber(tx, storeId);
+      const whatsappOptIn = input.whatsappUpdates === true && await storeHasWhatsAppNumber(storeId, tx);
       const order = await tx.order.create({
         data: {
           storeId,
@@ -703,6 +706,7 @@ export async function recordAuthorizedOrder(
           leaveAtDoor: delivering ? cart.leaveAtDoor : false,
           trackingToken: newTrackingToken(),
           acceptanceClockStartsAt: availability.clockStartsAt,
+          whatsappOptInAt: whatsappOptIn ? now : null,
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
@@ -981,6 +985,7 @@ export async function placeOrder(
   paymentIntentId: string,
   actorUserId: string | null = null,
   leaveAtDoor = false,
+  whatsappUpdates = false,
   acquisitionSource: AcquisitionSource | null = null,
 ): Promise<PlacedOrder> {
   assertLiveModeAllowed();
@@ -1152,6 +1157,7 @@ export async function placeOrder(
       epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
       leaveAtDoor,
+      whatsappUpdates,
       acquisitionSource,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,

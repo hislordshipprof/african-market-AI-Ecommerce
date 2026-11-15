@@ -120,4 +120,7 @@ reviewed
 err=$(review REVIEW_ROUND=2)
 if ! has "DELTA REVIEW" && [[ "$err" == *"30%"* ]]; then ok "lines a merge brings back count toward the 30% threshold"; else bad "merged-in lines threshold: $err / $(delta_file)"; fi
 
+# 10. The review prompt tells the reviewer to stop only its own servers, by PID, never by pattern (#631).
+if has "stop only the processes you started (by PID)" && has "never use pkill or killall by pattern"; then ok "review prompt forbids pattern kills"; else bad "review prompt pkill rule"; fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

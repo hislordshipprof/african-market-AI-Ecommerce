@@ -4,6 +4,8 @@ import { escapeHtml, money } from "../format";
 import { fulfilledStatus } from "../order/constants";
 import type { PushMessage } from "../push/sender";
 import { presetPrimary, readableFillColor } from "../theme";
+import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage } from "../whatsapp/templates";
+import type { OutboundMessage, WhatsAppSender } from "../whatsapp/types";
 import type { OrderNotifyEvent } from "./record";
 
 export type NotifyLine = {
@@ -48,6 +50,13 @@ export type NotifyOrder = {
   };
   lines: NotifyLine[];
   manualResolution: { refundedCents: number; repaidCents: number; capturedCents: number } | null;
+  /** Set only when the customer opted in to WhatsApp updates at checkout (#560). */
+  whatsapp?: {
+    /** The store's registered number; null when it has none now or its token cannot be opened. */
+    sender: WhatsAppSender | null;
+    /** The customer sent STOP to this store's number. */
+    optedOut: boolean;
+  } | null;
 };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -181,6 +190,7 @@ export type RenderedMessage = {
   html?: string;
   text?: string;
   push?: { storeId: string; orderId: string; message: PushMessage };
+  whatsapp?: { message: OutboundMessage; sender: WhatsAppSender };
 };
 
 /** The subject and first line: the order status, or that the store answered the customer's message. */
@@ -272,4 +282,32 @@ export function renderSms(order: NotifyOrder, event: OrderNotifyEvent, url: stri
   let text = `${name}: order #${order.number} ${status}. Track it: ${url}`;
   if (event === "placed") text += " Reply STOP to opt out.";
   return { to: order.customer.phone ?? "", text };
+}
+
+type WhatsAppEvent = Exclude<OrderNotifyEvent, "store_replied">;
+
+function whatsappTemplate(order: NotifyOrder, event: WhatsAppEvent) {
+  if (event === "ready") {
+    return order.fulfillment === "pickup" ? ORDER_UPDATE_TEMPLATES.ready_pickup : ORDER_UPDATE_TEMPLATES.ready_delivery;
+  }
+  return ORDER_UPDATE_TEMPLATES[event];
+}
+
+/**
+ * The order-update template (#560): the store name and the tracking link only.
+ * The link's path after the store's host is the button's URL suffix; null when
+ * the link has no path to carry.
+ */
+export function renderWhatsApp(
+  order: NotifyOrder,
+  event: WhatsAppEvent,
+  url: string,
+  to: string,
+  sender: WhatsAppSender,
+): RenderedMessage | null {
+  const origin = new URL(url).origin;
+  const suffix = url.startsWith(`${origin}/`) ? url.slice(origin.length + 1) : "";
+  if (!suffix) return null;
+  const message = orderUpdateMessage(to, whatsappTemplate(order, event), smsStoreName(order.store.name), suffix);
+  return { to, from: sender.phoneNumberId, whatsapp: { message, sender } };
 }

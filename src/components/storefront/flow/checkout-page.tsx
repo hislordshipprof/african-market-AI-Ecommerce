@@ -63,6 +63,8 @@ interface StripeConfig {
   prefill?: CheckoutPrefill | null;
   /** Pickup times drawn with the page, so they show before the first quote (#565). */
   pickupSlots?: SlotOptions;
+  /** The store has a registered WhatsApp number, so checkout offers order updates there (#560). */
+  whatsappUpdates?: boolean;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -299,6 +301,7 @@ function RealCheckoutForm({
     () => prefill?.contact ?? { name: "", phone: "", email: "" },
   );
   const [saveCard, setSaveCard] = useState(false);
+  const [whatsappUpdates, setWhatsappUpdates] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(cardView.preselectedId);
   const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
@@ -547,6 +550,7 @@ function RealCheckoutForm({
         notes,
         chosenSlot,
         delivery,
+        stripeConfig.whatsappUpdates ? whatsappUpdates : false,
       );
       if (!orderResult.ok) {
         if (orderResult.code === "slot_unavailable") {
@@ -656,6 +660,7 @@ function RealCheckoutForm({
       }
       contact={contact}
       setContact={setContact}
+      whatsapp={stripeConfig.whatsappUpdates ? { checked: whatsappUpdates, onChange: setWhatsappUpdates } : undefined}
       address={undefined}
       setAddress={() => {}}
       query=""
@@ -866,6 +871,8 @@ interface CheckoutLayoutProps {
   setFulfillment: (f: Fulfillment) => void;
   contact: { name: string; phone: string; email: string };
   setContact: (c: { name: string; phone: string; email: string }) => void;
+  /** Present only when the store has a registered WhatsApp number (#560). */
+  whatsapp?: { checked: boolean; onChange: (checked: boolean) => void };
   address: FlowAddress | undefined;
   setAddress: (a: FlowAddress | undefined) => void;
   query: string;
@@ -925,7 +932,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
-    signedIn = false, identityLocked = false,
+    signedIn = false, identityLocked = false, whatsapp,
   } = props;
 
   const courierReasons = (quote?.problems ?? [])
@@ -1180,6 +1187,19 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     Enter a valid phone number with at least 10 digits.
                   </p>
                 )}
+              {whatsapp && (
+                <label className={styles.choice}>
+                  <input
+                    type="checkbox"
+                    checked={whatsapp.checked}
+                    onChange={(event) => whatsapp.onChange(event.target.checked)}
+                  />
+                  <span>
+                    Get order updates on WhatsApp
+                    <small>Instead of texts, from {settings.name}. Reply STOP to turn them off.</small>
+                  </span>
+                </label>
+              )}
               <label className={styles.field}>
                 Email (required)
                 <input
