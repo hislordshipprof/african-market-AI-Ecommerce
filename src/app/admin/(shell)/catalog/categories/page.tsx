@@ -57,7 +57,7 @@ function CategoryRow({ category, first, last, nested = false }: { category: Cate
       <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted ${nested ? "size-10" : "size-12"}`}>
         {category.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={category.imageUrl} alt="" className="size-full object-cover" loading="lazy" />
+          <img src={category.imageUrl} alt="" width={48} height={48} className="size-full object-cover" loading="lazy" />
         ) : (
           <ImageOff aria-hidden className="size-5 text-muted-foreground" />
         )}

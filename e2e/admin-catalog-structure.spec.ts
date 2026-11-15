@@ -66,8 +66,8 @@ test.describe("Master catalog synonyms and categories", () => {
   test("synonyms: add with a language, the shared-term warning, the duplicate refusal, edit and remove", async ({ page }) => {
     await adminSignIn(page);
     await page.goto(`/admin/catalog/products/${ids.ground}`);
-    const add = page.getByRole("form", { name: "Add a local name or synonym" });
-    const list = page.getByRole("list", { name: "Local names and synonyms" });
+    const add = page.getByRole("form", { name: "Add a term" });
+    const list = page.getByRole("list", { name: "Synonyms" });
 
     await add.getByLabel("Term").fill(`${RUN} agushi`);
     await add.getByLabel("Language").selectOption("tw");
@@ -98,6 +98,7 @@ test.describe("Master catalog synonyms and categories", () => {
     await edit.getByRole("button", { name: "Save term" }).click();
     await expect(egwusi).toContainText("Igbo (ig), Nigeria");
 
+    page.once("dialog", (dialog) => dialog.accept());
     await egwusi.getByRole("button", { name: `Remove ${RUN} egwusi` }).click();
     await expect(list.getByRole("listitem").filter({ hasText: `${RUN} egwusi` })).toHaveCount(0);
 
@@ -112,11 +113,11 @@ test.describe("Master catalog synonyms and categories", () => {
     await expect(page.getByRole("navigation", { name: "Admin" }).locator("[aria-current='page']")).toHaveText("Categories");
 
     const add = page.getByRole("region", { name: "Add a category" });
-    await add.getByLabel("Name").fill(`${RUN} Soups`);
+    await add.getByLabel("Name", { exact: true }).fill(`${RUN} Soups`);
     await add.getByRole("button", { name: "Add category" }).click();
     await expect(add.getByRole("status")).toHaveText("Category added");
     for (const name of ["Egusi soup", "Okra soup"]) {
-      await add.getByLabel("Name").fill(`${RUN} ${name}`);
+      await add.getByLabel("Name", { exact: true }).fill(`${RUN} ${name}`);
       await add.getByLabel("Parent").selectOption({ label: `${RUN} Soups` });
       await add.getByRole("button", { name: "Add category" }).click();
       await expect(page.getByRole("list", { name: `Subcategories of ${RUN} Soups` }).getByRole("listitem")).toContainText([`${RUN} ${name}`]);
@@ -129,7 +130,7 @@ test.describe("Master catalog synonyms and categories", () => {
 
     await page.getByRole("link", { name: new RegExp(`^${RUN} Okra soup`) }).click();
     await expect(page.locator("h1")).toHaveText(`${RUN} Okra soup`);
-    await page.getByLabel("Name").fill(`${RUN} Okra and ogbono`);
+    await page.getByLabel("Name", { exact: true }).fill(`${RUN} Okra and ogbono`);
     await page.getByLabel("Local name").fill("OBE ILA");
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();

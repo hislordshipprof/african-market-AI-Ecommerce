@@ -19,7 +19,7 @@ export function Synonyms({ productId, synonyms }: { productId: string; synonyms:
       {synonyms.length === 0 ? (
         <p className="text-sm text-muted-foreground">No local names or synonyms yet. Add the names shoppers search for.</p>
       ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border" aria-label="Local names and synonyms">
+        <ul className="divide-y divide-border rounded-lg border border-border" aria-labelledby="synonyms-heading">
           {synonyms.map((synonym) => (
             <SynonymRow key={synonym.id} productId={productId} synonym={synonym} />
           ))}
@@ -61,7 +61,12 @@ function SynonymRow({ productId, synonym }: { productId: string; synonym: Synony
             {editing ? "Close" : "Edit"}
             <span className="sr-only"> {synonym.term}</span>
           </button>
-          <form action={remove}>
+          <form
+            action={remove}
+            onSubmit={(event) => {
+              if (!window.confirm(`Remove ${synonym.term}? Search stops finding this product by it.`)) event.preventDefault();
+            }}
+          >
             <input type="hidden" name="productId" value={productId} />
             <input type="hidden" name="synonymId" value={synonym.id} />
             <button type="submit" disabled={removing} className={QUIET_BUTTON}>
@@ -119,10 +124,10 @@ function SynonymForm({ productId, synonym, onSaved }: { productId: string; synon
       onReset={() => setLanguage(defaults.select)}
       noValidate
       autoComplete="off"
-      aria-label={synonym ? `Edit ${synonym.term}` : "Add a local name or synonym"}
+      {...(synonym ? { "aria-label": `Edit ${synonym.term}` } : { "aria-labelledby": id("heading") })}
       className={synonym ? "grid gap-3 rounded-lg bg-muted/50 p-3" : "grid gap-3"}
     >
-      {!synonym && <h3 className="text-base font-semibold text-foreground">Add a term</h3>}
+      {!synonym && <h3 id={id("heading")} className="text-base font-semibold text-foreground">Add a term</h3>}
       <input type="hidden" name="productId" value={productId} />
       {synonym && <input type="hidden" name="synonymId" value={synonym.id} />}
       <div className="grid gap-3 sm:grid-cols-2">

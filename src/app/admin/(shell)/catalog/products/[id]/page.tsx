@@ -52,9 +52,9 @@ export default async function MasterProductEditorPage(props: { params: Promise<{
       </section>
 
       <section aria-labelledby="synonyms-heading" className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 id="synonyms-heading" className="font-heading text-lg font-bold text-foreground">Local names and synonyms</h2>
+        <h2 id="synonyms-heading" className="font-heading text-lg font-bold text-foreground">Synonyms</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Storefront search and the store copilot find this product by these terms as soon as you save.
+          Local names, regional names and spellings. Storefront search and the store copilot find this product by them as soon as you save.
         </p>
         <Synonyms productId={product.id} synonyms={synonyms} />
       </section>
