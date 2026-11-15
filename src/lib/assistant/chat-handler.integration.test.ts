@@ -32,6 +32,7 @@ import { createAssistantModel } from "./model";
 import { WEB_SEARCH_MICROS } from "./cost";
 import { createFakeAnthropicFetch, judgeMessagesRequest } from "./messages-api-double";
 import * as spend from "./spend";
+import { withAiOnboardingSettings } from "../admin/platform-settings-test-lock";
 
 process.env.ASSISTANT_CHAT_ENABLED = "1";
 
@@ -899,11 +900,11 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   });
 
   // A cheap turn writes no turn_cost row: the first test counts exactly two actions.
-  it("records a turn over the oversight cost threshold for review", async () => {
-    const costly = {
-      inputTokens: { total: 300_000, noCache: 300_000, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 10, text: 10, reasoning: 0 },
-    };
+  const costly = {
+    inputTokens: { total: 300_000, noCache: 300_000, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 10, text: 10, reasoning: 0 },
+  };
+  async function costlyTurn(ip: string) {
     const { model } = strictModel(() => [
       { type: "stream-start", warnings: [] },
       { type: "text-start", id: "t" },
@@ -911,16 +912,27 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "text-end", id: "t" },
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage: costly },
     ]);
-    const response = await createChatHandler({ model })(request("long list", { ip: runIp("203.0.113.87") }));
+    const response = await createChatHandler({ model })(request("long list", { ip: runIp(ip) }));
     const cookie = response.headers.get("set-cookie") ?? "";
     await response.text();
     const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
     const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
     const rows = await storeScoped(storeId).aiAction.findMany({ where: { conversationId: conversation?.id ?? "", tool: "turn_cost" } });
+    return { conversation, rows };
+  }
+
+  it("records a turn over the oversight cost threshold for review", async () => {
+    const { conversation, rows } = await withAiOnboardingSettings({ aiTurnCostFlagCents: 2 }, () => costlyTurn("203.0.113.87"));
     expect(rows).toHaveLength(1);
     // Haiku 5.5 long-context rates: 300,000 input tokens at $0.50 per million and 10 output tokens at $2.50 per million.
     const userId = (conversation?.messages as Array<{ id: string; role: string }>).find((message) => message.role === "user")?.id;
     expect(rows[0]?.output).toEqual({ costMicros: 150_025, turn: userId });
+  });
+
+  it("AC3 (#561): reads the cost threshold from the platform setting, so a 15-cent turn is not flagged at 16 cents", async () => {
+    const { conversation, rows } = await withAiOnboardingSettings({ aiTurnCostFlagCents: 16 }, () => costlyTurn("203.0.113.161"));
+    expect(conversation).not.toBeNull();
+    expect(rows).toEqual([]);
   });
 
   it("stops at eight steps with the step-limit part", async () => {
