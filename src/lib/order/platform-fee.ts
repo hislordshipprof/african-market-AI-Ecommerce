@@ -11,6 +11,8 @@
  *   30¢ goes with that part. The platform bears 2.9% on the service fee and on the courier
  *   fee, each part rounded on its own.
  */
+import { goodsDiscountCents, type CouponTerms } from "../coupon/discount";
+
 export const CARD_FEE_BPS = 290;
 export const CARD_FEE_FIXED_CENTS = 30;
 
@@ -31,13 +33,26 @@ export function serviceFeeCents(goodsCents: number, settings: ServiceFeeSettings
   return Math.min(Math.max(percentOf(goodsCents, settings.rateBps), settings.minCents), settings.maxCents);
 }
 
-/** The most goods whose total with the service fee fits `budgetCents`. The fee never falls as goods rise. */
-export function maxGoodsWithin(budgetCents: number, settings: ServiceFeeSettings): number {
+/** Goods less the coupon discount: what the service fee is charged on (#557). */
+export function discountedGoodsCents(goodsCents: number, coupon?: CouponTerms | null): number {
+  return coupon ? goodsCents - goodsDiscountCents(goodsCents, coupon) : goodsCents;
+}
+
+/**
+ * The most goods whose total with the service fee fits `budgetCents`, after the coupon discount when
+ * there is one (#557). Neither the discounted goods nor the fee ever fall as goods rise.
+ */
+export function maxGoodsWithin(budgetCents: number, settings: ServiceFeeSettings, coupon?: CouponTerms | null): number {
+  const charged = (goods: number) => {
+    const net = discountedGoodsCents(goods, coupon);
+    return net + serviceFeeCents(net, settings);
+  };
   let low = 0;
-  let high = Math.max(0, budgetCents);
+  // A discount lets goods above the budget fit; a 90% coupon at most multiplies them by ten.
+  let high = Math.max(0, budgetCents) * (coupon ? 10 : 1) + (coupon?.amountOffCents ?? 0);
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (mid + serviceFeeCents(mid, settings) <= budgetCents) low = mid;
+    if (charged(mid) <= budgetCents) low = mid;
     else high = mid - 1;
   }
   return low;

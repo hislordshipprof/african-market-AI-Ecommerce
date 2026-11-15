@@ -1,14 +1,15 @@
 import type { PrismaClient } from "@prisma/client";
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
-import { maxGoodsWithin, orderServiceFeeSettings, serviceFeeCents } from "./platform-fee";
+import { discountedGoodsCents, maxGoodsWithin, orderServiceFeeSettings, serviceFeeCents } from "./platform-fee";
 import { canOfferSwap, lineChargeCents, type ChargeLine } from "./substitution-pricing";
+import { couponTerms } from "../coupon/discount";
 
 /** How long the customer has to answer before the line's swap rule applies. */
 export const SUBSTITUTION_WINDOW_MS = 10 * 60_000;
 
 export type SubstitutionDecision = "swap" | "refund";
 
-type SubstitutionTx = Pick<PrismaClient, "order" | "orderLine" | "listing" | "listingVariant" | "substitutionRequest">;
+type SubstitutionTx = Pick<PrismaClient, "order" | "orderLine" | "listing" | "listingVariant" | "substitutionRequest" | "storeCoupon">;
 
 type ShortLine = {
   id: string;
@@ -77,6 +78,7 @@ export async function openSubstitutionRequest(
     serviceFeeBps: number;
     serviceFeeMinCents: number;
     serviceFeeMaxCents: number;
+    couponId: string | null;
   },
 ): Promise<{ id: string; expiresAt: Date }> {
   const units = line.qtyOrdered - qtyFound;
@@ -93,9 +95,15 @@ export async function openSubstitutionRequest(
   const serviceFee = orderServiceFeeSettings(order);
   const goodsCents = estimate.reduce((sum, row) => sum + lineChargeCents(row), 0);
   const extrasCents = order.tipCents + order.deliveryFeeCents;
-  const totalWith = (goods: number) => goods + serviceFeeCents(goods, serviceFee) + extrasCents;
+  // Capture recomputes the coupon discount on the goods charged (#557), so the hold check does too.
+  const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+  const coupon = couponRow ? couponTerms(couponRow) : null;
+  const totalWith = (goods: number) => {
+    const net = discountedGoodsCents(goods, coupon);
+    return net + serviceFeeCents(net, serviceFee) + extrasCents;
+  };
   // The largest unit price whose goods, with their service fee, still fit the hold.
-  const goodsHeadroom = maxGoodsWithin(order.totalAuthorizedCents - extrasCents, serviceFee) - goodsCents;
+  const goodsHeadroom = maxGoodsWithin(order.totalAuthorizedCents - extrasCents, serviceFee, coupon) - goodsCents;
   const maxUnitCents = line.unitPriceCents + Math.floor(goodsHeadroom / units);
   const proposal = await proposeSwap(tx, line, units, maxUnitCents);
   const currentTotalCents = totalWith(goodsCents);

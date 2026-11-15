@@ -134,6 +134,8 @@ export interface StripeProvider {
     amountCents: number,
     idempotencyKey?: string,
     applicationFeeAmount?: number,
+    /** Sent with the capture; carries `coupon_id` for a coupon order (#557). */
+    metadata?: Record<string, string>,
   ): Promise<CaptureResult>;
 
   cancelPaymentIntent(
