@@ -13,23 +13,12 @@ vi.mock("next/headers", () => ({
 }));
 
 import { POST } from "./route";
-import { auth } from "@/lib/auth";
 import { authPrisma, storeScoped } from "@/lib/db";
+import { authPost, collectCookies } from "../../../../lib/test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-inv`;
 const password = "GuardPass-123!";
 const email = `invite-309-${suffix}@test.example`;
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 async function verifiedCookies(): Promise<string> {
   const signedUp = await authPost("/sign-up/email", { email, password, name: "Invite 309" });

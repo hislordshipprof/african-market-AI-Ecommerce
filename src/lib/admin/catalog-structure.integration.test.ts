@@ -40,28 +40,17 @@ import sharp from "sharp";
 import { addProductSynonym, removeProductSynonym, updateProductSynonym } from "./product-synonyms";
 import { createCategory, deleteCategory, getCategoryEditor, listCategoryTree, moveCategory, updateCategory, uploadCategoryImage } from "./catalog-categories";
 import { getMasterProductEditor } from "./master-catalog";
-import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { searchListings } from "../storefront/service";
 import { searchListingMatches } from "../copilot/search";
+import { authPost, collectCookies } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `cs${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 // Search terms share nothing with RUN, so the products' names are not trigram look-alikes of them.
 const TAG = Math.random().toString(36).replace(/[^a-z]/g, "").slice(0, 5).padEnd(5, "q");
 const password = "GuardPass-123!";
 const adminEmail = `${RUN}-admin@test.example`;
 const ownerEmail = `${RUN}-owner@test.example`;
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 async function signUp(email: string): Promise<string> {
   const res = await authPost("/sign-up/email", { email, password, name: RUN });

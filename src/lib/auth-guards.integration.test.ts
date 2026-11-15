@@ -27,7 +27,6 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { auth } from "./auth";
 import { authPrisma } from "./db";
 import { requirePlatformAdmin } from "./admin/session";
 import { requireStoreMember, requireStoreOwner } from "./store-admin/session";
@@ -35,39 +34,11 @@ import { clearTestSentEmails, getTestSentEmails } from "./email/send";
 import { syncCustomerForRequest } from "./customer-sync";
 import { createInvite, setInviteePassword } from "./invite/service";
 import { sendSignInLinkAction } from "./customer-sign-in/actions";
-import { verifyUrlFromEmail } from "./test-magic-link";
+import { AUTH_BASE, authGet, authPost, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
 import { storeScoped } from "./db";
 
-const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-c1`;
 const password = "GuardPass-123!";
-
-async function authPost(
-  path: string,
-  body: unknown,
-  cookies?: string,
-  extra?: Record<string, string>,
-): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json", ...extra };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-async function authGet(url: string, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = {};
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(url, { headers, redirect: "manual" }));
-}
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
 
 function cookiePairs(res: Response): string {
   return (res.headers.getSetCookie?.() ?? []).map((line) => line.split(";")[0]).join("; ");
@@ -100,14 +71,9 @@ async function verifyTotp(code: string, cookies: string): Promise<Response> {
 }
 
 async function latestToken(email: string): Promise<string> {
-  const rows = await authPrisma.verification.findMany({
-    where: { identifier: { startsWith: "magic-link:" } },
-    orderBy: { createdAt: "desc" },
-    take: 15,
-  });
-  const row = rows.find((item) => item.value.includes(email));
-  if (!row) throw new Error(`no magic link for ${email}`);
-  return row.identifier.replace(/^magic-link:/, "");
+  const link = await latestMagicLink(email);
+  if (!link) throw new Error(`no magic link for ${email}`);
+  return link.token;
 }
 
 describe("C1 real guards (lane DB, app_runtime)", () => {
@@ -177,7 +143,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     expect(verified.status, await verified.clone().text()).toBe(200);
     const sessionCookies = collectCookies(verified) || cookies;
 
-    const sessionRes = await authGet(`${BASE}/get-session`, sessionCookies);
+    const sessionRes = await authGet(`${AUTH_BASE}/get-session`, sessionCookies);
     const sessionBody = await sessionRes.json();
     expect(sessionBody.session.twoFactorVerified).toBe(true);
     expect(sessionBody.user.twoFactorEnabled).toBe(true);
@@ -301,7 +267,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       expect(mail?.to).toBe(email);
       const link = mail!.html.match(/href="([^"]+)"/)![1].replace(/&amp;/g, "&");
       const landed = await authGet(link);
-      const location = new URL(landed.headers.get("location")!, BASE);
+      const location = new URL(landed.headers.get("location")!, AUTH_BASE);
       expect(location.pathname).toBe("/admin/reset-password");
       const token = location.searchParams.get("token")!;
 
@@ -391,7 +357,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       expect(getTestSentEmails()).toHaveLength(0);
       const token = await latestToken(email);
       const verifyRes = await authGet(
-        `${BASE}/magic-link/verify?token=${token}&callbackURL=/account`,
+        `${AUTH_BASE}/magic-link/verify?token=${token}&callbackURL=/account`,
       );
       expect(verifyRes.status).toBe(403);
       expect(collectCookies(verifyRes)).not.toContain("session_token");
@@ -424,7 +390,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     expect(href).toBeTruthy();
     const verifyRes = await authGet(href!);
     const cookies = collectCookies(verifyRes);
-    const sessionRes = await authGet(`${BASE}/get-session`, cookies);
+    const sessionRes = await authGet(`${AUTH_BASE}/get-session`, cookies);
     const original = await sessionRes.json();
     expect(original.session.twoFactorVerified).toBe(false);
     const originalId = original.session.id as string;
@@ -450,7 +416,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     expect(again.status).toBe(200);
     expect(getTestSentEmails()).toHaveLength(0);
     const blocked = await authGet(
-      `${BASE}/magic-link/verify?token=${await latestToken(plainEmail)}&callbackURL=/account`,
+      `${AUTH_BASE}/magic-link/verify?token=${await latestToken(plainEmail)}&callbackURL=/account`,
     );
     expect(blocked.status).toBe(403);
 
@@ -471,7 +437,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
 type LiveSession = { id: string; userId: string; twoFactorVerified: boolean };
 
 async function readSession(cookies: string): Promise<LiveSession | null> {
-  const res = await authGet(`${BASE}/get-session`, cookies);
+  const res = await authGet(`${AUTH_BASE}/get-session`, cookies);
   const body = (await res.json()) as {
     session: { id: string; twoFactorVerified: boolean } | null;
     user: { id: string };
