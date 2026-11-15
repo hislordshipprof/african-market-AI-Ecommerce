@@ -17,6 +17,7 @@ import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
 import { copilotDailyDigest } from "../copilot/digest";
+import { deleteExpiredRejectedApplications } from "../store-application/service";
 import { STORE_LISTED, notifyWaitingRequests } from "../directory/store-requests";
 import { courierAssignmentTimeout, courierCancelOnOrderCancelled, courierDispatchOnPacking, courierDispatchOnReady, courierProofCopy, courierRegistration, courierRegistrationRetry } from "../delivery/courier-functions";
 
@@ -392,6 +393,15 @@ export const assistantRetention = inngest.createFunction(
     }),
 );
 
+/** Rejected store applications are deleted 12 months after the decision (#554). */
+export const storeApplicationRetention = inngest.createFunction(
+  {
+    id: "store-application/retention",
+    triggers: [{ cron: "TZ=UTC 29 3 * * *" }],
+  },
+  async ({ step }) => step.run("delete-expired-rejected", () => deleteExpiredRejectedApplications()),
+);
+
 export const dailyConfidence = inngest.createFunction(
   {
     id: "listing/daily-confidence",
@@ -433,6 +443,7 @@ export const inngestFunctions = [
   sweepOrphanedAuthorized,
   reconcileStuckTransitional,
   assistantRetention,
+  storeApplicationRetention,
   dailyConfidence,
   sendCustomerNotification,
   substitutionTimeout,

@@ -112,6 +112,7 @@ model Store {
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  application           StoreApplication?
   whatsAppNumber        StoreWhatsAppNumber?
   whatsAppOptOuts       WhatsAppOptOut[]
   driverRoutes          DriverRoute[]
@@ -1836,6 +1837,44 @@ model AssistantChatMonth {
 
   @@id([storeId, month])
   @@map("assistant_chat_months")
+}
+
+/// An application from the public /sell page (#554). Platform data with no RLS: only platform-admin code reads it.
+/// One pending application per email and per phone (partial unique indexes in the migration).
+model StoreApplication {
+  id                 String    @id @default(cuid())
+  businessName       String    @map("business_name")
+  /// african | caribbean | other_grocery | specialty_food
+  storeType          String    @map("store_type")
+  addressLine1       String    @map("address_line1")
+  city               String
+  state              String
+  zip                String
+  ownerName          String    @map("owner_name")
+  /// Lower-cased and trimmed.
+  email              String
+  /// E.164, US only: +1 and 10 digits.
+  phone              String
+  website            String?
+  offersPickup       Boolean   @default(false) @map("offers_pickup")
+  offersDelivery     Boolean   @default(false) @map("offers_delivery")
+  /// pending | approved | rejected
+  status             String    @default("pending")
+  /// Internal only; never sent to the applicant.
+  rejectReason       String?   @map("reject_reason")
+  decidedAt          DateTime? @map("decided_at")
+  decidedByEmail     String?   @map("decided_by_email")
+  /// Set once the plain rejection email has gone; a rejected row without it can be sent again.
+  rejectionEmailedAt DateTime? @map("rejection_emailed_at")
+  storeId            String?   @unique @map("store_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([status, decidedAt])
+  @@map("store_applications")
 }
 
 /// A store's own WhatsApp number for customers (#558, ADR-0010). Written by raw SQL in src/lib/db.ts.
