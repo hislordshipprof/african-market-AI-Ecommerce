@@ -5,6 +5,7 @@ import {
   platformAdminTransaction,
   storeScoped,
   lockStoreRow,
+  readStorePlanRows,
 } from "../db";
 import { sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
@@ -64,10 +65,7 @@ export async function recordInvite(tx: InviteTx, input: CreateInviteInput): Prom
 
   if (input.role === "staff") {
     await lockStoreRow(tx, input.storeId);
-    const subscription = await tx.storeSubscription.findUnique({
-      where: { storeId: input.storeId },
-      select: { plan: true, status: true },
-    });
+    const [subscription] = await readStorePlanRows(tx, [input.storeId]);
     const limit = staffLimit(effectivePlan(subscription));
     if (limit !== null) {
       const [staff, invited] = await Promise.all([
