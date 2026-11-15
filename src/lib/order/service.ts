@@ -7,6 +7,7 @@ import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
+import { couponTerms } from "../coupon/discount";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
 import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
@@ -1019,7 +1020,8 @@ export async function markReady(
 
     // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
     // The coupon's value cannot change once an order used it (#556), so it is read as placed.
-    const coupon = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+    const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+    const coupon = couponRow ? couponTerms(couponRow) : null;
     const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order), coupon });
     const capturedAmountCents = charge.amountCents;
 

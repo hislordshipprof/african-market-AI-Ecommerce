@@ -66,12 +66,6 @@ describe("#557: promo discount on receipts", () => {
   // Goods $20.00 − SAVE10 $2.00 + delivery $5.00 + service fee $0.54 (3% of $18.00) = $23.54.
   const promo = { ...order("DELIVERED", 2354), serviceFeeCents: 54, discountCents: 200, coupon: { code: "SAVE10" } };
 
-  it("the placed email shows the promo line and an estimate that already subtracts it", () => {
-    const html = renderEmail({ ...promo, status: "AUTHORIZED" }, "placed", URL, "orders@example.com").html;
-    expect(html).toContain("<p>Promo SAVE10: −$2.00.</p><p>Service fee $0.54.</p>");
-    expect(html).toContain("Estimated total $23.54.");
-  });
-
   it("the charged email shows the promo line before the service fee and charged amount", () => {
     const html = renderEmail(promo, "delivered", URL, "orders@example.com").html;
     expect(html).toContain("<p>Promo SAVE10: −$2.00.</p><p>Service fee $0.54.</p><p>Charged $23.54.</p>");

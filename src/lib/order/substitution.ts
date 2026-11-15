@@ -1,8 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
-import { maxGoodsWithin, orderServiceFeeSettings, serviceFeeCents } from "./platform-fee";
+import { discountedGoodsCents, maxGoodsWithin, orderServiceFeeSettings, serviceFeeCents } from "./platform-fee";
 import { canOfferSwap, lineChargeCents, type ChargeLine } from "./substitution-pricing";
-import { goodsDiscountCents } from "../coupon/discount";
+import { couponTerms } from "../coupon/discount";
 
 /** How long the customer has to answer before the line's swap rule applies. */
 export const SUBSTITUTION_WINDOW_MS = 10 * 60_000;
@@ -96,9 +96,10 @@ export async function openSubstitutionRequest(
   const goodsCents = estimate.reduce((sum, row) => sum + lineChargeCents(row), 0);
   const extrasCents = order.tipCents + order.deliveryFeeCents;
   // Capture recomputes the coupon discount on the goods charged (#557), so the hold check does too.
-  const coupon = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+  const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+  const coupon = couponRow ? couponTerms(couponRow) : null;
   const totalWith = (goods: number) => {
-    const net = coupon ? goods - goodsDiscountCents(goods, coupon) : goods;
+    const net = discountedGoodsCents(goods, coupon);
     return net + serviceFeeCents(net, serviceFee) + extrasCents;
   };
   // The largest unit price whose goods, with their service fee, still fit the hold.

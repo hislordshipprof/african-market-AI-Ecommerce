@@ -33,13 +33,18 @@ export function serviceFeeCents(goodsCents: number, settings: ServiceFeeSettings
   return Math.min(Math.max(percentOf(goodsCents, settings.rateBps), settings.minCents), settings.maxCents);
 }
 
+/** Goods less the coupon discount: what the service fee is charged on (#557). */
+export function discountedGoodsCents(goodsCents: number, coupon?: CouponTerms | null): number {
+  return coupon ? goodsCents - goodsDiscountCents(goodsCents, coupon) : goodsCents;
+}
+
 /**
  * The most goods whose total with the service fee fits `budgetCents`, after the coupon discount when
  * there is one (#557). Neither the discounted goods nor the fee ever fall as goods rise.
  */
 export function maxGoodsWithin(budgetCents: number, settings: ServiceFeeSettings, coupon?: CouponTerms | null): number {
   const charged = (goods: number) => {
-    const net = coupon ? goods - goodsDiscountCents(goods, coupon) : goods;
+    const net = discountedGoodsCents(goods, coupon);
     return net + serviceFeeCents(net, settings);
   };
   let low = 0;

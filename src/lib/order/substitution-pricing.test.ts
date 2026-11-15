@@ -38,8 +38,8 @@ describe("captureCharge", () => {
   });
 
   describe("with a store coupon (#557)", () => {
-    const percent20 = { kind: "percent", percentOff: 20, amountOffCents: null };
-    const fixed10 = { kind: "fixed", percentOff: null, amountOffCents: 1000 };
+    const percent20 = { kind: "percent" as const, percentOff: 20, amountOffCents: null };
+    const fixed10 = { kind: "fixed" as const, percentOff: null, amountOffCents: 1000 };
 
     it("recomputes a percent discount on the goods picked, stores each line's share, and charges the fee on discounted goods", () => {
       // Ordered $50.00; one unit of the $10 line found: goods $40.00, 20% = $8.00 split 600 / 200.
