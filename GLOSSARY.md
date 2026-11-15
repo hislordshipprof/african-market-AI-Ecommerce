@@ -99,6 +99,14 @@ _Avoid_: Waitlist, lead form, store suggestion
 A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected or archived. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
 _Avoid_: Deleting a master product
 
+**Synonym**:
+Another name a shopper searches for a master product: a local name ("egusi" in Yoruba), a regional name or a spelling ("garri"). It may carry an ISO 639 language code and a region. One product never has the same term twice; two products may share one ("agushi" names whole and ground egusi), and the admin editor warns when they do.
+_Avoid_: Alias, keyword
+
+**Category**:
+A platform-wide aisle (e.g. "Grains & Flours") that master products belong to, with a local name, a photo and a place in the order. A category may sit under one top-level category as a subcategory; there is no deeper level. Its slug never changes after creation.
+_Avoid_: Department, collection (a store's own curated list)
+
 **Listing**:
 A store's offer of a product: its price, sizes and stock at that store.
 _Avoid_: Product (when meaning the store's item), SKU
