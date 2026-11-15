@@ -9,7 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { removeWhatsAppLinkAction, startWhatsAppLinkAction } from "@/lib/whatsapp/actions";
+import { Switch } from "@/components/ui/switch";
+import { removeWhatsAppLinkAction, startWhatsAppLinkAction, updateWhatsAppNoticesAction } from "@/lib/whatsapp/actions";
+
+export interface Notices {
+  optInAlerts: boolean;
+  optInDigest: boolean;
+}
 
 export type LinkState =
   | { kind: "none" }
@@ -21,6 +27,7 @@ export type LinkState =
       since: string | null;
       /** A live code for a number change or re-check; the link above stays until it is answered. */
       pending: { phone: string; display: string } | null;
+      notices: Notices;
     };
 
 interface Props {
@@ -60,6 +67,61 @@ function ReplySteps({ display }: { display: string }) {
         </span>
       </li>
     </ol>
+  );
+}
+
+const NOTICE_ROWS: Array<{ key: keyof Notices; label: string; hint: string }> = [
+  { key: "optInAlerts", label: "Stock alerts", hint: "Sold out and running low, at most 2 an hour." },
+  { key: "optInDigest", label: "Daily digest", hint: "Orders, sales and stock, at your digest hour." },
+];
+
+/** Copilot alerts and the daily digest on WhatsApp (#144). Off until the owner turns them on. */
+function NoticeSettings({ initial }: { initial: Notices }) {
+  const router = useRouter();
+  const [notices, setNotices] = useState(initial);
+  const [saving, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function change(key: keyof Notices, checked: boolean) {
+    const previous = notices;
+    const next = { ...notices, [key]: checked };
+    setNotices(next);
+    setError(null);
+    startTransition(async () => {
+      const result = await updateWhatsAppNoticesAction(next);
+      if ("error" in result) {
+        setNotices(previous);
+        setError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  return (
+    <fieldset className="space-y-3 border-t border-border pt-4">
+      <legend className="sr-only">Store copilot messages on WhatsApp</legend>
+      <p className="text-sm font-medium text-foreground">Also send me on WhatsApp</p>
+      {NOTICE_ROWS.map((row) => (
+        <div key={row.key} className="flex min-h-11 items-center justify-between gap-4">
+          <div className="min-w-0">
+            <label htmlFor={`notice-${row.key}`} className="text-sm text-foreground">{row.label}</label>
+            <p id={`notice-${row.key}-hint`} className="text-xs text-muted-foreground">{row.hint}</p>
+          </div>
+          <Switch
+            id={`notice-${row.key}`}
+            checked={notices[row.key]}
+            onCheckedChange={(checked) => change(row.key, checked)}
+            disabled={saving}
+            aria-describedby={`notice-${row.key}-hint`}
+          />
+        </div>
+      ))}
+      <p className="text-xs text-muted-foreground">
+        Reply to any of them with a stock report, like &ldquo;restocked 20 bags of egusi&rdquo;. You confirm each change with a tap.
+      </p>
+      {error && <ErrorNote message={error} />}
+    </fieldset>
   );
 }
 
@@ -191,6 +253,8 @@ export function WhatsAppLinkForm({ storeName, storeSlug, configured, state, chil
                 your number, remove it.
               </p>
             )}
+
+            {state.kind === "linked" && !editing && <NoticeSettings initial={state.notices} />}
 
             {state.kind === "linked" && state.pending && !editing && (
               <div className="space-y-3 rounded-lg bg-muted/60 p-4">

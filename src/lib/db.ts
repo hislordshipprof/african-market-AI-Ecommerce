@@ -414,6 +414,7 @@ const STORE_SCOPED_TX_MODELS = [
   "orderPushSubscription",
   "ownerReport",
   "ownerReportItem",
+  "ownerWhatsAppLink",
   "paymentDispute",
   "paymentIntentRelease",
   "pickBatch",
@@ -2486,6 +2487,16 @@ export async function findVerifiedOwnerLink(
   };
 }
 
+/** Adds the owner to the day's WhatsApp digest recipients before the send (#144). False when already there. */
+export async function claimDigestWhatsApp(tx: RawTx, storeId: string, localDate: string, userId: string): Promise<boolean> {
+  const updated = await tx.$executeRaw`
+    UPDATE copilot_digests
+    SET whatsapp_sent_to = array_append(whatsapp_sent_to, ${userId})
+    WHERE store_id = ${storeId} AND local_date = ${localDate} AND NOT (${userId} = ANY (whatsapp_sent_to))
+  `;
+  return updated === 1;
+}
+
 /** Moves the owner's last inbound time forward to Meta's send time of this message (#144); never back. */
 export async function recordOwnerInbound(tx: RawTx, linkId: string, sentAt: Date): Promise<void> {
   await tx.$executeRaw`
@@ -2602,6 +2613,8 @@ export async function readOwnerLink(storeId: string, userId: string): Promise<{
   verified: boolean;
   verifiedAt: Date | null;
   codeLive: boolean;
+  optInAlerts: boolean;
+  optInDigest: boolean;
 } | null> {
   const rows = await storeScopedTransaction(storeId, (tx) =>
     tx.$queryRaw<Array<{
@@ -2610,8 +2623,10 @@ export async function readOwnerLink(storeId: string, userId: string): Promise<{
       verified: boolean;
       verified_at: Date | null;
       code_live: boolean;
+      opt_in_alerts: boolean;
+      opt_in_digest: boolean;
     }>>`
-      SELECT phone_number, pending_phone_number, verified, verified_at,
+      SELECT phone_number, pending_phone_number, verified, verified_at, opt_in_alerts, opt_in_digest,
         (verification_code_hash IS NOT NULL
           AND verification_expires_at > (now() AT TIME ZONE 'UTC')) AS code_live
       FROM owner_whatsapp_links
@@ -2626,6 +2641,8 @@ export async function readOwnerLink(storeId: string, userId: string): Promise<{
     verified: row.verified,
     verifiedAt: row.verified_at,
     codeLive: row.code_live === true,
+    optInAlerts: row.opt_in_alerts,
+    optInDigest: row.opt_in_digest,
   };
 }
 

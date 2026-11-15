@@ -1,5 +1,5 @@
 import { resolveAuthBaseUrl } from "../auth";
-import { Prisma, platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
+import { Prisma, claimDigestWhatsApp, platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { salesRows, salesView } from "../analytics/queries";
 import { sendEmail } from "../email/send";
 import { inngest } from "../inngest/client";
@@ -238,12 +238,8 @@ async function sendWhatsAppDigests(
     `Open the stock copilot: ${copilotUrl}`,
   ].join("\n");
   for (const recipient of recipients) {
-    const claimed = await storeScopedTransaction(store.id, (tx) => tx.$executeRaw`
-      UPDATE copilot_digests
-      SET whatsapp_sent_to = array_append(whatsapp_sent_to, ${recipient.userId})
-      WHERE store_id = ${store.id} AND local_date = ${localDate} AND NOT (${recipient.userId} = ANY (whatsapp_sent_to))
-    `);
-    if (claimed !== 1) continue;
+    const claimed = await storeScopedTransaction(store.id, (tx) => claimDigestWhatsApp(tx, store.id, localDate, recipient.userId));
+    if (!claimed) continue;
     await sendOwnerNotice(store.id, recipient, {
       text,
       template: COPILOT_TEMPLATES.digest,

@@ -22,6 +22,7 @@ import { setSpendClock } from "../assistant/spend";
 import { storeScoped } from "../db";
 import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "./fake";
 import { setWhatsAppProvider } from "./index";
+import { setOwnerNotices } from "./owner-link";
 import { PROPOSAL_GONE_REPLY, REJECTED_REPLY, TYPE_YOUR_REPORT_REPLY } from "./owner-handler";
 import { signWhatsAppBody } from "./signature";
 import type { OutboundMessage } from "./types";
@@ -206,5 +207,17 @@ describe.skipIf(!hasDb)("Store copilot on WhatsApp (lane database, recording fak
     const link = await storeScoped(storeB).ownerWhatsAppLink.findFirstOrThrow({ where: { userId: ownerB.id } });
     expect(link.lastInboundAt).not.toBeNull();
     expect(Math.abs(link.lastInboundAt!.getTime() - Date.now())).toBeLessThan(5_000);
+  });
+
+  it("the owner turns alerts and the digest on for their own verified link only, with an audit row", async () => {
+    const notices = { optInAlerts: true, optInDigest: true };
+    expect(await setOwnerNotices({ storeId: storeA, userId: ownerA.id, actorEmail: "a@example.com" }, notices)).toBe(true);
+    expect(await storeScoped(storeA).ownerWhatsAppLink.findFirstOrThrow({ where: { userId: ownerA.id } }))
+      .toMatchObject(notices);
+    expect(await storeScoped(storeA).auditLog.count({ where: { action: "whatsapp_link.notices", actorId: ownerA.id } })).toBe(1);
+    // Store B's owner has no link at store A: nothing is written there.
+    expect(await setOwnerNotices({ storeId: storeA, userId: ownerB.id, actorEmail: "b@example.com" }, notices)).toBe(false);
+    expect(await storeScoped(storeB).ownerWhatsAppLink.findFirstOrThrow({ where: { userId: ownerB.id } }))
+      .toMatchObject({ optInAlerts: false, optInDigest: false });
   });
 });
