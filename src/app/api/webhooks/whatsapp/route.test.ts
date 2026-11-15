@@ -95,6 +95,7 @@ describe("WhatsApp webhook route", () => {
       text: "À bọnọ\n",
       timestamp: 1762700000,
       replyId: null,
+      inGroup: false,
     });
 
     vi.stubEnv("WHATSAPP_APP_SECRET", "");
@@ -153,6 +154,7 @@ describe("WhatsApp webhook route", () => {
       text: "hi",
       timestamp: 1762700000,
       replyId: null,
+      inGroup: false,
     });
   });
 
@@ -182,5 +184,43 @@ describe("WhatsApp webhook route", () => {
     expect((await post(raw, signWhatsAppBody(raw, SECRET))).status).toBe(200);
     expect(handleStoreInboundMessage).toHaveBeenCalledTimes(1);
     expect(handleInboundMessage).not.toHaveBeenCalled();
+  });
+
+  it("a failing message does not stop the later messages in the payload; the answer is still 500 (F5)", async () => {
+    const raw = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "1", changes: [{ field: "messages", value: {
+        metadata: { phone_number_id: PHONE_ID },
+        messages: [
+          { from: "14045550123", id: "wamid.bad", type: "text", text: { body: "hi" } },
+          { from: "14045550123", id: "wamid.next", type: "text", text: { body: "hi" } },
+        ],
+      } }] }],
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(handleInboundMessage).mockRejectedValueOnce(new Error("bad row"));
+    expect((await post(raw, signWhatsAppBody(raw, SECRET))).status).toBe(500);
+    expect(vi.mocked(handleInboundMessage).mock.calls.map(([message]) => message.id)).toEqual(["wamid.bad", "wamid.next"]);
+    errorLog.mockRestore();
+  });
+
+  it("an odd status does not drop the message beside it, and an unreadable message logs its key names only (F13, F15)", async () => {
+    const raw = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "1", changes: [{ field: "messages", value: {
+        metadata: { phone_number_id: PHONE_ID },
+        messages: [
+          { from: "14045550123", id: "wamid.good", type: "text", text: { body: "hi" } },
+          { from: "14045550123", kind: "text", body: "private words" },
+        ],
+        statuses: [{ id: "wamid.s", status: "failed", errors: [{ code: "131047" }] }],
+      } }] }],
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await post(raw, signWhatsAppBody(raw, SECRET))).status).toBe(200);
+    expect(vi.mocked(handleInboundMessage).mock.calls.map(([message]) => message.id)).toEqual(["wamid.good"]);
+    const lines = warn.mock.calls.map(([line]) => JSON.parse(String(line)));
+    expect(lines).toEqual([{ event: "whatsapp_message_unparsed", count: 1, keys: [["body", "from", "kind"]] }]);
+    warn.mockRestore();
   });
 });

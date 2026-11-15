@@ -48,7 +48,7 @@ async function asPlatformAdmin(fn: (tx: typeof authPrisma) => Promise<unknown>):
 
 let seq = 0;
 function inbound(text: string, from = WA_ID) {
-  return { id: `wamid.w560-${base}-${++seq}`, from, fromUserId: null, type: "text", text, timestamp: null, replyId: null };
+  return { id: `wamid.w560-${base}-${++seq}`, from, fromUserId: null, type: "text", text, timestamp: null, replyId: null, inGroup: false };
 }
 
 describe.skipIf(!hasDb)("WhatsApp order updates (#560)", () => {
