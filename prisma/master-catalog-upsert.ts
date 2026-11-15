@@ -59,7 +59,7 @@ export function parseSearchSynonyms(raw: string): { term: string }[] {
     .map((term) => ({ term }));
 }
 
-/** Make the product's synonym rows match the CSV row: upsert each one, delete any it no longer names. */
+/** Make the seed's synonym rows match the CSV row: upsert each one, delete any seeded row it no longer names. */
 export async function upsertSynonyms(tx: Prisma.TransactionClient, row: CsvRow): Promise<void> {
   const keep: string[] = [];
   for (const syn of parseLocalNames(row.local_names)) {
@@ -80,7 +80,11 @@ export async function upsertSynonyms(tx: Prisma.TransactionClient, row: CsvRow):
       create: { id, productId: row.id, term: syn.term },
     });
   }
-  await tx.productSynonym.deleteMany({ where: { productId: row.id, id: { notIn: keep } } });
+  // Prunes only rows the seed created (its derived ids); a synonym added on the admin synonym screen stays (#541).
+  const rows = await tx.productSynonym.findMany({ where: { productId: row.id }, select: { id: true } });
+  const seeded = (id: string) => id.startsWith(`${row.id}_ln_`) || id.startsWith(`${row.id}_ss_`);
+  const stale = rows.map((r) => r.id).filter((id) => seeded(id) && !keep.includes(id));
+  if (stale.length > 0) await tx.productSynonym.deleteMany({ where: { id: { in: stale } } });
 }
 
 export type MasterProductVariant = {
