@@ -141,8 +141,8 @@ async function connectStoreNumber(input: ConnectStoreNumberInput): Promise<Conne
  * endpoint has no idempotency key, so a retry could deliver twice.
  */
 export const cloudApiWhatsAppProvider: WhatsAppProvider = {
-  async send(message) {
-    const config = readSendConfig();
+  async send(message, from) {
+    const config = from ?? readSendConfig();
     if (!config) throw new WhatsAppNotConfiguredError();
     const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(config.phoneNumberId)}/messages`;
     let response: Response;
