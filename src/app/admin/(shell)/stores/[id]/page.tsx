@@ -143,22 +143,22 @@ function PlanOverrideForm({
       </p>
       <input type="hidden" name="storeId" value={storeId} />
       <div className="mt-3 grid gap-3 sm:grid-cols-[10rem_12rem]">
-        <label className="grid gap-1.5 text-sm font-medium text-foreground">
-          Plan
-          <select name="plan" defaultValue={running?.plan ?? "pro"} className={FIELD}>
+        <div className="grid gap-1.5">
+          <label htmlFor="override-plan" className="text-sm font-medium text-foreground">Plan</label>
+          <select id="override-plan" name="plan" defaultValue={running?.plan ?? "pro"} className={FIELD}>
             <option value="pro">{PLAN_NAMES.pro}</option>
             <option value="starter">{PLAN_NAMES.starter}</option>
           </select>
-        </label>
-        <label className="grid gap-1.5 text-sm font-medium text-foreground">
-          Ends on (UTC)
-          <input name="endsOn" type="date" required className={FIELD} />
-        </label>
+        </div>
+        <div className="grid gap-1.5">
+          <label htmlFor="override-ends" className="text-sm font-medium text-foreground">Ends on (UTC)</label>
+          <input id="override-ends" name="endsOn" type="date" required className={FIELD} />
+        </div>
       </div>
-      <label className="mt-3 grid gap-1.5 text-sm font-medium text-foreground">
-        Reason
-        <input name="reason" required maxLength={500} placeholder="For example: launch partner, comped for 3 months" className={FIELD} />
-      </label>
+      <div className="mt-3 grid gap-1.5">
+        <label htmlFor="override-reason" className="text-sm font-medium text-foreground">Reason</label>
+        <input id="override-reason" name="reason" required maxLength={500} placeholder="For example: launch partner, comped for 3 months" className={FIELD} />
+      </div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button type="submit" className="min-h-11 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
           {running ? "Replace override" : "Set override"}

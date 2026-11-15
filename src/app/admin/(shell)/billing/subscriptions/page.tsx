@@ -62,24 +62,24 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
       <section aria-labelledby="list-title" className="mt-10">
         <h2 id="list-title" className="text-lg font-semibold text-foreground">Stores</h2>
         <form method="get" className="mt-3 flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-sm text-foreground">
-            Status
-            <select name="status" defaultValue={status ?? ""} className={FIELD}>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="filter-status" className="text-sm font-medium text-foreground">Status</label>
+            <select id="filter-status" name="status" defaultValue={status ?? ""} className={FIELD}>
               <option value="">All statuses</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>{billingStatusLabel(s)}</option>
               ))}
             </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-foreground">
-            Plan
-            <select name="plan" defaultValue={plan ?? ""} className={FIELD}>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="filter-plan" className="text-sm font-medium text-foreground">Plan</label>
+            <select id="filter-plan" name="plan" defaultValue={plan ?? ""} className={FIELD}>
               <option value="">All plans</option>
               {PLANS.map((p) => (
                 <option key={p} value={p}>{PLAN_NAMES[p]}</option>
               ))}
             </select>
-          </label>
+          </div>
           <button type="submit" className="min-h-11 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             Filter
           </button>
