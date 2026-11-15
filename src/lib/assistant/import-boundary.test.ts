@@ -13,9 +13,14 @@ afterEach(() => {
 });
 
 describe("assistant import boundary", () => {
-  it("assistant code cannot reach Stripe or placeOrder", () => {
+  it("assistant code, including the WhatsApp channel and its checkout link (#559), cannot reach Stripe or placeOrder", () => {
     const hits = findForbiddenImports(
-      [path.join(SRC, "lib/assistant"), path.join(SRC, "app/api/assistant")],
+      [
+        path.join(SRC, "lib/assistant"),
+        path.join(SRC, "app/api/assistant"),
+        path.join(SRC, "lib/whatsapp"),
+        path.join(SRC, "app/api/checkout-link"), path.join(SRC, "app/checkout/link-expired"),
+      ],
       SRC,
     );
     expect(hits).toEqual([]);
@@ -48,6 +53,19 @@ describe("assistant import boundary", () => {
     const hits = findForbiddenImports([path.join(src, "lib/assistant")], src);
     expect(hits.join("\n")).toContain("stripe");
     expect(hits.join("\n")).toContain("checkout/service");
+  });
+
+  it("#557: no assistant tool applies or reads a store coupon, and assistant code cannot reach the coupon modules", () => {
+    expect(ASSISTANT_TOOL_NAMES.filter((name) => /coupon|promo|discount|code/.test(name))).toEqual([]);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-boundary-"));
+    temps.push(root);
+    const src = path.join(root, "src");
+    fs.mkdirSync(path.join(src, "lib/assistant"), { recursive: true });
+    fs.writeFileSync(path.join(src, "lib/assistant/apply.ts"), 'import { applyCartCoupon } from "@/lib/coupon/checkout";\nexport const apply = applyCartCoupon;\n');
+    fs.writeFileSync(path.join(src, "lib/assistant/list.ts"), 'import { listCoupons } from "@/lib/coupon/service";\nexport const list = listCoupons;\n');
+    const hits = findForbiddenImports([path.join(src, "lib/assistant")], src).join("\n");
+    expect(hits).toContain("coupon/checkout");
+    expect(hits).toContain("coupon/service");
   });
 
   it("the registry is exactly the 19 tools, none of which pays or places an order (#247)", () => {

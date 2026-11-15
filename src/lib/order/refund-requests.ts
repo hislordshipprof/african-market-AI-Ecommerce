@@ -10,6 +10,7 @@ import {
 import type { RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
+import { recordCapture } from "./capture-record";
 import { serviceFeeShareOfRefund } from "./platform-fee";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
@@ -594,6 +595,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
           ...(refundId ? { refundId } : {}),
         },
       });
+      await recordCapture(tx, orderId, captured, null);
       if (!existing) {
         await tx.auditLog.create({
           data: systemAuditData(order.storeId, orderId, "anomaly_refund", {
@@ -620,6 +622,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       if (Object.keys(data).length > 0) {
         await tx.order.update({ where: { id: orderId }, data });
       }
+      await recordCapture(tx, orderId, captured, null);
       for (const item of failedRefunds) {
         const wrote = await writeAuditOnce(tx, order.storeId, orderId, "refund_failed", item.refundId, {
           refundId: item.refundId,

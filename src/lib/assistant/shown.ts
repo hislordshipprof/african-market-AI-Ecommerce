@@ -123,15 +123,14 @@ export function acceptanceForTurn(
   };
 }
 
-const RETURNED_LISTING_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes"]);
+const RETURNED_LISTING_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes", "get_order_status"]);
 
 function returnedListingIds(message: ShownMessage): string[] {
   const ids = new Set<string>();
   for (const part of message.parts) {
     const name = toolNameOf(part);
     if (!name || !RETURNED_LISTING_TOOLS.has(name) || !outputOk(part.output)) continue;
-    const body = part.output as { items?: unknown; cards?: unknown };
-    for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+    for (const row of returnedRows(part.output)) {
       const listingId = (row as { listingId?: unknown }).listingId;
       if (typeof listingId === "string") ids.add(listingId);
     }
@@ -149,22 +148,17 @@ export function replyCountsAsEmpty(message: ShownMessage): boolean {
   });
 }
 
-const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products"]);
+const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes", "get_order_status"]);
 const SHOWN_ID_LIMIT = 60;
 
-/**
- * One line per product variant a read tool showed in this chat, newest last.
- * The model miscopies long ids from deep in the history; this short table is
- * a clean place to copy them from.
- */
-export function shownProductIds(messages: readonly ShownMessage[]): string[] {
-  const rows = new Map<string, string>();
+/** One row per product variant a read tool showed in this chat, newest last, for a short table in the prompt. */
+export function shownProducts(messages: readonly ShownMessage[]): Array<{ item: string; variantId: string }> {
+  const rows = new Map<string, { item: string; variantId: string }>();
   for (const message of messages) {
     for (const part of message.parts) {
       const name = toolNameOf(part);
       if (!name || !SHOWN_ID_TOOLS.has(name) || !outputOk(part.output)) continue;
-      const body = part.output as { items?: unknown; cards?: unknown };
-      for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+      for (const row of returnedRows(part.output)) {
         const product = row as { name?: unknown; packLabel?: unknown; variantId?: unknown; variants?: unknown };
         if (typeof product.name !== "string") continue;
         const variants = Array.isArray(product.variants)
@@ -174,12 +168,19 @@ export function shownProductIds(messages: readonly ShownMessage[]): string[] {
           if (typeof variant.variantId !== "string") continue;
           const label = typeof variant.label === "string" ? `, ${variant.label}` : "";
           rows.delete(variant.variantId);
-          rows.set(variant.variantId, `${product.name}${label}: ${variant.variantId}`);
+          rows.set(variant.variantId, { item: `${product.name}${label}`, variantId: variant.variantId });
         }
       }
     }
   }
   return [...rows.values()].slice(-SHOWN_ID_LIMIT);
+}
+
+/** Product rows a tool returned: search items, cards, and the lines of past orders ("my usual"). */
+function returnedRows(output: unknown): object[] {
+  const body = output as { items?: unknown; cards?: unknown; orders?: unknown };
+  const lines = arrayOf(body.orders).flatMap((order) => arrayOf((order as { lines?: unknown }).lines));
+  return [...arrayOf(body.items), ...arrayOf(body.cards), ...lines];
 }
 
 function arrayOf(value: unknown): object[] {

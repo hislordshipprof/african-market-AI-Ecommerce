@@ -11,6 +11,7 @@ import type {
 import { ProviderStateError } from "./types";
 import { OverRefundError } from "./errors";
 import { billingObjects } from "../billing/webhook-objects";
+import { fakeCheckoutHoldCents } from "./checkout-payments";
 import { defaultFakePayouts, type FakePayoutData } from "./fake-payouts";
 
 const lateRefundKeys = new Set<string>();
@@ -84,6 +85,8 @@ function countsTowardBalance(status: string): boolean {
 const accounts = new Map<string, ConnectAccount>();
 const capturedPayments = new Map<string, number>();
 const capturedFees = new Map<string, number>();
+/** Metadata sent with each capture (#557: the coupon id). */
+const capturedMetadata = new Map<string, Record<string, string>>();
 const captureKeys = new Map<string, string>();
 const cancelledPayments = new Set<string>();
 const cancelKeys = new Map<string, string>();
@@ -157,6 +160,7 @@ function reset() {
   accounts.clear();
   capturedPayments.clear();
   capturedFees.clear();
+  capturedMetadata.clear();
   captureKeys.clear();
   cancelledPayments.clear();
   cancelKeys.clear();
@@ -352,8 +356,9 @@ const fakeStripeProvider: StripeProvider = {
     } satisfies WebhookEvent;
   },
 
-  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
+  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount, metadata) {
     captureCalls.push(idempotencyKey ?? "");
+    if (metadata) capturedMetadata.set(paymentIntentId, metadata);
     if (captureConflicts.delete(paymentIntentId)) {
       throw new FakeStripeError(
         "idempotency_key_in_use",
@@ -379,6 +384,8 @@ const fakeStripeProvider: StripeProvider = {
           status: "succeeded",
         } satisfies CaptureResult;
       }
+      const checkoutHold = fakeCheckoutHoldCents(paymentIntentId);
+      if (checkoutHold !== null) ensureAuthorizedAmount(paymentIntentId, checkoutHold);
       if (!authorizedAmounts.has(paymentIntentId)) {
         throw resourceMissing("payment_intent", paymentIntentId);
       }
@@ -691,4 +698,4 @@ function storeFundedRefundCents(paymentIntentId: string): number {
   return (refundedPayments.get(paymentIntentId) ?? 0) - (feeRefunded.get(paymentIntentId) ?? 0) - parts;
 }
 
-export { setNextPayoutsFailure, loginLinksCreated, FakeStripeError, feeRefundParts, storeFundedRefundCents, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
+export { setNextPayoutsFailure, loginLinksCreated, FakeStripeError, feeRefundParts, storeFundedRefundCents, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, capturedMetadata, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };

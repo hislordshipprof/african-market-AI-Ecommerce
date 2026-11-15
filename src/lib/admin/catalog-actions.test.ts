@@ -85,19 +85,19 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
 
   it("approve: needs_review -> active with one catalog.approve audit row", async () => {
     const p = await seed("approve");
-    expect(await approveProduct(p.id)).toEqual({ success: true });
+    expect(await approveProduct(p.id, "needs_review")).toEqual({ success: true });
     const after = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: p.id } }));
     expect(after.status).toBe("active");
     expect(await audits(p.id, "catalog.approve")).toHaveLength(1);
   });
 
   it("approve: unknown product returns an error", async () => {
-    expect(await approveProduct("does-not-exist")).toEqual({ error: "Product not found" });
+    expect(await approveProduct("does-not-exist", "needs_review")).toEqual({ error: "Product not found" });
   });
 
   it("reject: needs_review -> rejected with one catalog.reject audit row", async () => {
     const p = await seed("reject");
-    expect(await rejectProduct(p.id)).toEqual({ success: true });
+    expect(await rejectProduct(p.id, "needs_review")).toEqual({ success: true });
     const after = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: p.id } }));
     expect(after.status).toBe("rejected");
     expect(await audits(p.id, "catalog.reject")).toHaveLength(1);
@@ -105,7 +105,7 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
 
   it("update: changes fields and audits before/after", async () => {
     const p = await seed("update", "needs_review", { description: "old desc" });
-    expect(await updateReviewProduct(p.id, { name: "New Name", description: "New desc" })).toEqual({ success: true });
+    expect(await updateReviewProduct(p.id, "needs_review", { name: "New Name", description: "New desc" })).toEqual({ success: true });
     const after = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: p.id } }));
     expect(after.name).toBe("New Name");
     expect(after.description).toBe("New desc");
@@ -118,7 +118,7 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
   it("update: rejects a blank name and changes nothing", async () => {
     const name = "";
     const p = await seed("blank");
-    expect(await updateReviewProduct(p.id, { name })).toEqual({ error: "Name is required" });
+    expect(await updateReviewProduct(p.id, "needs_review", { name })).toEqual({ error: "Name is required" });
     const after = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: p.id } }));
     expect(after.name).toBe(`${RUN} blank`);
     expect(await audits(p.id, "catalog.edit")).toHaveLength(0);
@@ -180,25 +180,23 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
 
   it("concurrent approve: exactly one audit row, product active (TOCTOU closed)", async () => {
     const p = await seed("race");
-    const results = await Promise.all([approveProduct(p.id), approveProduct(p.id), approveProduct(p.id)]);
+    const results = await Promise.all([approveProduct(p.id, "needs_review"), approveProduct(p.id, "needs_review"), approveProduct(p.id, "needs_review")]);
     expect(results.every((r) => r.success)).toBe(true);
     const after = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: p.id } }));
     expect(after.status).toBe("active");
     expect(await audits(p.id, "catalog.approve")).toHaveLength(1);
   });
 
-  it("concurrent approve + reject: serialize, second audit row sees the first's result", async () => {
+  it("concurrent approve + reject from the same queue: the first wins, the second is told to reload", async () => {
     const p = await seed("race2");
-    await Promise.all([approveProduct(p.id), rejectProduct(p.id)]);
+    const results = await Promise.all([approveProduct(p.id, "needs_review"), rejectProduct(p.id, "needs_review")]);
     const after = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: p.id } }));
     const rows = await asAdmin((tx) => tx.auditLog.findMany({ where: { entityId: p.id } }));
-    expect(rows).toHaveLength(2);
-    // Order by the audit chain (not createdAt): the first row saw needs_review,
-    // the second saw the first row's resulting status.
-    const first = rows.find((r) => (r.before as { status: string }).status === "needs_review")!;
-    const second = rows.find((r) => r !== first)!;
-    expect((second.before as { status: string }).status).toBe((first.after as { status: string }).status);
-    expect(after.status).toBe((second.after as { status: string }).status);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].before).toEqual({ status: "needs_review" });
+    expect(after.status).toBe((rows[0].after as { status: string }).status);
+    expect(results.filter((r) => r.success)).toHaveLength(1);
+    expect(results.find((r) => r.error)?.error).toMatch(/changed .* after you opened it.*reload/i);
   });
 
   function scriptAttributes(toolInput: Record<string, unknown>) {

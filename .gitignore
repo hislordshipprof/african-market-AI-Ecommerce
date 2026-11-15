@@ -41,6 +41,8 @@ blob-report/
 
 # Partial shopper-assistant eval. The committed report stays tracked.
 src/lib/assistant/eval/partial-report.json
+# Local eval spend counter for one ticket.
+src/lib/assistant/eval/ticket-spend.json
 
 # Local browser profile directories (left by screenshot/validation tools)
 .validation-*/

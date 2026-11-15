@@ -9,6 +9,7 @@
   --d-line-strong: #c9c9c0;
   --d-primary: #0b6b3a;
   --d-on-primary: #ffffff;
+  --d-success: #2e7d4f;
   min-height: 100dvh;
   background: var(--d-bg);
   color: var(--d-ink);
@@ -26,11 +27,16 @@
     --d-line-strong: #8a8a82;
     --d-primary: #5fd08a;
     --d-on-primary: #0b2615;
+    --d-success: #5fd08a;
     color-scheme: dark;
   }
 }
 
 .bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   border-bottom: 1px solid var(--d-line);
   background: var(--d-surface);
   /* Lines the wordmark up with the 1080px content column. */
@@ -42,6 +48,18 @@
   font-weight: 700;
   font-size: 18px;
   letter-spacing: -0.2px;
+}
+
+.sell {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--d-ink);
+  text-underline-offset: 3px;
+}
+
+.sell:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 2px;
 }
 
 .main {
@@ -193,15 +211,27 @@
 
 .flags {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13px;
   font-weight: 600;
   padding: 4px 10px;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: var(--d-raised);
+}
+
+/* A courier is only a maybe until checkout quotes it: an outline, not a fill. */
+.flag[data-maybe] {
+  background: none;
+  border-color: var(--d-line-strong);
+  color: var(--d-muted);
 }
 
 .visit {
@@ -211,8 +241,93 @@
 }
 
 .owner {
-  font-size: 13px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.face {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--d-raised);
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--d-muted);
+}
+
+.ownerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ownerName {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.story {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--d-muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Reserves the line on the server, where it stays empty: hours are read in the browser (#453). */
+.open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.openMark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1.5px solid var(--d-muted);
+}
+
+.open[data-open="true"] .openMark {
+  border-color: var(--d-success);
+  background: var(--d-success);
+}
+
+.openLabel {
+  font-weight: 600;
+}
+
+.openDetail {
+  color: var(--d-muted);
+}
+
+.openDetail::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -349,6 +464,122 @@
 
 .results {
   margin-bottom: 40px;
+}
+
+/* "Tell me when a store opens near me" (#455): a quiet panel; the button is the only colour. */
+.request {
+  display: flex;
+  gap: 14px;
+  max-width: 720px;
+  margin-bottom: 40px;
+  padding: 20px;
+  border: 1px solid var(--d-line);
+  border-radius: 16px;
+  background: var(--d-surface);
+}
+
+.requestIcon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--d-muted);
+}
+
+.requestBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.requestTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  text-wrap: balance;
+  margin: 0 0 4px;
+}
+
+.requestForm {
+  display: grid;
+  gap: 14px;
+}
+
+.requestFields {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.requestField {
+  display: grid;
+  gap: 6px;
+}
+
+.consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--d-muted);
+  cursor: pointer;
+}
+
+.consent input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--d-primary);
+}
+
+.consent input:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 2px;
+}
+
+.requestActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.requestError {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.requestError:empty {
+  display: none;
+}
+
+.requestDone {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .request {
+    padding: 16px;
+  }
+
+  .requestIcon {
+    display: none;
+  }
+
+  .requestFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .resultsTitle {

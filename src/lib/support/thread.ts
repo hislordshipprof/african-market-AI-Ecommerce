@@ -11,6 +11,9 @@ export const MESSAGE_MAX_CHARS = 1000;
 export const messageBodySchema = z.string().trim().min(1).max(MESSAGE_MAX_CHARS).refine((body) => !body.includes("\u0000"));
 const THREAD_LIST_LIMIT = 100;
 
+/** The platform's Messages queue: escalated and not resolved. The queue and the order detail's link to it both read this. */
+export const PLATFORM_QUEUE_WHERE = { escalatedAt: { not: null }, state: { not: "resolved" } } satisfies Prisma.SupportThreadWhereInput;
+
 export type ThreadMessage = {
   id: string;
   sender: "customer" | "store" | "platform";

@@ -9,6 +9,7 @@ import {
   type LanguageModel,
   type ModelMessage,
   type UIMessage,
+  type UIMessageChunk,
 } from "ai";
 import { Prisma } from "@prisma/client";
 import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
@@ -26,6 +27,7 @@ import {
   prepareAttachments,
   readAssistantRequest,
   type AttachmentDescriptor,
+  type IncomingFile,
   type PreparedAttachment,
 } from "./attachments";
 import { scrubCardNumbers, scrubKnownStrings } from "./card-scrub";
@@ -35,10 +37,11 @@ import {
   ASSISTANT_DISABLED_STATUS,
   assistantChatEnabled,
 } from "./contract";
-import { TURN_COST_FLAG_MICROS } from "../admin/ai-review";
+import { readAiOnboardingSettings, turnCostFlagMicros } from "../admin/ai-onboarding-settings";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
-import { acceptanceForTurn, shownProductIds } from "./shown";
+import { acceptanceForTurn, shownProducts } from "./shown";
+import { itemHandles, type ItemHandles } from "./handles";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
@@ -47,7 +50,7 @@ import { AssistantConfigError, assistantModelId, assistantProviderOptions, creat
 import { groundingTransform, keyedUnitPricesFromHistory } from "./grounding";
 import { assistantSpendState, claimCapAlert, utcDay } from "./spend";
 import { ASSISTANT_CAP_MESSAGE, claimAssistantChat } from "../billing/assistant-chats";
-import { ASSISTANT_STATIC_PROMPT, storeContextMessage } from "./system-prompt";
+import { ASSISTANT_STATIC_PROMPT, storeContextMessage, type StoreContextInput } from "./system-prompt";
 import { assistantTools } from "./tools";
 
 const WINDOW_MS = 60 * 60 * 1000;
@@ -69,8 +72,65 @@ const RESTING_MESSAGE = "The helper is resting right now. You can still shop and
 export interface ChatHandlerOptions {
   model?: LanguageModel;
   now?: () => Date;
+  /** False never looks a dish up online; the #146 eval runs on the seeded recipe base only (#607). */
+  onlineRecipeLookup?: boolean;
   /** Test seam. Runs after the unlocked transcript read and before classification. */
   afterSnapshot?: (messages: UIMessage[]) => Promise<void>;
+}
+
+/** The store fields one turn needs: its id and the store context the model sees. */
+export type ShopperTurnStore = StoreContextInput & { id: string };
+
+/** One customer message to the shopper assistant, from the web chat or from WhatsApp (#559). */
+export interface ShopperTurnInput {
+  store: ShopperTurnStore;
+  cartId: string;
+  userId: string | null;
+  /** The client's message id. A repeat replays the finished turn. */
+  turnId: string;
+  text: string;
+  files: IncomingFile[];
+  replayOnly: boolean;
+  model: LanguageModel;
+  modelId: ReturnType<typeof assistantModelId>;
+  at: Date;
+}
+
+export type ShopperTurnOutcome =
+  | { kind: "error"; status: number; code: string; message: string; headers?: Record<string, string> }
+  | { kind: "replay"; message: UIMessage }
+  | { kind: "stream"; stream: ReadableStream<UIMessageChunk> };
+
+export type AssistantGate =
+  | { ok: true; model: LanguageModel; modelId: ReturnType<typeof assistantModelId> }
+  | { ok: false; code: "assistant_resting" | "assistant_unavailable"; message: string };
+
+export const ASSISTANT_RESTING_MESSAGE = RESTING_MESSAGE;
+export const ASSISTANT_UNAVAILABLE_MESSAGE = "The helper is not available right now.";
+
+/** The spend cap, then the model. Every channel passes this before a turn. */
+export async function openAssistant(at: Date, model?: LanguageModel): Promise<AssistantGate> {
+  try {
+    const spend = await assistantSpendState();
+    if (spend.resting) {
+      await claimCapAlert(utcDay(at));
+      return { ok: false, code: "assistant_resting", message: RESTING_MESSAGE };
+    }
+  } catch {
+    return { ok: false, code: "assistant_resting", message: RESTING_MESSAGE };
+  }
+  let chosen = model;
+  if (!chosen) {
+    try {
+      chosen = createAssistantModel();
+    } catch (error) {
+      if (error instanceof AssistantConfigError) {
+        return { ok: false, code: "assistant_unavailable", message: ASSISTANT_UNAVAILABLE_MESSAGE };
+      }
+      throw error;
+    }
+  }
+  return { ok: true, model: chosen, modelId: configuredModelId() };
 }
 
 export function createChatHandler(options: ChatHandlerOptions = {}) {
@@ -91,28 +151,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     const ip = await takeLimit(`assistant:ip:${clientIp(request.headers)}`, IP_LIMIT, at);
     if (!ip.ok) return rateLimited(ip.retryAfter);
 
-    try {
-      const spend = await assistantSpendState();
-      if (spend.resting) {
-        await claimCapAlert(utcDay(at));
-        return jsonError(503, "assistant_resting", RESTING_MESSAGE);
-      }
-    } catch {
-      return jsonError(503, "assistant_resting", RESTING_MESSAGE);
-    }
-
-    let model = options.model;
-    if (!model) {
-      try {
-        model = createAssistantModel();
-      } catch (error) {
-        if (error instanceof AssistantConfigError) {
-          return jsonError(503, "assistant_unavailable", "The helper is not available right now.");
-        }
-        throw error;
-      }
-    }
-    const modelId = configuredModelId();
+    const gate = await openAssistant(at, options.model);
+    if (!gate.ok) return jsonError(503, gate.code, gate.message);
 
     const session = await auth.api.getSession({
       headers: request.headers,
@@ -138,276 +178,315 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
 
     const headers = new Headers();
     if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId, request.headers));
-    const lookedUp = await storeScoped(store.id).aiConversation.findUnique({
-      where: { storeId_cartId: { storeId: store.id, cartId } },
-    });
-    const storedMessages = asMessages(lookedUp?.messages);
-    if (options.afterSnapshot) await options.afterSnapshot(storedMessages);
-    const storedUser = storedMessages.find((message) => message.role === "user" && message.id === parsed.id);
-    const storedFiles = storedUser ? attachmentDescriptors(storedUser) : [];
-    if (storedUser && parsed.files.length > 0 && !descriptorsMatch(storedFiles, parsed.files)) {
-      return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
-    }
-    const sameFiles = parsed.files.length === 0 || descriptorsMatch(storedFiles, parsed.files);
-    if (sameFiles) {
-      const replay = await replayCompletedTurn(store.id, cartId, parsed.id, headers, at);
-      if (replay) return replay;
-    }
-    let fileTurn = parsed.files.length > 0 || storedFiles.length > 0;
-    if (fileTurn && parsed.files.length === 0) {
-      return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
-    }
-
-    let prepared: PreparedAttachment[] = [];
-    if (parsed.files.length > 0) {
-      const slot = await takeRollingFileTurn(
-        `assistant:files:cart:${cartId}`,
-        BigInt(at.getTime()),
-        BigInt(WINDOW_MS),
-        FILE_LIMIT,
-      );
-      if (!slot.ok) {
-        return jsonError(429, "attachment_rate_limited", "Too many files this hour. You can still type a message.", {
-          "retry-after": String(slot.retryAfter),
-        });
-      }
-      const processed = await prepareAttachments(parsed.files);
-      if (!processed.ok) return jsonError(processed.status, processed.code, processed.message);
-      prepared = processed.files;
-    }
-
-    const leasedAt = now();
-    const turn = await takeTurn(
-      store.id,
+    const outcome = await runShopperTurn({
+      store,
       cartId,
       userId,
-      leasedAt,
-      modelId,
-      parsed.id,
-      prepared.map((file) => file.descriptor.digest),
-      parsed.replayOnly,
-    );
-    if (!turn) return jsonError(409, "assistant_busy", "The helper is still working on the previous message.");
-    if ("empty" in turn) return jsonError(400, "invalid_request", "Write between 1 and 2000 characters.");
-    if ("missing" in turn) return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
-    if ("conflict" in turn) return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
-    if ("replay" in turn) return replayAssistantMessage(turn.replay as UIMessage, headers);
-    fileTurn = turn.fileTurn;
-
-    const scrubbed = scrubCardNumbers(parsed.text).text;
-    const userMessage: UIMessage = {
-      id: parsed.id,
-      role: "user",
-      parts: [
-        ...(scrubbed ? [{ type: "text" as const, text: scrubbed }] : []),
-        ...prepared.map((file, index) => ({
-          type: "data-attachment" as const,
-          data: { ...file.descriptor, index: index + 1 },
-        })),
-      ],
-    };
-    const prior = asMessages(turn.messages);
-    const alreadyThere = prior.some((message) => message.role === "user" && message.id === parsed.id);
-    if (!alreadyThere) {
-      let chat;
-      try {
-        chat = await claimAssistantChat(store.id, at);
-      } catch {
-        chat = null;
-      }
-      if (!chat?.ok) {
-        await releaseLease(store.id, turn.id);
-        return jsonError(503, "assistant_unavailable", ASSISTANT_CAP_MESSAGE);
-      }
-    }
-    const withUser = alreadyThere ? prior : [...prior, userMessage];
-    try {
-      await storeScoped(store.id).aiConversation.update({
-        where: { id: turn.id },
-        data: { messages: withUser as unknown as Prisma.InputJsonValue },
-      });
-    } catch {
-      console.error("[assistant] transcript not saved", turn.id);
-      await releaseLease(store.id, turn.id);
-      return jsonError(503, "assistant_unavailable", FIXED_ERROR);
-    }
-
-    const turnCtx = {
-      storeId: store.id,
-      cartId,
-      conversationId: turn.id,
-      actorUserId: userId,
-      turnMessageId: parsed.id,
-      acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
-    };
-    const tools = assistantTools(turnCtx, { lookupModel: model });
-    const history = (await usableHistory(withUser, tools)).slice(-30);
-    if (!history.some((message) => message.id === parsed.id)) {
-      const current = withUser.find((message) => message.id === parsed.id);
-      if (current) history.push(current);
-    }
-    const sentHistory = retryVisible(history, parsed.id, alreadyThere);
-    let modelMessages: ModelMessage[];
-    try {
-      let attachmentIndex = 0;
-      modelMessages = await convertToModelMessages(withoutReasoning(sentHistory), {
-        tools,
-        convertDataPart: (part) => {
-          if (part.type !== "data-attachment") return undefined;
-          const data = part.data as AttachmentDescriptor & { index?: number };
-          attachmentIndex += 1;
-          return { type: "text", text: attachmentNote(data, data.index ?? attachmentIndex) };
-        },
-      });
-      if (prepared.length > 0) overlayCurrentFiles(modelMessages, sentHistory, parsed.id, scrubbed, prepared);
-    } catch {
-      console.error("[assistant] message could not be prepared", turn.id);
-      await releaseLease(store.id, turn.id);
-      return jsonError(503, "assistant_unavailable", FIXED_ERROR);
-    }
-
-    const result = streamText({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: ASSISTANT_STATIC_PROMPT,
-          providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-        },
-        { role: "system", content: storeContextMessage(store, at, shownProductIds(sentHistory)) },
-        ...modelMessages,
-      ],
-      allowSystemInMessages: true,
-      tools,
-      ...(fileTurn ? { activeTools: [...FILE_TURN_TOOLS] } : {}),
-      toolCallConcurrency: 1,
-      stopWhen: stepCountIs(ASSISTANT_STEP_CAP),
-      maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
-      maxRetries: 0,
-      streamRetries: 0,
-      timeout: { totalMs: fileTurn ? 45_000 : 55_000 },
-      prepareStep: ({ messages }) => ({ messages: scrubKnownStrings(messages) as typeof messages }),
-      providerOptions: assistantProviderOptions(modelId),
-      experimental_transform: groundingTransform({
-        historyUnitPrices: keyedUnitPricesFromHistory(sentHistory),
-        getAllowedCents: () => new Set([store.minimumOrderCents]),
-        onStrip: (amount) => {
-          const scrubbed = scrubCardNumbers(amount);
-          const stored = scrubbed.removed > 0 ? scrubbed.text : amount;
-          void storeScoped(store.id).aiAction.create({
-            data: {
-              storeId: store.id,
-              conversationId: turn.id,
-              tool: "grounding_strip",
-              input: { amount: stored },
-              output: {},
-              ok: true,
-            },
-          }).catch((error: unknown) => {
-            console.error("[assistant] grounding strip not saved", turn.id, error);
-          });
-        },
-      }),
-    });
-    void result.consumeStream();
-
-    const stream = createUIMessageStream({
-      originalMessages: history,
-      onError: () => FIXED_ERROR,
-      onFinish: async (event) => {
-        const keptIds = new Set(event.messages.map((message) => message.id));
-        let status: "complete" | "failed" = "complete";
-        try {
-          const reason = await result.finishReason;
-          if (reason === "error" || reason === "other") status = "failed";
-        } catch {
-          status = "failed";
-        }
-        const messages = scrubUiMessages(stampAssistant([
-          ...withUser.filter((message) => !keptIds.has(message.id)),
-          ...event.messages,
-        ], status));
-        await persistTurn({
-          storeId: store.id,
-          conversationId: turn.id,
-          turnId: parsed.id,
-          messages,
-          result,
-          modelId,
-        });
-      },
-      execute: async ({ writer }) => {
-        const reader = result.toUIMessageStream({ onError: () => FIXED_ERROR }).getReader();
-        const replyParts: string[] = [];
-        let openReply = "";
-        const takeReply = (chunk: unknown) => {
-          if (!chunk || typeof chunk !== "object") return;
-          const part = chunk as { type?: unknown; delta?: unknown };
-          if (part.type === "text-start") {
-            if (openReply) replyParts.push(openReply);
-            openReply = "";
-            return;
-          }
-          if (part.type === "text-delta" && typeof part.delta === "string") {
-            openReply += part.delta;
-            return;
-          }
-          if (part.type === "text-end" && openReply) {
-            replyParts.push(openReply);
-            openReply = "";
-          }
-        };
-        while (true) {
-          const next = await reader.read();
-          if (next.done) break;
-          const outgoing = scrubOutboundChunk(next.value);
-          if (!outgoing) continue;
-          takeReply(outgoing);
-          writer.write(outgoing as typeof next.value);
-        }
-        if (openReply) replyParts.push(openReply);
-        const steps = await Promise.resolve(result.steps).catch(() => []);
-        const last = steps.at(-1);
-        if (steps.length >= ASSISTANT_STEP_CAP && last?.finishReason === "tool-calls") {
-          writer.write({ type: "text-start", id: "step-limit" });
-          writer.write({ type: "text-delta", id: "step-limit", delta: STEP_LIMIT_TEXT });
-          writer.write({ type: "text-end", id: "step-limit" });
-          writer.write({ type: "data-step-limit", id: "step-limit", data: { text: STEP_LIMIT_TEXT } });
-        } else if (await turnFinishedNormally(result)) {
-          const replyText = replyParts.join("\n");
-          await writeServerChoices({
-            steps,
-            replyText,
-            ctx: turnCtx,
-            write: (chunk) => {
-              if (chunk.type === "tool-input-available") {
-                writer.write({
-                  type: "tool-input-available",
-                  toolCallId: chunk.toolCallId,
-                  toolName: chunk.toolName,
-                  input: chunk.input,
-                });
-                return;
-              }
-              writer.write({
-                type: "tool-output-available",
-                toolCallId: chunk.toolCallId,
-                output: chunk.output,
-              });
-            },
-          });
-        }
-      },
-    });
-
+      turnId: parsed.id,
+      text: parsed.text,
+      files: parsed.files,
+      replayOnly: parsed.replayOnly,
+      model: gate.model,
+      modelId: gate.modelId,
+      at,
+    }, { now, afterSnapshot: options.afterSnapshot, onlineRecipeLookup: options.onlineRecipeLookup });
+    if (outcome.kind === "error") return jsonError(outcome.status, outcome.code, outcome.message, outcome.headers);
+    if (outcome.kind === "replay") return replayAssistantMessage(outcome.message, headers);
     return createUIMessageStreamResponse({
-      stream,
+      stream: outcome.stream,
       headers,
       consumeSseStream: ({ stream: sse }) => {
         void consumeStream({ stream: sse });
       },
     });
   };
+}
+
+/**
+ * One turn on the store's cart: replay, files, the lease, the monthly chat
+ * cap, then the model with the same tools, grounding and transcript for every
+ * channel. The caller reads the returned stream to the end; the transcript is
+ * saved when it finishes.
+ */
+export async function runShopperTurn(
+  input: ShopperTurnInput,
+  options: {
+    now?: () => Date;
+    afterSnapshot?: (messages: UIMessage[]) => Promise<void>;
+    onlineRecipeLookup?: boolean;
+  } = {},
+): Promise<ShopperTurnOutcome> {
+  const now = options.now ?? (() => new Date());
+  const { store, cartId, userId, model, modelId, at } = input;
+  const parsed = { id: input.turnId, text: input.text, files: input.files, replayOnly: input.replayOnly };
+  const lookedUp = await storeScoped(store.id).aiConversation.findUnique({
+    where: { storeId_cartId: { storeId: store.id, cartId } },
+  });
+  const storedMessages = asMessages(lookedUp?.messages);
+  if (options.afterSnapshot) await options.afterSnapshot(storedMessages);
+  const storedUser = storedMessages.find((message) => message.role === "user" && message.id === parsed.id);
+  const storedFiles = storedUser ? attachmentDescriptors(storedUser) : [];
+  if (storedUser && parsed.files.length > 0 && !descriptorsMatch(storedFiles, parsed.files)) {
+    return fail(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
+  }
+  const sameFiles = parsed.files.length === 0 || descriptorsMatch(storedFiles, parsed.files);
+  if (sameFiles) {
+    const replay = await replayCompletedTurn(store.id, cartId, parsed.id, at);
+    if (replay) return { kind: "replay", message: replay };
+  }
+  let fileTurn = parsed.files.length > 0 || storedFiles.length > 0;
+  if (fileTurn && parsed.files.length === 0) {
+    return fail(400, "attachment_missing", attachmentFailure("attachment_missing").message);
+  }
+
+  let prepared: PreparedAttachment[] = [];
+  if (parsed.files.length > 0) {
+    const slot = await takeRollingFileTurn(
+      `assistant:files:cart:${cartId}`,
+      BigInt(at.getTime()),
+      BigInt(WINDOW_MS),
+      FILE_LIMIT,
+    );
+    if (!slot.ok) {
+      return fail(429, "attachment_rate_limited", "Too many files this hour. You can still type a message.", {
+        "retry-after": String(slot.retryAfter),
+      });
+    }
+    const processed = await prepareAttachments(parsed.files);
+    if (!processed.ok) return fail(processed.status, processed.code, processed.message);
+    prepared = processed.files;
+  }
+
+  const leasedAt = now();
+  const turn = await takeTurn(
+    store.id,
+    cartId,
+    userId,
+    leasedAt,
+    modelId,
+    parsed.id,
+    prepared.map((file) => file.descriptor.digest),
+    parsed.replayOnly,
+  );
+  if (!turn) return fail(409, "assistant_busy", "The helper is still working on the previous message.");
+  if ("empty" in turn) return fail(400, "invalid_request", "Write between 1 and 2000 characters.");
+  if ("missing" in turn) return fail(400, "attachment_missing", attachmentFailure("attachment_missing").message);
+  if ("conflict" in turn) return fail(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
+  if ("replay" in turn) return { kind: "replay", message: turn.replay as UIMessage };
+  fileTurn = turn.fileTurn;
+
+  const scrubbed = scrubCardNumbers(parsed.text).text;
+  const userMessage: UIMessage = {
+    id: parsed.id,
+    role: "user",
+    parts: [
+      ...(scrubbed ? [{ type: "text" as const, text: scrubbed }] : []),
+      ...prepared.map((file, index) => ({
+        type: "data-attachment" as const,
+        data: { ...file.descriptor, index: index + 1 },
+      })),
+    ],
+  };
+  const prior = asMessages(turn.messages);
+  const alreadyThere = prior.some((message) => message.role === "user" && message.id === parsed.id);
+  if (!alreadyThere) {
+    let chat;
+    try {
+      chat = await claimAssistantChat(store.id, at);
+    } catch {
+      chat = null;
+    }
+    if (!chat?.ok) {
+      await releaseLease(store.id, turn.id);
+      return fail(503, "assistant_unavailable", ASSISTANT_CAP_MESSAGE);
+    }
+  }
+  const withUser = alreadyThere ? prior : [...prior, userMessage];
+  try {
+    await storeScoped(store.id).aiConversation.update({
+      where: { id: turn.id },
+      data: { messages: withUser as unknown as Prisma.InputJsonValue },
+    });
+  } catch {
+    console.error("[assistant] transcript not saved", turn.id);
+    await releaseLease(store.id, turn.id);
+    return fail(503, "assistant_unavailable", FIXED_ERROR);
+  }
+
+  const turnCtx = {
+    storeId: store.id,
+    cartId,
+    conversationId: turn.id,
+    actorUserId: userId,
+    turnMessageId: parsed.id,
+    acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
+  };
+  const handles = itemHandles(store.id, turn.id);
+  const tools = assistantTools(turnCtx, { lookupModel: model, onlineLookup: options.onlineRecipeLookup }, handles);
+  const history = (await usableHistory(withUser, tools)).slice(-30);
+  if (!history.some((message) => message.id === parsed.id)) {
+    const current = withUser.find((message) => message.id === parsed.id);
+    if (current) history.push(current);
+  }
+  const sentHistory = retryVisible(history, parsed.id, alreadyThere);
+  let modelMessages: ModelMessage[];
+  let shown: string[];
+  try {
+    let attachmentIndex = 0;
+    modelMessages = await convertToModelMessages(withoutReasoning(sentHistory), {
+      tools,
+      convertDataPart: (part) => {
+        if (part.type !== "data-attachment") return undefined;
+        const data = part.data as AttachmentDescriptor & { index?: number };
+        attachmentIndex += 1;
+        return { type: "text", text: attachmentNote(data, data.index ?? attachmentIndex) };
+      },
+    });
+    if (prepared.length > 0) overlayCurrentFiles(modelMessages, sentHistory, parsed.id, scrubbed, prepared);
+    modelMessages = await handlesInToolCalls(modelMessages, handles);
+    shown = (await handles.toModel(shownProducts(sentHistory)) as ReturnType<typeof shownProducts>)
+      .map((row) => `${row.item}: ${row.variantId}`);
+  } catch {
+    console.error("[assistant] message could not be prepared", turn.id);
+    await releaseLease(store.id, turn.id);
+    return fail(503, "assistant_unavailable", FIXED_ERROR);
+  }
+
+  const result = streamText({
+    model,
+    messages: [
+      {
+        role: "system",
+        content: ASSISTANT_STATIC_PROMPT,
+        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      },
+      { role: "system", content: storeContextMessage(store, at, shown) },
+      ...modelMessages,
+    ],
+    allowSystemInMessages: true,
+    tools,
+    ...(fileTurn ? { activeTools: [...FILE_TURN_TOOLS] } : {}),
+    toolCallConcurrency: 1,
+    stopWhen: stepCountIs(ASSISTANT_STEP_CAP),
+    maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
+    maxRetries: 0,
+    streamRetries: 0,
+    timeout: { totalMs: fileTurn ? 45_000 : 55_000 },
+    prepareStep: ({ messages }) => ({ messages: scrubKnownStrings(messages) as typeof messages }),
+    providerOptions: assistantProviderOptions(modelId),
+    experimental_transform: groundingTransform({
+      historyUnitPrices: keyedUnitPricesFromHistory(sentHistory),
+      getAllowedCents: () => new Set([store.minimumOrderCents]),
+      onStrip: (amount) => {
+        const scrubbed = scrubCardNumbers(amount);
+        const stored = scrubbed.removed > 0 ? scrubbed.text : amount;
+        void storeScoped(store.id).aiAction.create({
+          data: {
+            storeId: store.id,
+            conversationId: turn.id,
+            tool: "grounding_strip",
+            input: { amount: stored },
+            output: {},
+            ok: true,
+          },
+        }).catch((error: unknown) => {
+          console.error("[assistant] grounding strip not saved", turn.id, error);
+        });
+      },
+    }),
+  });
+  void result.consumeStream();
+
+  const stream = createUIMessageStream({
+    originalMessages: history,
+    onError: () => FIXED_ERROR,
+    onFinish: async (event) => {
+      const keptIds = new Set(event.messages.map((message) => message.id));
+      let status: "complete" | "failed" = "complete";
+      try {
+        const reason = await result.finishReason;
+        if (reason === "error" || reason === "other") status = "failed";
+      } catch {
+        status = "failed";
+      }
+      const messages = scrubUiMessages(stampAssistant([
+        ...withUser.filter((message) => !keptIds.has(message.id)),
+        ...event.messages,
+      ], status));
+      await persistTurn({
+        storeId: store.id,
+        conversationId: turn.id,
+        turnId: parsed.id,
+        messages,
+        result,
+        modelId,
+      });
+    },
+    execute: async ({ writer }) => {
+      const reader = result.toUIMessageStream({ onError: () => FIXED_ERROR }).getReader();
+      const replyParts: string[] = [];
+      let openReply = "";
+      const takeReply = (chunk: unknown) => {
+        if (!chunk || typeof chunk !== "object") return;
+        const part = chunk as { type?: unknown; delta?: unknown };
+        if (part.type === "text-start") {
+          if (openReply) replyParts.push(openReply);
+          openReply = "";
+          return;
+        }
+        if (part.type === "text-delta" && typeof part.delta === "string") {
+          openReply += part.delta;
+          return;
+        }
+        if (part.type === "text-end" && openReply) {
+          replyParts.push(openReply);
+          openReply = "";
+        }
+      };
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        const outgoing = await idsInToolInput(scrubOutboundChunk(next.value), handles);
+        if (!outgoing) continue;
+        takeReply(outgoing);
+        writer.write(outgoing as typeof next.value);
+      }
+      if (openReply) replyParts.push(openReply);
+      const steps = await Promise.resolve(result.steps).catch(() => []);
+      const last = steps.at(-1);
+      if (steps.length >= ASSISTANT_STEP_CAP && last?.finishReason === "tool-calls") {
+        writer.write({ type: "text-start", id: "step-limit" });
+        writer.write({ type: "text-delta", id: "step-limit", delta: STEP_LIMIT_TEXT });
+        writer.write({ type: "text-end", id: "step-limit" });
+        writer.write({ type: "data-step-limit", id: "step-limit", data: { text: STEP_LIMIT_TEXT } });
+      } else if (await turnFinishedNormally(result)) {
+        const replyText = replyParts.join("\n");
+        await writeServerChoices({
+          steps,
+          replyText,
+          ctx: turnCtx,
+          write: (chunk) => {
+            if (chunk.type === "tool-input-available") {
+              writer.write({
+                type: "tool-input-available",
+                toolCallId: chunk.toolCallId,
+                toolName: chunk.toolName,
+                input: chunk.input,
+              });
+              return;
+            }
+            writer.write({
+              type: "tool-output-available",
+              toolCallId: chunk.toolCallId,
+              output: chunk.output,
+            });
+          },
+        });
+      }
+    },
+  });
+
+  return { kind: "stream", stream };
 }
 
 async function turnFinishedNormally(result: { finishReason: PromiseLike<string> }): Promise<boolean> {
@@ -462,8 +541,12 @@ async function persistTurn(args: {
     await releaseLease(args.storeId, args.conversationId);
     return;
   }
-  // AI oversight (#544) flags a costly turn for platform review.
-  if (cost > BigInt(TURN_COST_FLAG_MICROS)) {
+  // AI oversight (#544) flags a costly turn for platform review; the threshold is a platform setting (#561).
+  const threshold = await readAiOnboardingSettings().then(turnCostFlagMicros, (error: unknown) => {
+    console.error("[assistant] cost threshold not read", args.conversationId, error);
+    return null;
+  });
+  if (threshold !== null && cost > BigInt(threshold)) {
     await storeScoped(args.storeId).aiAction.create({
       data: {
         storeId: args.storeId,
@@ -628,6 +711,25 @@ function completedAssistant(messages: UIMessage[], clientId: string): UIMessage 
   return null;
 }
 
+/** History keeps ids, as the tools and the customer's screen use them; the model sees their handles. */
+async function handlesInToolCalls(messages: ModelMessage[], handles: ItemHandles): Promise<ModelMessage[]> {
+  return Promise.all(messages.map(async (message) => {
+    if (message.role !== "assistant" || typeof message.content === "string") return message;
+    const content = await Promise.all(message.content.map(async (part) => (
+      part.type === "tool-call" ? { ...part, input: await handles.toModel(part.input) } : part
+    )));
+    return { ...message, content } as ModelMessage;
+  }));
+}
+
+/** The model's tool input names handles; the stream and the saved transcript keep ids, also for a call the schema refused. */
+async function idsInToolInput(value: unknown, handles: ItemHandles): Promise<unknown> {
+  if (!value || typeof value !== "object") return value;
+  const part = value as { type?: string; input?: unknown };
+  if (part.type !== "tool-input-available" && part.type !== "tool-input-error") return value;
+  return { ...part, input: await handles.toIds(part.input) };
+}
+
 function scrubOutboundChunk(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const part = value as { type?: string; input?: unknown; output?: unknown; errorText?: unknown };
@@ -698,6 +800,10 @@ function rateLimited(retryAfter: number): Response {
   });
 }
 
+function fail(status: number, code: string, message: string, headers?: Record<string, string>): ShopperTurnOutcome {
+  return { kind: "error", status, code, message, ...(headers ? { headers } : {}) };
+}
+
 function jsonError(status: number, code: string, message: string, extra?: HeadersInit): Response {
   return Response.json({ error: { code, message } }, { status, headers: extra });
 }
@@ -722,9 +828,8 @@ async function replayCompletedTurn(
   storeId: string,
   cartId: string,
   clientId: string,
-  headers: Headers,
   at: Date,
-): Promise<Response | null> {
+): Promise<UIMessage | null> {
   const existing = await storeScoped(storeId).aiConversation.findUnique({
     where: { storeId_cartId: { storeId, cartId } },
   });
@@ -732,7 +837,7 @@ async function replayCompletedTurn(
   const prior = asMessages(existing.messages);
   if (!prior.some((message) => message.role === "user" && message.id === clientId)) return null;
   const completed = completedAssistant(prior, clientId);
-  if (completed) return replayAssistantMessage(completed, headers);
+  if (completed) return completed;
   const recovered = await storeScopedTransaction(storeId, async (tx) => {
     await lockConversationRow(tx, existing.id);
     const fresh = await tx.aiConversation.findUnique({ where: { id: existing.id } });
@@ -774,5 +879,5 @@ async function replayCompletedTurn(
     });
     return synthetic;
   });
-  return recovered ? replayAssistantMessage(recovered, headers) : null;
+  return recovered;
 }

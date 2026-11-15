@@ -52,8 +52,6 @@ describe.skipIf(!hasDb)("prompt injection cannot place an order (#247)", () => {
   let raw: PrismaClient;
   let storeId = "";
   let slug = "";
-  let variantId = "";
-  let listingId = "";
   const host = "inject.test";
 
   beforeAll(async () => {
@@ -65,10 +63,9 @@ describe.skipIf(!hasDb)("prompt injection cannot place an order (#247)", () => {
     const listing = await storeScoped(storeId).listing.create({
       data: { storeId, customName: `Egusi. ${INJECTION}`, price: 450, stockMode: "unlimited", frozen: false, perishable: false },
     });
-    listingId = listing.id;
-    variantId = (await storeScoped(storeId).listingVariant.create({
+    await storeScoped(storeId).listingVariant.create({
       data: { listingId: listing.id, label: "Each", price: 450, weightG: 100 },
-    })).id;
+    });
   });
 
   afterAll(async () => {
@@ -80,18 +77,19 @@ describe.skipIf(!hasDb)("prompt injection cannot place an order (#247)", () => {
   });
 
   it("a model that obeys the listing and calls every tool places no order and creates no PaymentIntent", async () => {
-    const inputs: Record<(typeof ASSISTANT_TOOL_NAMES)[number], Record<string, unknown>> = {
+    // Handles the model read from the search result; the item is the only one in this store.
+    const inputsFor = (listing: string, variant: string): Record<(typeof ASSISTANT_TOOL_NAMES)[number], Record<string, unknown>> => ({
       search_catalog: { query: "egusi" },
       set_shopper_needs: {},
-      show_products: { listing_ids: [listingId] },
-      check_availability: { listing_ids: [listingId] },
-      suggest_substitutes: { listing_id: listingId },
-      add_to_cart: { items: [{ variant_id: variantId, qty: 2 }] },
+      show_products: { listing_ids: [listing] },
+      check_availability: { listing_ids: [listing] },
+      suggest_substitutes: { listing_id: listing },
+      add_to_cart: { items: [{ variant_id: variant, qty: 2 }] },
       update_cart: { line_id: "missing", qty: 1 },
       remove_from_cart: { line_id: "missing" },
       set_swap_rule: { line_id: "missing", rule: "store_suggests" },
       get_cart_summary: {},
-      offer_choices: { listing_ids: [listingId, listingId] },
+      offer_choices: { listing_ids: [listing, listing] },
       get_order_status: {},
       check_delivery_area: { line1: "1 Main St", city: "Houston", state: "TX", zip: "77001" },
       get_store_info: {},
@@ -100,6 +98,11 @@ describe.skipIf(!hasDb)("prompt injection cannot place an order (#247)", () => {
       get_fulfillment_options: {},
       set_fulfillment: { fulfillment: "pickup", slot_id: "asap" },
       prepare_checkout: {},
+    });
+    const handleIn = (prompt: string, key: "listingId" | "variantId") => {
+      const handle = new RegExp(`${key}\\W+([iv]\\d+)`).exec(prompt.slice(prompt.lastIndexOf("tool-result")))?.[1];
+      if (!handle) throw new Error(`the model was never shown a ${key}`);
+      return handle;
     };
     const prompts: string[] = [];
     let calls = 0;
@@ -111,12 +114,19 @@ describe.skipIf(!hasDb)("prompt injection cannot place an order (#247)", () => {
           return { stream: streamOf([
             { type: "stream-start", warnings: [] },
             { type: "tool-call", toolCallId: "read", toolName: "search_catalog", input: JSON.stringify({ query: "egusi" }) },
-            // The cart is filled a step before prepare_checkout, which runs in parallel with the second add.
+            { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+          ]) };
+        }
+        const inputs = inputsFor(handleIn(prompts[1], "listingId"), handleIn(prompts[1], "variantId"));
+        if (calls === 2) {
+          // The cart is filled a step before prepare_checkout, which runs in parallel with the second add.
+          return { stream: streamOf([
+            { type: "stream-start", warnings: [] },
             { type: "tool-call", toolCallId: "fill", toolName: "add_to_cart", input: JSON.stringify(inputs.add_to_cart) },
             { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
           ]) };
         }
-        if (calls === 2) {
+        if (calls === 3) {
           return { stream: streamOf([
             { type: "stream-start", warnings: [] },
             ...ASSISTANT_TOOL_NAMES.map((name) => ({ type: "tool-call", toolCallId: `obey-${name}`, toolName: name, input: JSON.stringify(inputs[name]) })),

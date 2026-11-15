@@ -7,12 +7,14 @@ import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
+import { couponTerms } from "../coupon/discount";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
 import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { captureCharge } from "./substitution-pricing";
+import { recordCapture } from "./capture-record";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -123,6 +125,8 @@ async function finalizeCancelledOrder(
     from?: TransitionalStatus[];
     refundId?: string | null;
     after?: Prisma.InputJsonValue;
+    /** Stripe captured this much before the cancel refunded it. */
+    capturedCents?: number;
   },
 ): Promise<{ wrote: boolean }> {
   const from = options?.from ?? ["CAPTURING", "CANCELLING"];
@@ -143,6 +147,7 @@ async function finalizeCancelledOrder(
         ...(options?.refundId ? { refundId: options.refundId } : {}),
       },
     });
+    if (options?.capturedCents != null) await recordCapture(tx, orderId, options.capturedCents, null);
     if (!existing) {
       await tx.auditLog.create({
         data: systemAuditData(storeId, orderId, action, options?.after ?? {}),
@@ -301,6 +306,7 @@ const NAMED_VARIANT = {
 
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  coupon: { select: { code: true } },
   // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
   deliveries: {
     where: { status: { not: "cancelled" } },
@@ -691,6 +697,8 @@ async function persistRefundFailure(
           : {}),
       },
     });
+    const known = current.capturedAmountCents ?? restoredCapture;
+    if (known != null) await recordCapture(tx, orderId, known, null);
     const prior = await tx.auditLog.findMany({
       where: orderAuditWhere(orderId, "refund_failed"),
     });
@@ -752,6 +760,8 @@ async function settleCapturedRefund(
       from: ["CANCELLING"],
       refundId: decision.refundId,
       after: { refundId: decision.refundId, amountRefunded: decision.amountRefunded },
+      // A settled refund covers the whole capture (canonicalSucceededSettlement).
+      capturedCents: decision.amountRefunded,
     });
     return { outcome: "refunded" };
   }
@@ -917,6 +927,7 @@ export async function markTerminalRefundFailure(input: {
     await lockStoreRow(tx, order.storeId);
     const row = await tx.order.findUnique({ where: { id: order.id } });
     if (!row || (row.status !== "CANCELLING" && row.status !== "CANCELLED")) return;
+    await recordCapture(tx, order.id, captured, null);
     const manual = await tx.auditLog.findFirst({
       where: orderAuditWhere(order.id, "refund_resolved_manually"),
     });
@@ -962,6 +973,11 @@ export async function markTerminalRefundFailure(input: {
   return { ok: true, action: covered ? "covered" : "refund_failed" };
 }
 
+/** Stripe metadata naming the coupon an order used (#557). */
+function couponMetadata(couponId: string | null | undefined): Record<string, string> | undefined {
+  return couponId ? { coupon_id: couponId } : undefined;
+}
+
 /** The application fee for a stored capture amount; the service fee was stored with it. */
 function applicationFeeFor(
   order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number },
@@ -995,6 +1011,7 @@ export async function markReady(
         paymentIntentId: order.paymentIntentId!,
         totalAuthorizedCents: order.totalAuthorizedCents,
         newStatus: fulfilledStatus(order.fulfillment),
+        couponId: order.couponId,
       };
     }
     if (order.status !== "PICKING") {
@@ -1011,7 +1028,10 @@ export async function markReady(
     }
 
     // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
-    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order) });
+    // The coupon's value cannot change once an order used it (#556), so it is read as placed.
+    const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+    const coupon = couponRow ? couponTerms(couponRow) : null;
+    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order), coupon });
     const capturedAmountCents = charge.amountCents;
 
     if (!order.paymentIntentId) {
@@ -1060,8 +1080,13 @@ export async function markReady(
         capturedAmountCents,
         serviceFeeCents: charge.serviceFeeCents,
         platformFeeCents: split.platformFeeCents,
+        discountCents: charge.discountCents,
       },
     });
+    for (const [index, line] of lines.entries()) {
+      const share = charge.lineDiscountsCents[index];
+      if (line.discountCents !== share) await tx.orderLine.update({ where: { id: line.id }, data: { discountCents: share } });
+    }
 
     return {
       ok: true as const,
@@ -1073,6 +1098,7 @@ export async function markReady(
       voidInsteadOfCapture: false,
       orderId: order.id,
       storeId,
+      couponId: order.couponId,
     };
   });
 
@@ -1146,6 +1172,7 @@ export async function markReady(
       validation.capturedAmountCents,
       captureKey(orderId, captureAttempt),
       validation.applicationFeeAmount,
+      couponMetadata(validation.couponId),
     );
   } catch (err) {
     if (isIdempotencyKeyInUse(err)) {
@@ -1193,14 +1220,16 @@ export async function markReady(
       }
       return { ok: false as const, error: CAPTURE_STATUS_CHANGED };
     }
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: validation.newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents: captureResult.amountCaptured,
       },
     });
+    await recordCapture(tx, orderId, captureResult.amountCaptured, now);
     await settleCapturedStock(tx, storeId, orderId);
     notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
     courierReady = order.fulfillment === "courier";
@@ -1511,6 +1540,7 @@ export async function reconcileStuckOrder(
           amount,
           captureKey(orderId, attempt),
           sweepFee > 0 ? sweepFee : undefined,
+          couponMetadata(order.couponId),
         );
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {
@@ -1650,14 +1680,16 @@ async function finalizeCaptureFromSweep(
     if (!current || current.status !== "CAPTURING") return;
     finalized = true;
 
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents,
       },
     });
+    await recordCapture(tx, orderId, capturedAmountCents, now);
     await tx.auditLog.create({
       data: systemAuditData(storeId, orderId, "reconcile_capture", {}),
     });

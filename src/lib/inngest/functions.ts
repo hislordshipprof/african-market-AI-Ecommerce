@@ -18,6 +18,8 @@ import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
 import { copilotDailyDigest } from "../copilot/digest";
 import { copilotWeeklyReport } from "../copilot/weekly-report";
+import { deleteExpiredRejectedApplications } from "../store-application/service";
+import { STORE_LISTED, notifyWaitingRequests } from "../directory/store-requests";
 import { courierAssignmentTimeout, courierCancelOnOrderCancelled, courierDispatchOnPacking, courierDispatchOnReady, courierProofCopy, courierRegistration, courierRegistrationRetry } from "../delivery/courier-functions";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
@@ -392,6 +394,15 @@ export const assistantRetention = inngest.createFunction(
     }),
 );
 
+/** Rejected store applications are deleted once the retention in AI and onboarding settings has passed (#554, #561). */
+export const storeApplicationRetention = inngest.createFunction(
+  {
+    id: "store-application/retention",
+    triggers: [{ cron: "TZ=UTC 29 3 * * *" }],
+  },
+  async ({ step }) => step.run("delete-expired-rejected", () => deleteExpiredRejectedApplications()),
+);
+
 export const dailyConfidence = inngest.createFunction(
   {
     id: "listing/daily-confidence",
@@ -416,6 +427,16 @@ export const dailyConfidence = inngest.createFunction(
   },
 );
 
+/** "Tell me when a store opens near me" (#455): on a store being listed, and daily for anything a failed send missed. One run at a time. */
+export const directoryStoreRequestNotices = inngest.createFunction(
+  {
+    id: "directory/store-request-notices",
+    concurrency: { limit: 1 },
+    triggers: [{ event: STORE_LISTED }, { cron: "TZ=UTC 7 15 * * *" }],
+  },
+  async ({ step }) => step.run("notify-waiting-requests", () => notifyWaitingRequests()),
+);
+
 export const inngestFunctions = [
   acceptanceAlert,
   autoCancel,
@@ -423,6 +444,7 @@ export const inngestFunctions = [
   sweepOrphanedAuthorized,
   reconcileStuckTransitional,
   assistantRetention,
+  storeApplicationRetention,
   dailyConfidence,
   sendCustomerNotification,
   substitutionTimeout,
@@ -437,4 +459,5 @@ export const inngestFunctions = [
   courierProofCopy,
   courierRegistration,
   courierRegistrationRetry,
+  directoryStoreRequestNotices,
 ];

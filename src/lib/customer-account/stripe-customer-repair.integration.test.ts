@@ -8,23 +8,25 @@ const hasDb = Boolean(process.env.DATABASE_URL);
 const run = `t248-repair-${Date.now()}`;
 
 describe.skipIf(!hasDb)("stripe customer repair", () => {
+  // Only this run's ids: other suites share the database and run in parallel workers.
+  const userIds: string[] = [];
+
   beforeAll(async () => {
     vi.stubEnv("E2E_FAKE_STRIPE", "1");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("CI", "true");
-    await authPrisma.user.deleteMany({ where: { id: { startsWith: "user-t248-attempt-" } } });
-    await authPrisma.user.deleteMany({ where: { id: { startsWith: "user-t248-repair-" } } });
     resetFakeCheckoutPayments();
   });
 
   afterAll(async () => {
     vi.unstubAllEnvs();
-    await authPrisma.user.deleteMany({ where: { id: { startsWith: `user-${run}` } } });
+    await authPrisma.user.deleteMany({ where: { id: { in: userIds } } });
     resetFakeCheckoutPayments();
   });
 
   async function user(suffix: string): Promise<string> {
     const userId = `user-${run}-${suffix}`;
+    userIds.push(userId);
     await authPrisma.user.create({ data: { id: userId, name: "Ada", email: `${userId}@example.test` } });
     return userId;
   }

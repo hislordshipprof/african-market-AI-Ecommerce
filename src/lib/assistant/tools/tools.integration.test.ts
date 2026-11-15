@@ -19,6 +19,8 @@ import {
   type AssistantContext,
 } from "./execute";
 import { acceptanceForTurn } from "../shown";
+import { assistantTools } from "./index";
+import { itemHandles } from "../handles";
 import { addToCartInput, offerChoicesInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
 const { headerState, cartCookies } = vi.hoisted(() => ({
@@ -174,10 +176,10 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     return { listingId: listing.id, variantId: variant.id };
   }
 
-  async function freshCart() {
-    const cart = await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } });
-    const talk = await storeScoped(storeA).aiConversation.create({
-      data: { storeId: storeA, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
+  async function freshCart(storeId = storeA) {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const talk = await storeScoped(storeId).aiConversation.create({
+      data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
     });
     return { cartId: cart.id, conversationId: talk.id };
   }
@@ -320,6 +322,19 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(row?.output).toMatchObject({ ok: false, code: "not_shown" });
     expect(await storeScoped(storeB).aiAction.findFirst({ where: { id: row?.id ?? "" } })).toBeNull();
     expect(await storeScoped(storeB).cartLine.findFirst({ where: { variantId: variantB } })).toBeNull();
+  });
+
+  it("a miscopied variant id is refused as no product here, never named by the id itself", async () => {
+    const talk = await freshCart();
+    const miscopied = `${variantA.slice(0, -1)}${variantA.endsWith("x") ? "y" : "x"}`;
+    const result = await addToCart(ctx({
+      cartId: talk.cartId,
+      conversationId: talk.conversationId,
+      acceptance: { led: true, customerText: "yes", lastReplyText: "Egusi", lastReplyEmpty: false, lastReplyListingIds: [] },
+    }), { items: [{ variant_id: miscopied, qty: 1 }] });
+    expect(result).toMatchObject({ ok: false, code: "not_shown", notShown: [{ variantId: miscopied, notInStore: true }] });
+    expect((result as unknown as { notShown: Array<Record<string, unknown>> }).notShown[0]).not.toHaveProperty("name");
+    expect((result as unknown as { hint?: string }).hint).toMatch(/handle/i);
   });
 
   it("add_to_cart returns the line total, the added total and the cart subtotal after the write", async () => {
@@ -785,10 +800,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     const wide = await searchCatalog(ctx(), { query: `ata rodo ${suffix}` });
     const cameroonHit = searchItems(wide).find((row) => row.listingId === cameroon.listingId);
     expect(cameroonHit?.match).toBe("near");
-    const cartB = (await storeScoped(storeB).cart.create({ data: { storeId: storeB, source: "manual" } })).id;
-    const conversationB = (await storeScoped(storeB).aiConversation.create({
-      data: { storeId: storeB, cartId: cartB, model: "claude-haiku-5-5", messages: [] },
-    })).id;
+    const { cartId: cartB, conversationId: conversationB } = await freshCart(storeB);
     const otherStore = await searchCatalog(ctx({ storeId: storeB, cartId: cartB, conversationId: conversationB }), { query: `yams ${suffix}` });
     const otherItems = searchItems(otherStore);
     expect(otherItems.some((row) => row.listingId === scotch.listingId || row.name.includes(suffix))).toBe(false);
@@ -972,16 +984,14 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   it("update_cart with quantity zero removes the line", async () => {
     const item = await makeListing(storeA, { name: "Remove By Zero", price: 55 });
     const keeper = await makeListing(storeA, { name: "Keep Yam", price: 40 });
-    const keeperCart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
-    const keeperTalk = (await storeScoped(storeA).aiConversation.create({
-      data: { storeId: storeA, cartId: keeperCart, model: "claude-haiku-5-5", messages: [] },
-    })).id;
+    const { cartId: keeperCart, conversationId: keeperTalk } = await freshCart();
     await addLine(storeA, keeperCart, item.variantId, 2, null);
     await addLine(storeA, keeperCart, keeper.variantId, 1, null);
     const gone = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: item.variantId } });
     const result = await updateCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: gone!.id, qty: 0 });
     expect(result).toMatchObject({ ok: true, removed: true, qty: 0, subtotalCents: 40, serviceFeeCents: 99, totalBeforeDeliveryCents: 139 });
     expect(result).not.toHaveProperty("lineTotalCents");
+    expect(await storeScoped(storeA).cartLine.findUnique({ where: { id: gone!.id } })).toBeNull();
     const kept = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: keeper.variantId } });
     const removed = await removeFromCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: kept!.id });
     expect(removed).toMatchObject({ ok: true, removed: true, subtotalCents: 0, serviceFeeCents: 0, totalBeforeDeliveryCents: 0 });
@@ -1127,20 +1137,21 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
 
     const beforeActions = await substituteActionIds();
     const result = await suggestSubstitutes(ctx(), { listing_id: source.listingId });
+    const pack = { variantId: expect.any(String), packLabel: expect.any(String) };
     expect(result).toEqual({
       ok: true,
       items: [
-        { listingId: premium.listingId, name: "Premium Garri", priceCents: 150, mayBeUnavailable: false },
-        { listingId: tiedOrder[0]?.id, name: tiedOrder[0]?.customName, priceCents: 200, mayBeUnavailable: false },
-        { listingId: tiedOrder[1]?.id, name: tiedOrder[1]?.customName, priceCents: 200, mayBeUnavailable: false },
-        { listingId: pricey.listingId, name: "Pricey Twin", priceCents: 800, mayBeUnavailable: false },
-        { listingId: soft.listingId, name: "Soft Stock", priceCents: 50, mayBeUnavailable: true },
+        { listingId: premium.listingId, name: "Premium Garri", ...pack, priceCents: 150, mayBeUnavailable: false },
+        { listingId: tiedOrder[0]?.id, name: tiedOrder[0]?.customName, ...pack, priceCents: 200, mayBeUnavailable: false },
+        { listingId: tiedOrder[1]?.id, name: tiedOrder[1]?.customName, ...pack, priceCents: 200, mayBeUnavailable: false },
+        { listingId: pricey.listingId, name: "Pricey Twin", ...pack, priceCents: 800, mayBeUnavailable: false },
       ],
     });
 
     await expectOneNewSubstituteAction(beforeActions, source.listingId, result);
     const returnedIds = (result.ok ? result.items as Array<{ listingId: string }> : []).map((item) => item.listingId);
-    for (const excluded of [source.listingId, dropped.listingId, quieter.listingId, inactive.listingId, foreign.listingId]) {
+    // Low stock confidence may be unavailable, and a swap that may be out is no swap (#476).
+    for (const excluded of [source.listingId, soft.listingId, dropped.listingId, quieter.listingId, inactive.listingId, foreign.listingId]) {
       expect(returnedIds).not.toContain(excluded);
     }
   });
@@ -1484,5 +1495,82 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       ],
     });
     expect(JSON.stringify(omitted)).not.toContain(expensive.id);
+  });
+
+  describe("item handles (#597)", () => {
+    async function runTool(tools: ReturnType<typeof assistantTools>, name: "search_catalog" | "add_to_cart" | "show_products", input: unknown) {
+      const tool = tools[name] as unknown as {
+        execute: (input: unknown, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+        toModelOutput: (options: { toolCallId: string; input: unknown; output: unknown }) => Promise<{ type: string; value: unknown }>;
+      };
+      const output = await tool.execute(input, { toolCallId: randomUUID(), messages: [] });
+      const model = await tool.toModelOutput({ toolCallId: "call", input, output });
+      return { output, model: model.value };
+    }
+
+    async function newConversation(storeId: string) {
+      return { storeId, ...(await freshCart(storeId)), actorUserId: null };
+    }
+
+    it("the model sees short handles, never a long id, and an add by handle adds that variant", async () => {
+      const turn = await newConversation(storeA);
+      const tools = assistantTools(turn);
+      const search = await runTool(tools, "search_catalog", { query: "egusi" });
+      expect(JSON.stringify(search.output)).toContain(variantA);
+      expect(JSON.stringify(search.model)).not.toContain(variantA);
+      expect(JSON.stringify(search.model)).not.toContain(listingA);
+      const row = (search.model as { items: Array<{ listingId: string; variantId: string; name: string }> }).items.find((item) => item.name === "Egusi");
+      expect(row).toMatchObject({ listingId: expect.stringMatching(/^i\d+$/), variantId: expect.stringMatching(/^v\d+$/) });
+      const added = await runTool(assistantTools(turn), "add_to_cart", { items: [{ variant_id: row!.variantId, qty: 2 }] });
+      expect(added.output).toMatchObject({ ok: true });
+      expect(JSON.stringify(added.model)).toMatch(/"lineId":"c\d+"/);
+      const lines = await storeScoped(storeA).cartLine.findMany({ where: { cartId: turn.cartId } });
+      expect(lines.map((line) => [line.variantId, line.qty])).toEqual([[variantA, 2]]);
+    });
+
+    it("an unknown handle or a raw id is refused with a clear error and changes nothing", async () => {
+      const turn = await newConversation(storeA);
+      const tools = assistantTools(turn);
+      await runTool(tools, "search_catalog", { query: "egusi" });
+      for (const variant of ["v99", variantA, "v1x"]) {
+        const refused = await runTool(tools, "add_to_cart", { items: [{ variant_id: variant, qty: 1 }] });
+        expect(refused.output).toMatchObject({ ok: false, code: "unknown_handle", handles: [variant] });
+        expect((refused.output as { message: string }).message).toContain(variant);
+      }
+      expect(await storeScoped(storeA).cartLine.count({ where: { cartId: turn.cartId } })).toBe(0);
+      const audit = await storeScoped(storeA).aiAction.findFirst({ where: { conversationId: turn.conversationId, tool: "add_to_cart" } });
+      expect(audit?.ok).toBe(false);
+    });
+
+    it("a handle another writer gave after this chat read its map still resolves", async () => {
+      const turn = await newConversation(storeA);
+      const tools = assistantTools(turn);
+      await runTool(tools, "search_catalog", { query: "no such thing at all" });
+      const given = await itemHandles(storeA, turn.conversationId).toModel({ variantId: variantA }) as { variantId: string };
+      const added = await runTool(tools, "add_to_cart", { items: [{ variant_id: given.variantId, qty: 1 }] });
+      expect(added.output).toMatchObject({ ok: true });
+      const lines = await storeScoped(storeA).cartLine.findMany({ where: { cartId: turn.cartId } });
+      expect(lines.map((line) => line.variantId)).toEqual([variantA]);
+    });
+
+    it("a handle from another conversation or another store never resolves", async () => {
+      const first = await newConversation(storeA);
+      const search = await runTool(assistantTools(first), "search_catalog", { query: "egusi" });
+      const handle = (search.model as { items: Array<{ variantId: string; name: string }> }).items.find((item) => item.name === "Egusi")!.variantId;
+      const sameStore = await newConversation(storeA);
+      const otherStore = await newConversation(storeB);
+      for (const turn of [sameStore, otherStore]) {
+        const refused = await runTool(assistantTools(turn), "add_to_cart", { items: [{ variant_id: handle, qty: 1 }] });
+        expect(refused.output).toMatchObject({ ok: false, code: "unknown_handle" });
+        expect(await storeScoped(turn.storeId).cartLine.count({ where: { cartId: turn.cartId } })).toBe(0);
+      }
+      // Store B cannot read or change store A's handle map.
+      const leaked = await storeScoped(storeB).aiConversation.findUnique({ where: { id: first.conversationId } });
+      expect(leaked).toBeNull();
+      await expect(storeScoped(storeB).aiConversation.update({
+        where: { id: first.conversationId },
+        data: { itemHandles: { v: [variantB] } },
+      })).rejects.toThrow();
+    });
   });
 });

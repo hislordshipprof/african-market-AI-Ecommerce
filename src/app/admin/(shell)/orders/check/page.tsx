@@ -1,3 +1,4 @@
+import { formatAge } from "@/lib/admin/format-age";
 import { listOrdersToCheck } from "@/lib/admin/orders-to-check";
 import { ROW_LIMIT, type OrderAlertRow } from "@/lib/admin/orders-to-check-query";
 import type { OrderRecoveryGroup } from "@/lib/db";
@@ -15,14 +16,6 @@ const GROUP_LABELS: Record<OrderRecoveryGroup, string> = {
   uncaptured: "accepted orders not yet charged",
   captured: "charged orders",
 };
-
-function formatAge(since: Date, now: number): string {
-  const minutes = Math.max(0, Math.floor((now - since.getTime()) / 60_000));
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} h ${minutes % 60} min`;
-  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
-}
 
 export default async function OrdersToCheckPage() {
   const { checkedAt, stuck, cappedGroups, alerts, alertsCapped } = await listOrdersToCheck();

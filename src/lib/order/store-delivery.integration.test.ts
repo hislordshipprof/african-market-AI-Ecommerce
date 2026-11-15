@@ -149,7 +149,7 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     expect(after.order.outForDeliveryAt).toBeInstanceOf(Date);
     expect(after.events.map((event) => event.type)).toEqual(["out_for_delivery"]);
     expect(after.notifications.filter((row) => row.event === "out_for_delivery").map((row) => row.channel).sort())
-      .toEqual(["email", "sms"]);
+      .toEqual(["email", "push", "sms"]);
   });
 
   it("an order out for delivery is delivered with a photo: proof key, one delivery event, and a delivered SMS with the tracking link", async () => {
@@ -169,7 +169,7 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     expect(bucket.get(after.order.deliveryProofKey!)?.bucket).toBe("proof-bucket");
     expect(after.events.map((event) => event.type).sort()).toEqual(["delivered", "out_for_delivery"]);
     expect(after.notifications.filter((row) => row.event === "delivered").map((row) => row.channel).sort())
-      .toEqual(["email", "sms"]);
+      .toEqual(["email", "push", "sms"]);
 
     await handler({ event: { data: { storeId, orderId: order.id, event: "delivered" } }, step: makeFakeStep() });
     const sms = getTestSentSms().at(-1)!;

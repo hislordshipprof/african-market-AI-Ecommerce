@@ -195,7 +195,7 @@ async function customerIdForCartUser(storeId: string, userId: string): Promise<s
   return customer.id;
 }
 
-/** Integer cents: live variant price × quantity. Shared by the cart page, summary, and cart tools. */
+/** Integer cents: the sum of live variant price × quantity over the lines. */
 export function cartLineSubtotalCents(lines: ReadonlyArray<{ priceCents: number; qty: number }>): number {
   let sum = 0;
   for (const line of lines) sum += line.priceCents * line.qty;
@@ -648,7 +648,7 @@ export async function checkMinimumOrder(
 
   const minimumCents = store?.minimumOrderCents ?? 0;
   const currentCents = cart
-    ? cart.lines.reduce((sum, l) => sum + l.variant.price * l.qty, 0)
+    ? cartLineSubtotalCents(cart.lines.map((l) => ({ priceCents: l.variant.price, qty: l.qty })))
     : 0;
 
   return {

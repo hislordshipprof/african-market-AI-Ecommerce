@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { listStores } from "@/lib/admin/actions";
 import { SuspendButton } from "./suspend-button";
-import { billingStatusLabel, effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
+import { billingStatusLabel, PLAN_NAMES } from "@/lib/billing/plan";
 
 export default async function StoreListPage() {
   const stores = await listStores();
@@ -62,9 +62,9 @@ export default async function StoreListPage() {
                   <td className="px-4 py-3">
                     <span
                       className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        store.status === "active"
-                          ? "bg-muted text-foreground"
-                          : "bg-destructive/10 text-destructive"
+                        store.status === "suspended"
+                          ? "bg-destructive/10 text-destructive"
+                          : "bg-muted text-foreground"
                       }`}
                     >
                       {store.status}
@@ -73,7 +73,7 @@ export default async function StoreListPage() {
                   <td className="px-4 py-3 text-muted-foreground">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium text-foreground">
-                        {PLAN_NAMES[effectivePlan(store.subscription)]}
+                        {PLAN_NAMES[store.plan]}
                       </span>
                       <span>· {billingStatusLabel(store.subscription?.status ?? "none")}</span>
                       {store.subscription?.pilot && (

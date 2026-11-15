@@ -4,8 +4,14 @@ import { ALLERGENS, DIETARY_CLAIMS } from "../../catalog/attributes";
 import { scrubKnownStrings } from "../card-scrub";
 import { exactAssistantKeys } from "../contract";
 
+const handle = (kind: string, example: string) =>
+  z.string().min(1).describe(`A ${kind} handle a tool returned in this chat, such as ${example}.`);
+const listingHandle = handle("listing", "i3");
+const variantHandle = handle("variant", "v12");
+const lineHandle = handle("cart line", "c2");
+
 const listingIds = (max: number) =>
-  z.array(z.string().min(1)).min(1).max(max);
+  z.array(listingHandle).min(1).max(max);
 
 export const searchCatalogInput = z.object({
   query: z.string().min(1).max(100).describe(
@@ -24,7 +30,13 @@ export const setShopperNeedsInput = z.object({
     "Ingredients the customer rules out, in their words, such as yellow onion.",
   ),
   remove: z.array(z.string().trim().min(1).max(60)).max(10).default([]).describe(
-    "Constraints the customer takes back, by the name this tool returned.",
+    "Constraints the customer takes back, by the name this tool returned. budget removes the budget.",
+  ),
+  have_at_home: z.array(z.string().trim().min(1).max(60)).max(10).default([]).describe(
+    "Items the customer says they already have at home, in their words, such as rice.",
+  ),
+  budget_cents: z.number().int().min(1).max(10_000_000).optional().describe(
+    "The most the customer wants the cart's items to cost, in cents, such as 3000 for under $30.",
   ),
 });
 
@@ -37,30 +49,30 @@ export const checkAvailabilityInput = z.object({
 });
 
 export const suggestSubstitutesInput = z.object({
-  listing_id: z.string().min(1),
+  listing_id: listingHandle,
 });
 
 export const addToCartInput = z.object({
   items: z.array(z.object({
-    variant_id: z.string().min(1),
+    variant_id: variantHandle,
     qty: z.number().int().min(1).max(UNSET_MAX_PER_ORDER),
-    backup_variant_id: z.string().min(1).optional(),
+    backup_variant_id: variantHandle.optional(),
   })).min(1).max(20),
 });
 
 export const updateCartInput = z.object({
-  line_id: z.string().min(1),
+  line_id: lineHandle,
   qty: z.number().int().min(0).max(UNSET_MAX_PER_ORDER),
 });
 
 export const removeFromCartInput = z.object({
-  line_id: z.string().min(1),
+  line_id: lineHandle,
 });
 
 export const setSwapRuleInput = z.object({
-  line_id: z.string().min(1),
+  line_id: lineHandle,
   rule: z.enum(SWAP_RULES),
-  substitute_variant_id: z.string().min(1).optional(),
+  substitute_variant_id: variantHandle.optional(),
 }).refine(
   (value) => value.rule !== "named_substitute" || !!value.substitute_variant_id,
   { message: "named_substitute requires substitute_variant_id" },
@@ -68,8 +80,8 @@ export const setSwapRuleInput = z.object({
 
 export const offerChoicesInput = z.object({
   options: z.array(z.object({
-    listing_id: z.string().min(1),
-    variant_id: z.string().min(1).optional(),
+    listing_id: listingHandle,
+    variant_id: variantHandle.optional(),
   })).min(2).max(6),
 });
 

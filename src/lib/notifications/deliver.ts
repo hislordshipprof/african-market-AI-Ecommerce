@@ -1,4 +1,6 @@
-import { NOTIFICATION_EXPIRE_MS, NOTIFICATION_REPLAY_MS, storeScoped, storeScopedTransaction } from "../db";
+import { isWhatsAppOptedOut, NOTIFICATION_EXPIRE_MS, NOTIFICATION_REPLAY_MS, storeScoped, storeScopedTransaction } from "../db";
+import { storeWhatsAppSender } from "../whatsapp/store-number";
+import { normalizeUsPhone } from "./phone";
 import { orderTrackingUrl } from "./tracking-url";
 import { notificationChannels, type NotificationChannel } from "./channels";
 import type { NotifyOrder } from "./messages";
@@ -48,11 +50,23 @@ function log(event: string, orderId: string, channel?: string, reason?: string):
 }
 
 async function loadOrder(storeId: string, orderId: string): Promise<NotifyOrder | null> {
+  const order = await loadOrderRow(storeId, orderId);
+  if (!order?.whatsappOptInAt) return order;
+  const phone = normalizeUsPhone(order.customer.phone);
+  const [sender, optedOut] = await Promise.all([
+    storeWhatsAppSender(storeId),
+    phone.ok ? isWhatsAppOptedOut(storeId, phone.e164.slice(1)) : Promise.resolve(false),
+  ]);
+  return { ...order, whatsapp: { sender, optedOut } };
+}
+
+async function loadOrderRow(storeId: string, orderId: string) {
   return storeScopedTransaction(storeId, async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
       include: {
         customer: { select: { name: true, email: true, phone: true } },
+        coupon: { select: { code: true } },
         store: {
           select: {
             name: true,
@@ -99,7 +113,7 @@ async function claim(
   orderId: string,
   event: string,
   channel: string,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string; replay: boolean } | null> {
   return storeScopedTransaction(storeId, async (tx) => {
     const row = await tx.notificationLog.findUnique({
       where: { orderId_event_channel: { orderId, event, channel } },
@@ -119,7 +133,7 @@ async function claim(
       data: { status: "sending", attempts: { increment: 1 } },
     });
     if (claimed.count !== 1) return null;
-    return { id: row.id };
+    return { id: row.id, replay: row.status === "sending" };
   });
 }
 
@@ -143,6 +157,19 @@ async function writeResult(
   });
 }
 
+/** WhatsApp and SMS are one phone channel: a later step sent on either supersedes this one. */
+function sameChannel(channel: string): string[] {
+  return channel === "sms" || channel === "whatsapp" ? ["sms", "whatsapp"] : [channel];
+}
+
+async function whatsappSent(storeId: string, orderId: string, event: OrderNotifyEvent): Promise<boolean> {
+  const row = await storeScoped(storeId).notificationLog.findUnique({
+    where: { orderId_event_channel: { orderId, event, channel: "whatsapp" } },
+    select: { status: true },
+  });
+  return row?.status === "sent";
+}
+
 async function higherSent(
   storeId: string,
   orderId: string,
@@ -150,7 +177,7 @@ async function higherSent(
   channel: string,
 ): Promise<boolean> {
   const rows = await storeScoped(storeId).notificationLog.findMany({
-    where: { orderId, channel, status: "sent" },
+    where: { orderId, channel: { in: sameChannel(channel) }, status: "sent" },
     select: { event: true },
   });
   return rows.some((row) => (RANK[row.event as OrderNotifyEvent] ?? -1) > RANK[event]);
@@ -174,6 +201,11 @@ async function runChannel(
 ): Promise<{ status: string; reason: string | null }> {
   const claimed = await claim(storeId, order.id, event, channel.kind);
   if (!claimed) return { status: "unchanged", reason: null };
+  // No idempotency key on a WhatsApp send: an attempt that may have reached Meta is not repeated; SMS covers it.
+  if (channel.kind === "whatsapp" && claimed.replay) {
+    await writeResult(storeId, claimed.id, "failed", "outcome_unknown");
+    return { status: "failed", reason: "outcome_unknown" };
+  }
   const url = order.trackingToken
     ? orderTrackingUrl(order.store, order.trackingToken, env, event === "substitution" ? "/substitutions" : "")
     : null;
@@ -190,6 +222,11 @@ async function runChannel(
   if (skip) {
     await writeResult(storeId, claimed.id, "skipped", skip);
     return { status: "skipped", reason: skip };
+  }
+  // WhatsApp replaces SMS for an opted-in customer; SMS goes only when WhatsApp did not (#560).
+  if (channel.kind === "sms" && await whatsappSent(storeId, order.id, event)) {
+    await writeResult(storeId, claimed.id, "skipped", "whatsapp_sent");
+    return { status: "skipped", reason: "whatsapp_sent" };
   }
   const prepared = channel.prepare(order, event, url, env);
   if (prepared.outcome !== "ready") {

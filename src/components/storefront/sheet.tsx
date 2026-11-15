@@ -1,15 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
-import { m, useReducedMotion } from "motion/react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import styles from "./cart.module.css";
-
-const subscribeMobile = (listener: () => void) => {
-  const query = window.matchMedia("(max-width: 767px)");
-  query.addEventListener("change", listener);
-  return () => query.removeEventListener("change", listener);
-};
 
 export function Sheet({
   open,
@@ -23,12 +16,6 @@ export function Sheet({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const reduced = useReducedMotion();
-  const mobile = useSyncExternalStore(
-    subscribeMobile,
-    () => window.matchMedia("(max-width: 767px)").matches,
-    () => false,
-  );
   const restore = useRef<(() => void) | null>(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -73,22 +60,9 @@ export function Sheet({
     };
   }, []);
   return (
-    <m.dialog
+    <dialog
       ref={ref}
       className={styles.sheet}
-      initial={false}
-      animate={
-        reduced
-          ? { x: 0, y: 0 }
-          : {
-              x: !open && !mobile ? "100%" : "0%",
-              y: !open && mobile ? "100%" : "0%",
-            }
-      }
-      transition={{
-        duration: reduced ? 0 : open ? 0.3 : 0.2,
-        ease: open ? [0, 0, 0, 1] : [0.4, 0, 1, 1],
-      }}
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();
@@ -112,6 +86,6 @@ export function Sheet({
         </header>
         {children}
       </div>
-    </m.dialog>
+    </dialog>
   );
 }

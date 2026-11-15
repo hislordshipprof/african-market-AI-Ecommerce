@@ -13,7 +13,7 @@ export default async function DirectoryListingPage() {
       storeSlug={store.slug}
       place={[store.city, store.state].filter(Boolean).join(", ")}
       located={store.lat != null && store.lng != null}
-      suspended={store.status !== "active"}
+      status={store.status}
       initial={{
         listed: store.listed,
         blurb: store.listingBlurb ?? "",

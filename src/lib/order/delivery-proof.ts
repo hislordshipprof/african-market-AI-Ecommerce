@@ -1,4 +1,5 @@
 import { PHOTO_UPLOAD_MAX_BYTES } from "../listing/csv-file-cap";
+import { isPhotoType } from "../image/photo-type";
 import { cleanJpeg } from "../image/server-jpeg";
 
 export const DELIVERY_PROOF_MAX_BYTES = PHOTO_UPLOAD_MAX_BYTES;
@@ -12,16 +13,6 @@ export const PROOF_PHOTO_MISSING = "Add a photo of the delivered order";
 export const PROOF_PHOTO_NOT_IMAGE = "The delivery photo must be a JPEG, PNG or WebP image";
 export const PROOF_PHOTO_TOO_LARGE = "The delivery photo is too large. Take it again or choose a smaller one";
 
-function startsWith(bytes: Uint8Array, prefix: number[], offset = 0): boolean {
-  return prefix.every((byte, i) => bytes[offset + i] === byte);
-}
-
-/** The file's own magic bytes decide the type; the browser's content type is never trusted. */
-function isPhotoType(bytes: Uint8Array): boolean {
-  return startsWith(bytes, [0xff, 0xd8, 0xff])
-    || startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-    || (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8));
-}
 
 /**
  * Checks the photo, then re-encodes it: upright, long edge at most 2000px, JPEG 85,

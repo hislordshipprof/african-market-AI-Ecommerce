@@ -11,7 +11,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
-import { AlertCircle, Camera, ChartColumn, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare } from "lucide-react";
+import type { GoLiveItemView } from "@/components/go-live/go-live-items";
+import { GoLiveCard } from "./go-live-card";
+import { AlertCircle, Camera, ChartColumn, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -20,6 +22,10 @@ interface Props {
   role: string;
   stripeOnboardingStatus: string;
   unreadMessages: number;
+  /** Orders placed by shoppers who arrived from the Store directory (#454). */
+  directoryOrders: number;
+  /** The go-live checklist while the store is in setup (#555); null once it is live. */
+  goLive: GoLiveItemView[] | null;
   plan: {
     name: string;
     status: string;
@@ -47,6 +53,8 @@ export function StoreAdminDashboard({
   role,
   stripeOnboardingStatus,
   unreadMessages,
+  directoryOrders,
+  goLive,
   plan,
 }: Props) {
   const searchParams = useSearchParams();
@@ -84,6 +92,8 @@ export function StoreAdminDashboard({
             Manage your store and team
           </p>
         </div>
+
+        {goLive && <GoLiveCard items={goLive} isOwner={role === "owner"} />}
 
         {role === "owner" && plan.paymentFailed && (
           <div role="alert" className="mb-4 flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
@@ -165,6 +175,26 @@ export function StoreAdminDashboard({
           )}
 
           {role === "owner" && (
+            <Link href={`/store-admin/promotions?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <TicketPercent className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Promotions</CardTitle>
+                      <CardDescription>
+                        Coupon codes for your shoppers
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && (
             <Link href={`/store-admin/payouts?store=${storeParam}`}>
               <Card className="transition-shadow hover:shadow-md">
                 <CardHeader>
@@ -220,6 +250,9 @@ export function StoreAdminDashboard({
                       <CardDescription>
                         Show your store to shoppers nearby
                       </CardDescription>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {directoryOrders === 1 ? "1 order" : `${directoryOrders.toLocaleString("en-US")} orders`} from the directory
+                      </p>
                     </div>
                   </div>
                 </CardHeader>

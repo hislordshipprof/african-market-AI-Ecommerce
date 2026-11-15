@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import recipeBase from "../../../../prisma/recipe-base.json";
@@ -8,8 +8,9 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-ap
 import { createAssistantModel } from "../model";
 import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
 import { WEB_SEARCH_MICROS } from "../cost";
+import { readConstraints } from "../constraints";
 import { RECIPE_LOOKUPS_PER_STORE_DAY, saveLookedUpRecipe, takeLookupSlot } from "../recipes";
-import { failNextSpendWrites } from "../spend";
+import { failNextSpendWrites, setSpendClock, utcDay } from "../spend";
 import { setShopperNeeds, type AssistantContext } from "./execute";
 import { getRecipe } from "./recipe";
 
@@ -83,12 +84,15 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     return { listingId: row.id, variantId: variant.id };
   }
 
+  // A ledger day of its own, so spend other test files record on today's row cannot satisfy a spend check here.
+  const ledgerDay = new Date(Date.UTC(2700, 0, 1) + randomInt(20_000) * 86_400_000);
   async function spentToday(): Promise<bigint> {
-    const row = await raw.assistantSpendDay.findUnique({ where: { day: new Date(new Date().toISOString().slice(0, 10)) } });
+    const row = await raw.assistantSpendDay.findUnique({ where: { day: new Date(utcDay(ledgerDay)) } });
     return row?.costMicros ?? BigInt(0);
   }
 
   beforeAll(async () => {
+    setSpendClock(() => ledgerDay);
     raw = testPrismaClient();
     await seedRecipeBase(raw, base);
     storeA = (await raw.store.create({ data: { slug: `recipe-a-${suffix}`, name: "Recipe A", themePreset: "palm-and-shea" } })).id;
@@ -107,9 +111,11 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   });
 
   afterAll(async () => {
+    setSpendClock(null);
     vi.unstubAllEnvs();
     await platform.recipe.deleteMany({ where: { key: { startsWith: "kelewele " } } });
     await platform.recipe.deleteMany({ where: { key: { startsWith: "egusi stew " } } });
+    await platform.recipe.deleteMany({ where: { key: { startsWith: `plantain ${suffix}` } } });
     await platform.recipe.deleteMany({ where: { key: { startsWith: "ዶሮ ወጥ " } } });
     for (const id of [storeA, storeB].filter(Boolean)) {
       await storeScoped(id).cart.deleteMany({});
@@ -153,6 +159,66 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(result.notCarried).toContain("onion");
   });
 
+  it("leaves out what the customer already has at home for the rest of the conversation, until taken back", async () => {
+    const ctx = await conversation(storeA);
+    expect(await setShopperNeeds(ctx, { have_at_home: ["Rice", "tomatoes"] })).toMatchObject({ ok: true, haveAtHome: ["rice", "tomatoes"] });
+    const first = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(first.haveAtHome).toEqual(["rice"]);
+    expect(first.inStock.map((item) => item.ingredient)).not.toContain("rice");
+    // Tomatoes at home are not tomato paste.
+    expect(first.lowOrOut.map((item) => item.ingredient)).toContain("tomato paste");
+    // Kept for the conversation: a later recipe still leaves it out.
+    const again = await getRecipe(ctx, { dish: "Jollof", servings: 10 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(again.haveAtHome).toEqual(["rice"]);
+    // Taken back: the next recipe proposes it again.
+    expect(await setShopperNeeds(ctx, { remove: ["rice"] })).toMatchObject({ haveAtHome: ["tomatoes"] });
+    const back = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(back.inStock.map((item) => item.ingredient)).toContain("rice");
+    expect(back).not.toHaveProperty("haveAtHome");
+  });
+
+  it("keeps only the 50 newest have-at-home items in a conversation", async () => {
+    const ctx = await conversation(storeA);
+    for (let batch = 0; batch < 6; batch++) {
+      await setShopperNeeds(ctx, { have_at_home: Array.from({ length: 10 }, (_, i) => `item ${batch * 10 + i}`) });
+    }
+    const kept = (await readConstraints(storeA, ctx.conversationId)).haveAtHome;
+    expect(kept).toHaveLength(50);
+    expect(kept[0]).toBe("item 10");
+    expect(kept.at(-1)).toBe("item 59");
+  });
+
+  it("finds a seeded dish the shopper named with what they want in it, with no lookup", async () => {
+    const fake = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
+    const deps = { lookupModel: createAssistantModel({ fetch: fake.fetch }) };
+    const jollof = await getRecipe(ctxA, { dish: "Jollof with tomato paste, not fresh tomato", servings: 6 }, deps);
+    const breakfast = await getRecipe(ctxA, { dish: "Ethiopian breakfast with teff and berbere", servings: 2 }, deps);
+    expect(fake.requests).toHaveLength(0);
+    expect(jollof).toMatchObject({ ok: true, lookedUp: false, recipe: "Jollof rice" });
+    expect(breakfast).toMatchObject({ ok: true, lookedUp: false, recipe: "Chechebsa (kita firfir)" });
+  });
+
+  it("never fills a seeded ingredient with a different product that only has the ingredient's word in its name", async () => {
+    const honeyBeans = await listing(storeA, "beans-honey-oloyin", `Honey beans ${suffix}`);
+    const butterSpice = await listing(storeA, "kibe-qimem-butter-spice", `Spiced-butter spice mix ${suffix}`);
+    const ctx = await conversation(storeA);
+    const result = await getRecipe(ctx, { dish: "Chechebsa", servings: 2 }) as unknown as RecipeOutput;
+    const offered = [...result.inStock, ...result.lowOrOut];
+    expect(offered.map((item) => item.listingId)).not.toContain(honeyBeans.listingId);
+    expect(offered.map((item) => item.listingId)).not.toContain(butterSpice.listingId);
+    expect(result.notCarried).toEqual(expect.arrayContaining(["honey", "niter kibbeh"]));
+  });
+
+  it("a dish whose full name the base answers is not cut down to the part before with", async () => {
+    const plain = `plantain ${suffix}`;
+    await saveLookedUpRecipe(plain, { name: plain, ingredients: ["ripe plantain"], sourceUrl: "https://recipes.example/plantain" });
+    await saveLookedUpRecipe(`${plain} with beans`, { name: `${plain} with beans`, ingredients: ["beans"], sourceUrl: "https://recipes.example/beans" });
+    const fake = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
+    const result = await getRecipe(ctxA, { dish: `${plain} with beans`, servings: 2 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
+    expect(fake.requests).toHaveLength(0);
+    expect(result).toMatchObject({ ok: true, source: "https://recipes.example/beans" });
+  });
+
   it("asks for servings when they are unclear, without searching or looking up", async () => {
     const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["ripe plantain"])] });
     const result = await getRecipe(ctxA, { dish }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
@@ -161,7 +227,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   });
 
   it("looks up a dish not in the base once, matches it to this store, saves it, and counts the search in spend", async () => {
-    const before = await raw.assistantSpendDay.findUnique({ where: { day: new Date(new Date().toISOString().slice(0, 10)) } });
+    const before = await spentToday();
     const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["Rice", "ripe plantain", "ginger", "rice"])] });
     const first = await getRecipe(ctxA, { dish, servings: 4 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) }) as unknown as RecipeOutput;
     expect(fake.requests).toHaveLength(1);
@@ -169,8 +235,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(first).toMatchObject({ ok: true, lookedUp: true, source: "https://recipes.example/kelewele" });
     expect(first.inStock.map((item) => item.listingId)).toEqual([rice.listingId]);
     expect(first.notCarried).toEqual(["ripe plantain", "ginger"]);
-    const after = await raw.assistantSpendDay.findUnique({ where: { day: new Date(new Date().toISOString().slice(0, 10)) } });
-    expect((after?.costMicros ?? BigInt(0)) - (before?.costMicros ?? BigInt(0))).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS);
+    expect((await spentToday()) - before).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS);
 
     const again = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
     const second = await getRecipe(ctxA, { dish: dish.toUpperCase(), servings: 8 }, { lookupModel: createAssistantModel({ fetch: again.fetch }) }) as unknown as RecipeOutput;

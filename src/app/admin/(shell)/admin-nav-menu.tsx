@@ -3,20 +3,10 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, ClipboardCheck, House, LogOut, Menu, MessagesSquare, PackageSearch, Store, Undo2, X } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { ADMIN_NAV, currentNavHref, type AdminNavHref } from "./admin-nav";
+import { ADMIN_NAV, currentNavHref } from "./admin-nav";
 import { signOutAdmin } from "./sign-out";
-
-const ICONS: Record<AdminNavHref, typeof House> = {
-  "/admin": House,
-  "/admin/stores": Store,
-  "/admin/catalog/review": ClipboardCheck,
-  "/admin/orders": Undo2,
-  "/admin/orders/check": PackageSearch,
-  "/admin/support": MessagesSquare,
-  "/admin/ai/conversations": Bot,
-};
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
@@ -72,8 +62,7 @@ export function AdminNav({ email }: { email: string }) {
         >
           <nav aria-label="Admin" className="px-3 py-3 lg:py-0">
             <ul className="grid gap-1">
-              {ADMIN_NAV.map(({ href, label }) => {
-                const Icon = ICONS[href];
+              {ADMIN_NAV.map(({ href, label, icon: Icon }) => {
                 const isCurrent = href === current;
                 return (
                   <li key={href}>

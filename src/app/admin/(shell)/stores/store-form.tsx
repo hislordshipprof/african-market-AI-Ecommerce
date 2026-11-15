@@ -455,24 +455,6 @@ export function StoreForm({
             </label>
           </div>
 
-          {mode === "edit" && (
-            <div>
-              <label htmlFor="status" className="mb-1 block text-sm font-medium text-foreground">
-                Status
-              </label>
-              <select
-                id="status"
-                name="status"
-                defaultValue={sv?.status ?? store?.status ?? "active"}
-                className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <option value="active">Active</option>
-                <option value="suspended">Suspended</option>
-              </select>
-            </div>
-          )}
-
-          {mode === "create" && <input type="hidden" name="status" value="active" />}
         </div>
       </fieldset>
 

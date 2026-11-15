@@ -19,6 +19,7 @@ import { scheduleCourierCancel, scheduleCourierPacking } from "../inngest/notify
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
+import { platformFeeLedger } from "../admin/fee-ledger-query";
 import { FakeStripeError, fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
@@ -479,6 +480,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("READY");
     expect(updated!.readyAt).toBeTruthy();
     expect(updated!.capturedAmountCents).toBe(6000);
+    // The capture record (#537) outlives a later refund or cancellation that clears capturedAmountCents.
+    expect(updated!.captureCents).toBe(6000);
+    expect(updated!.capturedAt).toEqual(updated!.readyAt);
 
     expect(capturedPayments.get(order.paymentIntentId!)).toBe(6000);
     // ADR-0021: the store's card fee is on its $57 part only (2.9% + 30¢ = 195), plus the $3 courier fee.
@@ -1284,14 +1288,16 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("AWAITING_PICKUP");
     expect(updated!.readyAt).toBeTruthy();
     expect(updated!.capturedAmountCents).toBe(capturedAmount);
+    expect(updated!.captureCents).toBe(capturedAmount);
+    expect(updated!.capturedAt).toEqual(updated!.readyAt);
 
     const logs = await storeScoped(storeId).auditLog.findMany({
       where: { entityId: order.id, action: "reconcile_capture" },
     });
     expect(logs.length).toBe(1);
-    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(3);
     await reconcileStuckOrder(storeId, order.id);
-    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(3);
   });
 
   it("K1: sweep finalizes CAPTURING order when Phase 3 DB failure (Stripe succeeded)", async () => {
@@ -1524,10 +1530,31 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("REFUND_FAILED");
+    expect(updated!.capturedAmountCents).toBe(5000);
+    expect(updated!.captureCents).toBe(5000);
     const alerts = await storeScoped(storeId).auditLog.findMany({
       where: { entityId: order.id, action: "refund_failed" },
     });
     expect(alerts.length).toBe(1);
+  });
+
+  it("a capture found at cancel whose refund fails stays in the fee ledger as captured", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    setNextRefundStatus(order.paymentIntentId!, "failed");
+
+    expect((await reconcileStuckOrder(storeId, order.id)).ok).toBe(false);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated).toMatchObject({ status: "REFUND_FAILED", readyAt: null, cancelledAt: null, confirmedCaptureCents: 5000 });
+    const ledger = await platformFeeLedger(updated!.captureConfirmedAt!.toISOString().slice(0, 7));
+    expect(ledger.rows.filter((row) => row.id === order.id).map((row) => [row.kind, row.capturedCents, row.refundFailed])).toEqual([
+      ["capture", 5000, true],
+    ]);
   });
 
   it("Codex-1/C4: CANCELLING + Stripe succeeded but refund pending does not finalize CANCELLED", async () => {
@@ -1745,6 +1772,8 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
     expect(updated!.capturedAmountCents).toBeNull();
+    // The refund proves Stripe captured 5500; the capture record keeps it (#537).
+    expect(updated!.captureCents).toBe(5500);
 
     expect(refundedPayments.has(order.paymentIntentId!)).toBe(true);
 
@@ -3231,6 +3260,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("REFUND_FAILED");
     expect(updated!.refundId).toBe(refund.refundId);
     expect(updated!.capturedAmountCents).toBe(order.totalAuthorizedCents);
+    expect(updated!.captureCents).toBe(order.totalAuthorizedCents);
   });
 
   it("webhook refund.canceled moves a captured cancellation to REFUND_FAILED and restores the amount", async () => {
@@ -3616,9 +3646,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       const result = await markReady(storeId, order.id);
       expect(result).toEqual({ ok: true, capturedAmountCents: 0, voided: true });
       expect(cancelledPayments.has(seeded)).toBe(true);
-      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(3);
       await markReady(storeId, order.id);
-      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(3);
     } finally {
       vi.unstubAllEnvs();
     }

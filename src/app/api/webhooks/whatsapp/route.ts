@@ -5,10 +5,13 @@ import { parseInput } from "@/lib/security/parse-input";
 import { readWhatsAppConfig } from "@/lib/whatsapp/config";
 import { messageRef } from "@/lib/whatsapp/code";
 import { handleInboundMessage } from "@/lib/whatsapp/inbound";
+import { handleStoreInboundMessage } from "@/lib/whatsapp/store-inbound";
 import { verifyWhatsAppSignature } from "@/lib/whatsapp/signature";
 import { extractWebhook, whatsappWebhookSchema } from "@/lib/whatsapp/webhook-payload";
 
 export const dynamic = "force-dynamic";
+/** A store message can run a shopper assistant turn (#559), which stops itself at 55 seconds. */
+export const maxDuration = 60;
 
 /** Meta's documented webhook payload ceiling [unverified, #143]. */
 const MAX_BODY_BYTES = 3 * 1024 * 1024;
@@ -43,7 +46,8 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * Inbound messages and statuses. Order: app secret configured (503), size
+ * Inbound messages and statuses, for the platform number and every store
+ * number (one Meta app, one app secret). Order: app secret configured (503), size
  * (413), signature over the raw bytes (401), then parse. After a valid
  * signature every answer is 200 unless handling failed (500, so Meta
  * redelivers); a 4xx would be retried for days.
@@ -80,7 +84,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true }, { status: 200 });
   }
 
-  const { messages, failedStatusCodes, unreadableMessages } = extractWebhook(parsed.data, phoneNumberId);
+  const { messages, failedStatusCodes, unreadableMessages } = extractWebhook(parsed.data);
   if (unreadableMessages > 0) {
     console.warn(JSON.stringify({ event: "whatsapp_message_unparsed", count: unreadableMessages }));
   }
@@ -88,9 +92,12 @@ export async function POST(req: NextRequest) {
     console.warn(JSON.stringify({ event: "whatsapp_delivery_failed", code }));
   }
 
-  for (const message of messages) {
+  // The platform number is the owner path (#143); any other number is a
+  // store's own number, routed to that store or dropped (#558).
+  for (const { phoneNumberId: to, message } of messages) {
     try {
-      await handleInboundMessage(message);
+      if (phoneNumberId && to === phoneNumberId) await handleInboundMessage(message);
+      else await handleStoreInboundMessage(to, message);
     } catch (error) {
       console.error(JSON.stringify({
         event: "whatsapp_inbound_failed",

@@ -138,15 +138,17 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     const failed = await fakeStripeProvider.refundPayment(pi, 3000, `failed-${placed.orderId}`);
     setRefundStatus(failed.refundId, "failed");
     await evaluateOrderRefundState(placed.orderId);
-    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("REFUND_FAILED");
+    const stillFailed = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } });
+    expect(stillFailed.status).toBe("REFUND_FAILED");
+    expect(stillFailed.captureCents).toBe(3000);
     expect(await stockOf(storeId, listingId)).toEqual(held);
 
     await fakeStripeProvider.refundPayment(pi, 3000, `covered-${placed.orderId}`);
     await evaluateOrderRefundState(placed.orderId);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("CANCELLED");
-    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(3);
     await evaluateOrderRefundState(placed.orderId);
-    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(2);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(3);
     const released = { qty: 10, events: [["reservation", -3], ["reservation_release", 3]] };
     expect(await stockOf(storeId, listingId)).toEqual(released);
 
@@ -179,6 +181,9 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
       await evaluateOrderRefundState(second.orderId);
       expect(await stockOf(storeId, recounted.listingId)).toEqual(superseded);
     }
+    const coveredCancel = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: second.orderId } });
+    expect(coveredCancel.status).toBe("CANCELLED");
+    expect(coveredCancel.captureCents).toBe(3000);
   }, 30_000);
 
   it("a replay after a partial dashboard refund reuses the stored amount, then refunds the rest", async () => {
@@ -678,7 +683,7 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     await evaluateOrderRefundState(order.id);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("REFUNDED");
     const issued = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: order.id, event: "refunded" } });
-    expect(issued.map((row) => row.channel).sort()).toEqual(["email", "sms"]);
+    expect(issued.map((row) => row.channel).sort()).toEqual(["email", "push", "sms"]);
   });
 
   it("an issue refund on a courier order keeps the application fee", async () => {

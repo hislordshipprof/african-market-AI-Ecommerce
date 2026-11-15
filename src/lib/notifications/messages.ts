@@ -2,7 +2,10 @@ import { customerStatusLabel } from "../customer-account/order-history-view";
 import { quotedFrom, stripHeaderChars } from "../email/from";
 import { escapeHtml, money } from "../format";
 import { fulfilledStatus } from "../order/constants";
+import type { PushMessage } from "../push/sender";
 import { presetPrimary, readableFillColor } from "../theme";
+import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage } from "../whatsapp/templates";
+import type { OutboundMessage, WhatsAppSender } from "../whatsapp/types";
 import type { OrderNotifyEvent } from "./record";
 
 export type NotifyLine = {
@@ -22,6 +25,7 @@ export type NotifyLine = {
 
 export type NotifyOrder = {
   id: string;
+  storeId: string;
   number: number;
   status: string;
   fulfillment: string;
@@ -29,6 +33,8 @@ export type NotifyOrder = {
   tipCents: number;
   deliveryFeeCents: number;
   serviceFeeCents: number;
+  discountCents: number;
+  coupon: { code: string } | null;
   totalAuthorizedCents: number;
   capturedAmountCents: number | null;
   refundId: string | null;
@@ -46,6 +52,13 @@ export type NotifyOrder = {
   };
   lines: NotifyLine[];
   manualResolution: { refundedCents: number; repaidCents: number; capturedCents: number } | null;
+  /** Set only when the customer opted in to WhatsApp updates at checkout (#560). */
+  whatsapp?: {
+    /** The store's registered number; null when it has none now or its token cannot be opened. */
+    sender: WhatsAppSender | null;
+    /** The customer sent STOP to this store's number. */
+    optedOut: boolean;
+  } | null;
 };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -160,6 +173,12 @@ function cancelCopy(order: NotifyOrder): string {
 /** Events after capture: the order is picked and the final amount is charged. */
 const CHARGED_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set(["ready", "out_for_delivery", "delivered", "completed"]);
 
+function promoLine(order: NotifyOrder): string {
+  if (order.discountCents <= 0) return "";
+  const label = order.coupon ? `Promo ${order.coupon.code}` : "Promo discount";
+  return `<p>${escapeHtml(label)}: −${escapeHtml(money(order.discountCents))}.</p>`;
+}
+
 function lineRows(order: NotifyOrder, event: OrderNotifyEvent): string {
   const picked = CHARGED_EVENTS.has(event);
   return order.lines.map((line) => {
@@ -178,6 +197,8 @@ export type RenderedMessage = {
   subject?: string;
   html?: string;
   text?: string;
+  push?: { storeId: string; orderId: string; message: PushMessage };
+  whatsapp?: { message: OutboundMessage; sender: WhatsAppSender };
 };
 
 /** The subject and first line: the order status, or that the store answered the customer's message. */
@@ -211,7 +232,8 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
   if (event !== "cancelled" && event !== "store_replied" && event !== "refunded" && event !== "substitution") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {
-    const estimate = order.subtotalCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;
+    const estimate = order.subtotalCents - order.discountCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;
+    parts.push(promoLine(order));
     if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
     parts.push(`<p>Estimated total ${escapeHtml(money(estimate))}.</p>`);
     parts.push(`<p>Card hold ${escapeHtml(money(order.totalAuthorizedCents))}. You'll be charged the final amount after picking.</p>`);
@@ -226,6 +248,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
         }));
       }
     } else {
+      parts.push(promoLine(order));
       if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
       parts.push(`<p>Charged ${escapeHtml(money(order.capturedAmountCents))}.</p>`);
     }
@@ -248,6 +271,15 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   };
 }
 
+/** A lock-screen line: the store's name and the status, never money or items. */
+export function renderPush(order: NotifyOrder, event: OrderNotifyEvent, url: string): RenderedMessage {
+  const body = `Order #${order.number}: ${headline(order, event)}`;
+  return {
+    to: order.id,
+    push: { storeId: order.storeId, orderId: order.id, message: { title: order.store.name, body, url, tag: `order-${order.number}` } },
+  };
+}
+
 export function renderSms(order: NotifyOrder, event: OrderNotifyEvent, url: string): RenderedMessage {
   const name = smsStoreName(order.store.name);
   if (event === "store_replied") {
@@ -260,4 +292,32 @@ export function renderSms(order: NotifyOrder, event: OrderNotifyEvent, url: stri
   let text = `${name}: order #${order.number} ${status}. Track it: ${url}`;
   if (event === "placed") text += " Reply STOP to opt out.";
   return { to: order.customer.phone ?? "", text };
+}
+
+type WhatsAppEvent = Exclude<OrderNotifyEvent, "store_replied">;
+
+function whatsappTemplate(order: NotifyOrder, event: WhatsAppEvent) {
+  if (event === "ready") {
+    return order.fulfillment === "pickup" ? ORDER_UPDATE_TEMPLATES.ready_pickup : ORDER_UPDATE_TEMPLATES.ready_delivery;
+  }
+  return ORDER_UPDATE_TEMPLATES[event];
+}
+
+/**
+ * The order-update template (#560): the store name and the tracking link only.
+ * The link's path after the store's host is the button's URL suffix; null when
+ * the link has no path to carry.
+ */
+export function renderWhatsApp(
+  order: NotifyOrder,
+  event: WhatsAppEvent,
+  url: string,
+  to: string,
+  sender: WhatsAppSender,
+): RenderedMessage | null {
+  const origin = new URL(url).origin;
+  const suffix = url.startsWith(`${origin}/`) ? url.slice(origin.length + 1) : "";
+  if (!suffix) return null;
+  const message = orderUpdateMessage(to, whatsappTemplate(order, event), smsStoreName(order.store.name), suffix);
+  return { to, from: sender.phoneNumberId, whatsapp: { message, sender } };
 }

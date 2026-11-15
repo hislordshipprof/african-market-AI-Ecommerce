@@ -65,6 +65,15 @@ describe.skipIf(!hasDb)("upsertMasterProduct (DB integration)", () => {
     expect(edited.map((s) => s.term).sort()).toEqual(["Ji", "white yam"]);
   });
 
+  it("a re-seed keeps a synonym a platform admin added on the synonym screen (#541)", async () => {
+    const variant = { statusOnCreate: "active", statusOnUpdate: "active", confidence: "high", imageUrl: null };
+    await asAdmin((tx) => upsertMasterProduct(tx, row(ids[0]), null, variant));
+    await asAdmin((tx) => tx.productSynonym.create({ data: { productId: ids[0], term: "Doya", language: "ha", region: "Nigeria" } }));
+    await asAdmin((tx) => upsertMasterProduct(tx, row(ids[0], { search_synonyms: "white yam" }), null, variant));
+    const terms = (await asAdmin((tx) => tx.productSynonym.findMany({ where: { productId: ids[0] } }))).map((s) => s.term).sort();
+    expect(terms).toEqual(["Doya", "Isu", "white yam"]);
+  });
+
   it("review variant: created needs_review with no image; re-seed never resets an approved status", async () => {
     await asAdmin((tx) => upsertMasterProduct(tx, row(ids[1], { confidence: " medium " }), null, { statusOnCreate: "needs_review", confidence: "medium", imageUrl: null }));
     expect(await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: ids[1] } }))).toMatchObject({ status: "needs_review", confidence: "medium", imageUrl: null });
