@@ -12,11 +12,11 @@ import { recordInvite, sendInviteEmail, type CreateInviteInput } from "../invite
 import { resolveAuthBaseUrl } from "../auth";
 import { requestCourierRegistration } from "../delivery/courier-registration";
 import { revalidateStore } from "../get-store";
+import { readAiOnboardingSettings } from "../admin/ai-onboarding-settings";
 import { REJECT_REASON_MAX, STORE_TYPES } from "./fields";
 
 const HOUR_MS = 60 * 60 * 1000;
 const PER_IP_PER_HOUR = 5;
-const RETENTION_MONTHS = 12;
 
 type Actor = { id: string; email: string };
 
@@ -348,10 +348,11 @@ function rejectionHtml(ownerName: string, businessName: string): string {
   `;
 }
 
-/** Rejected applications are kept 12 months from the decision, then deleted by the daily job. */
+/** Rejected applications are kept for the retention set in AI and onboarding settings (#561), then deleted by the daily job. */
 export async function deleteExpiredRejectedApplications(now = new Date()): Promise<number> {
+  const { rejectedApplicationRetentionMonths } = await readAiOnboardingSettings();
   const cutoff = new Date(now);
-  cutoff.setUTCMonth(cutoff.getUTCMonth() - RETENTION_MONTHS);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - rejectedApplicationRetentionMonths);
   const { count } = await platformAdmin.storeApplication.deleteMany({
     where: { status: "rejected", decidedAt: { lt: cutoff } },
   });

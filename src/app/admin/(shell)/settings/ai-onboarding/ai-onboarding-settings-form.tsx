@@ -24,7 +24,7 @@ const SECTIONS: Array<{ legend: string; fields: Array<{ name: Field; label: stri
         name: "rejectedApplicationRetentionMonths",
         label: "Keep rejected applications",
         unit: "months",
-        hint: "Then the daily job deletes them. Not in use until store applications ship.",
+        hint: "Then the daily job deletes them.",
       },
     ],
   },

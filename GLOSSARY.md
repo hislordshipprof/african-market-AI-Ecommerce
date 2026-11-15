@@ -32,7 +32,7 @@ A member of our team who approves store applications, sets up stores and support
 _Avoid_: Platform team (only the customer-facing label on a platform admin's support reply)
 
 **Store application**:
-A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted 12 months after the decision.
+A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted once the retention set by the platform admin (default 12 months) has passed since the decision.
 _Avoid_: Sign-up, lead, merchant application
 
 **Customer**:
