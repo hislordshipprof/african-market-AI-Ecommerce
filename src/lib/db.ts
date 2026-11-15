@@ -1789,7 +1789,7 @@ export async function claimConversationLease(
 }
 
 /**
- * Deletes one batch of actions older than the naive timestamp.
+ * Deletes one batch of actions older than the naive timestamp, only in `storeIds` when given (a test seam).
  * The batch key is written in the same transaction, so a replay returns the
  * committed count instead of deleting the next batch.
  */
@@ -1797,12 +1797,14 @@ export function deleteExpiredAssistantActions(
   cutoff: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_actions
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
         ORDER BY created_at, id
         LIMIT ${batchSize}
         FOR UPDATE SKIP LOCKED
@@ -1827,12 +1829,14 @@ export function deleteExpiredAssistantConversations(
   now: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_conversations
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
           AND (in_flight_until IS NULL OR in_flight_until <= ${now})
         ORDER BY created_at, id
         LIMIT ${batchSize}
@@ -1857,12 +1861,14 @@ export function deleteExpiredReviewFlags(
   cutoff: string,
   batchSize: number,
   batchKey: string,
+  storeIds: string[] | null = null,
 ): Promise<number> {
   return deleteExpiredBatch(batchKey, (tx) =>
     tx.$queryRaw<Array<{ deleted: number }>>`
       WITH doomed AS (
         SELECT id FROM ai_review_flags
         WHERE created_at < ${cutoff}
+        AND (${storeIds}::text[] IS NULL OR store_id = ANY(${storeIds}::text[]))
         ORDER BY created_at, id
         LIMIT ${batchSize}
         FOR UPDATE SKIP LOCKED
