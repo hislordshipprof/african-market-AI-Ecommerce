@@ -168,11 +168,12 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 
 ## 7. Platform admin console
 - Tenants: create, suspend, plan/billing, settings override.
+  - Built (#561): `/admin/settings/ai-onboarding` sets, platform-wide, the go-live listing floor (1 to 200, default 20, for #555), the AI review daily sample per store (0 to 20, default 5), the AI turn cost flag (1 to 100 cents, default 2) and the rejected-application retention (1 to 24 months, default 12, for #554). Each lives on the `platform_settings` row with a database check for its range; out of range is refused, never clamped. A save writes one `audit_logs` row (`platform.ai_onboarding_settings_update`) with before and after in the same transaction, and the page shows who changed them last and when. The AI review list, the transcript view and the shopper chat handler read the sample size and cost flag each time they run; the go-live gate (#555) and the retention job (#554) read theirs through `readAiOnboardingSettings` when they land.
 - Master catalog: products, synonyms (by language), images, recipes, category tree; merge duplicates proposed by AI.
   - Built (#540): the product list (`/admin/catalog/products`: catalog search, filters, paging) and editor (fields, status, photo upload to WebP). A product is archived, never deleted; every save is audited and refreshes the storefronts that list it. A save from an editor opened before someone else's save is refused with a reload message.
 - Orders & disputes across tenants; manual refund; courier incident log.
 - Courier config: provider priorities, failover timeout, per-metro settings. As built (#535): `/admin/settings/couriers` sets, platform-wide, the selection mode (cheapest, DoorDash first, Uber first), the assignment timeout (300 to 1200 seconds, default 600), an on/off switch per courier and the courier weight limit (1 to 100 lb). Per-metro overrides wait for #577.
-- AI oversight: conversation sampling and flagged answers at `/admin/ai/conversations` (#544): a daily sample per store, auto-flags, transcript view with an audit row per view, and review labels; eval dashboard later.
+- AI oversight: conversation sampling and flagged answers at `/admin/ai/conversations` (#544): a daily sample per store (size set in AI and onboarding settings, #561), auto-flags, transcript view with an audit row per view, and review labels; eval dashboard later.
 - Billing: subscriptions (Stripe Billing), platform fees ledger.
 
 ---
