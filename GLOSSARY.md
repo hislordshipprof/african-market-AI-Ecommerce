@@ -65,7 +65,7 @@ An order placed within 30 days of the shopper arriving on the store's site from 
 _Avoid_: Referral, marketplace order
 
 **Near me**:
-The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
+The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few, a Store request panel, and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
 _Avoid_: Store locator, geo search
 
 **Store request**:
