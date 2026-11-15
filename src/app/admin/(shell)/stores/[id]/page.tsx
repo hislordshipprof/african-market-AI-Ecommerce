@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
-import { getStoreById, getStoreSubscription, retryCourierRegistrationAction, setPilotAction } from "@/lib/admin/actions";
-import { effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
-import { PILOT_FREE_MONTHS, PILOT_STORE_CAP } from "@/lib/billing/service";
+import { getStoreById, getStoreSubscription, retryCourierRegistrationAction, setPilotAction, setPlanOverrideAction } from "@/lib/admin/actions";
+import { billingStatusLabel, PLAN_NAMES, type Plan } from "@/lib/billing/plan";
+import { PILOT_FREE_MONTHS, PILOT_STORE_CAP, PLAN_OVERRIDE_MAX_DAYS } from "@/lib/billing/service";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { getStoreNumber, storeNumberLinkMode } from "@/lib/whatsapp/store-number";
 import { StoreForm } from "../store-form";
@@ -19,15 +19,15 @@ export default async function EditStorePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ pilotError?: string; courierRetry?: string }>;
+  searchParams: Promise<{ pilotError?: string; courierRetry?: string; override?: string; overrideError?: string }>;
 }) {
   await requirePlatformAdmin();
   const { id } = await params;
-  const { pilotError, courierRetry } = await searchParams;
+  const { pilotError, courierRetry, override, overrideError } = await searchParams;
   const store = await getStoreById(id);
   if (!store) notFound();
   const [subscription, storeNumber] = await Promise.all([getStoreSubscription(store.id), getStoreNumber(store.id)]);
-  const plan = PLAN_NAMES[effectivePlan(subscription)];
+  const plan = PLAN_NAMES[subscription?.plan ?? "starter"];
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-8">
@@ -37,7 +37,7 @@ export default async function EditStorePage({
       <section aria-labelledby="billing" className="mb-8 rounded-lg border border-border bg-card p-5">
         <h2 id="billing" className="text-base font-semibold text-foreground">Plan and billing</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {plan} · {subscription?.status ?? "none"}
+          {plan} · {billingStatusLabel(subscription?.status ?? "none")}
           {subscription?.trialEndsAt && ` · trial ends ${subscription.trialEndsAt.toISOString().slice(0, 10)}`}
           {subscription?.paymentFailedAt && " · last payment failed"}
         </p>
@@ -59,6 +59,15 @@ export default async function EditStorePage({
         {pilotError && (
           <p role="alert" className="mt-2 text-sm text-destructive">{pilotError}</p>
         )}
+        <PlanOverrideForm
+          storeId={store.id}
+          stripePlan={(subscription?.stripePlan ?? "starter") as Plan}
+          running={subscription?.overridePlan && subscription.overrideEndsAt
+            ? { plan: subscription.overridePlan as Plan, endsAt: subscription.overrideEndsAt, reason: subscription.overrideReason ?? "" }
+            : null}
+          saved={override === "saved"}
+          error={overrideError}
+        />
       </section>
       <section aria-labelledby="couriers" className="mb-8 rounded-lg border border-border bg-card p-5">
         <h2 id="couriers" className="text-base font-semibold text-foreground">Courier registration</h2>
@@ -104,5 +113,59 @@ export default async function EditStorePage({
         <InviteOwnerForm storeId={store.id} />
       </div>
     </div>
+  );
+}
+
+const dateFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+const FIELD = "min-h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
+/** Time-boxed plan override (#547): drives the plan gate, never touches Stripe. */
+function PlanOverrideForm({
+  storeId,
+  stripePlan,
+  running,
+  saved,
+  error,
+}: {
+  storeId: string;
+  stripePlan: Plan;
+  running: { plan: Plan; endsAt: Date; reason: string } | null;
+  saved: boolean;
+  error?: string;
+}) {
+  return (
+    <form action={setPlanOverrideAction} className="mt-6 border-t border-border pt-5" aria-labelledby="override-title">
+      <h3 id="override-title" className="text-sm font-semibold text-foreground">Plan override</h3>
+      <p className="mt-1 text-sm text-muted-foreground" data-testid="override-state">
+        {running
+          ? `${PLAN_NAMES[running.plan]} until ${dateFormat.format(running.endsAt)} (${running.reason}). Stripe plan: ${PLAN_NAMES[stripePlan]}.`
+          : `No override. The store runs on its Stripe plan. An override ends on its date, at most ${PLAN_OVERRIDE_MAX_DAYS} days out, and never changes what Stripe bills.`}
+      </p>
+      <input type="hidden" name="storeId" value={storeId} />
+      <div className="mt-3 grid gap-3 sm:grid-cols-[10rem_12rem]">
+        <div className="grid gap-1.5">
+          <label htmlFor="override-plan" className="text-sm font-medium text-foreground">Plan</label>
+          <select id="override-plan" name="plan" defaultValue={running?.plan ?? "pro"} className={FIELD}>
+            <option value="pro">{PLAN_NAMES.pro}</option>
+            <option value="starter">{PLAN_NAMES.starter}</option>
+          </select>
+        </div>
+        <div className="grid gap-1.5">
+          <label htmlFor="override-ends" className="text-sm font-medium text-foreground">Ends on (UTC)</label>
+          <input id="override-ends" name="endsOn" type="date" required className={FIELD} />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-1.5">
+        <label htmlFor="override-reason" className="text-sm font-medium text-foreground">Reason</label>
+        <input id="override-reason" name="reason" required maxLength={500} placeholder="For example: launch partner, comped for 3 months" className={FIELD} />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="submit" className="min-h-11 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          {running ? "Replace override" : "Set override"}
+        </button>
+        {saved && !error && <span role="status" className="text-sm text-muted-foreground">Override saved.</span>}
+      </div>
+      {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+    </form>
   );
 }
