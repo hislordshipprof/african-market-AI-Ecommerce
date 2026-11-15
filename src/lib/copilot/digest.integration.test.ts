@@ -182,6 +182,25 @@ describe.skipIf(!hasDb)("copilot daily digest (lane database)", () => {
     expect(getTestSentEmails()).toHaveLength(0);
     expect(await digestRows(storeBId)).toBe(0);
   });
+  it("an owner with a 254-character address still gets the digest, because the send key is built from the user id", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    const storeLongId = (await raw.store.create({
+      data: { slug: `digest-long-${RUN}`, name: "Digest Long", timezone: "America/Chicago", digestHour: 20 },
+    })).id;
+    const longOwner = `digest-long-owner-${RUN}`;
+    const longEmail = `${RUN.padEnd(64, "a")}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.com`;
+    expect(longEmail).toHaveLength(254);
+    await raw.user.create({ data: { id: longOwner, name: longOwner, email: longEmail } });
+    await storeScoped(storeLongId).storeMembership.create({ data: { storeId: storeLongId, userId: longOwner, role: "owner" } });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await digestHandler({ step: makeFakeStep() });
+
+    const received = getTestSentEmails().filter((email) => email.to === longEmail);
+    expect(received).toHaveLength(1);
+    expect(received[0]!.idempotencyKey!.length).toBeLessThanOrEqual(256);
+    expect(received[0]!.idempotencyKey).toContain(longOwner);
+  });
 });
 
 describe("localClock", () => {
