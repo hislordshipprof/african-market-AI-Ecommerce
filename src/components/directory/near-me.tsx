@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { LocateFixed } from "lucide-react";
+import { directoryLink } from "@/lib/directory/attribution";
 import { NEARBY_MILES } from "@/lib/directory/distance";
 import { StoreCard, type CardStore } from "./store-card";
 import styles from "./directory.module.css";
@@ -149,7 +150,7 @@ function StateList({ states }: { states: StateGroup[] }) {
             <ul className={styles.stateStores}>
               {state.stores.map((store) => (
                 <li key={store.slug}>
-                  <a href={store.href} className={styles.stateStore}>{store.name}</a>
+                  <a href={directoryLink(store.href)} className={styles.stateStore}>{store.name}</a>
                   {store.city ? <span className={styles.place}>{store.city}</span> : null}
                 </li>
               ))}

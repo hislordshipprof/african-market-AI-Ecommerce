@@ -1,6 +1,6 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../auth";
 import { getStore } from "../get-store";
@@ -27,6 +27,7 @@ import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform, storeScoped } from "../db";
 import { loadCheckoutDraft } from "../assistant/checkout-draft";
 import type { PickupSlot } from "../order/pickup-slots";
+import { ATTRIBUTION_COOKIE, acquisitionSource } from "../directory/attribution";
 
 const contactSchema = z.strictObject({
   name: z.string().max(200),
@@ -275,6 +276,7 @@ export async function placeOrderAction(
   notes: string,
   slot: string,
   delivery?: unknown,
+  whatsappUpdates?: unknown,
 ): Promise<
   | { ok: true; token: string }
   | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" }
@@ -287,7 +289,8 @@ export async function placeOrderAction(
   const payment = parseInput(z.string().min(1).max(200), paymentIntentId);
   const note = parseInput(z.string().max(2000), notes);
   const when = parseInput(z.string().max(80), slot);
-  if (!payment.ok || !note.ok || !when.ok) return { ok: false, error: "Could not place order" };
+  const whatsapp = parseInput(z.boolean().optional(), whatsappUpdates);
+  if (!payment.ok || !note.ok || !when.ok || !whatsapp.ok) return { ok: false, error: "Could not place order" };
   try {
     const store = await getStore();
     const resolved = await resolveShopperCart();
@@ -303,6 +306,8 @@ export async function placeOrderAction(
       payment.data,
       resolved.userId,
       request?.leaveAtDoor ?? false,
+      whatsapp.data === true,
+      acquisitionSource((await cookies()).get(ATTRIBUTION_COOKIE)?.value),
     );
     return { ok: true, token: result.trackingToken ?? result.token };
   } catch (e) {

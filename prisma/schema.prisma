@@ -110,6 +110,8 @@ model Store {
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  whatsAppNumber        StoreWhatsAppNumber?
+  whatsAppOptOuts       WhatsAppOptOut[]
   driverRoutes          DriverRoute[]
   pickBatches           PickBatch[]
 
@@ -1227,6 +1229,8 @@ model Order {
   totalAuthorizedCents    Int       @map("total_authorized_cents")
   paymentIntentId         String?   @unique @map("payment_intent_id")
   sourceCartId            String?   @map("source_cart_id")
+  /// "directory" when the shopper arrived from a Store directory link within 30 days (#454); null otherwise.
+  acquisitionSource       String?   @map("acquisition_source")
   capturedAmountCents     Int?      @map("captured_amount_cents")
   refundId                String?   @map("refund_id")
   platformFeeCents        Int?      @map("platform_fee_cents")
@@ -1273,6 +1277,8 @@ model Order {
   driverRouteId           String?   @map("driver_route_id")
   /// The open pick batch this order is in (#564); cleared when staff leave the batch.
   pickBatchId             String?   @map("pick_batch_id")
+  /// Checkout opt-in to WhatsApp order updates (#560); NULL keeps SMS.
+  whatsappOptInAt         DateTime? @map("whatsapp_opt_in_at")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1463,6 +1469,12 @@ model PlatformSettings {
   serviceFeeBps        Int      @default(300) @map("service_fee_bps")
   serviceFeeMinCents   Int      @default(99) @map("service_fee_min_cents")
   serviceFeeMaxCents   Int      @default(299) @map("service_fee_max_cents")
+  /// Courier settings (#535): cheapest, doordash_first or uber_first.
+  courierSelectionMode String   @default("cheapest") @map("courier_selection_mode")
+  /// Seconds with no courier assigned before failover, 300 to 1200.
+  courierAssignmentTimeoutS Int @default(600) @map("courier_assignment_timeout_s")
+  doordashEnabled      Boolean  @default(true) @map("doordash_enabled")
+  uberEnabled          Boolean  @default(true) @map("uber_enabled")
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")
@@ -1751,6 +1763,42 @@ model AssistantChatMonth {
 
   @@id([storeId, month])
   @@map("assistant_chat_months")
+}
+
+/// A store's own WhatsApp number for customers (#558, ADR-0010). Written by raw SQL in src/lib/db.ts.
+model StoreWhatsAppNumber {
+  id            String   @id @default(cuid())
+  storeId       String   @unique @map("store_id")
+  wabaId        String   @map("waba_id")
+  /// Unique platform-wide among pending and registered rows (partial unique index in SQL), so an inbound message resolves to one store.
+  phoneNumberId String   @map("phone_number_id")
+  displayNumber String?  @map("display_number")
+  /// pending | registered | failed | disconnected
+  status        String   @default("pending")
+  coexistence   Boolean  @default(true)
+  /// AES-256-GCM ciphertext (WHATSAPP_TOKEN_KEY). Never read outside src/lib/whatsapp.
+  businessToken String?  @map("business_token")
+  failureCode   String?  @map("failure_code")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@map("store_whatsapp_numbers")
+}
+
+/// A customer who sent STOP to the store's own WhatsApp number (#560). Per store.
+model WhatsAppOptOut {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  /// Meta's digits-only sender id.
+  waId      String   @map("wa_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, waId])
+  @@map("whatsapp_opt_outs")
 }
 
 /// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.

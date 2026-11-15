@@ -1,5 +1,5 @@
 import { WhatsAppApiError } from "./errors";
-import { APPROVED_TEMPLATES, OWNER_LINK_TEMPLATE } from "./templates";
+import { APPROVED_TEMPLATES, isOrderUpdateTemplate, OWNER_LINK_TEMPLATE } from "./templates";
 import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
 
 /**
@@ -11,7 +11,10 @@ import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
  *   titles 1–20 characters, ids 1–256 and unique (131009);
  * - templates only by an approved name and language (132001), and the
  *   owner_link_code template with exactly a body code and a copy-code button
- *   code of at most 15 characters (132000).
+ *   code of at most 15 characters (132000);
+ * - an order-update template (#560) with exactly a non-empty body store name
+ *   and a URL button suffix that is a path, not a whole URL (132000).
+ * A test can withdraw a template's approval (revokeFakeTemplate).
  */
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -19,10 +22,13 @@ const WINDOW_MS = 24 * 60 * 60 * 1000;
 export interface FakeOutboxEntry {
   message: OutboundMessage;
   result: SendResult;
+  /** The store number's phone_number_id it was sent from; null is the platform number. */
+  from: string | null;
 }
 
 const outbox: FakeOutboxEntry[] = [];
 const lastInbound = new Map<string, number>();
+const revoked = new Set<string>();
 let sequence = 0;
 
 function digits(to: string): string {
@@ -42,7 +48,8 @@ function checkTemplate(message: Extract<OutboundMessage, { type: "template" }>):
   const approved = APPROVED_TEMPLATES.some(
     (template) => template.name === message.name && template.language === message.language,
   );
-  if (!approved) throw new WhatsAppApiError(132001, 404);
+  if (!approved || revoked.has(message.name)) throw new WhatsAppApiError(132001, 404);
+  if (isOrderUpdateTemplate(message.name)) return checkOrderUpdate(message);
   if (message.name !== OWNER_LINK_TEMPLATE.name) return;
   const components = message.components ?? [];
   const body = components.find((component) => component.type === "body");
@@ -53,6 +60,17 @@ function checkTemplate(message: Extract<OutboundMessage, { type: "template" }>):
   if (button.parameters.length !== 1) invalid(132000);
   const code = button.parameters[0].text;
   if (!code || code.length > 15) invalid(132000);
+}
+
+function checkOrderUpdate(message: Extract<OutboundMessage, { type: "template" }>): void {
+  const components = message.components ?? [];
+  const body = components.find((component) => component.type === "body");
+  const button = components.find((component) => component.type === "button");
+  if (components.length !== 2 || !body || !button) invalid(132000);
+  if (body.parameters.length !== 1 || !body.parameters[0].text.trim()) invalid(132000);
+  if (button.sub_type !== "url" || button.index !== "0" || button.parameters.length !== 1) invalid(132000);
+  const suffix = button.parameters[0].text;
+  if (!suffix || /^[a-z]+:/i.test(suffix) || suffix.startsWith("/")) invalid(132000);
 }
 
 function check(message: OutboundMessage, now: number): void {
@@ -86,9 +104,18 @@ function check(message: OutboundMessage, now: number): void {
 }
 
 export const fakeWhatsAppProvider: WhatsAppProvider = {
+  // Fake Embedded Signup: the ids and display number come from the form. A
+  // missing display number is Meta's invalid-parameter error (100).
+  connectStoreNumber(input) {
+    if (!input.displayNumber) return Promise.reject(new WhatsAppApiError(100, 400));
+    return Promise.resolve({
+      businessToken: `fake-business-token-${input.phoneNumberId}`,
+      displayNumber: input.displayNumber,
+    });
+  },
   // Records synchronously before returning, so a caller that started the send
   // and did not await it still finds the entry.
-  send(message) {
+  send(message, from) {
     try {
       check(message, Date.now());
     } catch (error) {
@@ -96,7 +123,7 @@ export const fakeWhatsAppProvider: WhatsAppProvider = {
     }
     sequence += 1;
     const result: SendResult = { messageId: `wamid.fake-${sequence}`, waId: digits(message.to) };
-    outbox.push({ message, result });
+    outbox.push({ message, result, from: from?.phoneNumberId ?? null });
     return Promise.resolve(result);
   },
 };
@@ -110,7 +137,13 @@ export function getFakeOutbox(): readonly FakeOutboxEntry[] {
   return outbox;
 }
 
+/** Meta withdrew this template's approval: sends of it fail with 132001 until resetFake. */
+export function revokeFakeTemplate(name: string): void {
+  revoked.add(name);
+}
+
 export function resetFake(): void {
   outbox.length = 0;
   lastInbound.clear();
+  revoked.clear();
 }

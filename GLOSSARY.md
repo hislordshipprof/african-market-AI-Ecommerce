@@ -53,12 +53,16 @@ A card the customer agreed to keep on their account, shown as brand and last fou
 _Avoid_: Wallet, payment profile
 
 **Store directory**:
-The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there.
+The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there. Each store card shows open now or when it opens, pickup and delivery, the owner's face and story, and after a near me search the distance and whether the store delivers to you (its own radius only; a courier is only "may be available").
 _Avoid_: Marketplace, combined app
 
 **Directory listing**:
 A store's entry in the Store directory: the owner's "Listed in the directory" switch (off by default; a platform admin can override it), a blurb of at most 160 characters, and up to 3 cuisine tags from a fixed list. The street address is never part of it.
 _Avoid_: Profile, store page
+
+**Directory order**:
+An order placed within 30 days of the shopper arriving on the store's site from a Store directory link (`?ref=directory`, kept in a first-party cookie that says only "directory"). The order stores `acquisitionSource = 'directory'`; the owner's dashboard counts them.
+_Avoid_: Referral, marketplace order
 
 **Near me**:
 The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
@@ -167,6 +171,12 @@ A Copilot alert asking the owner to confirm a listing whose confidence fell belo
 
 **Linked WhatsApp number**:
 The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
+**WhatsApp order updates**:
+Order status messages a customer gets on WhatsApp from the Store WhatsApp number instead of SMS, after ticking "Get order updates on WhatsApp" at checkout (default off, offered only when the store's number is Live). Email is unchanged. If a WhatsApp message cannot go, that update goes by SMS once. Replying STOP turns them off for that store.
+
+**Store WhatsApp number**:
+The store's own WhatsApp Business number, which customers message (ADR-0010). Linked by the owner or a platform admin through Meta's Embedded Signup (in test mode, ids typed into a form); "Live" once registered. By default the store keeps the WhatsApp Business app on it (coexistence). Not the Linked WhatsApp number, which is the owner's personal number.
 
 **Daily sample**:
 The AI conversations a platform admin reviews for one UTC day (#544): up to 5 random Shopper assistant chats and 5 random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. The same day always shows the same sample.
@@ -290,6 +300,12 @@ A 4-digit code the courier must get from the customer at the door. Required for 
 
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
+
+**Courier settings**:
+The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+
+**Assignment timeout**:
+How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.
 
 **Courier**:
 A driver from a courier company. Not a user of the platform.

@@ -1,6 +1,7 @@
 import { listedStoresByDistance, platform, pointWithinZipReach } from "@/lib/db";
 import type { NearQuery } from "./near-query";
-import { DIRECTORY_STORE_FIELDS, type DirectoryStore } from "./stores";
+import { assessRadius } from "@/lib/address/geo";
+import { DIRECTORY_QUERY_FIELDS, toDirectoryStores, type DirectoryRow, type DirectoryStore } from "./stores";
 import type { StateCode } from "./us-states";
 import { NEARBY_MILES } from "./distance";
 
@@ -36,7 +37,13 @@ export async function isUsPoint(point: Point): Promise<boolean> {
   return pointWithinZipReach(point, ZIP_REACH_BAND_DEG);
 }
 
-export type NearStore = DirectoryStore & { distanceMi: number };
+export type NearStore = DirectoryStore & { distanceMi: number; deliversToYou: boolean };
+
+/** The store's own delivery reaches the point: its radius only, as at checkout (equal is inside). */
+function deliversTo(point: Point, row: DirectoryRow): boolean {
+  if (!row.storeDeliveryEnabled || row.lat == null || row.lng == null) return false;
+  return assessRadius(point, { lat: row.lat, lng: row.lng, radiusMi: Number(row.deliveryRadiusMi) }).withinRadius;
+}
 
 /**
  * Listed, active stores nearest first. Within 50 miles when any are; otherwise the few
@@ -49,12 +56,13 @@ export async function nearestStores(point: Point): Promise<{ nearby: boolean; st
   if (picked.length === 0) return { nearby, stores: [] };
   const rows = await platform.store.findMany({
     where: { slug: { in: picked.map((r) => r.slug) } },
-    select: DIRECTORY_STORE_FIELDS,
+    select: DIRECTORY_QUERY_FIELDS,
   });
-  const bySlug = new Map(rows.map((row) => [row.slug, row]));
+  const cards = await toDirectoryStores(rows);
+  const bySlug = new Map(rows.map((row, i) => [row.slug, { row, card: cards[i]! }]));
   const stores = picked.flatMap((r) => {
-    const store = bySlug.get(r.slug);
-    return store ? [{ ...store, distanceMi: r.distance }] : [];
+    const found = bySlug.get(r.slug);
+    return found ? [{ ...found.card, distanceMi: r.distance, deliversToYou: deliversTo(point, found.row) }] : [];
   });
   return { nearby, stores };
 }
