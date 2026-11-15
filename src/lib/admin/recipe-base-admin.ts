@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { dishKey, dishKeys } from "../assistant/recipe-base";
-import { Prisma, platformAdminTransaction } from "../db";
+import { Prisma, lockRecipeNames, lockRecipeRow, platformAdminTransaction } from "../db";
 import { parseInput } from "../security/parse-input";
 import { requirePlatformAdmin } from "./session";
 import {
@@ -187,15 +187,6 @@ async function audit(tx: Tx, session: Session, action: string, recipeId: string,
       ...(after ? { after: after as Prisma.InputJsonObject } : {}),
     },
   });
-}
-
-async function lockRecipeRow(tx: Tx, recipeId: string) {
-  await tx.$queryRaw`SELECT 1 FROM recipes WHERE id = ${recipeId} FOR UPDATE`;
-}
-
-/** Serializes edits that change which names answer to which dish, so two saves cannot claim one name. */
-async function lockRecipeNames(tx: Tx) {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('recipe-base-names'))`;
 }
 
 const CHECK_FIELDS = "Check the highlighted fields";

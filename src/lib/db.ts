@@ -1415,6 +1415,16 @@ export async function productSynonymsWithSharedNames(
 }
 
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
+/** Row-lock a recipe of the recipe base for an admin edit, curate or delete. */
+export async function lockRecipeRow(tx: Pick<PrismaClient, "$queryRaw">, recipeId: string) {
+  await tx.$queryRaw`SELECT 1 FROM recipes WHERE id = ${recipeId} FOR UPDATE`;
+}
+
+/** Serializes recipe edits that change which names answer to which dish, so two saves cannot claim one name. */
+export async function lockRecipeNames(tx: Pick<PrismaClient, "$executeRaw">) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('recipe-base-names'))`;
+}
+
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
 }
