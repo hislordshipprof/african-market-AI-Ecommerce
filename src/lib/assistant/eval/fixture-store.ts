@@ -32,7 +32,7 @@ export async function assertRuntimeRole(): Promise<string> {
  * Dataset dishes the current seed declarations do not answer, or the database answers with anything but that
  * declaration's curated row; core items the recipe has no ingredient for ("dish: core label"); and mapped
  * recipe ingredients store A has no listing for ("dish: ingredient"). Unmapped ingredients such as onion are
- * left to the store's search (#607).
+ * left to the store's search: an exact item, else a similar item the shopper accepts (#607, #633).
  */
 export async function unseededDishes(cases: EvalCase[], fixture: CatalogFixture, declarations: SeedRecipe[]): Promise<string[]> {
   const masterOf = new Map(fixture.listings.map((listing) => [listing.key, listing.masterProductId]));
