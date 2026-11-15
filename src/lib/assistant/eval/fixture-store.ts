@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertAppRuntimeLogin, platform, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../../db";
 import { resolveIngredients } from "../../catalog/ingredients";
-import type { CatalogFixture } from "./types";
+import { declaredRecipe, dishKey, type SeedRecipe } from "../recipe-base";
+import { findRecipe } from "../recipes";
+import type { CatalogFixture, EvalCase } from "./types";
 import type { MasterCatalogRow } from "./fingerprint";
 
 const LEASE_DIR = join(tmpdir(), "shopper-assistant-eval-leases");
@@ -23,6 +25,36 @@ export interface CreatedEvalStores {
 export async function assertRuntimeRole(): Promise<string> {
   await assertAppRuntimeLogin();
   return "app_runtime";
+}
+
+/**
+ * Dataset dishes the current seed declarations do not answer, or the database answers with anything but that
+ * declaration's curated row; core items the recipe has no ingredient for ("dish: core label"); and mapped
+ * recipe ingredients store A has no listing for ("dish: ingredient"). Unmapped ingredients such as onion are
+ * left to the store's search (#607).
+ */
+export async function unseededDishes(cases: EvalCase[], fixture: CatalogFixture, declarations: SeedRecipe[]): Promise<string[]> {
+  const masterOf = new Map(fixture.listings.map((listing) => [listing.key, listing.masterProductId]));
+  const sold = new Set(fixture.listings.filter((listing) => listing.store === "A" && listing.active).map((listing) => listing.masterProductId));
+  const names = [...new Set(cases.flatMap((item) => (item.dish ? [item.dish.name] : [])))];
+  const problems: string[] = [];
+  for (const name of names) {
+    const declared = declaredRecipe(declarations, name);
+    const recipe = declared ? await findRecipe(name) : null;
+    if (!declared || !recipe || recipe.origin !== "curated" || dishKey(recipe.name) !== dishKey(declared.name)) {
+      problems.push(name);
+      continue;
+    }
+    const masters = new Set(declared.ingredients.flatMap((row) => row.masterProductId ?? []));
+    const core = new Map(cases.flatMap((item) => (item.dish?.name === name ? item.dish.core : [])).map((group) => [group.label, group]));
+    for (const group of core.values()) {
+      if (!group.options.some((key) => masters.has(masterOf.get(key) ?? ""))) problems.push(`${name}: ${group.label}`);
+    }
+    for (const row of declared.ingredients) {
+      if (row.masterProductId && !sold.has(row.masterProductId)) problems.push(`${name}: ${row.name}`);
+    }
+  }
+  return problems;
 }
 
 export async function createEvalStores(fixture: CatalogFixture): Promise<CreatedEvalStores> {
