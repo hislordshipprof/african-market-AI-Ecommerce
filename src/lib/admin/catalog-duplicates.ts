@@ -405,7 +405,7 @@ export async function mergeDuplicatePair(_prev: DuplicateActionState, form: Form
         after: {
           loserId,
           loserStatus: "merged",
-          listingIds: listings.map((listing) => listing.id),
+          listingIds: listings.map((listing) => listing.id).sort(),
           movedSynonyms,
           droppedSynonyms,
           addedSynonym: addedName ? loser.name : null,
