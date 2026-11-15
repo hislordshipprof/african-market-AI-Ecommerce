@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NO_SERVICE_FEE } from "./platform-fee";
+import { ADR_0021_SERVICE_FEE, NO_SERVICE_FEE } from "./platform-fee";
 import { canOfferSwap, captureCharge } from "./substitution-pricing";
 
 describe("canOfferSwap", () => {
@@ -35,5 +35,33 @@ describe("captureCharge", () => {
 
   it("captures nothing, not even tip or fee, when no line is charged", () => {
     expect(captureCharge([line("refunded", 2, 0, 1000)], { tipCents: 300, deliveryFeeCents: 500, serviceFee: NO_SERVICE_FEE }).amountCents).toBe(0);
+  });
+
+  describe("with a store coupon (#557)", () => {
+    const percent20 = { kind: "percent" as const, percentOff: 20, amountOffCents: null };
+    const fixed10 = { kind: "fixed" as const, percentOff: null, amountOffCents: 1000 };
+
+    it("recomputes a percent discount on the goods picked, stores each line's share, and charges the fee on discounted goods", () => {
+      // Ordered $50.00; one unit of the $10 line found: goods $40.00, 20% = $8.00 split 600 / 200.
+      // Fee 3% of $32.00 = 96¢, raised to the 99¢ minimum. Capture 3200 + 99 = 3299.
+      const charge = captureCharge(
+        [line("picked", 2, 2, 1500), line("refunded", 2, 1, 1000)],
+        { tipCents: 0, deliveryFeeCents: 0, serviceFee: ADR_0021_SERVICE_FEE, coupon: percent20 },
+      );
+      expect(charge).toEqual({ amountCents: 3299, serviceFeeCents: 99, discountCents: 800, lineDiscountsCents: [600, 200] });
+    });
+
+    it("caps a fixed discount at the goods picked and never takes it off delivery or tip, even below the code's minimum", () => {
+      // $10 off, but only $8.00 of goods found: $8.00 off, goods 0, no fee; delivery $5 and tip $2 still charged.
+      const charge = captureCharge(
+        [line("refunded", 3, 1, 800)],
+        { tipCents: 200, deliveryFeeCents: 500, serviceFee: ADR_0021_SERVICE_FEE, coupon: fixed10 },
+      );
+      expect(charge).toEqual({ amountCents: 700, serviceFeeCents: 0, discountCents: 800, lineDiscountsCents: [800] });
+    });
+
+    it("gives no discount and no line shares without a coupon", () => {
+      expect(captureCharge([line("picked", 1, 1, 1000)], fees)).toEqual({ amountCents: 1000, serviceFeeCents: 0, discountCents: 0, lineDiscountsCents: [0] });
+    });
   });
 });

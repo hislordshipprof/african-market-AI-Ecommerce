@@ -27,7 +27,7 @@ import type {
   SwapRule,
 } from "@/lib/customer-flow/contracts";
 import { setSwapRule as serverSetSwapRule } from "@/lib/cart/actions";
-import { quoteCheckoutAction } from "@/lib/checkout/actions";
+import { applyCouponAction, quoteCheckoutAction, removeCouponAction } from "@/lib/checkout/actions";
 import { basketQuoteView, type BasketQuoteResponse } from "@/lib/checkout/summary";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import type { SwapRuleValue } from "@/lib/cart/service";
@@ -41,6 +41,7 @@ import {
   QuoteLines,
 } from "./common";
 import styles from "./cart-checkout.module.css";
+import { CouponField } from "./coupon-field";
 
 import { money } from "@/lib/format";
 export { money };
@@ -94,11 +95,13 @@ function useBasketQuote(
   syncing: boolean,
   realCheckout: boolean,
   demo: ReturnType<typeof createDemoServices>,
+  couponRev = 0,
 ) {
   const [response, setResponse] = useState<BasketQuoteResponse | null>(null);
+  // The coupon revision is part of the key: a new or removed code is a new quote (#557).
   const basketKey = lines
     .map((line) => `${cartItemKey(line)}:${line.quantity}`)
-    .join("|");
+    .join("|") + (couponRev ? `#${couponRev}` : "");
   useEffect(() => {
     if (!basketKey) return;
     let active = true;
@@ -158,7 +161,8 @@ export function CartPage({
     () => createDemoServices(settings, catalog, enabled),
     [settings, catalog, enabled],
   );
-  const summary = useBasketQuote(lines, subtotal, syncing, realCheckout, demo);
+  const [couponRev, setCouponRev] = useState(0);
+  const summary = useBasketQuote(lines, subtotal, syncing, realCheckout, demo, couponRev);
   const quote = summary.kind === "quote" ? summary.quote : null;
   const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
@@ -317,6 +321,20 @@ export function CartPage({
           </div>
           <aside className={styles.sticky}>
             <FlowCard title="Basket summary">
+              {realCheckout && (
+                <CouponField
+                  applied={quote?.coupon ?? null}
+                  apply={async (code) => {
+                    const result = await applyCouponAction(code);
+                    if (result.ok) setCouponRev((rev) => rev + 1);
+                    return result;
+                  }}
+                  remove={async () => {
+                    await removeCouponAction();
+                    setCouponRev((rev) => rev + 1);
+                  }}
+                />
+              )}
               {quote ? (
                 <QuoteLines quote={quote} fulfillment="pickup" />
               ) : (

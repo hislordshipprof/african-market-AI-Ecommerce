@@ -143,6 +143,19 @@ test.describe("Order inbox", () => {
     }
   });
 
+  test("#557: the order shows the promo discount the store funds, only when there is one", async ({ page }) => {
+    const number = 18603;
+    await insertInboxOrder({ number, status: "AWAITING_PICKUP", capturedAmountCents: 1800, discountCents: 200 });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByTestId("order-discount")).toHaveText("−$2.00");
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
   test("a refund-failed order tells staff the platform is resolving it", async ({ page }) => {
     const number = 18602;
     await insertInboxOrder({ number, status: "REFUND_FAILED", capturedAmountCents: 1800 });

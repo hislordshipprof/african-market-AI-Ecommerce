@@ -52,7 +52,7 @@ export async function storePayoutDetail(
     where: { storeId: store.id, paymentIntentId: { in: intents } },
     select: {
       id: true, number: true, paymentIntentId: true, fulfillment: true, capturedAmountCents: true,
-      platformFeeCents: true, serviceFeeCents: true, tipCents: true, deliveryFeeCents: true,
+      platformFeeCents: true, serviceFeeCents: true, tipCents: true, deliveryFeeCents: true, discountCents: true,
     },
   });
   return { ok: true, payout, breakdown: payoutBreakdown(payout.amountCents, transactions, orders) };
