@@ -425,8 +425,8 @@ export async function listMasterProducts(query?: string, take = MASTER_PRODUCT_P
   const { masterProduct } = await import("../db").then((m) => m.platformAdmin);
   const term = query?.trim();
   return masterProduct.findMany({
-    // An archived master product keeps its listings but takes no new ones.
-    where: { status: { not: "archived" }, ...(term ? { name: { contains: escapeLike(term), mode: "insensitive" } } : {}) },
+    // An archived master product keeps its listings but takes no new ones; a merged one has none left.
+    where: { status: { notIn: ["archived", "merged"] }, ...(term ? { name: { contains: escapeLike(term), mode: "insensitive" } } : {}) },
     orderBy: { name: "asc" },
     take: Math.min(Math.max(1, Math.floor(take)), MASTER_PRODUCT_PAGE_SIZE),
   });

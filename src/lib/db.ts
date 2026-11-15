@@ -330,6 +330,7 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "aiReviewFlag",
   "attributeProposal",
   "auditLog",
+  "catalogDuplicatePair",
   "category",
   "copilotConversation",
   "courierIncidentNote",

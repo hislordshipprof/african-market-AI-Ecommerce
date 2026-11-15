@@ -11,6 +11,7 @@ import { requirePlatformAdmin } from "./session";
 import { z } from "zod";
 import {
   CATALOG_PAGE_SIZE,
+  MERGED_PRODUCT_MESSAGE,
   catalogFiltersSchema,
   masterProductFormSchema,
   readMasterProductForm,
@@ -124,6 +125,8 @@ export type MasterProductEditor = {
     /** The version of the editable fields this form was loaded with; a save from an older version is refused. */
     version: string;
   };
+  /** Set for a merged product, which is read-only. */
+  mergedInto: { id: string; name: string } | null;
   categories: Array<{ id: string; name: string }>;
   storeCount: number;
 };
@@ -140,12 +143,14 @@ export async function getMasterProductEditor(productId: string): Promise<MasterP
         id: true, name: true, categoryId: true, subcategory: true, description: true, unit: true, weightG: true,
         frozen: true, perishable: true, storage: true, status: true, imageUrl: true,
         ingredientsStatus: true, allergensStatus: true, dietaryStatus: true, updatedAt: true,
+        mergedInto: { select: { id: true, name: true } },
       },
     });
     if (!product) return null;
+    const { mergedInto, ...details } = product;
     const categories = await tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
     const storeCount = (await storesListingMasterProduct(tx, product.id)).length;
-    return { product: { ...product, status: product.status as MasterStatus, version: detailsVersion(product) }, categories, storeCount };
+    return { product: { ...details, status: details.status as MasterStatus, version: detailsVersion(details) }, categories, storeCount, mergedInto };
   });
 }
 
@@ -193,6 +198,7 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
     await lockMasterProductRow(tx, productId);
     const product = await tx.masterProduct.findUnique({ where: { id: productId } });
     if (!product) return { ok: false, message: "Product not found" };
+    if (product.status === "merged") return { ok: false, message: MERGED_PRODUCT_MESSAGE };
     // The form holds every field as it was loaded; saving it over a newer row would undo the other admin's change.
     if (detailsVersion(product) !== version) return { ok: false, message: STALE_PRODUCT_MESSAGE };
     if (next.categoryId && next.categoryId !== product.categoryId) {
@@ -248,16 +254,18 @@ export async function uploadMasterProductImage(_prev: ImageState, form: FormData
   if (!(image instanceof File) || image.size === 0) return { ok: false, message: "Choose a photo to upload." };
   if (image.size > PHOTO_UPLOAD_MAX_BYTES) return { ok: false, message: "The photo is over 2 MB. Choose a smaller one." };
 
-  const exists = await platformAdminTransaction((tx) => tx.masterProduct.findUnique({ where: { id: id.data }, select: { id: true } }));
+  const exists = await platformAdminTransaction((tx) => tx.masterProduct.findUnique({ where: { id: id.data }, select: { status: true } }));
   if (!exists) return { ok: false, message: "Product not found" };
+  if (exists.status === "merged") return { ok: false, message: MERGED_PRODUCT_MESSAGE };
 
   const uploaded = await uploadCatalogPhoto(id.data, new Uint8Array(await image.arrayBuffer()));
   if (!uploaded.ok) return { ok: false, message: PHOTO_MESSAGES[uploaded.reason] };
 
   const result = await platformAdminTransaction(async (tx): Promise<ImageState & { storeIds?: string[] }> => {
     await lockMasterProductRow(tx, id.data);
-    const product = await tx.masterProduct.findUnique({ where: { id: id.data }, select: { imageUrl: true } });
+    const product = await tx.masterProduct.findUnique({ where: { id: id.data }, select: { imageUrl: true, status: true } });
     if (!product) return { ok: false, message: "Product not found" };
+    if (product.status === "merged") return { ok: false, message: MERGED_PRODUCT_MESSAGE };
     await tx.masterProduct.update({ where: { id: id.data }, data: { imageUrl: uploaded.url } });
     await tx.auditLog.create({
       data: {

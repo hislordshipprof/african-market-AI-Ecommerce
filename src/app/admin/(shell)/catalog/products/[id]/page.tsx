@@ -14,7 +14,7 @@ export default async function MasterProductEditorPage(props: { params: Promise<{
   const { id } = await props.params;
   const editor = await getMasterProductEditor(id);
   if (!editor) notFound();
-  const { product, categories, storeCount } = editor;
+  const { product, categories, storeCount, mergedInto } = editor;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
@@ -25,30 +25,44 @@ export default async function MasterProductEditorPage(props: { params: Promise<{
         <ChevronLeft aria-hidden className="size-4" /> Products
       </Link>
       <h1 className="mt-2 font-heading text-[28px] font-bold leading-tight text-foreground">{product.name}</h1>
-      <p className="mt-1 text-muted-foreground">
-        {MASTER_STATUS_LABELS[product.status]}.{" "}
-        {storeCount === 0 ? "No store lists it yet." : `${storeCount} ${storeCount === 1 ? "store lists" : "stores list"} it; saving refreshes their storefronts.`}
-      </p>
+      {mergedInto ? (
+        <p className="mt-1 text-muted-foreground">
+          Merged into{" "}
+          <Link href={`/admin/catalog/products/${mergedInto.id}`} className="font-medium text-primary underline underline-offset-4">
+            {mergedInto.name}
+          </Link>
+          . Its listings and synonyms moved there, and it can no longer be edited.
+        </p>
+      ) : (
+        <p className="mt-1 text-muted-foreground">
+          {MASTER_STATUS_LABELS[product.status]}.{" "}
+          {storeCount === 0 ? "No store lists it yet." : `${storeCount} ${storeCount === 1 ? "store lists" : "stores list"} it; saving refreshes their storefronts.`}
+        </p>
+      )}
 
-      <section aria-labelledby="photo-heading" className="mt-8 rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 id="photo-heading" className="font-heading text-lg font-bold text-foreground">Photo</h2>
-        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start">
-          <div className="flex size-32 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
-            {product.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={product.imageUrl} alt={`${product.name} photo`} className="size-full object-cover" />
-            ) : (
-              <ImageOff role="img" aria-label="No photo yet" className="size-8 text-muted-foreground" />
-            )}
-          </div>
-          <PhotoForm productId={product.id} />
-        </div>
-      </section>
+      {!mergedInto && (
+        <>
+          <section aria-labelledby="photo-heading" className="mt-8 rounded-xl border border-border bg-card p-4 sm:p-5">
+            <h2 id="photo-heading" className="font-heading text-lg font-bold text-foreground">Photo</h2>
+            <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start">
+              <div className="flex size-32 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
+                {product.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={product.imageUrl} alt={`${product.name} photo`} className="size-full object-cover" />
+                ) : (
+                  <ImageOff role="img" aria-label="No photo yet" className="size-8 text-muted-foreground" />
+                )}
+              </div>
+              <PhotoForm productId={product.id} />
+            </div>
+          </section>
 
-      <section aria-labelledby="details-heading" className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 id="details-heading" className="font-heading text-lg font-bold text-foreground">Details</h2>
-        <ProductForm product={product} categories={categories} />
-      </section>
+          <section aria-labelledby="details-heading" className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
+            <h2 id="details-heading" className="font-heading text-lg font-bold text-foreground">Details</h2>
+            <ProductForm product={product} categories={categories} />
+          </section>
+        </>
+      )}
 
       <section aria-labelledby="attributes-heading" className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
         <h2 id="attributes-heading" className="font-heading text-lg font-bold text-foreground">Ingredients, allergens and dietary claims</h2>
