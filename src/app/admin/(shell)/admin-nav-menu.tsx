@@ -17,6 +17,7 @@ const ICONS: Record<AdminNavHref, typeof House> = {
   "/admin/orders": Undo2,
   "/admin/orders/check": PackageSearch,
   "/admin/orders/search": Search,
+  "/admin/couriers/incidents": Truck,
   "/admin/support": MessagesSquare,
   "/admin/ai/conversations": Bot,
   "/admin/ai/eval-spend": Gauge,
