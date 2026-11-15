@@ -28,7 +28,8 @@ export async function getAdminHomeCounts(): Promise<AdminHomeCounts> {
   return {
     stores: settled(stores, (list) => {
       const active = list.filter((store) => store.status === "active").length;
-      return { active, suspended: list.length - active };
+      const suspended = list.filter((store) => store.status === "suspended").length;
+      return { active, suspended };
     }),
     refunds: settled(refunds, (list) => ({ count: list.length, incomplete: false })),
     ordersToCheck: settled(orders, (queues) => ({

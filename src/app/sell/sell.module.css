@@ -1,0 +1,268 @@
+/* Neutral grounds, colour only on the action (#528). Tokens come from the directory page (.page). */
+.bar {
+  border-bottom: 1px solid var(--d-line);
+  background: var(--d-surface);
+  padding: 14px max(20px, calc((100% - 1080px) / 2));
+}
+
+.bar a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.layout {
+  display: grid;
+  gap: 32px;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 56px;
+  }
+
+  .intro {
+    position: sticky;
+    top: 32px;
+  }
+}
+
+.steps {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.step {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.stepNumber {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--d-line-strong);
+  font-weight: 700;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepTitle {
+  display: block;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.stepBody {
+  display: block;
+  color: var(--d-muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 20px;
+  border: 1px solid var(--d-line);
+  border-radius: 16px;
+  background: var(--d-surface);
+}
+
+@media (min-width: 600px) {
+  .card {
+    padding: 32px;
+  }
+}
+
+.formTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  margin: 8px 0 0;
+}
+
+.formTitle:first-child {
+  margin-top: 0;
+}
+
+.formError {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--d-line-strong);
+  background: var(--d-raised);
+  font-size: 15px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.row,
+.row2 {
+  display: grid;
+  gap: 18px;
+}
+
+@media (min-width: 600px) {
+  .row {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .row2 {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0;
+  color: var(--d-muted);
+  font-size: 14px;
+}
+
+.input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--d-line-strong);
+  border-radius: 10px;
+  background: var(--d-surface);
+  color: var(--d-ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 1px;
+}
+
+.input[aria-invalid="true"] {
+  border-color: #b42318;
+}
+
+.error {
+  margin: 0;
+  color: #b42318;
+  font-size: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .input[aria-invalid="true"] {
+    border-color: #ff8a80;
+  }
+
+  .error {
+    color: #ff8a80;
+  }
+}
+
+.fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.fieldset legend {
+  margin-bottom: 8px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--d-primary);
+}
+
+.trap {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.submit {
+  min-height: 48px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--d-primary);
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 160ms ease-out;
+}
+
+@media (prefers-color-scheme: dark) {
+  .submit {
+    color: #0b1a10;
+  }
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.submit:focus-visible {
+  outline: 2px solid var(--d-ink);
+  outline-offset: 2px;
+}
+
+.fine {
+  margin: 0;
+  color: var(--d-muted);
+  font-size: 13px;
+}
+
+.doneTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.doneBody {
+  margin: 0;
+  color: var(--d-muted);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .submit {
+    transition: none;
+  }
+}

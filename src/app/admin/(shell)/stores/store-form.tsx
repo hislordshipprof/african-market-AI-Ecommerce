@@ -466,6 +466,7 @@ export function StoreForm({
                 defaultValue={sv?.status ?? store?.status ?? "active"}
                 className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
+                {(sv?.status ?? store?.status) === "setup" && <option value="setup">Setup (not open yet)</option>}
                 <option value="active">Active</option>
                 <option value="suspended">Suspended</option>
               </select>

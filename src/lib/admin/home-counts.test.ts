@@ -27,7 +27,7 @@ function queues(overrides: { stuck?: number; alerts?: number; cappedGroups?: str
 describe("getAdminHomeCounts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listStores.mockResolvedValue([{ status: "active" }, { status: "suspended" }, { status: "active" }]);
+    listStores.mockResolvedValue([{ status: "active" }, { status: "suspended" }, { status: "active" }, { status: "setup" }]);
     listRefundFailedOrders.mockResolvedValue([{ orderId: "o1" }, { orderId: "o2" }]);
     listOrdersToCheck.mockResolvedValue(queues({ stuck: 2, alerts: 3 }));
     listEscalatedThreads.mockResolvedValue({ threads: [{ id: "t1", waiting: true }, { id: "t2", waiting: false }], hidden: 0 });
