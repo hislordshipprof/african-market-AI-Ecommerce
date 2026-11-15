@@ -281,15 +281,29 @@ export async function remainingCaptureCents(paymentIntentId: string): Promise<nu
   return unrefundedCents(pi.amountReceived, listed);
 }
 
-/** `cancel` refunds the whole remaining capture. `issue` refunds an amount after delivery (#428). */
+/**
+ * `cancel` refunds the whole remaining capture. `issue` refunds an amount after delivery (#428).
+ * `platform` is a platform admin's refund after delivery (#538): refused, not capped, above the remaining capture.
+ */
 export type RefundCause =
   | { cause: "cancel" }
-  | { cause: "issue"; amountCents: number; issueReportId?: string };
+  | { cause: "issue"; amountCents: number; issueReportId?: string }
+  | { cause: "platform"; amountCents: number; submissionId: string; reason: string; actor: { id: string; email: string } };
+
+export const PLATFORM_REFUNDABLE_FROM = ["DELIVERED", "COMPLETED", "PARTIALLY_REFUNDED"] as const;
 
 const REFUNDABLE_FROM: Record<RefundCause["cause"], readonly string[]> = {
   cancel: ["CANCELLING"],
   issue: ["DELIVERED", "COMPLETED", "PARTIALLY_REFUNDED"],
+  platform: PLATFORM_REFUNDABLE_FROM,
 };
+
+export const PLATFORM_REFUND_ACTION = "platform_refund";
+
+/** One key per platform refund form, so a double or concurrent submit reserves one request. */
+export function platformRefundKey(orderId: string, submissionId: string): string {
+  return `refund:${orderId}:platform:${submissionId}`;
+}
 
 /** Courier recovery is kept on a courier order (spec §10, owner decision 3). */
 function refundsApplicationFee(cause: RefundCause, fulfillment: string): boolean {
@@ -343,8 +357,9 @@ export async function submitRefund(
   const succeeded = countedCents(listed, ["succeeded"]);
   const remaining = unrefundedCents(captured, listed);
   // ADR-0019: an issue refund never exceeds what is still unrefunded.
-  const amount = cause.cause === "issue" ? Math.min(cause.amountCents, remaining) : remaining;
-  if (cause.cause === "issue" && amount <= 0) return { blocked: true };
+  if (cause.cause === "platform" && cause.amountCents > remaining) return { blocked: true };
+  const amount = cause.cause === "cancel" ? remaining : Math.min(cause.amountCents, remaining);
+  if (cause.cause !== "cancel" && amount <= 0) return { blocked: true };
   if (remaining === 0) {
     const pendingRefund = listed.find((refund) => refund.status === "pending" || refund.status === "requires_action");
     if (pendingRefund) return pendingRefund;
@@ -364,8 +379,11 @@ export async function submitRefund(
     if (manual || !current || !allowed.includes(current.status)) return { blocked: true as const, open: null, row: null };
     const again = await openRefundRequest(tx, orderId);
     if (again) return { open: again, row: null };
+    if (cause.cause === "platform" && await tx.refundRequest.count({ where: { key: platformRefundKey(orderId, cause.submissionId) } })) {
+      return { blocked: true as const, open: null, row: null };
+    }
     const count = await tx.refundRequest.count({ where: { orderId } });
-    const key = `refund:${orderId}:${count + 1}`;
+    const key = cause.cause === "platform" ? platformRefundKey(orderId, cause.submissionId) : `refund:${orderId}:${count + 1}`;
     const refundApplicationFee = refundsApplicationFee(cause, current.fulfillment);
     const row = await tx.refundRequest.create({
       data: {
@@ -375,14 +393,27 @@ export async function submitRefund(
         key,
         amountCents: amount,
         refundApplicationFee,
-        // The store never received the service fee, so its share of a courier issue refund comes from the platform fee.
-        serviceFeeShareCents: cause.cause === "issue" && !refundApplicationFee ? serviceFeeShareOfRefund(amount, current) : 0,
+        // The store never received the service fee, so its share of a courier refund after delivery comes from the platform fee.
+        serviceFeeShareCents: cause.cause !== "cancel" && !refundApplicationFee ? serviceFeeShareOfRefund(amount, current) : 0,
         state: "RESERVED",
       },
     });
     if (cause.cause === "issue" && cause.issueReportId) {
       // The issue shows what is refunded, capped at the unrefunded capture, even if the create call then fails.
       await tx.issueReport.update({ where: { id: cause.issueReportId }, data: { refundRequestId: row.id, amountCents: amount } });
+    }
+    if (cause.cause === "platform") {
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: cause.actor.id,
+          actorEmail: cause.actor.email,
+          action: PLATFORM_REFUND_ACTION,
+          entityType: "order",
+          entityId: orderId,
+          after: { key, refundRequestId: row.id, amountCents: amount, reason: cause.reason },
+        },
+      });
     }
     return { open: null, row };
   });

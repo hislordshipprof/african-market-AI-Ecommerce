@@ -2,7 +2,7 @@ import { Prisma, type Order, type OrderLine } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
+import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
@@ -337,6 +337,8 @@ const ORDER_WITH_LINES = {
   },
 } as const;
 
+const PLATFORM_REFUNDED_STATUSES: OrderStatus[] = ["PARTIALLY_REFUNDED", "REFUNDED"];
+
 export async function getStoreOrders(storeId: string) {
   const orders = await storeScopedTransaction(storeId, async (tx) => {
     const resolved = await tx.auditLog.findMany({
@@ -344,18 +346,31 @@ export async function getStoreOrders(storeId: string) {
       select: { entityId: true },
     });
     const resolvedIds = resolved.map((row) => row.entityId);
-    return tx.order.findMany({
+    const platformRefunded = await tx.auditLog.findMany({
+      where: { action: PLATFORM_REFUND_ACTION, entityType: "order" },
+      select: { entityId: true },
+    });
+    const platformRefundedIds = platformRefunded.map((row) => row.entityId);
+    const rows = await tx.order.findMany({
       where: {
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           ...(resolvedIds.length > 0
             ? [{ id: { in: resolvedIds }, status: "CANCELLED" as const }]
             : []),
+          // #538: the store sees a refund the platform team made.
+          ...(platformRefundedIds.length > 0
+            ? [{ id: { in: platformRefundedIds }, status: { in: PLATFORM_REFUNDED_STATUSES } }]
+            : []),
         ],
       },
       include: ORDER_WITH_LINES,
       orderBy: { createdAt: "desc" },
     });
+    return rows.map((row) => ({
+      ...row,
+      refundedByPlatform: platformRefundedIds.includes(row.id) && PLATFORM_REFUNDED_STATUSES.includes(row.status),
+    }));
   });
   // This payload reaches a client component. A user id is the same at every store, so it
   // would let two stores' admins match one person: send only whether an account is linked.
