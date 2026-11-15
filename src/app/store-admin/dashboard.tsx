@@ -20,6 +20,8 @@ interface Props {
   role: string;
   stripeOnboardingStatus: string;
   unreadMessages: number;
+  /** Orders placed by shoppers who arrived from the Store directory (#454). */
+  directoryOrders: number;
   plan: {
     name: string;
     status: string;
@@ -47,6 +49,7 @@ export function StoreAdminDashboard({
   role,
   stripeOnboardingStatus,
   unreadMessages,
+  directoryOrders,
   plan,
 }: Props) {
   const searchParams = useSearchParams();
@@ -240,6 +243,9 @@ export function StoreAdminDashboard({
                       <CardDescription>
                         Show your store to shoppers nearby
                       </CardDescription>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {directoryOrders === 1 ? "1 order" : `${directoryOrders.toLocaleString("en-US")} orders`} from the directory
+                      </p>
                     </div>
                   </div>
                 </CardHeader>

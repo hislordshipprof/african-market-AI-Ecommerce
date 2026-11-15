@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { storeMayUse } from "../billing/plan";
+import type { AcquisitionSource } from "../directory/attribution";
 import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS, storeHasWhatsAppNumber } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
@@ -497,6 +498,7 @@ export interface RecordAuthorizedOrderInput {
   leaveAtDoor?: boolean;
   /** The checkout's WhatsApp updates tick (#560); kept only when the store has a registered number. */
   whatsappUpdates?: boolean;
+  acquisitionSource?: AcquisitionSource | null;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -682,6 +684,7 @@ export async function recordAuthorizedOrder(
           totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
+          acquisitionSource: input.acquisitionSource ?? null,
           serviceFeeCents: currentQuote.serviceFeeCents,
           serviceFeeBps: serviceFee.rateBps,
           serviceFeeMinCents: serviceFee.minCents,
@@ -983,6 +986,7 @@ export async function placeOrder(
   actorUserId: string | null = null,
   leaveAtDoor = false,
   whatsappUpdates = false,
+  acquisitionSource: AcquisitionSource | null = null,
 ): Promise<PlacedOrder> {
   assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
@@ -1154,6 +1158,7 @@ export async function placeOrder(
       minimumOrderCents,
       leaveAtDoor,
       whatsappUpdates,
+      acquisitionSource,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
         qty: line.qty,

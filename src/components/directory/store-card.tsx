@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { directoryLink } from "@/lib/directory/attribution";
 import { Check, ShoppingBag, Truck, UserRound } from "lucide-react";
 import type { DirectoryStore } from "@/lib/directory/stores";
 import { storeInitials } from "@/lib/store-initials";
@@ -14,7 +15,7 @@ export type CardStore = DirectoryStore & { href: string; distanceMi?: number; de
 export function StoreCard({ store }: { store: CardStore }) {
   const delivery = deliveryLine(store);
   return (
-    <a className={styles.card} href={store.href}>
+    <a className={styles.card} href={directoryLink(store.href)}>
       <span className={styles.cardHead}>
         {store.logoUrl ? (
           <Image className={styles.logo} src={store.logoUrl} alt="" width={48} height={48} unoptimized />
