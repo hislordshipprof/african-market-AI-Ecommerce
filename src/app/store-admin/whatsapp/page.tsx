@@ -30,7 +30,14 @@ export default async function WhatsAppPage() {
     const pending = link.codeLive && link.pendingPhoneNumber
       ? { phone: link.pendingPhoneNumber, display: displayNumber(link.pendingPhoneNumber) }
       : null;
-    state = { kind: "linked", phone: link.phoneNumber, display: displayNumber(link.phoneNumber), since, pending };
+    state = {
+      kind: "linked",
+      phone: link.phoneNumber,
+      display: displayNumber(link.phoneNumber),
+      since,
+      pending,
+      notices: { optInAlerts: link.optInAlerts, optInDigest: link.optInDigest },
+    };
   } else {
     state = {
       kind: link.codeLive ? "waiting" : "expired",

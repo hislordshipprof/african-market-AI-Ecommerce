@@ -1,6 +1,6 @@
 import { WhatsAppApiError } from "./errors";
 import { isBsuid } from "./phone";
-import { APPROVED_TEMPLATES, isOrderUpdateTemplate, OWNER_LINK_TEMPLATE } from "./templates";
+import { APPROVED_TEMPLATES, copilotTemplateParameters, isOrderUpdateTemplate, OWNER_LINK_TEMPLATE } from "./templates";
 import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
 
 /**
@@ -17,7 +17,10 @@ import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
  *   owner_link_code template with exactly a body code and a copy-code button
  *   code of at most 15 characters (132000);
  * - an order-update template (#560) with exactly a non-empty body store name
- *   and a URL button suffix that is a path, not a whole URL (132000).
+ *   and a URL button suffix that is a path, not a whole URL (132000);
+ * - a copilot template (#144) with exactly its count of non-empty body
+ *   variables (132000), none holding a new line, a tab or more than four
+ *   spaces in a row (132018).
  * A test can withdraw a template's approval (revokeFakeTemplate).
  */
 
@@ -54,6 +57,8 @@ function checkTemplate(message: Extract<OutboundMessage, { type: "template" }>):
   );
   if (!approved || revoked.has(message.name)) throw new WhatsAppApiError(132001, 404);
   if (isOrderUpdateTemplate(message.name)) return checkOrderUpdate(message);
+  const parameters = copilotTemplateParameters(message.name);
+  if (parameters !== null) return checkCopilot(message, parameters);
   if (message.name !== OWNER_LINK_TEMPLATE.name) return;
   const components = message.components ?? [];
   const body = components.find((component) => component.type === "body");
@@ -75,6 +80,16 @@ function checkOrderUpdate(message: Extract<OutboundMessage, { type: "template" }
   if (button.sub_type !== "url" || button.index !== "0" || button.parameters.length !== 1) invalid(132000);
   const suffix = button.parameters[0].text;
   if (!suffix || /^[a-z]+:/i.test(suffix) || suffix.startsWith("/")) invalid(132000);
+}
+
+function checkCopilot(message: Extract<OutboundMessage, { type: "template" }>, count: number): void {
+  const components = message.components ?? [];
+  const body = components[0];
+  if (components.length !== 1 || body?.type !== "body" || body.parameters.length !== count) invalid(132000);
+  for (const parameter of body.parameters) {
+    if (!parameter.text.trim()) invalid(132000);
+    if (/[\n\t]| {5}/.test(parameter.text)) invalid(132018);
+  }
 }
 
 function check(message: OutboundMessage, now: number): void {

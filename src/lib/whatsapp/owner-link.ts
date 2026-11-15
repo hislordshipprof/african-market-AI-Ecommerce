@@ -4,6 +4,7 @@ import {
   platformAdminTransaction,
   readOwnerLink,
   storeScoped,
+  storeScopedTransaction,
   upsertPendingOwnerLink,
 } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
@@ -29,6 +30,9 @@ export interface OwnerLinkView {
   verifiedAt: Date | null;
   /** A code was sent and can still be used. */
   codeLive: boolean;
+  /** Copilot alerts and the daily digest on WhatsApp (#144); off until the owner turns them on. */
+  optInAlerts: boolean;
+  optInDigest: boolean;
 }
 
 interface Owner {
@@ -115,6 +119,39 @@ export async function startOwnerLink(owner: Owner, rawPhone: string): Promise<{ 
 export async function removeOwnerLink(owner: Owner): Promise<{ ok: true }> {
   await deleteOwnerLinkForMember(owner.storeId, owner.userId, owner.actorEmail);
   return { ok: true };
+}
+
+/**
+ * The owner's choice of copilot alerts and the daily digest on WhatsApp (#144),
+ * on their own verified link only, with an audit row when it changes. False
+ * when there is no verified link.
+ */
+export async function setOwnerNotices(
+  owner: Owner,
+  notices: { optInAlerts: boolean; optInDigest: boolean },
+): Promise<boolean> {
+  return storeScopedTransaction(owner.storeId, async (tx) => {
+    const link = await tx.ownerWhatsAppLink.findUnique({
+      where: { storeId_userId: { storeId: owner.storeId, userId: owner.userId } },
+      select: { id: true, verified: true, optInAlerts: true, optInDigest: true },
+    });
+    if (!link?.verified) return false;
+    if (link.optInAlerts === notices.optInAlerts && link.optInDigest === notices.optInDigest) return true;
+    await tx.ownerWhatsAppLink.update({ where: { id: link.id }, data: notices });
+    await tx.auditLog.create({
+      data: {
+        storeId: owner.storeId,
+        actorId: owner.userId,
+        actorEmail: owner.actorEmail,
+        action: "whatsapp_link.notices",
+        entityType: "owner_whatsapp_link",
+        entityId: link.id,
+        before: { optInAlerts: link.optInAlerts, optInDigest: link.optInDigest },
+        after: notices,
+      },
+    });
+    return true;
+  });
 }
 
 export function getOwnerLink(storeId: string, userId: string): Promise<OwnerLinkView | null> {
