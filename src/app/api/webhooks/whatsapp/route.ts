@@ -10,6 +10,8 @@ import { verifyWhatsAppSignature } from "@/lib/whatsapp/signature";
 import { extractWebhook, whatsappWebhookSchema } from "@/lib/whatsapp/webhook-payload";
 
 export const dynamic = "force-dynamic";
+/** A store message can run a shopper assistant turn (#559), which stops itself at 55 seconds. */
+export const maxDuration = 60;
 
 /** Meta's documented webhook payload ceiling [unverified, #143]. */
 const MAX_BODY_BYTES = 3 * 1024 * 1024;

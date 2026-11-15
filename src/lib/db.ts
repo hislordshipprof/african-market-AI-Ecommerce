@@ -170,7 +170,9 @@ const STORE_SCOPED_MODELS = [
   "substitutionRequest",
   "supportMessage",
   "supportThread",
+  "whatsAppCheckoutLink",
   "whatsAppOptOut",
+  "whatsAppShopperCart",
 ] as const;
 
 export function storeScoped(storeId: string) {
@@ -415,6 +417,8 @@ const STORE_SCOPED_TX_MODELS = [
   "substitutionRequest",
   "supportMessage",
   "supportThread",
+  "whatsAppCheckoutLink",
+  "whatsAppShopperCart",
 ] as const;
 type StoreScopedTxModels = (typeof STORE_SCOPED_TX_MODELS)[number] | TxRawMethods;
 
@@ -2311,6 +2315,11 @@ export async function isWhatsAppOptedOut(storeId: string, waId: string): Promise
 export async function lockStoreSubscriptionRow(tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">, storeId: string): Promise<void> {
   await tx.$executeRaw`INSERT INTO store_subscriptions (store_id) VALUES (${storeId}) ON CONFLICT (store_id) DO NOTHING`;
   await tx.$queryRaw`SELECT store_id FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`;
+}
+
+/** Serialises finding or creating one WhatsApp sender's cart at one store (#559). */
+export async function lockWhatsAppShopper(tx: Pick<PrismaClient, "$executeRaw">, storeId: string, senderKey: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`whatsapp-shopper:${storeId}:${senderKey}`}))`;
 }
 
 /** Serialises pilot-offer changes so the 5-store cap holds under concurrency. */
