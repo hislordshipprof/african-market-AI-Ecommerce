@@ -73,11 +73,13 @@ const ISSUE_LABELS: Record<string, string> = {
   poor_freshness: "Not fresh",
 };
 
+/** Refunded is the ledger amount of refunds Stripe has confirmed, the same figure as the Sales "Refunded" line. */
 async function issueReasons(storeId: string, range: AnalyticsRange, timeZone: string) {
   const rows = await storeScopedRawQuery<{ type: string; reports: number; refundedCents: number }>(storeId, Prisma.sql`
     SELECT i.type, COUNT(*)::int AS reports,
-           COALESCE(SUM(i.amount_cents) FILTER (WHERE i.state IN ('auto_refunded', 'approved')), 0)::int AS "refundedCents"
+           COALESCE(SUM(r.amount_cents) FILTER (WHERE r.provider_status = 'succeeded'), 0)::int AS "refundedCents"
     FROM issue_reports i
+    LEFT JOIN refund_requests r ON r.id = i.refund_request_id AND r.store_id = i.store_id
     WHERE i.store_id = ${storeId}
       AND i.created_at >= ((${range.from}::date)::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'
       AND i.created_at < (((${range.to}::date + 1))::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'
@@ -330,7 +332,7 @@ export async function retryFailedReports(
   nowIso: string,
   env: Record<string, string | undefined> = process.env,
 ): Promise<void> {
-  const stores = await platform.store.findMany({ where: { id: { in: storeIds } }, select: STORE_SELECT });
+  const stores = await platform.store.findMany({ where: { id: { in: storeIds }, status: { not: "suspended" } }, select: STORE_SELECT });
   const { failedStoreIds } = await sendDueReports(stores, new Date(nowIso), env);
   if (failedStoreIds.length > 0) throw new Error(`Copilot weekly report still failing for ${failedStoreIds.length} store${failedStoreIds.length === 1 ? "" : "s"}`);
 }
