@@ -704,6 +704,7 @@ model CopilotConversation {
   @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, userId, lastMessageAt])
+  @@index([userId])
   @@map("copilot_conversations")
 }
 

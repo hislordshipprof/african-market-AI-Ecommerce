@@ -477,9 +477,9 @@ export async function storeScopedTransaction<T>(
  * never wait: it locks with SKIP LOCKED and picks up a skipped row on its next run.
  *
  * Copilot confirm and the copilot turn commit take the store lock before any
- * proposal, audit or stock row. A proposal insert takes FOR KEY SHARE on its
- * listing and on the store. Confirm then locks the listing and claims the
- * proposal. The turn commit locks the conversation row only after the store.
+ * proposal, audit or stock row. A proposal insert takes FOR KEY SHARE on the
+ * store and the conversation rows only: stock_proposals has no foreign key to
+ * listings. Confirm then locks the listing and claims the proposal. The turn commit locks the conversation row only after the store.
  */
 export async function lockConversationRow(tx: Pick<PrismaClient, "$queryRaw">, conversationId: string) {
   await tx.$queryRaw`SELECT id FROM ai_conversations WHERE id = ${conversationId} FOR UPDATE`;
