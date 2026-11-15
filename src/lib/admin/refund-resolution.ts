@@ -9,6 +9,7 @@ import { parseInput, readFormFields } from "../security/parse-input";
 import { getStripeProvider } from "../stripe";
 import { evaluateOrderRefundStateAfterCommit, reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
 import { releaseOrderStock } from "../order/stock-ledger";
+import { recordCapture } from "../order/capture-record";
 import { systemAuditData } from "../system-actor";
 import { failedAtLabel } from "./failed-at";
 import { recordOrderNotification } from "../notifications/record";
@@ -266,6 +267,7 @@ export async function resolveRefundFailed(
       data: { status: "CANCELLED", cancelledAt: new Date(), notes, capturedAmountCents: null },
     });
     if (updated.count !== 1) return { ok: false as const, error: "already resolved" };
+    await recordCapture(tx, orderId, capturedCents, null);
     await releaseOrderStock(tx, order.storeId, orderId);
     await tx.auditLog.create({
       data: {

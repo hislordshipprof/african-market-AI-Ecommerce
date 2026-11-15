@@ -305,6 +305,10 @@ The audit recorded when an unconfirmed card hold is released after capture does 
 **Orders to check**:
 The platform-admin page that lists stuck orders and the alert rows nothing else reads. A stuck order has stayed in one state past its limit, such as a capture still retrying after 30 minutes.
 
+**Order search**:
+The platform-admin page that finds any order at any store: by store and order number, exact customer email or phone, status, fulfillment, and a date range read as store days in each store's own time zone. Results are 50 to a page, newest first. It is read only. Opening an order shows its lines, money, timeline, refund requests, deliveries, issue reports and support thread, and writes a `platform.order_view` audit row naming the admin; going Back or Forward to it writes a new row before the data shows again. Captured shows what Stripe captured, and when if the app saw the capture happen; it stays after a refund or cancellation cleared the order's capture. Every thread has a link; Open in Messages appears only for a thread in the Messages queue. The tracking link shows only its last four characters.
+_Avoid_: Order lookup, order explorer
+
 **Refund failed**:
 The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status. The reconcile cron keeps checking until the capture is covered or an admin records the repayment. The queue shows the failed refund's id and when that failure was recorded. A later, different failure keeps its own time.
 

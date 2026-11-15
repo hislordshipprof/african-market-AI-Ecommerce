@@ -1100,6 +1100,9 @@ model Customer {
   @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, email])
+  /// Admin order search by exact email or phone across stores (#537).
+  @@index([email])
+  @@index([phone])
   @@index([storeId, claimedByCustomerId])
   @@index([userId])
   @@map("customers")
@@ -1304,6 +1307,9 @@ model Order {
   /// "directory" when the shopper arrived from a Store directory link within 30 days (#454); null otherwise.
   acquisitionSource       String?   @map("acquisition_source")
   capturedAmountCents     Int?      @map("captured_amount_cents")
+  /// What Stripe captured and when (#537). Kept when a refund or cancellation later clears capturedAmountCents.
+  captureCents            Int?      @map("capture_cents")
+  capturedAt              DateTime? @map("captured_at")
   refundId                String?   @map("refund_id")
   platformFeeCents        Int?      @map("platform_fee_cents")
   deliveryFeeCents        Int       @default(0) @map("delivery_fee_cents")
@@ -1385,7 +1391,9 @@ model Order {
   @@index([storeId, status])
   @@index([storeId, fulfillment, pickupSlot])
   @@index([storeId, sourceCartId, createdAt])
-  @@index([storeId, createdAt])
+  /// Keyset pages of the admin order search (#537), per store and across stores.
+  @@index([storeId, createdAt, id])
+  @@index([createdAt, id])
   @@index([customerId])
   @@index([captureConfirmedAt])
   @@map("orders")

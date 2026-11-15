@@ -138,7 +138,9 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     const failed = await fakeStripeProvider.refundPayment(pi, 3000, `failed-${placed.orderId}`);
     setRefundStatus(failed.refundId, "failed");
     await evaluateOrderRefundState(placed.orderId);
-    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("REFUND_FAILED");
+    const stillFailed = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } });
+    expect(stillFailed.status).toBe("REFUND_FAILED");
+    expect(stillFailed.captureCents).toBe(3000);
     expect(await stockOf(storeId, listingId)).toEqual(held);
 
     await fakeStripeProvider.refundPayment(pi, 3000, `covered-${placed.orderId}`);
@@ -179,6 +181,9 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
       await evaluateOrderRefundState(second.orderId);
       expect(await stockOf(storeId, recounted.listingId)).toEqual(superseded);
     }
+    const coveredCancel = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: second.orderId } });
+    expect(coveredCancel.status).toBe("CANCELLED");
+    expect(coveredCancel.captureCents).toBe(3000);
   }, 30_000);
 
   it("a replay after a partial dashboard refund reuses the stored amount, then refunds the rest", async () => {

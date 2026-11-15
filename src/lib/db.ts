@@ -8,6 +8,8 @@ import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
 import { EARTH_RADIUS_MI } from "./address/geo";
 import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
+import { VALID_US_TIMEZONES } from "./admin/timezone";
+import type { OrderSearchFilters } from "./admin/order-search";
 
 /** One TTL for preview cleanup and the import-token claim. */
 export const IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -1282,6 +1284,60 @@ export async function findOrderAlertRows(opts: {
     })),
     capped: rows.length > opts.limit,
   };
+}
+
+/** Unknown zones in `stores.timezone` (free text) read as New York, as `formatInZone` does, instead of failing the query. */
+const STORE_ZONE = Prisma.sql`(CASE WHEN s.timezone IN (${Prisma.join(VALID_US_TIMEZONES)}) THEN s.timezone ELSE 'America/New_York' END)`;
+
+/** Local midnight of `day` in the order's store zone, as a UTC timestamp like `orders.created_at`. */
+const storeMidnight = (day: Prisma.Sql) => Prisma.sql`((${day})::timestamp AT TIME ZONE ${STORE_ZONE}) AT TIME ZONE 'UTC'`;
+
+/** The admin order search (#537): exact filters, store-day dates, newest first on (created_at, id). */
+export function orderSearchSql(filters: OrderSearchFilters, limit: number): Prisma.Sql {
+  const where: Prisma.Sql[] = [];
+  if (filters.storeId) where.push(Prisma.sql`o.store_id = ${filters.storeId}`);
+  if (filters.number !== null) where.push(Prisma.sql`o.number = ${filters.number}`);
+  if (filters.email) where.push(Prisma.sql`o.customer_id IN (SELECT c.id FROM customers c WHERE c.email = ${filters.email})`);
+  if (filters.phone) where.push(Prisma.sql`o.customer_id IN (SELECT c.id FROM customers c WHERE c.phone = ${filters.phone})`);
+  if (filters.status) where.push(Prisma.sql`o.status = ${filters.status}`);
+  if (filters.fulfillment) where.push(Prisma.sql`o.fulfillment = ${filters.fulfillment}`);
+  if (filters.from) {
+    const from = Prisma.sql`${filters.from}::date`;
+    where.push(Prisma.sql`o.created_at >= (${from} - 1)::timestamp`);
+    where.push(Prisma.sql`o.created_at >= ${storeMidnight(from)}`);
+  }
+  if (filters.to) {
+    const next = Prisma.sql`${filters.to}::date + 1`;
+    where.push(Prisma.sql`o.created_at < (${next} + 1)::timestamp`);
+    where.push(Prisma.sql`o.created_at < ${storeMidnight(next)}`);
+  }
+  if (filters.cursor) {
+    const at = Prisma.sql`(${filters.cursor.createdAt.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+    where.push(Prisma.sql`(o.created_at, o.id) < (${at}, ${filters.cursor.id})`);
+  }
+  return Prisma.sql`
+    SELECT o.id, o.number, o.status, o.fulfillment, o.total_authorized_cents, o.capture_cents, o.created_at,
+           s.name AS store_name, s.timezone AS store_timezone
+    FROM orders o
+    JOIN stores s ON s.id = o.store_id
+    WHERE ${where.length > 0 ? Prisma.join(where, " AND ") : Prisma.sql`TRUE`}
+    ORDER BY o.created_at DESC, o.id DESC
+    LIMIT ${limit}
+  `;
+}
+
+export async function findOrderSearchRows(filters: OrderSearchFilters, limit: number) {
+  return platformAdminTransaction((tx) => tx.$queryRaw<Array<{
+    id: string;
+    number: number;
+    status: string;
+    fulfillment: string;
+    total_authorized_cents: number;
+    capture_cents: number | null;
+    created_at: Date;
+    store_name: string;
+    store_timezone: string;
+  }>>(orderSearchSql(filters, limit)));
 }
 
 /** Stores with a listing on this master product, active or not: the storefronts its edits reach. */
