@@ -18,19 +18,20 @@ import { platformAdminTransaction, storeScoped } from "../db";
 import { isRlsRejection } from "../listing/cross-store-write";
 import { listConversationSample, readTranscript } from "./ai-oversight";
 import { labelConversationAction } from "./ai-oversight-actions";
+import { runAssistantRetention } from "../assistant/retention";
 import { withAiOnboardingSettings } from "./platform-settings-test-lock";
 
 const hasDb = !!process.env.DATABASE_URL;
 const suffix = randomUUID().slice(0, 8);
-const DAY = "2001-02-03";
-const IN_DAY = new Date("2001-02-03T12:00:00.000Z");
-const LAST_MS = new Date("2001-02-03T23:59:59.999Z");
+const DAY = "2001-04-03";
+const IN_DAY = new Date("2001-04-03T12:00:00.000Z");
+const LAST_MS = new Date("2001-04-03T23:59:59.999Z");
 /** Over any cost threshold another test file sets (1 to 20 cents, see platform-settings-test-lock). */
 const ALWAYS_COSTLY = 1_000_000;
 /** 3 cents: over the 2-cent default, under 20 cents. */
 const MIDDLING = 30_000;
-const NEXT_DAY = new Date("2001-02-04T00:00:00.000Z");
-const DAY_BEFORE = new Date("2001-02-02T10:00:00.000Z");
+const NEXT_DAY = new Date("2001-04-04T00:00:00.000Z");
+const DAY_BEFORE = new Date("2001-04-02T10:00:00.000Z");
 
 type FakeSession = Awaited<ReturnType<typeof auth.api.getSession>>;
 
@@ -138,7 +139,7 @@ describe.skipIf(!hasDb)("AI oversight", () => {
     const flagged = sample.shopper.find((row) => row.id === flaggedShopper);
     expect(flagged?.reasons).toEqual(["amount_removed", "made_up_id", "forwarded", "costly_turn"]);
     expect(sample.shopper.filter((row) => !row.sampled).every((row) => row.reasons.length > 0)).toBe(true);
-    expect(sample.shopper.some((row) => row.lastMessageAt < "2001-02-03")).toBe(false);
+    expect(sample.shopper.some((row) => row.lastMessageAt < "2001-04-03")).toBe(false);
 
     expect(sample.copilot.filter((row) => row.sampled)).toHaveLength(5);
     expect(sample.copilot.find((row) => row.id === costlyCopilot)?.reasons).toEqual(["costly_turn"]);
@@ -184,6 +185,13 @@ describe.skipIf(!hasDb)("AI oversight", () => {
     const onlyB = await listConversationSample({ day: DAY, storeId: storeB });
     expect(onlyB.shopper.map((row) => row.id)).toEqual([shopperB]);
     expect(onlyB.copilot).toEqual([]);
+  });
+
+  it("keeps its conversations through the retention sweep that assistant/retention.integration.test.ts runs at 2001-06-01", async () => {
+    // Retention deletes every older conversation in the shared DB, so this file's data must be newer than that sweep's cutoff.
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2001-06-01T00:00:00.000Z"));
+    await runAssistantRetention({ run: async (_id, fn) => fn() });
+    expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: plainShopper } })).not.toBeNull();
   });
 
   it("shows a transcript's scrubbed messages and tool calls, never file content, and audits every view", async () => {

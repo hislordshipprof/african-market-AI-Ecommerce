@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { readSendConfig, readWhatsAppConfig } from "./config";
 import { WhatsAppApiError, WhatsAppNotConfiguredError } from "./errors";
+import { isBsuid } from "./phone";
 import type { ConnectedStoreNumber, ConnectStoreNumberInput, OutboundMessage, SendResult, WhatsAppProvider } from "./types";
 
 /**
@@ -10,13 +11,16 @@ import type { ConnectedStoreNumber, ConnectStoreNumberInput, OutboundMessage, Se
 export const GRAPH_API_VERSION = "v25.0";
 const SEND_TIMEOUT_MS = 10_000;
 
-/** Meta's `to` accepts digits; the plus is dropped so `to` and wa_id compare equal. */
-function recipient(to: string): string {
-  return to.replace(/^\+/, "");
+/**
+ * Meta's `to` accepts digits; the plus is dropped so `to` and wa_id compare
+ * equal. A business-scoped user id goes in `recipient` instead, with no `to`.
+ */
+function addressee(to: string): { to: string } | { recipient: string } {
+  return isBsuid(to) ? { recipient: to } : { to: to.replace(/^\+/, "") };
 }
 
 export function toGraphPayload(message: OutboundMessage): Record<string, unknown> {
-  const base = { messaging_product: "whatsapp", recipient_type: "individual", to: recipient(message.to) };
+  const base = { messaging_product: "whatsapp", recipient_type: "individual", ...addressee(message.to) };
   switch (message.type) {
     case "text":
       return { ...base, type: "text", text: { body: message.body, preview_url: false } };

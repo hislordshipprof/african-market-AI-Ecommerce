@@ -193,4 +193,14 @@ describe("WhatsApp provider", () => {
       },
     });
   });
+
+  it("a business-scoped user id goes in `recipient`, with no `to` (#409)", () => {
+    expect(toGraphPayload({ type: "text", to: "US.13491208655302741918", body: "hi" })).toEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      recipient: "US.13491208655302741918",
+      type: "text",
+      text: { body: "hi", preview_url: false },
+    });
+  });
 });
