@@ -50,22 +50,23 @@ export function RecipeForm({ recipe, products }: Pick<RecipeEditor, "recipe" | "
 
   const update = (uid: number, patch: Partial<Row>) => setRows((all) => all.map((row) => (row.uid === uid ? { ...row, ...patch } : row)));
   const error = (field: string) => state.fieldErrors?.[field];
-  const described = (field: string, id: string) => (error(field) ? { "aria-invalid": true, "aria-describedby": `${id}-error` } : {});
+  const described = (field: string, id: string, hint = false) =>
+    error(field) ? { "aria-invalid": true, "aria-describedby": `${id}-error` } : hint ? { "aria-describedby": `${id}-hint` } : {};
 
   return (
     <form ref={formRef} onSubmit={submit} noValidate autoComplete="off" className="mt-4 grid gap-4">
       <input type="hidden" name="recipeId" value={recipe.id} />
 
       <Field id="name" label="Name" hint={`Shoppers find it by this name. Today it answers to “${recipe.key}”.`} error={error("name")}>
-        <input id="name" name="name" defaultValue={recipe.name} required maxLength={200} className={FIELD} {...described("name", "name")} />
+        <input id="name" name="name" defaultValue={recipe.name} required maxLength={200} className={FIELD} {...described("name", "name", true)} />
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
         <Field id="aliases" label="Other names" hint="One per line: local names and spellings shoppers use." error={error("aliases")}>
-          <textarea id="aliases" name="aliases" defaultValue={recipe.aliases.join("\n")} rows={3} className={`${FIELD} py-2`} {...described("aliases", "aliases")} />
+          <textarea id="aliases" name="aliases" defaultValue={recipe.aliases.join("\n")} rows={3} className={`${FIELD} py-2`} {...described("aliases", "aliases", true)} />
         </Field>
         <Field id="servings" label="Servings" hint="What the quantities are for." error={error("servings")}>
-          <input id="servings" name="servings" inputMode="numeric" defaultValue={recipe.servings ?? ""} className={FIELD} {...described("servings", "servings")} />
+          <input id="servings" name="servings" inputMode="numeric" defaultValue={recipe.servings ?? ""} className={FIELD} {...described("servings", "servings", true)} />
         </Field>
       </div>
 
@@ -102,7 +103,7 @@ export function RecipeForm({ recipe, products }: Pick<RecipeEditor, "recipe" | "
                     placeholder="Product id"
                     spellCheck={false}
                     className={FIELD}
-                    {...described(field("masterProductId"), id("product"))}
+                    {...described(field("masterProductId"), id("product"), true)}
                   />
                 </Field>
                 <Field id={id("qty")} label="Quantity" error={error(field("qty"))}>
@@ -159,7 +160,7 @@ function Field({ id, label, hint, error, children }: { id: string; label: string
     <div className="grid min-w-0 content-start gap-1.5">
       <label htmlFor={id} className="text-sm font-medium text-foreground">{label}</label>
       {children}
-      {hint && !error && <p className="break-words text-sm text-muted-foreground">{hint}</p>}
+      {hint && !error && <p id={`${id}-hint`} className="break-words text-sm text-muted-foreground">{hint}</p>}
       {error && <p id={`${id}-error`} className="text-sm text-destructive">{error}</p>}
     </div>
   );

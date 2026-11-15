@@ -107,7 +107,7 @@ test.describe("Recipe base admin", () => {
     await page.getByLabel("Other names").fill(`${RUN} gob3`);
     await page.getByLabel("Servings").fill("4");
     await page.getByLabel("Master product").fill(ids.product);
-    await expect(page.getByText(`${RUN} Black-eyed beans`)).toBeVisible();
+    await expect(page.getByLabel("Master product")).toHaveAccessibleDescription(`${RUN} Black-eyed beans`);
     await page.getByLabel("Quantity").fill("2");
     await page.getByLabel("Unit").fill("cup");
     await page.getByRole("button", { name: "Add ingredient" }).click();
