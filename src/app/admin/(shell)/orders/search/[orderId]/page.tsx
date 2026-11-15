@@ -4,7 +4,9 @@ import { ChevronLeft } from "lucide-react";
 import { viewOrderDetail, type OrderDetail } from "@/lib/admin/order-detail";
 import { money } from "@/lib/format";
 import { FULFILLMENT_LABELS, placedAt } from "../order-labels";
+import { PLATFORM_REFUNDABLE_FROM, remainingCaptureCents } from "@/lib/order/refund-requests";
 import { AuditedView } from "./audited-view";
+import { RefundForm } from "./refund-form";
 
 export const metadata = { title: "Order — Platform Admin" };
 // Every view writes an audit row, so the page is never served from a cache; AuditedView covers Back and Forward.
@@ -65,6 +67,15 @@ function Lines({ lines }: { lines: OrderDetail["lines"] }) {
   );
 }
 
+/** Only a hint for the form: the action re-reads Stripe before refunding. */
+async function remainingHint(paymentIntentId: string): Promise<number | null> {
+  try {
+    return await remainingCaptureCents(paymentIntentId);
+  } catch {
+    return null;
+  }
+}
+
 function captured(pay: OrderDetail["payment"], at: (date: Date) => string): string {
   if (!pay.capturedAt) return pay.capturedCents === null ? "Not captured" : money(pay.capturedCents);
   return `${pay.capturedCents === null ? "Amount not recorded" : money(pay.capturedCents)} on ${at(pay.capturedAt)}`;
@@ -80,6 +91,8 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
   const at = (date: Date) => placedAt(date, zone);
   const pay = order.payment;
   const thread = order.supportThread;
+  const refundable = !!pay.paymentIntentId && (PLATFORM_REFUNDABLE_FROM as readonly string[]).includes(order.status);
+  const remaining = refundable ? await remainingHint(pay.paymentIntentId!) : null;
 
   return (
     <AuditedView key={order.viewId} viewId={order.viewId}>
@@ -123,6 +136,18 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
               ]}
             />
           </Section>
+
+          <div className="lg:col-span-2">
+            <Section title="Refund" id="refund-heading">
+              {refundable && remaining !== 0 ? (
+                <RefundForm key={order.viewId} orderId={order.id} submissionId={crypto.randomUUID()} remainingCents={remaining} />
+              ) : (
+                <Empty>
+                  {refundable ? "Nothing is left to refund on this payment." : "A refund here is for a delivered, completed or partly refunded order."}
+                </Empty>
+              )}
+            </Section>
+          </div>
 
           <div className="lg:col-span-2">
             <Section title="Lines" id="lines-heading">
