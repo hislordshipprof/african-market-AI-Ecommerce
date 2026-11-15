@@ -153,8 +153,9 @@ test("the owner lists the store, writes the blurb and picks cuisines; the direct
     await page.goto(`${root}/`);
     const card = page.getByRole("link", { name: /Mama Ngozi African Market/ });
     await expect(card).toContainText(blurb);
-    await expect(card).toContainText("West African · East African · Caribbean");
-    await shoot(page, "450-directory-card", "Find an African grocery store near you");
+    // Cuisine tags show one per tag (#690), in the fixed list's order.
+    await expect(card).toContainText(/West African.*East African.*Caribbean/);
+    await shoot(page, "450-directory-card", "Your food, from the families who know it");
 
     await page.goto(`${store}/store-admin/directory?store=mama-ngozi`);
     await listed.click();
@@ -225,7 +226,7 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     expect(await page.evaluate(() => (window as unknown as { locationAsks: number }).locationAsks)).toBe(1);
     await expect(page.getByText("Location is off for this site. Enter your ZIP code or city instead.")).toBeVisible();
     await expect(page.getByLabel("ZIP code or city")).toBeFocused();
-    await shoot(page, "452-near-denied", "Find an African grocery store near you");
+    await shoot(page, "452-near-denied", "Your food, from the families who know it");
 
     await page.getByLabel("ZIP code or city").fill("77002");
     await page.getByRole("button", { name: "Find stores" }).click();
@@ -238,7 +239,7 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await page.getByLabel("ZIP code or city").fill("New York, NY");
     await page.getByRole("button", { name: "Find stores" }).click();
     await expect(page.getByRole("heading", { name: "No stores within 50 miles of New York, NY" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Mama Ngozi African Market Houston/ })).toContainText(/1,\d{3} mi/);
+    await expect(page.getByRole("link", { name: /Mama Ngozi African Market Parkside/ })).toContainText(/1,\d{3} mi/);
     await expect(page.getByRole("heading", { name: "Browse by state" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Texas", level: 3 })).toBeVisible();
     await shoot(page, "452-near-fallback", "No stores within 50 miles of New York, NY");

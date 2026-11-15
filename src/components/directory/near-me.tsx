@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
-import { LocateFixed } from "lucide-react";
+import { Check, LocateFixed } from "lucide-react";
 import { directoryLink } from "@/lib/directory/attribution";
 import { NEARBY_MILES } from "@/lib/directory/distance";
+import { withCuisine, type CuisineChip } from "@/lib/directory/cuisine-filter";
 import { StoreCard, type CardStore } from "./store-card";
 import { StoreRequestForm } from "./store-request-form";
 import styles from "./directory.module.css";
@@ -25,10 +26,22 @@ type View =
 const DENIED = "Location is off for this site. Enter your ZIP code or city instead.";
 const UNAVAILABLE = "We couldn't get your location. Enter your ZIP code or city instead.";
 
-/** Store directory near me (#452). Location is asked for only when the shopper taps the button. */
-export function NearMe({ states, children }: { states: StateGroup[]; children: ReactNode }) {
+/**
+ * Store directory near me (#452). Location is asked for only when the shopper taps the button.
+ * The home's hero frames the search (#690); a cuisine chip filters the list on show, home or results.
+ */
+export function NearMe({ states, stores, chips, backdrop, intro, counts }: {
+  states: StateGroup[];
+  stores: CardStore[];
+  chips: CuisineChip[];
+  backdrop: ReactNode;
+  intro: ReactNode;
+  counts: ReactNode;
+}) {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<View>({ kind: "idle" });
+  const [cuisine, setCuisine] = useState<string | null>(null);
+  const chosen = chips.find((chip) => chip.value === cuisine) ?? null;
   const input = useRef<HTMLInputElement>(null);
 
   async function search(params: URLSearchParams) {
@@ -72,6 +85,10 @@ export function NearMe({ states, children }: { states: StateGroup[]; children: R
 
   return (
     <>
+      <section className={styles.hero} aria-labelledby="directory-title">
+        {backdrop}
+        <div className={styles.heroBody}>
+          {intro}
       <form className={styles.search} onSubmit={onSubmit} role="search" aria-label="Find stores near you">
         <label className={styles.searchLabel} htmlFor="near-query">ZIP code or city</label>
         <div className={styles.searchRow}>
@@ -112,17 +129,79 @@ export function NearMe({ states, children }: { states: StateGroup[]; children: R
           </div>
         ) : null}
       </div>
+          {counts}
+        </div>
+      </section>
 
-      {view.kind === "stores" ? <Results answer={view} /> : null}
-      {view.kind === "stores" && !view.nearby ? <StoreRequestForm zip={view.label && /^\d{5}$/.test(view.label) ? view.label : null} /> : null}
-      {view.kind === "outside" || (view.kind === "stores" && !view.nearby) ? <StateList states={states} /> : null}
-      {view.kind === "stores" || view.kind === "outside" ? null : children}
+      <div className={styles.section}>
+        {view.kind === "outside" ? null : (
+          <Browse chips={chips} chosen={chosen} onChoose={(value) => setCuisine((current) => (current === value ? null : value))} />
+        )}
+        {view.kind === "stores" ? <Results answer={view} cuisine={chosen} /> : null}
+        {view.kind === "stores" && !view.nearby ? <StoreRequestForm zip={view.label && /^\d{5}$/.test(view.label) ? view.label : null} /> : null}
+        {view.kind === "outside" || (view.kind === "stores" && !view.nearby) ? <StateList states={states} /> : null}
+        {view.kind === "stores" || view.kind === "outside" ? null : <AllStores stores={stores} cuisine={chosen} />}
+      </div>
     </>
   );
 }
 
-function Results({ answer }: { answer: Extract<Answer, { kind: "stores" }> }) {
+/** "Browse by where home is" (#690): one tap filters, a second tap on the same chip clears it. */
+function Browse({ chips, chosen, onChoose }: { chips: CuisineChip[]; chosen: CuisineChip | null; onChoose: (value: string) => void }) {
+  if (chips.length === 0) return null;
+  return (
+    <section aria-labelledby="browse-title" className={styles.browse}>
+      <h2 id="browse-title" className={styles.sectionTitle}>Browse by where home is</h2>
+      <ul className={styles.chips} aria-label="Filter markets by cuisine">
+        {chips.map((chip) => {
+          const on = chosen?.value === chip.value;
+          return (
+            <li key={chip.value}>
+              <button type="button" className={styles.chip} aria-pressed={on} onClick={() => onChoose(chip.value)}>
+                {on ? <Check aria-hidden="true" size={16} strokeWidth={2.25} /> : null}
+                {chip.label}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function StoreGrid({ stores }: { stores: CardStore[] }) {
+  return (
+    <ul className={styles.grid}>
+      {stores.map((store) => (
+        <li key={store.slug}><StoreCard store={store} /></li>
+      ))}
+    </ul>
+  );
+}
+
+/** Said when a chip leaves no store in the list, with the way back. */
+function NoneTagged({ cuisine }: { cuisine: CuisineChip }) {
+  return <p className={styles.note}>None of these markets list {cuisine.label}. Tap {cuisine.label} again to see them all.</p>;
+}
+
+function AllStores({ stores, cuisine }: { stores: CardStore[]; cuisine: CuisineChip | null }) {
+  const shown = withCuisine(stores, cuisine?.value ?? null);
+  const what = cuisine ? `${cuisine.label} ` : "";
+  return (
+    <section aria-labelledby="directory-stores" className={styles.results}>
+      <h2 id="directory-stores" className={styles.count} aria-live="polite">
+        {shown.length === 1 ? `1 ${what}market` : `${shown.length} ${what}markets`}
+      </h2>
+      {stores.length === 0 ? <p className={styles.empty}>No stores are listed yet. Check back soon.</p> : null}
+      {stores.length > 0 && shown.length === 0 && cuisine ? <NoneTagged cuisine={cuisine} /> : null}
+      {shown.length > 0 ? <StoreGrid stores={shown} /> : null}
+    </section>
+  );
+}
+
+function Results({ answer, cuisine }: { answer: Extract<Answer, { kind: "stores" }>; cuisine: CuisineChip | null }) {
   const place = answer.label ?? "you";
+  const shown = withCuisine(answer.stores, cuisine?.value ?? null);
   const heading = answer.stores.length === 0
     ? "No stores are listed yet"
     : answer.nearby
@@ -132,11 +211,8 @@ function Results({ answer }: { answer: Extract<Answer, { kind: "stores" }> }) {
     <section aria-labelledby="near-results" className={styles.results}>
       <h2 id="near-results" className={styles.resultsTitle}>{heading}</h2>
       {!answer.nearby && answer.stores.length > 0 ? <p className={styles.note}>These are the closest stores.</p> : null}
-      <ul className={styles.grid}>
-        {answer.stores.map((store) => (
-          <li key={store.slug}><StoreCard store={store} /></li>
-        ))}
-      </ul>
+      {answer.stores.length > 0 && shown.length === 0 && cuisine ? <NoneTagged cuisine={cuisine} /> : null}
+      {shown.length > 0 ? <StoreGrid stores={shown} /> : null}
     </section>
   );
 }

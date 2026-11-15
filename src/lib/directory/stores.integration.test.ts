@@ -14,6 +14,7 @@ const PUBLIC_FIELDS = [
   "brandColor",
   "city",
   "state",
+  "neighborhood",
   "hours",
   "timezone",
   "pickupEnabled",
