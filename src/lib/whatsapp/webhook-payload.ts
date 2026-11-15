@@ -17,6 +17,11 @@ const messageSchema = z.looseObject({
   timestamp: z.string().max(20).optional(),
   type: z.string().min(1).max(40),
   text: z.looseObject({ body: z.string().max(65_536) }).optional(),
+  interactive: z.looseObject({
+    type: z.string().max(40),
+    list_reply: z.looseObject({ id: z.string().min(1).max(256) }).optional(),
+    button_reply: z.looseObject({ id: z.string().min(1).max(256) }).optional(),
+  }).optional(),
 });
 
 const statusSchema = z.looseObject({
@@ -52,6 +57,10 @@ export interface InboundMessage {
   type: string;
   /** Text body for type "text"; null for every other type. */
   text: string | null;
+  /** Meta's send time in Unix seconds; null when missing or not a number. */
+  timestamp: number | null;
+  /** The id of a tapped list row or reply button (type "interactive"); null otherwise. */
+  replyId: string | null;
 }
 
 /** An inbound message and the business number it was sent to. */
@@ -96,6 +105,10 @@ export function extractWebhook(payload: WhatsAppWebhook): ExtractedWebhook {
             fromUserId: message.from_user_id ?? null,
             type: message.type,
             text: message.type === "text" && message.text ? message.text.body : null,
+            timestamp: message.timestamp && /^\d{1,12}$/.test(message.timestamp) ? Number(message.timestamp) : null,
+            replyId: message.type === "interactive"
+              ? message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null
+              : null,
           },
         });
       }

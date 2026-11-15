@@ -4,6 +4,7 @@ import { test, expect, type Page, type Request } from "@playwright/test";
 import { resolveDirectUrl } from "../src/lib/env";
 import { storeUrl } from "./urls";
 import { generateTOTP } from "./totp";
+import { ADMIN_NAV } from "../src/app/admin/(shell)/admin-nav";
 
 const ADMIN_EMAIL = "admin@platform.test";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
@@ -765,32 +766,15 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Subscriptions", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger", "Courier settings", "AI and onboarding"];
+  const MENU = ADMIN_NAV.map((entry) => entry.label);
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
   });
 
   test("every admin page has the menu with the current page marked", async ({ page }) => {
-    const pages: Array<[string, string]> = [
-      ["/admin", "Home"],
-      ["/admin/stores", "Stores"],
-      ["/admin/stores/new", "Stores"],
-      ["/admin/billing/subscriptions", "Subscriptions"],
-      ["/admin/applications", "Applications"],
-      ["/admin/store-requests", "Store requests"],
-      ["/admin/catalog/products", "Products"],
-      ["/admin/catalog/review", "Catalog review"],
-      ["/admin/orders", "Refunds"],
-      ["/admin/orders/check", "Orders to check"],
-      ["/admin/couriers/incidents", "Courier incidents"],
-      ["/admin/support", "Messages"],
-      ["/admin/ai/conversations", "AI conversations"],
-      ["/admin/ai/eval-spend", "AI eval and spend"],
-      ["/admin/billing/ledger", "Fee ledger"],
-      ["/admin/settings/couriers", "Courier settings"],
-      ["/admin/settings/ai-onboarding", "AI and onboarding"],
-    ];
+    // Every menu entry, plus a nested page that keeps its section marked.
+    const pages: Array<[string, string]> = [...ADMIN_NAV.map((entry): [string, string] => [entry.href, entry.label]), ["/admin/stores/new", "Stores"]];
     for (const [path, current] of pages) {
       await page.goto(path);
       const menu = page.getByRole("navigation", { name: "Admin" });

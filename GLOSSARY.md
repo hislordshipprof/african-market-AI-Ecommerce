@@ -38,6 +38,20 @@ A plan a platform admin gives a store until a date, with a reason (for example, 
 A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted once the retention set by the platform admin (default 12 months) has passed since the decision.
 _Avoid_: Sign-up, lead, merchant application
 
+**Setup**:
+Where every new store starts, from an approved store application or the stores page. Its storefront shows "Opening soon", checkout is refused before any payment call, and the Store directory never lists it. Stores created before the go-live checklist stayed live.
+_Avoid_: Draft, pending, password page
+
+**Go-live checklist**:
+What a store in setup must finish before it goes live, shown on the store admin home and the platform admin's store page: payouts connected, hours and time zone set, pickup or a delivery option on, at least the go-live listing floor of active listings with a price (a platform setting, default 20), no placeholder weights on active listings, a plan chosen or a pilot store, and courier registration done or not needed (Starter). A test order is recommended after going live, never required.
+
+**Go live**:
+The store owner's button that moves a store from setup to live once every checklist item is done, with an audit row. A platform admin can go live for a store with items still open, only with a reason, which the audit row keeps.
+_Avoid_: Launch, publish
+
+**Suspended**:
+A store a platform admin took offline. Suspension is separate from going live and wins over everything: the storefront is offline, checkout is refused and the store cannot go live. Lifting it returns the store to where the suspension found it, setup or live.
+
 **Customer**:
 A person who buys from a store, whether or not they have an account.
 _Avoid_: Buyer, shopper, user
@@ -136,7 +150,7 @@ A pending owner report the Store copilot drafted and has not applied. Stock chan
 ## Assistants
 
 **Shopper assistant**:
-The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
+The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront, and on the store's own WhatsApp number (#559), where it replies only inside Meta's 24-hour window and checks out through a **WhatsApp checkout link**. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
 _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 
 **Choice chips**:
@@ -185,6 +199,9 @@ A Copilot alert asking the owner to confirm a listing whose confidence fell belo
 
 **Linked WhatsApp number**:
 The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
+**WhatsApp checkout link**:
+The link the Shopper assistant sends on WhatsApp when a customer is ready to check out. It opens the store's normal checkout with the cart the chat filled, works once and for 60 minutes, and places nothing: the customer pays on that page, as a guest or signed in. A used or expired link shows "This checkout link has expired".
 
 **WhatsApp order updates**:
 Order status messages a customer gets on WhatsApp from the Store WhatsApp number instead of SMS, after ticking "Get order updates on WhatsApp" at checkout (default off, offered only when the store's number is Live). Email is unchanged. If a WhatsApp message cannot go, that update goes by SMS once. Replying STOP turns them off for that store.

@@ -11,10 +11,18 @@ export interface ReplyButton {
   title: string;
 }
 
+/** One row of an interactive list (#559). The id comes back as the customer's tap. */
+export interface ListRow {
+  id: string;
+  title: string;
+  description?: string;
+}
+
 /** `to` is the recipient's number in E.164 or its wa_id (digits only). */
 export type OutboundMessage =
   | { type: "text"; to: string; body: string }
   | { type: "interactive"; to: string; body: string; buttons: ReplyButton[] }
+  | { type: "list"; to: string; body: string; button: string; rows: ListRow[] }
   | { type: "template"; to: string; name: string; language: string; components?: TemplateComponent[] }
   | {
       type: "media";
