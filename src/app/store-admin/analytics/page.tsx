@@ -235,11 +235,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       <main className="mx-auto max-w-5xl space-y-8 px-4 py-6">
         <RangePicker slug={store.slug} range={range} today={storeToday(store.timezone)} />
 
-<<<<<<< HEAD
-        <Section id="sales" title="Sales" note="Captured orders by the day they were placed. The card fee leaves out the customer's service fee. Net to store is after the card fee, the service fee, courier fees and refunds." csvHref={csv("sales")}>
-=======
         <Section id="sales" title="Sales" note="Captured orders by the day they were placed. Goods revenue leaves out the customer's service fee, tip and delivery fee. The card fee leaves out the customer's service fee. Net to store is after the card fee, the service fee, courier fees and refunds." csvHref={csv("sales")}>
->>>>>>> origin/main
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
             <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Net to store</p>
