@@ -75,6 +75,10 @@
       "synonyms": []
     },
     {
+      "name": "butter",
+      "synonyms": []
+    },
+    {
       "name": "cassava",
       "synonyms": []
     },
@@ -151,6 +155,10 @@
     },
     {
       "name": "hibiscus",
+      "synonyms": []
+    },
+    {
+      "name": "honey",
       "synonyms": []
     },
     {
@@ -2864,6 +2872,76 @@
         }
       ],
       "store": "A"
+    },
+    {
+      "key": "niter-kibbeh",
+      "masterProductId": "niter-kibbeh",
+      "priceCents": 2789,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "niter-kibbeh-pack",
+          "label": "5 lb",
+          "priceCents": 2789,
+          "weightG": 2268
+        }
+      ],
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "butter",
+          "fenugreek",
+          "ginger"
+        ],
+        "allergens": [
+          "milk"
+        ],
+        "dietary": [
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
+    },
+    {
+      "key": "honey-malab",
+      "masterProductId": "honey-malab",
+      "priceCents": 2826,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "honey-malab-pack",
+          "label": "5 lb",
+          "priceCents": 2826,
+          "weightG": 2268
+        }
+      ],
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "honey"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     }
   ]
 }

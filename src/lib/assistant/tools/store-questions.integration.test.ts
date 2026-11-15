@@ -11,6 +11,7 @@ import { setAddressProvider, fakeAddressBackend } from "../../address/provider";
 import { storeScoped } from "../../db";
 import { listStoreThreads } from "../../support/thread";
 import { assistantTools, type AssistantContext } from "./index";
+import { itemHandles } from "../handles";
 
 const hasDb = !!process.env.DATABASE_URL;
 const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -187,16 +188,21 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
     expect(seen).not.toContain(stockfish.variants[0].id);
     expect(seen).not.toContain(palmB.variants[0].id);
 
-    // Reordering adds those lines to this store's cart.
-    const reordered = await runner(inStoreA)("add_to_cart", { items: [{ variant_id: egusi.variants[0].id, qty: 2 }] });
+    // The model sees the line by handle and reorders with it into this store's cart.
+    const shownA = await itemHandles(storeA, inStoreA.conversationId)
+      .toModel(await runner(inStoreA)("get_order_status", {})) as { orders: Array<{ lines: Array<{ listingId: string; variantId: string }> }> };
+    const egusiHandle = shownA.orders[0].lines[0].variantId;
+    expect(egusiHandle).toMatch(/^v\d+$/);
+    expect(shownA.orders[0].lines[0].listingId).toMatch(/^i\d+$/);
+    const reordered = await runner(inStoreA)("add_to_cart", { items: [{ variant_id: egusiHandle, qty: 2 }] });
     expect(reordered, JSON.stringify(reordered)).toMatchObject({ ok: true, added: 2 });
 
     const inB = await runner(inStoreB)("get_order_status", {});
     expect(inB).toMatchObject({ ok: true, orders: [{ number: 2501, lines: [{ name: "Palm oil", variantId: palmB.variants[0].id }] }] });
     expect(JSON.stringify(inB)).not.toContain(egusi.variants[0].id);
-    // Store A's variant cannot reach store B's cart.
-    expect(await runner(inStoreB)("add_to_cart", { items: [{ variant_id: egusi.variants[0].id, qty: 1 }] }))
-      .toMatchObject({ ok: false, code: "variant_not_found" });
+    // Store A's variant cannot reach store B's cart: its handle is not one of that chat's.
+    expect(await runner(inStoreB)("add_to_cart", { items: [{ variant_id: egusiHandle, qty: 1 }] }))
+      .toMatchObject({ ok: false, code: "unknown_handle" });
     expect(JSON.stringify(await runner({ actorUserId: bob })("get_order_status", {}))).not.toContain(egusi.variants[0].id);
 
     // A line the store no longer sells says so, so a yes does not reorder it.

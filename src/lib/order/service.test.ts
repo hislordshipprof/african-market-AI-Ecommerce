@@ -1,16 +1,25 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+
+vi.mock("../inngest/notify", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../inngest/notify")>()),
+  scheduleCourierPacking: vi.fn(),
+  scheduleCourierCancel: vi.fn(),
+}));
 import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
-import { acceptOrder, autoCancelOrder, cancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
+import { fulfilledStatus } from "./constants";
+import { acceptOrder, autoCancelOrder, cancelOrder, completePickup, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
 import { recordAuthorizedOrder } from "../checkout/service";
 import { updateListing } from "../listing/service";
 import { confirmProposal } from "../copilot/confirm";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
+import { scheduleCourierCancel, scheduleCourierPacking } from "../inngest/notify";
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
+import { platformFeeLedger } from "../admin/fee-ledger-query";
 import { FakeStripeError, fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
@@ -241,7 +250,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     return order;
   }
 
-  async function pickingBelowMinimum() {
+  async function pickingBelowMinimum(fulfillment: "pickup" | "courier" = "pickup") {
     const num = ++orderSeq;
     const paymentIntentId = `pi_void_${num}_${Date.now()}`;
     const order = await storeScopedTransaction(storeId, async (tx) => {
@@ -251,7 +260,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
           number: num,
           customerId,
           status: "AUTHORIZED",
-          fulfillment: "pickup",
+          fulfillment,
           subtotalCents: 30,
           bufferCents: 10,
           tipCents: 0,
@@ -350,6 +359,46 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("PICKING");
     expect(updated!.readyAt).toBeNull();
+  });
+
+  it("#562: a courier order's first resolved line starts packing: the time is kept and the courier booked once", async () => {
+    vi.mocked(scheduleCourierPacking).mockClear();
+    const courier = await createTestOrder("AUTHORIZED", { fulfillment: "courier" });
+    await acceptOrder(storeId, courier.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: courier.id }, orderBy: { id: "asc" } });
+
+    await markLinePicked(storeId, lines[0].id);
+    const started = (await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: courier.id } })).pickingStartedAt;
+    expect(started).toBeInstanceOf(Date);
+    await markLinePicked(storeId, lines[1].id);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: courier.id } })).pickingStartedAt).toEqual(started);
+    expect(vi.mocked(scheduleCourierPacking).mock.calls).toEqual([[storeId, courier.id]]);
+
+    // A short first line starts packing too.
+    const short = await createTestOrder("AUTHORIZED", { fulfillment: "courier" });
+    await acceptOrder(storeId, short.id, 15);
+    const [first] = await storeScoped(storeId).orderLine.findMany({ where: { orderId: short.id }, orderBy: { id: "asc" } });
+    expect((await markLineShort(storeId, first.id, 0)).ok).toBe(true);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: short.id } })).pickingStartedAt).toBeInstanceOf(Date);
+    expect(vi.mocked(scheduleCourierPacking).mock.calls).toEqual([[storeId, courier.id], [storeId, short.id]]);
+
+    // A pickup order books no courier.
+    const pickup = await createTestOrder("AUTHORIZED");
+    await acceptOrder(storeId, pickup.id, 15);
+    const [pickupLine] = await storeScoped(storeId).orderLine.findMany({ where: { orderId: pickup.id } });
+    await markLinePicked(storeId, pickupLine.id);
+    expect(vi.mocked(scheduleCourierPacking)).toHaveBeenCalledTimes(2);
+  });
+
+  it("#562 AC4: an emptied courier order voided at Ready cancels its courier; a pickup order has none to cancel", async () => {
+    vi.mocked(scheduleCourierCancel).mockClear();
+    const courier = await pickingBelowMinimum("courier");
+    expect(await markReady(storeId, courier.id)).toMatchObject({ ok: true, voided: true });
+    expect(vi.mocked(scheduleCourierCancel).mock.calls).toEqual([[storeId, courier.id]]);
+
+    const pickup = await pickingBelowMinimum();
+    expect(await markReady(storeId, pickup.id)).toMatchObject({ ok: true, voided: true });
+    expect(vi.mocked(scheduleCourierCancel)).toHaveBeenCalledTimes(1);
   });
 
   it("markLinePicked rejects line from wrong status order", async () => {
@@ -1241,9 +1290,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "reconcile_capture" },
     });
     expect(logs.length).toBe(1);
-    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(3);
     await reconcileStuckOrder(storeId, order.id);
-    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(3);
   });
 
   it("K1: sweep finalizes CAPTURING order when Phase 3 DB failure (Stripe succeeded)", async () => {
@@ -1480,6 +1529,25 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "refund_failed" },
     });
     expect(alerts.length).toBe(1);
+  });
+
+  it("a capture found at cancel whose refund fails stays in the fee ledger as captured", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    setNextRefundStatus(order.paymentIntentId!, "failed");
+
+    expect((await reconcileStuckOrder(storeId, order.id)).ok).toBe(false);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated).toMatchObject({ status: "REFUND_FAILED", readyAt: null, cancelledAt: null, confirmedCaptureCents: 5000 });
+    const ledger = await platformFeeLedger(updated!.captureConfirmedAt!.toISOString().slice(0, 7));
+    expect(ledger.rows.filter((row) => row.id === order.id).map((row) => [row.kind, row.capturedCents, row.refundFailed])).toEqual([
+      ["capture", 5000, true],
+    ]);
   });
 
   it("Codex-1/C4: CANCELLING + Stripe succeeded but refund pending does not finalize CANCELLED", async () => {
@@ -3568,9 +3636,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       const result = await markReady(storeId, order.id);
       expect(result).toEqual({ ok: true, capturedAmountCents: 0, voided: true });
       expect(cancelledPayments.has(seeded)).toBe(true);
-      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(3);
       await markReady(storeId, order.id);
-      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(3);
     } finally {
       vi.unstubAllEnvs();
     }

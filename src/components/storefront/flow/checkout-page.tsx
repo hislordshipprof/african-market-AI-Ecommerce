@@ -18,9 +18,12 @@ import { cartItemKey } from "@/lib/storefront/cart-store";
 import { clearCart } from "@/lib/cart/actions";
 import {
   quoteCheckoutAction,
+  applyCouponAction,
+  removeCouponAction,
   createPaymentIntentAction,
   placeOrderAction,
   confirmAddressAction,
+  assistantCheckoutDraftAction,
 } from "@/lib/checkout/actions";
 import type {
   CheckoutInput,
@@ -44,6 +47,8 @@ import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
+import type { SlotOptions } from "@/lib/checkout/slots";
+import { CouponField } from "./coupon-field";
 import styles from "./cart-checkout.module.css";
 
 type Outcome =
@@ -59,6 +64,10 @@ interface StripeConfig {
   harness?: boolean;
   signedIn?: boolean;
   prefill?: CheckoutPrefill | null;
+  /** Pickup times drawn with the page, so they show before the first quote (#565). */
+  pickupSlots?: SlotOptions;
+  /** The store has a registered WhatsApp number, so checkout offers order updates there (#560). */
+  whatsappUpdates?: boolean;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -295,6 +304,7 @@ function RealCheckoutForm({
     () => prefill?.contact ?? { name: "", phone: "", email: "" },
   );
   const [saveCard, setSaveCard] = useState(false);
+  const [whatsappUpdates, setWhatsappUpdates] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(cardView.preselectedId);
   const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
@@ -312,11 +322,15 @@ function RealCheckoutForm({
   const [schedule, setSchedule] = useState(false);
   const [slot, setSlot] = useState("asap");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
+  // Server-computed times for the chosen fulfillment, in store time (#565).
+  const [slotOptions, setSlotOptions] = useState<SlotOptions | null>(stripeConfig.pickupSlots ?? null);
   const [quoteKey, setQuoteKey] = useState("");
   const [error, setError] = useState("");
   const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
+  // Bumped when the cart's code changes, so the quote is asked again (#557).
+  const [couponRev, setCouponRev] = useState(0);
   const metadata = lines.map((line) => ({
     line,
     item: catalog.find((item) => cartItemKey(item) === cartItemKey(line)),
@@ -326,7 +340,16 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
-  const delivery = fulfillment === "store-delivery" && confirmed
+  async function applyCoupon(code: string) {
+    const result = await applyCouponAction(code);
+    if (result.ok) setCouponRev((rev) => rev + 1);
+    return result;
+  }
+  async function removeCoupon() {
+    await removeCouponAction();
+    setCouponRev((rev) => rev + 1);
+  }
+  const delivery = fulfillment !== "pickup" && confirmed
     ? {
         line1: confirmed.line1,
         line2: line2 || null,
@@ -336,11 +359,11 @@ function RealCheckoutForm({
         leaveAtDoor: !frozen && leaveAtDoor,
       }
     : undefined;
-  const currentKey = JSON.stringify({ contact, fulfillment, delivery });
+  const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
-    if (confirmed || line1.trim().length < 3 || fulfillment !== "store-delivery") return;
+    if (confirmed || line1.trim().length < 3 || fulfillment === "pickup") return;
     const controller = new AbortController();
     suggestAbort.current = controller;
     const timer = setTimeout(() => {
@@ -366,7 +389,8 @@ function RealCheckoutForm({
         if (!active) return;
         if (result.ok) {
           setQuote(result.quote);
-          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery }));
+          setSlotOptions(result.slots);
+          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery, couponRev }));
         } else {
           setError(result.error);
         }
@@ -377,32 +401,49 @@ function RealCheckoutForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey]);
 
-  const [slots] = useState(() => {
-    const first = new Date();
-    first.setHours(10, 0, 0, 0);
-    if (first.getTime() <= Date.now()) first.setDate(first.getDate() + 1);
-    return Array.from({ length: 6 }, (_, i) => {
-      const date = new Date(first);
-      date.setDate(date.getDate() + i);
-      return {
-        value: date.toISOString(),
-        label: date.toLocaleString("en-US", {
-          weekday: "short", month: "short", day: "numeric", hour: "numeric",
-        }),
-      };
-    });
-  });
+  const slotRequired = slotOptions?.required === true;
+  const slots = (slotOptions?.slots ?? []).map((option) => ({ value: option.id, label: option.label }));
+  const scheduled = slotRequired || (schedule && fulfillment === "pickup");
+  // A choice the fresh list no longer offers falls back to its first time.
+  const chosenSlot = !scheduled
+    ? "asap"
+    : slots.some((option) => option.value === slot) ? slot : slots[0]?.value ?? "asap";
+
+  function takeFreshSlots(fresh: SlotOptions, message: string) {
+    setSlotOptions(fresh);
+    setSlot(fresh.slots[0]?.id ?? "asap");
+    setError(message);
+    setPayState("idle");
+  }
+
+  // The pickup time chosen with the assistant, in store time (#247). It never
+  // overrides a choice the shopper made on this page before it loaded.
+  const shopperChose = useRef(false);
+  function chosenByShopper<T>(set: (value: T) => void) {
+    return (value: T) => { shopperChose.current = true; set(value); };
+  }
+  useEffect(() => {
+    let active = true;
+    assistantCheckoutDraftAction().then((draft) => {
+      if (!active || !draft || !settings.pickupEnabled || shopperChose.current) return;
+      setFulfillment("pickup");
+      if (draft.slot.id === "asap") return;
+      setSchedule(true);
+      setSlot(draft.slot.id);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [settings.pickupEnabled]);
 
   async function pay(event: FormEvent) {
     event.preventDefault();
     setSubmitted(true);
     setError("");
     setErrorHref(null);
-    if (schedule && slot === "asap") {
-      setError("Choose a pickup time within the next six days.");
+    if (scheduled && chosenSlot === "asap") {
+      setError(fulfillment === "pickup" ? "Choose a pickup time." : "Choose a delivery time.");
       return;
     }
-    if (fulfillment === "store-delivery" && !delivery) {
+    if (fulfillment !== "pickup" && !delivery) {
       setError("Confirm your delivery address.");
       return;
     }
@@ -453,8 +494,20 @@ function RealCheckoutForm({
             }
           : undefined,
         delivery,
+        chosenSlot,
       );
       if (!piResult.ok) {
+        if (piResult.code === "quote_changed") {
+          setQuote(piResult.quote);
+          setQuoteKey(currentKey);
+          setError(piResult.error);
+          setPayState("idle");
+          return;
+        }
+        if (piResult.code === "slot_unavailable") {
+          takeFreshSlots(piResult.slots, piResult.error);
+          return;
+        }
         if (piResult.code === "basket_already_ordered") {
           setErrorHref("/account");
           setError(piResult.error);
@@ -509,14 +562,27 @@ function RealCheckoutForm({
         contact,
         fulfillment,
         notes,
-        schedule ? slot : "asap",
+        chosenSlot,
         delivery,
+        stripeConfig.whatsappUpdates ? whatsappUpdates : false,
       );
       if (!orderResult.ok) {
+        if (orderResult.code === "slot_unavailable") {
+          // The hold was released; Pay again holds a new one for the new time.
+          takeFreshSlots(orderResult.slots, orderResult.error);
+          return;
+        }
         setErrorHref(orderResult.code === "basket_already_ordered" ? "/account" : null);
         if (orderResult.code === "basket_changed" || orderResult.code === "basket_already_ordered") {
           setError(orderResult.error);
           setPayState("idle");
+          return;
+        }
+        if (orderResult.code === "coupon_refused") {
+          // The hold was released and the code taken off; the next quote shows the full price.
+          setError(orderResult.error);
+          setPayState("idle");
+          setCouponRev((rev) => rev + 1);
           return;
         }
         throw new Error(orderResult.error);
@@ -546,7 +612,7 @@ function RealCheckoutForm({
       lines={lines}
       subtotal={subtotal}
       fulfillment={fulfillment}
-      setFulfillment={setFulfillment}
+      setFulfillment={chosenByShopper(setFulfillment)}
       deliveryEditor={
         <StoreDeliveryFields
           line1={line1}
@@ -615,6 +681,7 @@ function RealCheckoutForm({
       }
       contact={contact}
       setContact={setContact}
+      whatsapp={stripeConfig.whatsappUpdates ? { checked: whatsappUpdates, onChange: setWhatsappUpdates } : undefined}
       address={undefined}
       setAddress={() => {}}
       query=""
@@ -627,16 +694,18 @@ function RealCheckoutForm({
       leaveAtDoor={false}
       setLeaveAtDoor={() => {}}
       schedule={schedule}
-      setSchedule={setSchedule}
-      slot={slot}
-      setSlot={setSlot}
+      setSchedule={chosenByShopper(setSchedule)}
+      slot={chosenSlot}
+      setSlot={chosenByShopper(setSlot)}
       slots={slots}
+      slotRequired={slotRequired}
       promo=""
       setPromo={() => {}}
       appliedPromo=""
       setAppliedPromo={() => {}}
       promoMessage=""
       setPromoMessage={() => {}}
+      coupon={{ apply: applyCoupon, remove: removeCoupon }}
       tipPercent={0}
       setTipPercent={() => {}}
       customTip=""
@@ -649,7 +718,7 @@ function RealCheckoutForm({
       payState={payState}
       frozen={frozen}
       weightG={weightG}
-      courierEligible={false}
+      courierEligible={settings.courierOffered}
       onSubmit={pay}
       signedIn={Boolean(stripeConfig.signedIn)}
       paymentSection={
@@ -824,6 +893,8 @@ interface CheckoutLayoutProps {
   setFulfillment: (f: Fulfillment) => void;
   contact: { name: string; phone: string; email: string };
   setContact: (c: { name: string; phone: string; email: string }) => void;
+  /** Present only when the store has a registered WhatsApp number (#560). */
+  whatsapp?: { checked: boolean; onChange: (checked: boolean) => void };
   address: FlowAddress | undefined;
   setAddress: (a: FlowAddress | undefined) => void;
   query: string;
@@ -840,12 +911,19 @@ interface CheckoutLayoutProps {
   slot: string;
   setSlot: (v: string) => void;
   slots: { value: string; label: string }[];
+  /** Store delivery with a schedule: no ASAP, the order takes a slot (#565). */
+  slotRequired?: boolean;
   promo: string;
   setPromo: (v: string) => void;
   appliedPromo: string;
   setAppliedPromo: (v: string) => void;
   promoMessage: string;
   setPromoMessage: (v: string) => void;
+  /** Real checkout: the cart's store coupon, put on and taken off on the server (#557). */
+  coupon?: {
+    apply: (code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    remove: () => Promise<void>;
+  };
   tipPercent: number | null;
   setTipPercent: (v: number | null) => void;
   customTip: string;
@@ -875,14 +953,19 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     contact, setContact, address, setAddress, query, setQuery,
     suggestions, setSuggestions, searching, notes, setNotes,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
-    slot, setSlot, slots, promo, setPromo,
-    setAppliedPromo, promoMessage, setPromoMessage,
+    slot, setSlot, slots, slotRequired = false, promo, setPromo,
+    setAppliedPromo, promoMessage, setPromoMessage, coupon,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
-    signedIn = false, identityLocked = false,
+    signedIn = false, identityLocked = false, whatsapp,
   } = props;
+
+  const courierReasons = (quote?.problems ?? [])
+    .filter((problem) => problem.code === "ineligible" || problem.code === "outside-radius")
+    .map((problem) => problem.message);
+  const courierQuoted = Boolean(quote?.courierProvider) && !quotePending;
 
   return (
     <div className={styles.page}>
@@ -930,6 +1013,18 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     Courier · {money(699)} demo quote
                   </Chip>
                 )}
+                {isRealPayment && courierEligible && (
+                  <Chip
+                    type="button"
+                    selected={fulfillment === "courier"}
+                    onClick={() => setFulfillment("courier")}
+                  >
+                    <Truck size={18} />
+                    {fulfillment === "courier" && courierQuoted && quote
+                      ? `Courier · ${money(quote.courierFeeCents)}`
+                      : "Courier"}
+                  </Chip>
+                )}
               </div>
               <p className={styles.muted}>
                 Order weight: {(weightG / 453.592).toFixed(1)} lb. Delivery
@@ -941,6 +1036,16 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   lb or less; frozen goods also require confirmed insulated
                   packaging. Choose pickup or store delivery.
                 </p>
+              )}
+              {isRealPayment && fulfillment === "courier" && (
+                courierQuoted && quote ? (
+                  <p className={styles.muted} role="status">
+                    Delivered by {quote.courierProvider === "Uber Direct" ? "Uber" : "DoorDash"}. You pay the
+                    courier&rsquo;s own quote, with no markup.
+                  </p>
+                ) : courierReasons.length > 0 ? (
+                  <p className={styles.error} role="status">{courierReasons.join(" ")}</p>
+                ) : null
               )}
               {frozen && (
                 <p className={styles.notice}>
@@ -1022,35 +1127,42 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </p>
               </div>
             )}
-            <div className={styles.options}>
-              <Chip
-                type="button"
-                selected={!schedule}
-                onClick={() => setSchedule(false)}
-              >
-                {settings.closed
-                  ? "When the store opens"
-                  : `ASAP · about ${settings.prepTimeMinutes} min`}
-              </Chip>
-              {fulfillment === "pickup" && (
+            {!slotRequired && (
+              <div className={styles.options}>
                 <Chip
                   type="button"
-                  selected={schedule}
-                  onClick={() => { setSchedule(true); setSlot(slots[0].value); }}
+                  selected={!schedule}
+                  onClick={() => setSchedule(false)}
                 >
-                  Schedule pickup
+                  {settings.closed
+                    ? "When the store opens"
+                    : `ASAP · about ${settings.prepTimeMinutes} min`}
                 </Chip>
-              )}
-            </div>
-            {schedule && fulfillment === "pickup" && (
+                {fulfillment === "pickup" && slots.length > 0 && (
+                  <Chip
+                    type="button"
+                    selected={schedule}
+                    onClick={() => { setSchedule(true); setSlot(slots[0].value); }}
+                  >
+                    Schedule pickup
+                  </Chip>
+                )}
+              </div>
+            )}
+            {slotRequired && slots.length === 0 && (
+              <p className={styles.error} role="status">
+                No delivery times are open right now. Choose pickup, or check back later.
+              </p>
+            )}
+            {((schedule && fulfillment === "pickup") || slotRequired) && slots.length > 0 && (
               <label className={styles.field}>
-                Pickup time
+                {fulfillment === "pickup" ? "Pickup time" : "Delivery time"}
                 <select value={slot} onChange={(e) => setSlot(e.target.value)}>
                   {slots.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-                <small>Pickup is available within the next six days.</small>
+                <small>Times are in the store&apos;s timezone.</small>
               </label>
             )}
             <label className={styles.field}>
@@ -1102,6 +1214,19 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     Enter a valid phone number with at least 10 digits.
                   </p>
                 )}
+              {whatsapp && (
+                <label className={styles.choice}>
+                  <input
+                    type="checkbox"
+                    checked={whatsapp.checked}
+                    onChange={(event) => whatsapp.onChange(event.target.checked)}
+                  />
+                  <span>
+                    Get order updates on WhatsApp
+                    <small>Instead of texts, from {settings.name}. Reply STOP to turn them off.</small>
+                  </span>
+                </label>
+              )}
               <label className={styles.field}>
                 Email (required)
                 <input
@@ -1180,7 +1305,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </li>
               ))}
             </ul>
-            {!isRealPayment && (
+            {coupon ? (
+              <CouponField
+                applied={quote?.coupon ?? null}
+                apply={coupon.apply}
+                remove={coupon.remove}
+                disabled={payState !== "idle"}
+              />
+            ) : (
               <>
                 <label className={styles.field}>
                   Promo code

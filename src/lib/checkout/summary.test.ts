@@ -63,6 +63,14 @@ describe("orderSummary", () => {
     expect(labels(view)).not.toContain("Store delivery");
   });
 
+  it("#557: shows the store coupon by its code right under the subtotal, before the fee charged on discounted goods", () => {
+    const view = orderSummary(quote({ discountCents: 1000, coupon: { code: "SAVE20", discountCents: 1000 } }), "pickup");
+    expect(view.lines.slice(0, 2)).toEqual([
+      { key: "subtotal", label: "Subtotal", cents: expect.any(Number) },
+      { key: "discount", label: "Promo SAVE20", cents: -1000 },
+    ]);
+  });
+
   it("still shows a tip the shopper chose on pickup", () => {
     const view = orderSummary(quote({ tipCents: 200 }), "pickup");
     expect(view.lines).toContainEqual({ key: "tip", label: "Tip", cents: 200 });

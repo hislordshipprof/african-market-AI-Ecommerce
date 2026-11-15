@@ -827,7 +827,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         message: MESSAGES.not_shown,
         notShown,
         ...(notShown.some((item) => "notInStore" in item)
-          ? { hint: "A notInStore variant_id is no product in this store. Copy it again, character by character, from the tool result that listed it, and do not write ids in the reply." }
+          ? { hint: "A notInStore variant_id is no product in this store. Use the handle a tool returned here for that item, and never write a handle in the reply." }
           : {}),
       });
     }

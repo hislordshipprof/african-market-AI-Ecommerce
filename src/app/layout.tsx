@@ -1,13 +1,16 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Figtree, Geist } from "next/font/google";
 import { headers } from "next/headers";
 import { findStoreForHeaders } from "@/lib/get-store";
 import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
+import { pwaMetadata, themeColor } from "@/lib/pwa/manifest";
+import { ServiceWorker } from "@/components/pwa/service-worker";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+// Nothing renders in Geist (globals.css maps font-sans to Figtree), so it must not cost a preload (#563).
+const geist = Geist({subsets:['latin'],variable:'--font-sans',preload:false});
 
 const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
@@ -22,8 +25,16 @@ const figtree = Figtree({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
+  const headerList = await headers();
+  if (headerList.get("x-platform-root") === "1") return { title: "Store directory · African Markets" };
+  const store = await findStoreForHeaders(headerList);
+  if (!store) return { title: "Store not found" };
+  return { title: store.name, ...pwaMetadata(store, "storefront") };
+}
+
+export async function generateViewport(): Promise<Viewport> {
   const store = await findStoreForHeaders(await headers());
-  return { title: store?.name ?? "Store not found" };
+  return store ? { themeColor: themeColor(store) } : {};
 }
 
 function themeToCss(vars: Record<string, string>): string {
@@ -66,6 +77,7 @@ export default async function RootLayout({
       <body>
         {children}
         <Toaster />
+        {store ? <ServiceWorker /> : null}
       </body>
     </html>
   );

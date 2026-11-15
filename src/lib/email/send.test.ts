@@ -159,6 +159,6 @@ describe("ResendSender", () => {
         subject: "Fail",
         html: "<p>Fail</p>",
       }),
-    ).rejects.toThrow(/Resend API error 500/);
+    ).rejects.toMatchObject({ status: 500, code: "http_500" });
   });
 });

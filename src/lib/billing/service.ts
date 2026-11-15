@@ -4,12 +4,15 @@ import {
   claimStripeBillingEvent,
   lockPilotOffer,
   lockStoreSubscriptionRow,
+  overrideEndWindow,
   platformAdmin,
   platformAdminTransaction,
+  readStorePlanRows,
   storeScoped,
+  storeScopedTransaction,
 } from "../db";
 import { sendEmail } from "../email/send";
-import { escapeHtml } from "../notifications/messages";
+import { escapeHtml } from "../format";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import type { WebhookEvent } from "../stripe/types";
 import { effectivePlan, type Plan } from "./plan";
@@ -39,9 +42,16 @@ function pilotTrialAvailable(row: { pilot: boolean; stripeSubscriptionId: string
 
 /** The store's own billing row, read under its RLS context. */
 export async function getStoreBilling(storeId: string) {
-  const row = await storeScoped(storeId).storeSubscription.findUnique({ where: { storeId } });
+  const [row, planRow] = await storeScopedTransaction(storeId, async (tx) => [
+    await tx.storeSubscription.findUnique({ where: { storeId } }),
+    (await readStorePlanRows(tx, [storeId]))[0],
+  ] as const);
   return {
-    plan: effectivePlan(row),
+    plan: effectivePlan(planRow),
+    /** A running platform override, for "Pro, courtesy of the platform team until …". */
+    override: planRow?.overridePlan && planRow.overrideEndsAt
+      ? { plan: planRow.overridePlan as Plan, endsAt: planRow.overrideEndsAt }
+      : null,
     chosenPlan: (row?.plan ?? "starter") as Plan,
     status: row?.status ?? "none",
     pilot: row?.pilot ?? false,
@@ -53,6 +63,47 @@ export async function getStoreBilling(storeId: string) {
     subscribed: hasLiveSubscription(row),
     pilotTrialAvailable: pilotTrialAvailable(row),
   };
+}
+
+/** An override ends on a date; at most a year out, so it is never open-ended in practice. */
+export const PLAN_OVERRIDE_MAX_DAYS = 366;
+
+/**
+ * Platform admin gives a store a plan until a date, with a reason (#547). Stripe is never called:
+ * the override drives the plan gate only. A new override replaces the running one. Writes an audit row.
+ * The date checks use the database clock, the same clock that ends the override.
+ */
+export async function setPlanOverride(
+  input: { storeId: string; plan: Plan; endsAt: Date; reason: string },
+  actor: Actor,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const reason = input.reason.trim();
+  if (!reason) return { ok: false, error: "Give a reason for the override." };
+  return platformAdminTransaction(async (tx) => {
+    const store = await tx.store.findUnique({ where: { id: input.storeId }, select: { id: true } });
+    if (!store) return { ok: false as const, error: "Store not found." };
+    const window = await overrideEndWindow(tx, input.endsAt, PLAN_OVERRIDE_MAX_DAYS);
+    if (!window.future) return { ok: false as const, error: "The end date must be in the future." };
+    if (!window.withinMax) return { ok: false as const, error: `An override can run for at most ${PLAN_OVERRIDE_MAX_DAYS} days.` };
+    const row = await lockedRow(tx, input.storeId);
+    await tx.storeSubscription.update({
+      where: { storeId: input.storeId },
+      data: { overridePlan: input.plan, overrideEndsAt: input.endsAt, overrideReason: reason },
+    });
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: actor.id,
+        actorEmail: actor.email,
+        action: "subscription.plan_override_set",
+        entityType: "store_subscription",
+        entityId: input.storeId,
+        before: { overridePlan: row.overridePlan, overrideEndsAt: row.overrideEndsAt?.toISOString() ?? null, overrideReason: row.overrideReason },
+        after: { overridePlan: input.plan, overrideEndsAt: input.endsAt.toISOString(), overrideReason: reason },
+      },
+    });
+    return { ok: true as const };
+  });
 }
 
 export function pilotTrialEnd(from: Date): Date {

@@ -1,16 +1,21 @@
-import { sendEmail } from "../email/send";
+import { providerSinkMode, sendEmail } from "../email/send";
 import { productionRuntime } from "../inngest/event-key";
 import { ProviderSendError } from "./provider-error";
 import { normalizeUsPhone } from "./phone";
-import { renderEmail, renderSms, type NotifyOrder, type RenderedMessage } from "./messages";
+import { pushSender } from "../push/sender";
+import { pushToOrder } from "../push/order-subscriptions";
+import { renderEmail, renderPush, renderSms, renderWhatsApp, type NotifyOrder, type RenderedMessage } from "./messages";
 import { smsSender, type SmsSender } from "./sms";
+import { getWhatsAppProvider } from "../whatsapp/index";
+import { whatsappErrorCode } from "../whatsapp/errors";
 import type { NotificationChannelKind } from "./channel-kinds";
-import type { OrderNotifyEvent } from "./record";
+import { WHATSAPP_EVENTS, type OrderNotifyEvent } from "./record";
 
-export type ChannelResult =
-  | { outcome: "sent"; providerMessageId: string }
+type NotSent =
   | { outcome: "skipped"; reason: string }
   | { outcome: "failed"; reason: string; retryable: boolean };
+
+export type ChannelResult = { outcome: "sent"; providerMessageId: string } | NotSent;
 
 export interface NotificationChannel {
   kind: NotificationChannelKind;
@@ -19,8 +24,12 @@ export interface NotificationChannel {
     event: OrderNotifyEvent,
     url: string,
     env: Record<string, string | undefined>,
-  ): ChannelResult | { outcome: "ready"; message: RenderedMessage };
-  send(message: RenderedMessage, options: { idempotencyKey: string }): Promise<ChannelResult>;
+  ): NotSent | { outcome: "ready"; message: RenderedMessage };
+  send(
+    message: RenderedMessage,
+    options: { idempotencyKey: string },
+    env: Record<string, string | undefined>,
+  ): Promise<ChannelResult>;
 }
 
 const logged = new Set<string>();
@@ -31,10 +40,6 @@ function logOnce(reason: string, orderId: string, channel: string): void {
   console.error(JSON.stringify({ event: reason, orderId, channel, reason }));
 }
 
-function sinkMode(env: Record<string, string | undefined>): boolean {
-  return env.NEXT_PHASE === "phase-production-build" || env.NODE_ENV === "test" || env.CI === "true";
-}
-
 function previewEnv(env: Record<string, string | undefined>): boolean {
   return env.VERCEL_ENV === "preview";
 }
@@ -43,7 +48,7 @@ function sandboxEmail(to: string): boolean {
   return to === "delivered@resend.dev" || /^delivered\+[^@]+@resend\.dev$/i.test(to);
 }
 
-function mapEmailError(err: unknown): ChannelResult {
+function mapEmailError(err: unknown): NotSent {
   if (err instanceof ProviderSendError) {
     if (err.code === "invalid_idempotent_request" || err.status === 409 && err.code === "invalid_idempotent_request") {
       return { outcome: "failed", reason: "idempotency_conflict", retryable: false };
@@ -62,27 +67,13 @@ function mapEmailError(err: unknown): ChannelResult {
     }
     return { outcome: "failed", reason: err.code || `resend_${err.status}`, retryable: false };
   }
-  if (err instanceof Error) {
-    const match = /^Resend API error (\d+): ([\s\S]*)$/.exec(err.message);
-    if (match) {
-      const status = Number(match[1]);
-      let name = "";
-      try {
-        const body = JSON.parse(match[2]) as { name?: string };
-        name = typeof body.name === "string" ? body.name : "";
-      } catch {
-        name = "";
-      }
-      return mapEmailError(new ProviderSendError(status, name || `http_${status}`));
-    }
-    if (err.name === "TimeoutError" || err.name === "AbortError") {
-      return { outcome: "failed", reason: "resend_timeout", retryable: true };
-    }
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+    return { outcome: "failed", reason: "resend_timeout", retryable: true };
   }
   return { outcome: "failed", reason: "provider_error", retryable: true };
 }
 
-function mapSmsError(err: unknown): ChannelResult {
+function mapSmsError(err: unknown): NotSent {
   if (!(err instanceof ProviderSendError)) {
     if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
       return { outcome: "failed", reason: "telnyx_timeout", retryable: true };
@@ -93,17 +84,19 @@ function mapSmsError(err: unknown): ChannelResult {
   if (err.code === "timeout" || err.code === "network") {
     return { outcome: "failed", reason: "telnyx_timeout", retryable: true };
   }
-  if (err.status === 409 || err.code === "10016" || err.code === "40006" || err.code === "40008") {
-    return { outcome: "failed", reason: err.code === "10016" ? "telnyx_10016" : `telnyx_${err.code}`, retryable: true };
+  if (err.status === 409 || err.status === 429 || err.code === "10016" || err.code === "40006" || err.code === "40008") {
+    return { outcome: "failed", reason: `telnyx_${err.code}`, retryable: true };
   }
-  if (err.status === 422) return { outcome: "failed", reason: "idempotency_conflict", retryable: false };
+  if (err.code === "idempotency_conflict") return { outcome: "failed", reason: "idempotency_conflict", retryable: false };
+  if (err.status === 422) return { outcome: "failed", reason: `telnyx_${err.code}`, retryable: false };
   if (err.status >= 500 || err.status === 0) {
     return { outcome: "failed", reason: "telnyx_5xx", retryable: true };
   }
   return { outcome: "failed", reason: err.code, retryable: false };
 }
 
-async function settle(result: ChannelResult): Promise<ChannelResult> {
+/** A retryable failure throws so the Inngest step retries; any other result is returned. */
+function throwIfRetryable(result: NotSent): NotSent {
   if (result.outcome === "failed" && result.retryable) {
     throw new Error(result.reason);
   }
@@ -119,11 +112,11 @@ export const emailChannel: NotificationChannel = {
       logOnce("preview_recipient", order.id, "email");
       return { outcome: "skipped", reason: "preview_recipient" };
     }
-    if (!sinkMode(env) && productionRuntime(env) && !env.RESEND_API_KEY) {
+    if (!providerSinkMode(env) && productionRuntime(env) && !env.RESEND_API_KEY) {
       logOnce("email_not_configured", order.id, "email");
       return { outcome: "failed", reason: "email_not_configured", retryable: false };
     }
-    if (!sinkMode(env) && productionRuntime(env) && !env.EMAIL_FROM) {
+    if (!providerSinkMode(env) && productionRuntime(env) && !env.EMAIL_FROM) {
       logOnce("email_from_missing", order.id, "email");
       return { outcome: "skipped", reason: "email_from_missing" };
     }
@@ -141,7 +134,7 @@ export const emailChannel: NotificationChannel = {
       });
       return { outcome: "sent", providerMessageId: sent.id };
     } catch (err) {
-      return settle(mapEmailError(err));
+      return throwIfRetryable(mapEmailError(err));
     }
   },
 };
@@ -165,8 +158,8 @@ export const smsChannel: NotificationChannel = {
       message: { ...rendered, to: phone.e164, from: env.TELNYX_FROM_NUMBER ?? "test-from" },
     };
   },
-  async send(message, options) {
-    const sender: SmsSender | null = smsSender();
+  async send(message, options, env) {
+    const sender: SmsSender | null = smsSender(env);
     if (!sender) return { outcome: "skipped", reason: "sms_not_configured" };
     try {
       const sent = await sender.send(
@@ -175,9 +168,61 @@ export const smsChannel: NotificationChannel = {
       );
       return { outcome: "sent", providerMessageId: sent.id };
     } catch (err) {
-      return settle(mapSmsError(err));
+      return throwIfRetryable(mapSmsError(err));
     }
   },
 };
 
-export const notificationChannels: NotificationChannel[] = [emailChannel, smsChannel];
+/**
+ * Order updates from the store's own number for an opted-in customer (#560).
+ * Never retried: the send endpoint has no idempotency key. Any result but
+ * `sent` leaves the event to SMS, once.
+ */
+export const whatsappChannel: NotificationChannel = {
+  kind: "whatsapp",
+  prepare(order, event, url, env) {
+    const whatsapp = order.whatsapp;
+    if (!whatsapp) return { outcome: "skipped", reason: "not_opted_in" };
+    if (event === "store_replied" || !WHATSAPP_EVENTS.has(event)) return { outcome: "skipped", reason: "not_whatsapp_event" };
+    const phone = normalizeUsPhone(order.customer.phone);
+    if (!phone.ok) return { outcome: "skipped", reason: phone.reason };
+    if (previewEnv(env)) {
+      logOnce("preview_recipient", order.id, "whatsapp");
+      return { outcome: "skipped", reason: "preview_recipient" };
+    }
+    if (whatsapp.optedOut) return { outcome: "skipped", reason: "opted_out" };
+    if (!whatsapp.sender) return { outcome: "skipped", reason: "store_number_unavailable" };
+    const rendered = renderWhatsApp(order, event, url, phone.e164, whatsapp.sender);
+    if (!rendered) return { outcome: "skipped", reason: "tracking_url_unavailable" };
+    return { outcome: "ready", message: rendered };
+  },
+  async send(message) {
+    if (!message.whatsapp) return { outcome: "failed", reason: "whatsapp_unrendered", retryable: false };
+    try {
+      const sent = await getWhatsAppProvider().send(message.whatsapp.message, message.whatsapp.sender);
+      return { outcome: "sent", providerMessageId: sent.messageId };
+    } catch (err) {
+      return { outcome: "failed", reason: `whatsapp_${whatsappErrorCode(err)}`, retryable: false };
+    }
+  },
+};
+
+/** Web push to the devices that opted in on the tracking page (#563). */
+export const pushChannel: NotificationChannel = {
+  kind: "push",
+  prepare(order, event, url, env) {
+    if (!pushSender(env)) return { outcome: "skipped", reason: "push_not_configured" };
+    return { outcome: "ready", message: renderPush(order, event, url) };
+  },
+  async send(message) {
+    if (!message.push) return { outcome: "skipped", reason: "no_subscription" };
+    const { storeId, orderId, message: payload } = message.push;
+    const result = await pushToOrder(storeId, orderId, payload);
+    if (result.sent > 0) return { outcome: "sent", providerMessageId: `push:${result.sent}` };
+    if (result.failed > 0) return throwIfRetryable({ outcome: "failed", reason: "push_failed", retryable: result.retryable });
+    return { outcome: "skipped", reason: "no_subscription" };
+  },
+};
+
+/** WhatsApp runs before SMS, so SMS can see whether it went (#560). Push runs last (#563). */
+export const notificationChannels: NotificationChannel[] = [emailChannel, whatsappChannel, smsChannel, pushChannel];

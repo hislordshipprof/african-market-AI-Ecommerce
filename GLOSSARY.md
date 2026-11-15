@@ -28,8 +28,15 @@ A person who works for a store and picks and hands off orders.
 _Avoid_: Picker (a picker is staff doing a pick, not a separate role)
 
 **Platform admin**:
-A member of our team who sets up stores and supports them.
+A member of our team who approves store applications, sets up stores and supports them.
 _Avoid_: Platform team (only the customer-facing label on a platform admin's support reply)
+
+**Plan override**:
+A plan a platform admin gives a store until a date, with a reason (for example, comped Pro). It decides the store's plan features while it runs, even over a Stripe downgrade, and never changes what Stripe bills. It always has an end date; after it, the store's Stripe plan applies again.
+
+**Store application**:
+A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted once the retention set by the platform admin (default 12 months) has passed since the decision.
+_Avoid_: Sign-up, lead, merchant application
 
 **Customer**:
 A person who buys from a store, whether or not they have an account.
@@ -53,13 +60,30 @@ A card the customer agreed to keep on their account, shown as brand and last fou
 _Avoid_: Wallet, payment profile
 
 **Store directory**:
-The public site listing stores by state and location, linking each to its storefront.
+The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there. Each store card shows open now or when it opens, pickup and delivery, the owner's face and story, and after a near me search the distance and whether the store delivers to you (its own radius only; a courier is only "may be available").
 _Avoid_: Marketplace, combined app
+
+**Directory listing**:
+A store's entry in the Store directory: the owner's "Listed in the directory" switch (off by default; a platform admin can override it), a blurb of at most 160 characters, and up to 3 cuisine tags from a fixed list. The street address is never part of it.
+_Avoid_: Profile, store page
+
+**Directory order**:
+An order placed within 30 days of the shopper arriving on the store's site from a Store directory link (`?ref=directory`, kept in a first-party cookie that says only "directory"). The order stores `acquisitionSource = 'directory'`; the owner's dashboard counts them.
+_Avoid_: Referral, marketplace order
+
+**Near me**:
+The Store directory search by ZIP code, city or the shopper's location (asked for only on a tap). It lists listed stores within 50 miles, nearest first, with their distance; with none that close it shows the nearest few, a Store request panel, and then the state list, which also answers a location outside the US. ZIPs and cities are looked up in Census Gazetteer tables seeded into Postgres.
+_Avoid_: Store locator, geo search
+
+**Store request**:
+A shopper's "tell me when a store opens near me" from the Store directory: a ZIP and an email or US mobile number, with consent. It gets one message when a listed store is within 50 miles of that ZIP, and its contact is then deleted. Platform admins see the requests by state and ZIP as onboarding leads.
+_Avoid_: Waitlist, lead form, store suggestion
 
 ## Catalog
 
 **Master product**:
-A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms.
+A canonical product shared across stores (e.g. "Egusi, ground"), with its local names and synonyms. Its status is active, needs review, rejected or archived. Only an active one matches a CSV row or a shelf photo, and an archived one is also left out of the store's product picker. Archiving replaces deleting: listings already on the product keep selling unchanged. Platform admins edit it under Products in the admin console; its ingredients, allergens and dietary claims change only through Catalog review.
+_Avoid_: Deleting a master product
 
 **Listing**:
 A store's offer of a product: its price, sizes and stock at that store.
@@ -103,17 +127,23 @@ Product attributes Claude read from a master product's label photo and descripti
 **Listing draft**:
 One product Claude read from a store's shelf photo, matched to the master catalog (one match, several for the owner to pick, none, or already listed). It becomes a listing only when the owner sets or checks its price and taps Publish. The shelf photo stays private and is never a product image.
 
+**Reorder list**:
+The owner's saved list of what to buy from a wholesaler, started from the copilot's reorder suggestions and edited by the owner. One draft per store; saving replaces it. It orders nothing and changes no stock.
+
 **Stock proposal**:
 A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
 
 ## Assistants
 
 **Shopper assistant**:
-The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: only the customer's tap on a **Confirm card** places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
+The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
 _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 
 **Choice chips**:
 The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
+
+**Item handle**:
+A short name such as `i3` (listing), `v12` (variant) or `c2` (cart line) that the Shopper assistant's tools show the model in place of a long id, and take back as input (#597). Each conversation keeps its own handles, so one never resolves in another conversation or store; an unknown handle is refused, never guessed.
 
 **Shopper constraint**:
 An allergen to avoid, a dietary claim that must hold, or an ingredient to avoid, taken from the customer's words and saved on the conversation (#485). The Shopper assistant checks them on Product attributes only, never by matching product names: search leaves out an excluded listing, and add and swap refuse one with the reason. A constraint is hard: it gates search, recipes, add and swap. An ingredient term that names only a form of a known Ingredient, such as fresh tomato, triggers the clarify rule; one close to no known Ingredient is not saved, and the assistant says once that it can't check it. While any is saved, the store's own swap is not used: a may-be-unavailable line with no backup that passes gets Exact item only, a refund, including lines already in the cart (owner, 2026-11-12). A budget and the items the customer has at home are saved on the same conversation but are not constraints (#476): a budget refuses only an add or a quantity raise that would take the item subtotal over it, and an item at home only leaves that ingredient out of a recipe; neither gates search or swap.
@@ -131,13 +161,14 @@ A listing whose attribute for a Shopper constraint is unknown. It is shown marke
 A customer message that starts, as a whole word, with yes, ok, okay, sure, go ahead, add those, or add what you suggested. On that turn the Shopper assistant adds a product only when the previous reply or the customer's own message named it.
 
 **Recipe base**:
-The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog.
+The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog. The #146 eval uses seeded dishes only and never looks one up (#607).
 
-**Confirm card**:
-The final card in the Shopper assistant's checkout, drawn by the server from a saved checkout snapshot: items, fulfillment, fees, hold amount and card. Tapping its Place order button is the only way an assistant order is placed.
+**Review card**:
+The last card in a Shopper assistant chat before paying, drawn by the server from the normal checkout quote: items, pickup time, fees, total and card hold. Its "Review and pay" button opens the normal checkout. It is information, not consent: it places nothing, and checkout shows the current basket (#247).
+_Avoid_: Confirm card (the parked 2026-11-04 design; replaced 2026-11-14)
 
 **Cancel window**:
-The 10 minutes after an assistant order is placed during which the customer can cancel it and the card hold is voided. The store is alerted when it ends.
+Not used. The assistant-only 10-minute cancel window was dropped on 2026-11-14 (#247), because assistant orders are placed by normal checkout.
 
 **Store copilot**:
 The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp.
@@ -152,13 +183,42 @@ A stock alert the Store copilot raises for the store owner: sold out, running lo
 **Confirm-request**:
 A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
 
+**Linked WhatsApp number**:
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
+**WhatsApp order updates**:
+Order status messages a customer gets on WhatsApp from the Store WhatsApp number instead of SMS, after ticking "Get order updates on WhatsApp" at checkout (default off, offered only when the store's number is Live). Email is unchanged. If a WhatsApp message cannot go, that update goes by SMS once. Replying STOP turns them off for that store.
+
+**Store WhatsApp number**:
+The store's own WhatsApp Business number, which customers message (ADR-0010). Linked by the owner or a platform admin through Meta's Embedded Signup (in test mode, ids typed into a form); "Live" once registered. By default the store keeps the WhatsApp Business app on it (coexistence). Not the Linked WhatsApp number, which is the owner's personal number.
+
+**Daily sample**:
+The AI conversations a platform admin reviews for one UTC day (#544): up to N random Shopper assistant chats and N random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. N is an AI and onboarding setting, 5 by default; 0 shows only auto-flagged chats. The same day always shows the same sample.
+
+**Auto-flag**:
+A reason the platform marks an AI chat for review without a person: the grounder removed an amount, a tool refused a made-up id, a constraint or Cannot confirm refusal, `forward_to_store`, or a turn over the cost threshold (an AI and onboarding setting, 2 cents by default). A shopper turn is marked when it is saved, so a later threshold change applies from the next turn; copilot chats and transcript views use the threshold in force when viewed.
+
+**Review label**:
+A platform admin's verdict on one AI chat: wrong item, wrong price, unsafe, tone or other, with an optional note. Stored in `ai_review_flags`, owned by the chat's store, and deleted with the chat or after 90 days.
+_Avoid_: Flag (on its own), rating
+
 ## Ordering and fulfillment
 
 **Order**:
 One customer's purchase from exactly one store.
 
+**Store coupon**:
+A code a store owner creates (#556) that takes a percent or a fixed amount off the goods of one order; the store funds it. A cart takes one code. The discount is never on tip or fees, is recomputed on the goods picked at capture, and is never removed by a short (#557). Shown to the shopper as "Promo CODE".
+_Avoid_: Voucher, promo (alone), discount code
+
+**Coupon use**:
+An order placed with a store coupon. It counts toward the code's total and per-customer limits until the order is cancelled.
+
 **Tracking link**:
 The unguessable link in every customer message that opens the order's tracking page without signing in.
+
+**Driver route**:
+One slot's Ready store-delivery orders handed to the store's own driver (#566). The driver gets an SMS with a route link that needs no login: stops in nearest-next order, Navigate, Out for delivery, and Delivered with a delivery proof photo. The link works until midnight at the end of the store day and the store can revoke it.
 
 **Support thread**:
 The one conversation about an order between its customer and the store, opened from the tracking link. A platform admin can join it.
@@ -197,6 +257,10 @@ The message asking a customer to approve a swap or a refund for a short line bef
 **Pick list**:
 The ordered list of lines staff collect for one or more orders, with frozen items last.
 
+**Batch**:
+2 to 4 Accepted orders of one store that staff pick together from one combined Pick list (#564). Each shared item is one line with its total and its split per order; each order has a tote letter (one bag per order), A for the oldest. Units found fill the oldest order first, so a Short lands on the newest. While an order is in a batch it is picked only from the batch; leaving the batch keeps what is picked. "Start packing" on the batch's packing screen starts packing every order and books the courier for courier orders (Ready time).
+_Avoid_: Wave (a warehouse term for many batches)
+
 **Ready**:
 The moment staff confirm every line is resolved and the order can be handed off. Marking it ready captures the final amount (goods picked, plus tip, plus delivery fee). Pickup orders then show Awaiting pickup. Delivery orders show Ready.
 
@@ -218,6 +282,10 @@ A platform admin recorded the amount they repaid outside the app. The order beco
 **RefundRequest**:
 One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
 
+**Fee ledger**:
+The platform admin's monthly report of what the platform keeps (#546), at `/admin/billing/ledger`, built from our order and refund rows, not from Stripe. Each captured order is a row: captured amount, service fee, courier fee passed through, the platform's card fee share, the application fee, and the platform net (service fee less the platform's card fee share). An order counts in the month its capture was confirmed; a cancel, refund or manual repayment never changes that row. A refund that returns fee is a negative row in the UTC month it succeeded, and a manual repayment is its own row in the month it was recorded. Months are UTC calendar months.
+_Avoid_: Commission report
+
 **Open request**:
 A RefundRequest that is still unanswered: reserved, unknown, or created at the provider but not yet succeeded, failed or canceled. Manual repayment waits until no request is open.
 
@@ -235,6 +303,10 @@ How a customer gets an order: store delivery, courier delivery, or pickup.
 
 **Store delivery**:
 Delivery done by the store's own driver, at a fee the store sets.
+
+**Slot**:
+A time window a customer books for pickup or store delivery, set by the store and shown in the store's timezone. Each slot takes a set number of orders; a cancelled order frees its place.
+_Avoid_: Time slot, Delivery window
 
 **Delivery radius**:
 The straight-line distance, in miles, from the store's confirmed coordinates. An address at exactly that distance is inside the area.
@@ -254,9 +326,24 @@ A 4-digit code the courier must get from the customer at the door. Required for 
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
 
+**Courier settings**:
+The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+
+**AI and onboarding settings**:
+The platform-wide numbers a platform admin sets at `/admin/settings/ai-onboarding` (#561): the go-live listing floor (1 to 200, default 20), the Daily sample size per store (0 to 20, default 5), the Auto-flag cost threshold (1 to 100 cents, default 2) and how long a rejected store application is kept (1 to 24 months, default 12). Out of range is refused, never clamped; every save writes an audit row, and the page shows who changed them last and when.
+
+**Assignment timeout**:
+How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.
+
+**Courier incident**:
+A courier order where something went wrong: failover, both couriers failed, the courier company cancelled, the order came back to the store or the return failed, a courier was assigned after the assignment timeout, or it was delivered with no proof. One per order. Listed for platform admins at `/admin/couriers/incidents`; worked out from the delivery events each time the page opens, never stored. Only an admin's notes, and whether it is resolved, are stored. A newer incident event reopens a resolved one.
+
 **Courier**:
 A driver from a courier company. Not a user of the platform.
 _Avoid_: Driver (reserve for the store's own driver)
+
+**Ready time**:
+When a courier order's bag will be packed. Set when packing starts (the first line picked or marked short, or "Start packing" on a Batch) from the item count and the store's recent packing pace, at least 10 and at most 45 minutes out; the courier is booked for it then. The store can push it once by 5 minutes ("5 more minutes").
 
 ## Relationships
 

@@ -12,6 +12,8 @@ import { getRecipeInput, parseToolInput } from "./schemas";
 export interface RecipeDeps {
   /** Model for the web lookup: the chat's own model, so its calls are metered like the chat's. */
   lookupModel?: LanguageModel;
+  /** False answers a dish missing from the base with recipe_not_found and never looks it up (the #146 eval, #607). */
+  onlineLookup?: boolean;
   now?: () => Date;
 }
 
@@ -68,6 +70,24 @@ async function searchFits(storeId: string, name: string, need: ShopperNeed | nul
   }] : []);
 }
 
+/**
+ * Search fits for one recipe ingredient. A seeded ingredient names its product, so another product fits only
+ * when its own name or a synonym is the ingredient: De Rica is "tomato paste", Honey beans are not "honey" (#607).
+ */
+async function ingredientFits(storeId: string, ingredient: RecipeRow["ingredients"][number], need: ShopperNeed | null = null): Promise<StoreItem[]> {
+  const fits = await searchFits(storeId, ingredient.name, need);
+  if (!ingredient.masterProductId || fits.length === 0) return fits;
+  const wanted = dishKey(ingredient.name);
+  const rows = await storeScoped(storeId).listing.findMany({
+    where: { id: { in: fits.map((item) => item.listingId) } },
+    select: { id: true, customName: true, masterProductId: true, masterProduct: { select: { name: true, synonyms: { select: { term: true } } } } },
+  });
+  const same = new Set(rows.filter((row) => row.masterProductId === ingredient.masterProductId
+    || [row.customName, row.masterProduct?.name, ...(row.masterProduct?.synonyms ?? []).map((synonym) => synonym.term)]
+      .some((term) => term != null && dishKey(term) === wanted)).map((row) => row.id));
+  return fits.filter((item) => same.has(item.listingId));
+}
+
 function scaledAmount(qty: number | null, unit: string | null, base: number | null, servings: number): string | undefined {
   if (qty == null || !base) return undefined;
   const scaled = Math.round((qty * servings * 100) / base) / 100;
@@ -88,7 +108,7 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
   const haveAtHome = recipe.ingredients.filter((ingredient) => atHome(ingredient.name)).map((ingredient) => ingredient.name);
   const found = await Promise.all(recipe.ingredients.filter((ingredient) => !atHome(ingredient.name)).map(async (ingredient) => ({
     ingredient,
-    fits: await searchFits(storeId, ingredient.name, need),
+    fits: await ingredientFits(storeId, ingredient, need),
     master: ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null,
   })));
   const items = found.flatMap((row) => [...row.fits, ...(row.master ? [row.master] : [])]);
@@ -106,7 +126,7 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
       ?? (master && status(master) === "unknown" ? master : undefined);
     if (!pick) {
       // Search left out excluded items, so only an unfiltered search tells excluded from not carried.
-      if (master || (need && (await searchFits(storeId, ingredient.name)).length > 0)) excluded.push(ingredient.name);
+      if (master || (need && (await ingredientFits(storeId, ingredient)).length > 0)) excluded.push(ingredient.name);
       else notCarried.push(ingredient.name);
       continue;
     }
@@ -168,6 +188,7 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
   let recipe = await findRecipe(parsed.dish);
   let lookedUp = false;
   if (!recipe) {
+    if (deps.onlineLookup === false) return notFound();
     const now = (deps.now ?? (() => new Date()))();
     if (!(await takeLookupSlot(ctx.storeId, now))) {
       return recordRead(ctx, "get_recipe", parsed, {

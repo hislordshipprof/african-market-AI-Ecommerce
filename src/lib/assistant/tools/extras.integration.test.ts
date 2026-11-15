@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { platformAdmin, storeScoped } from "../../db";
 import { readConstraints } from "../constraints";
-import { acceptanceForTurn, shownProductIds, type ShownMessage } from "../shown";
+import { acceptanceForTurn, shownProducts, type ShownMessage } from "../shown";
 import { addToCart, setShopperNeeds, setSwapRule, showProducts, suggestSubstitutes, updateCart, type AssistantContext } from "./execute";
 
 vi.mock("next/cache", () => ({
@@ -144,9 +144,9 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
     const lineId = (added as unknown as { lineId: string }).lineId;
     expect(await setSwapRule(ctx, { line_id: lineId, rule: "named_substitute", substitute_variant_id: listing.spinach.variantId })).toMatchObject({ ok: true });
 
-    // The suggested variant id is in the chat's copy table, like a search result's.
+    // The suggested variant is in the chat's shown table, like a search result's.
     const messages: ShownMessage[] = [{ role: "assistant", parts: [{ type: "tool-suggest_substitutes", state: "output-available", output: suggested }] }];
-    expect(shownProductIds(messages).join("\n")).toContain(listing.spinach.variantId);
+    expect(shownProducts(messages).map((row) => row.variantId)).toContain(listing.spinach.variantId);
   });
 
   it("treats a past order's lines like shown products, so yes reorders them", () => {
@@ -159,7 +159,7 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
       { role: "assistant", parts: [{ type: "tool-get_order_status", state: "output-available", output }, { type: "text", text: "Your last order had 2 Egusi. Add it again?" }] },
       { role: "user", id: "u2", parts: [{ type: "text", text: "yes" }] },
     ];
-    expect(shownProductIds(messages)).toEqual(["Egusi, 1 lb: variant-egusi"]);
+    expect(shownProducts(messages)).toEqual([{ item: "Egusi, 1 lb", variantId: "variant-egusi" }]);
     expect(acceptanceForTurn(messages, "u2", "yes").lastReplyListingIds).toEqual(["listing-egusi"]);
   });
 });

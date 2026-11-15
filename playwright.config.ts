@@ -49,6 +49,9 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${E2E_PORT}`,
     trace: "on-first-retry",
+    // The store service worker answers navigations, which page.route() would no longer see (#563).
+    // e2e/pwa.spec.ts allows it.
+    serviceWorkers: "block",
   },
   projects: [
     {

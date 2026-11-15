@@ -247,6 +247,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
             <dl className="grid grid-cols-2 gap-4 self-start lg:grid-cols-1">
               <Stat label="Goods revenue" value={money(t.goodsCents)} />
               <Stat label="Orders" value={count(t.orders)} detail={`Average ${money(t.averageOrderCents)}`} />
+              <Stat label="Promo discounts given" value={money(t.discountsCents)} detail="Funded by your store; goods are after it" />
               <Stat label="Refunds" value={money(t.refundsCents)} />
               <Stat label="Card fee" value={money(t.cardFeeCents)} detail={t.courierFeeCents > 0 ? `Courier fees ${money(t.courierFeeCents)}` : undefined} />
             </dl>

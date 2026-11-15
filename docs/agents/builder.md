@@ -39,7 +39,7 @@ Write the question in your report and end the run. Do not invent product decisio
 1. `pnpm build`
 2. `pnpm test:e2e` (seeds, starts server, runs tests — no manual server start needed)
 
-Stop any other server on your lane port (`E2E_PORT`, default 3000) before running `pnpm test:e2e`. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
+Use your own lane port (`E2E_PORT`), stop only the processes you started (by PID), and never `pkill` or `killall` by pattern: other lanes share this machine and a pattern kill can stop their servers or CI. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
 
 ## Verify before you claim done
 These five checks must pass on your pushed HEAD. You run 1 and 2 plus the affected parts of 3–5 (the pipeline's local-ci runs all five in full after each push; see below):
@@ -48,6 +48,8 @@ These five checks must pass on your pushed HEAD. You run 1 and 2 plus the affect
 3. `pnpm test` (unit + integration, including store-isolation tests)
 4. `pnpm build`
 5. `pnpm test:e2e`: Playwright opens the running app and checks each acceptance criterion that has a visible result.
+
+**Storefront home JS budget (#629).** After the build in the full suite, `scripts/ci-local.sh` runs `node scripts/js-budget.mjs`. It sums the gzipped first-load JS of the storefront home (`/`) from `.next/diagnostics/route-bundle-stats.json` and fails when it is over the budget, printing the size, the budget, every chunk that is new or bigger than the baseline kept next to the budget (largest first, with its delta; chunk names are content-hashed, so a changed chunk shows as new), and the five largest chunks. At 81a926cb the home measured 189,034 bytes (184.6 KiB); the budget is `budgetBytes` in `scripts/js-budget.json`, 193,000 bytes. #563 reached a 2.42 s mobile LCP against 2.5 s, and about 15 KB more crosses it again. `scripts/js-budget.json` also holds `baseline`, the first-load chunk list (path and gzipped bytes) of the last reviewed build. To raise the budget, run `pnpm build` then `node scripts/js-budget.mjs --update-baseline --budget <bytes>` (without `--budget` the budget is kept and only the baseline is rewritten) in its own reviewed commit, and say in the PR what grew and why it is worth it. Run it by hand after `pnpm build` with `node scripts/js-budget.mjs`. Tests: `bash scripts/js-budget.test.sh`.
 
 While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). Run `pnpm typecheck` and `pnpm lint` before each push. **Never run `scripts/ci-local.sh` or the whole suite yourself:** after each push, `scripts/build-ticket.sh` runs it once, in parallel with the independent review. It uses a machine-wide queue (up to two full suites at once, `CI_SLOTS`, each in its own slot), a private database and port, and retries only failed tests (never the whole suite). A run still queued when the review blocks is cancelled, since that commit will not merge. It runs steps 1–5 in full and records a `local-ci` commit status on the pushed HEAD; that status is the merge gate. A real failure comes back to you as a fix-round finding. GitHub Actions does not run on pushes. It runs only when the coordinator adds the `run-ci` label (milestone PRs), to save Actions minutes. Local e2e runs `E2E_WORKERS` browsers (default 4), so lanes sharing the machine don't starve memory.
 
@@ -64,9 +66,12 @@ While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts 
 - **No tests for UI-only changes (owner, 2026-11-07).** Moving, restyling or centering an element, changing a button, copy or layout: write no test and add no snapshot. Check it in the browser and run typecheck, lint and build. Nothing more.
 - **Never build tooling for a test (owner, 2026-11-07).** No stub binaries, compiled files, re-implemented shell tools, parsers or harnesses in the repo to make a test pass or run faster (#351 committed a Rust copy of grep/sed/cat for one slow test). A slow or flaky test is shrunk or deleted with the owner's say. Never spend a fix round on test timing; report it to the coordinator instead.
 - **Reviewers flag test waste.** A review treats a new test outside the list above, or tooling added for a test, as a finding to remove, not a gap to fill. Never ask for a test per edge case.
-- Test doubles enforce the provider's real rules (wrong account, amount above the authorization, already captured or cancelled, signature checks). A fake that accepts anything hides bugs. Each external path also has at least one test against the real sandbox when the keys are in `.env.local`.
+- Test doubles enforce the provider's real rules (wrong account, amount above the authorization, already captured or cancelled, signature checks). A fake that accepts anything hides bugs. Each external path also has at least one test against the real sandbox when the keys are in `.env.local`. Live sandbox tests (`src/lib/**/*sandbox*.test.ts`) run only with `LIVE_SANDBOX=1`: CI sets it in the first `scripts/ci-main.sh` run of each UTC day, never on a branch. Run them by hand with `LIVE_SANDBOX=1 npx vitest run <file>`. A provider's quota or rate-limit refusal (a 429) is skipped with a warning naming the provider, never passed or failed (`providerSandbox` in `src/lib/test-live-provider.ts`, #591).
 
 If something fails and you cannot fix it, report it as failing with the output. Never report a check you did not run.
+
+### Model lists in `src/lib/db.ts`
+Add a new model by adding one line, in its sorted (alphabetical) position, to the matching array in `src/lib/db.ts`: `CUSTOMER_SCOPED_TX_MODELS`, `PLATFORM_ADMIN_TX_MODELS` or `STORE_SCOPED_TX_MODELS` (what `customerScopedTransaction`, `platformAdminTransaction` and `storeScopedTransaction` hand to the callback), and `STORE_SCOPED_MODELS` (what `storeScoped()` wraps). The types and the callback objects are derived from these arrays; edit nothing else there. Never append at the end: two tickets that append conflict.
 
 ### No agent reviews its own work
 Don't run the code review on your own code. After you push, `scripts/build-ticket.sh` runs `scripts/review-ticket.sh`: a fresh session that never saw your reasoning reviews the diff, plus a second reviewer for money, auth and external-provider tickets. Its findings come back to you as a fix round. Reproduce each finding before changing code, and say so with evidence when one does not reproduce.
@@ -74,7 +79,7 @@ Don't run the code review on your own code. After you push, `scripts/build-ticke
 ## Finish
 1. Commit in small, meaningful commits. Add no AI attribution: no `Co-Authored-By:` trailer for any AI tool, no `Claude-Session:` link, no "Generated with" line (owner rule; `.githooks/commit-msg` strips them).
 2. Push the branch and open a PR: title = issue title; body = what changed, how each acceptance criterion is verified, anything deferred, `Closes #<n>`. No "Generated with" line or session link.
-3. Never push to `main` (a pre-push hook blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), and never close issues by hand. No agent stage merges, ship included. Only `scripts/merge-ticket.sh` merges, after the review gate and local-ci pass on the PR head.
+3. Never push to `main` (`.githooks/pre-push` blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), and never close issues by hand. No agent stage merges, ship included. Only `scripts/merge-ticket.sh` merges, after the review gate and local-ci pass on the PR head.
 4. Write `.builder/report-<n>.md` in the main checkout (the script tells you its path), and update it as you go so a killed run still leaves a record. It names the commit SHA checked, the QA and code-review verdict lines, every finding code with how it ended (fix commit, or follow-up issue), the PR URL, and open questions. Keep it under 50 lines.
 
 ### Migrations

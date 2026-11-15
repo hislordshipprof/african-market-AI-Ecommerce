@@ -2,26 +2,30 @@ import { afterAll, describe, expect, it } from "vitest";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { COURIER_BOTH_FAILED, selectAndDispatch, type CourierEvent } from "./dispatch";
+import { readCourierSettings } from "./courier-settings";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
+import { liveSandbox, providerSandbox } from "../test-live-provider";
 
 const hasKeys = Boolean(process.env.DATABASE_URL && process.env.UBER_DIRECT_CLIENT_ID && process.env.UBER_DIRECT_CLIENT_SECRET && process.env.UBER_DIRECT_CUSTOMER_ID);
 
+const sandbox = providerSandbox("Uber Direct");
+
 // Opt-in: a real Uber Direct sandbox quote through the selection; create is intercepted so nothing is ever booked.
-describe.skipIf(!hasKeys)("selectAndDispatch against the Uber Direct sandbox", () => {
+describe.skipIf(!liveSandbox || !hasKeys)("selectAndDispatch against the Uber Direct sandbox", () => {
   const raw = testPrismaClient();
   let storeId = "";
 
-  afterAll(async () => {
+  afterAll(sandbox.hook(async () => {
     if (storeId) {
       await storeScoped(storeId).order.deleteMany({});
       await storeScoped(storeId).customer.deleteMany({});
       await raw.store.deleteMany({ where: { id: storeId } });
     }
     await raw.$disconnect();
-  });
+  }));
 
-  it("takes the live Uber quote, skips DoorDash without keys, and books nothing", async () => {
+  it("takes the live Uber quote, skips DoorDash without keys, and books nothing", sandbox.test(async () => {
     const stamp = Date.now().toString(36);
     storeId = (await raw.store.create({ data: { slug: `dispatch-sandbox-${stamp}`, name: "Sandbox Probe Market", themePreset: "palm-and-shea", pickupEnabled: true } })).id;
     const customer = await storeScoped(storeId).customer.create({ data: { storeId, name: "Sandbox Buyer", email: `sandbox-${stamp}@example.com` } });
@@ -30,6 +34,9 @@ describe.skipIf(!hasKeys)("selectAndDispatch against the Uber Direct sandbox", (
     });
 
     const uber = new UberDirectProvider();
+    // selectAndDispatch turns a refused quote into a failed courier, so the refusal is watched here.
+    const quote = uber.quote.bind(uber);
+    uber.quote = (request) => sandbox.watch(quote(request));
     const booked: string[] = [];
     uber.create = async (quoteId) => {
       booked.push(quoteId);
@@ -47,12 +54,12 @@ describe.skipIf(!hasKeys)("selectAndDispatch against the Uber Direct sandbox", (
           tipCents: 0,
         },
       },
-      { providers: [new DoorDashDriveProvider({ env: {} }), uber], emit: async (e) => void events.push(e) },
+      { providers: [new DoorDashDriveProvider({ env: {} }), uber], emit: async (e) => void events.push(e), settings: () => readCourierSettings() },
     );
 
     expect(booked).toHaveLength(1);
     expect(booked[0]).toMatch(/^dqt_/);
     expect(result).toEqual({ ok: false, reason: "both_failed" });
     expect(events.at(-1)?.name).toBe(COURIER_BOTH_FAILED);
-  }, 30_000);
+  }), 30_000);
 });

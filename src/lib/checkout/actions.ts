@@ -1,6 +1,6 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../auth";
 import { getStore } from "../get-store";
@@ -15,14 +15,20 @@ import {
   SavedCardUnavailableError,
   BasketAlreadyOrderedError,
   BasketChangedError,
+  SlotUnavailableError,
   type DeliveryRequest,
 } from "./service";
+import { assertSlotOffered, slotOptions, type SlotOptions } from "./slots";
 import type { CheckoutQuote, Contact, Fulfillment } from "../customer-flow/contracts";
 import { parseInput } from "../security/parse-input";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { clientIp } from "../assistant/client-ip";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
-import { platform } from "../db";
+import { platform, storeScoped } from "../db";
+import { loadCheckoutDraft } from "../assistant/checkout-draft";
+import { applyCartCoupon, CouponRefusedError, removeCartCoupon, type ApplyCouponResult } from "../coupon/checkout";
+import type { PickupSlot } from "../order/pickup-slots";
+import { ATTRIBUTION_COOKIE, acquisitionSource } from "../directory/attribution";
 
 const contactSchema = z.strictObject({
   name: z.string().max(200),
@@ -50,7 +56,7 @@ function readDelivery(
   fulfillment: Fulfillment,
   delivery: unknown,
 ): DeliveryRequest | null | { error: string } {
-  if (fulfillment !== "store-delivery") return null;
+  if (fulfillment === "pickup") return null;
   const parsed = parseInput(deliverySchema, delivery);
   if (!parsed.ok) return { error: "We couldn't find that address" };
   return {
@@ -75,6 +81,13 @@ function readCheckout(
   return { ok: true, contact: parsedContact.data, fulfillment: parsedFulfillment.data };
 }
 
+/** The times checkout offers for this fulfillment, read fresh from the store row (#565). */
+async function checkoutSlotOptions(storeId: string, fulfillment: Fulfillment): Promise<SlotOptions> {
+  const store = await platform.store.findUnique({ where: { id: storeId } });
+  if (!store) return { required: false, slots: [] };
+  return slotOptions(storeScoped(storeId), storeId, store, fulfillment, new Date());
+}
+
 async function signedInUserId(): Promise<string | null> {
   const session = await auth.api.getSession({
     headers: await headers(),
@@ -83,24 +96,30 @@ async function signedInUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+// Quotes re-run on each contact edit, so the limit is generous; it backs up the coupon checks (#557).
+const QUOTE_PER_IP = 600;
+const QUOTE_WINDOW_MS = 60 * 60_000;
+
 export async function quoteCheckoutAction(
   contact: Contact,
   fulfillment: Fulfillment,
   delivery?: unknown,
 ): Promise<
-  | { ok: true; quote: CheckoutQuote; orderedToken?: string }
+  | { ok: true; quote: CheckoutQuote; slots: SlotOptions; orderedToken?: string }
   | { ok: false; error: string; code?: "basket_already_ordered" }
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
-  // A store-delivery visit with no confirmed address is still a quote: the fee
-  // stays visible and Pay can ask the shopper to confirm. Payment and placement
+  // A delivery visit with no confirmed address is still a quote: the fee or the
+  // reason stays visible and Pay can ask the shopper to confirm. Payment and placement
   // keep refusing that payload.
-  const request = input.fulfillment === "store-delivery" && delivery == null
+  const request = input.fulfillment !== "pickup" && delivery == null
     ? null
     : readDelivery(input.fulfillment, delivery);
   if (request && "error" in request) return { ok: false, error: request.error };
   try {
+    const limit = await takeRateLimit(`checkout-quote:ip:${clientIp(await headers())}`, QUOTE_PER_IP, QUOTE_WINDOW_MS);
+    if (!limit.ok) return { ok: false, error: "Too many requests. Please wait and try again." };
     const store = await getStore();
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
@@ -110,18 +129,22 @@ export async function quoteCheckoutAction(
     if (resume?.kind === "unproved") {
       return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
     }
-    const quote = await quoteCheckout(
-      store.id,
-      store.minimumOrderCents,
-      resolved.cartId,
-      input.contact,
-      input.fulfillment,
-      request,
-    );
+    const [quote, slots] = await Promise.all([
+      quoteCheckout(
+        store.id,
+        store.minimumOrderCents,
+        resolved.cartId,
+        input.contact,
+        input.fulfillment,
+        request,
+        { actorUserId },
+      ),
+      checkoutSlotOptions(store.id, input.fulfillment),
+    ]);
     if (resume?.kind === "order") {
-      return { ok: true, quote, orderedToken: resume.trackingToken ?? resume.token };
+      return { ok: true, quote, slots, orderedToken: resume.trackingToken ?? resume.token };
     }
-    return { ok: true, quote };
+    return { ok: true, quote, slots };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Quote failed" };
   }
@@ -132,10 +155,13 @@ export async function createPaymentIntentAction(
   fulfillment: Fulfillment,
   selection?: { saveCard?: boolean; savedCardId?: string | null; attemptToken?: string | null },
   delivery?: unknown,
+  slot?: unknown,
 ): Promise<
   | { ok: true; orderedToken: string }
   | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number; attemptToken?: string }
   | { ok: false; error: string; code?: "saved_card_unavailable" | "basket_already_ordered" | "RATE_LIMITED" }
+  | { ok: false; error: string; code: "quote_changed"; quote: CheckoutQuote }
+  | { ok: false; error: string; code: "slot_unavailable"; slots: SlotOptions }
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
@@ -144,6 +170,8 @@ export async function createPaymentIntentAction(
   const selectionParsed = parseInput(selectionSchema, selection);
   if (!selectionParsed.ok) return { ok: false, error: "Payment setup failed" };
   const chosen = selectionParsed.data;
+  const when = parseInput(z.string().max(80).optional(), slot);
+  if (!when.ok) return { ok: false, error: "Payment setup failed" };
   try {
     const store = await getStore();
     const gate = checkCheckoutReady(store.stripeOnboardingStatus);
@@ -176,15 +204,21 @@ export async function createPaymentIntentAction(
       input.contact,
       input.fulfillment,
       request,
+      { recheckCourier: input.fulfillment === "courier", actorUserId },
     );
     if (quote.problems.length) {
-      return { ok: false, error: quote.problems.map((p) => p.message).join(" ") };
+      const error = quote.problems.map((p) => p.message).join(" ");
+      // The new courier fee goes back to the page, so the shopper sees it before any hold (#527).
+      if (quote.problems.some((p) => p.code === "quote-changed")) return { ok: false, error, code: "quote_changed", quote };
+      return { ok: false, error };
     }
     if (quote.holdCents < 50) {
       return { ok: false, error: "Order total is too low" };
     }
     const fresh = await platform.store.findUnique({ where: { id: store.id } });
     if (!fresh) return { ok: false, error: "Payment setup failed" };
+    // No card is held for a time that is already gone; placeOrder reserves it under the store lock.
+    await assertSlotOffered(storeScoped(store.id), store.id, fresh, input.fulfillment, when.data ?? null, new Date());
     let snapshot: {
       line1: string;
       line2: string | null;
@@ -233,6 +267,9 @@ export async function createPaymentIntentAction(
     if (e instanceof SavedCardUnavailableError) {
       return { ok: false, error: e.message, code: "saved_card_unavailable" };
     }
+    if (e instanceof SlotUnavailableError) {
+      return { ok: false, error: e.message, code: e.code, slots: e.options };
+    }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Payment setup failed",
@@ -247,9 +284,11 @@ export async function placeOrderAction(
   notes: string,
   slot: string,
   delivery?: unknown,
+  whatsappUpdates?: unknown,
 ): Promise<
   | { ok: true; token: string }
-  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" }
+  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" | "coupon_refused" }
+  | { ok: false; error: string; code: "slot_unavailable"; slots: SlotOptions }
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
@@ -258,7 +297,8 @@ export async function placeOrderAction(
   const payment = parseInput(z.string().min(1).max(200), paymentIntentId);
   const note = parseInput(z.string().max(2000), notes);
   const when = parseInput(z.string().max(80), slot);
-  if (!payment.ok || !note.ok || !when.ok) return { ok: false, error: "Could not place order" };
+  const whatsapp = parseInput(z.boolean().optional(), whatsappUpdates);
+  if (!payment.ok || !note.ok || !when.ok || !whatsapp.ok) return { ok: false, error: "Could not place order" };
   try {
     const store = await getStore();
     const resolved = await resolveShopperCart();
@@ -274,20 +314,46 @@ export async function placeOrderAction(
       payment.data,
       resolved.userId,
       request?.leaveAtDoor ?? false,
+      whatsapp.data === true,
+      acquisitionSource((await cookies()).get(ATTRIBUTION_COOKIE)?.value),
     );
     return { ok: true, token: result.trackingToken ?? result.token };
   } catch (e) {
     if (e instanceof BasketAlreadyOrderedError) {
       return { ok: false, error: e.message, code: e.code };
     }
-    if (e instanceof BasketChangedError) {
+    if (e instanceof BasketChangedError || e instanceof CouponRefusedError) {
       return { ok: false, error: e.message, code: e.code };
+    }
+    if (e instanceof SlotUnavailableError) {
+      return { ok: false, error: e.message, code: e.code, slots: e.options };
     }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Could not place order",
     };
   }
+}
+
+/** Puts one store coupon code on the shopper's cart (#557). The next quote shows what it takes off. */
+export async function applyCouponAction(code: unknown): Promise<ApplyCouponResult> {
+  const parsed = parseInput(z.string().max(40), code);
+  if (!parsed.ok) return { ok: false, error: "That code isn't valid at this store." };
+  const store = await getStore();
+  const resolved = await resolveShopperCart();
+  if (!resolved) return { ok: false, error: "No cart found" };
+  return applyCartCoupon(store.id, resolved.cartId, parsed.data, {
+    ip: clientIp(await headers()),
+    userId: await signedInUserId(),
+  });
+}
+
+export async function removeCouponAction(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const store = await getStore();
+  const resolved = await resolveShopperCart();
+  if (!resolved) return { ok: false, error: "No cart found" };
+  await removeCartCoupon(store.id, resolved.cartId);
+  return { ok: true };
 }
 
 export async function confirmAddressAction(delivery: unknown): Promise<
@@ -335,5 +401,17 @@ export async function confirmAddressAction(delivery: unknown): Promise<
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "We couldn't check that address right now. Try again." };
+  }
+}
+
+/** The pickup slot the assistant saved for this cart (#247), if the store still offers it today. */
+export async function assistantCheckoutDraftAction(): Promise<{ slot: PickupSlot } | null> {
+  try {
+    const resolved = await resolveShopperCart();
+    if (!resolved) return null;
+    const draft = await loadCheckoutDraft(resolved.storeId, resolved.cartId);
+    return draft ? { slot: draft.slot } : null;
+  } catch {
+    return null;
   }
 }

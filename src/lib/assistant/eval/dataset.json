@@ -14,6 +14,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -57,6 +58,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -100,6 +102,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -143,6 +146,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -187,6 +191,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -230,6 +235,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -273,6 +279,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -316,6 +323,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -359,6 +367,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -403,6 +412,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -446,6 +456,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -489,6 +500,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -532,6 +544,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -575,6 +588,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -619,6 +633,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -662,6 +677,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -705,6 +721,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -748,6 +765,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -791,6 +809,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -835,6 +854,7 @@
       "gino-pepper-onion-paste"
     ],
     "dish": {
+      "name": "Jollof",
       "core": [
         {
           "label": "rice",
@@ -875,6 +895,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -918,6 +939,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -961,6 +983,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1004,6 +1027,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1048,6 +1072,7 @@
     "gaps": [],
     "addsFromTurn": 3,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1091,6 +1116,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1134,6 +1160,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1177,6 +1204,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1220,6 +1248,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1264,6 +1293,7 @@
     "gaps": [],
     "addsFromTurn": 3,
     "dish": {
+      "name": "Egusi soup",
       "core": [
         {
           "label": "egusi",
@@ -1307,6 +1337,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1337,6 +1368,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1367,6 +1399,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1397,6 +1430,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1428,6 +1462,7 @@
     "gaps": [],
     "addsFromTurn": 3,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1458,6 +1493,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1488,6 +1524,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1518,6 +1555,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1548,6 +1586,7 @@
     "gaps": [],
     "addsFromTurn": 2,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",
@@ -1579,6 +1618,7 @@
     "gaps": [],
     "addsFromTurn": 3,
     "dish": {
+      "name": "Ethiopian breakfast",
       "core": [
         {
           "label": "teff",

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
+import { DEFAULT_CHANNEL_KINDS, type NotificationChannelKind } from "./channel-kinds";
 
 export const ORDER_NOTIFY_EVENTS = [
   "placed",
@@ -16,6 +16,19 @@ export const ORDER_NOTIFY_EVENTS = [
 ] as const;
 export type OrderNotifyEvent = (typeof ORDER_NOTIFY_EVENTS)[number];
 
+/** The events an opted-in customer hears on WhatsApp instead of SMS (#560). A store reply stays on SMS. */
+export const WHATSAPP_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set<OrderNotifyEvent>([
+  "placed",
+  "accepted",
+  "ready",
+  "out_for_delivery",
+  "delivered",
+  "completed",
+  "cancelled",
+  "refunded",
+  "substitution",
+]);
+
 export function isOrderNotifyEvent(value: string): value is OrderNotifyEvent {
   return (ORDER_NOTIFY_EVENTS as readonly string[]).includes(value);
 }
@@ -28,6 +41,10 @@ export function newTrackingToken(): string {
 type TokenTx = {
   order: {
     updateMany: (args: Prisma.OrderUpdateManyArgs) => Promise<{ count: number }>;
+    findUnique: (args: {
+      where: { id: string };
+      select: { whatsappOptInAt: true };
+    }) => Promise<{ whatsappOptInAt: Date | null } | null>;
   };
   notificationLog: {
     createMany: (args: Prisma.NotificationLogCreateManyArgs) => Promise<{ count: number }>;
@@ -36,7 +53,8 @@ type TokenTx = {
 };
 
 /**
- * Inserts one pending row per channel kind. A second insert for the same
+ * Inserts one pending row per default channel kind, plus a whatsapp row when
+ * the customer opted in at checkout and the event goes to WhatsApp. A second insert for the same
  * order, event and channel is a no-op, including Cancelled then Refund failed
  * then Cancelled again. Returns whether any row was inserted.
  */
@@ -50,8 +68,13 @@ export async function recordOrderNotification(
     where: { id: orderId, trackingToken: null },
     data: { trackingToken: newTrackingToken() },
   });
+  const order = WHATSAPP_EVENTS.has(event)
+    ? await tx.order.findUnique({ where: { id: orderId }, select: { whatsappOptInAt: true } })
+    : null;
+  const channels: NotificationChannelKind[] = [...DEFAULT_CHANNEL_KINDS];
+  if (order?.whatsappOptInAt) channels.push("whatsapp");
   const inserted = await tx.notificationLog.createMany({
-    data: NOTIFICATION_CHANNEL_KINDS.map((channel) => ({
+    data: channels.map((channel) => ({
       storeId,
       orderId,
       event,

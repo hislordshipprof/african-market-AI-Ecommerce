@@ -56,7 +56,7 @@
   gap: 12px;
   padding: 14px 16px;
   border-radius: var(--radius-md);
-  background: var(--color-soft);
+  background: var(--color-raised);
   color: var(--color-ink);
   margin-bottom: 24px;
   font-size: 13px;
@@ -138,7 +138,7 @@
   height: 72px;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--color-soft);
+  background: var(--color-photo-well);
 }
 .flow-fee {
   display: flex;
@@ -197,7 +197,7 @@
   margin-top: 4px;
 }
 .flow-map {
-  background: var(--color-soft);
+  background: var(--color-raised);
   position: relative;
   min-height: 120px;
   height: 100%;
@@ -317,7 +317,7 @@
   gap: 12px;
   padding: 12px 16px;
   border-radius: var(--radius-md);
-  background: #15201a;
+  background: rgb(var(--sf-scrim, 8 10 9));
   color: #fff;
   font-size: 14px;
   box-shadow: 0 12px 32px #0003;

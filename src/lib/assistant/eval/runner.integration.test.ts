@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appUserQuery, platformAdmin, platformSessionUser, storeScoped } from "../../db";
+import { findRecipe } from "../recipes";
 import * as spend from "../spend";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-api-double";
 import { createEvalStores, deleteOwnedStores, sweepAbandonedEvalStores, writeLease, type CreatedEvalStores } from "./fixture-store";
@@ -13,6 +14,7 @@ import { fingerprintFromParts } from "./fingerprint";
 import { assessReport } from "./gate";
 import { runEval, type AttemptContext } from "./runner";
 import { storeContextMessage } from "../system-prompt";
+import { itemHandles } from "../handles";
 import { bindingFromFixture, scoreCase, type CatalogBinding } from "./score";
 import type { CatalogFixture, EvalCase, FixtureListing } from "./types";
 
@@ -80,6 +82,36 @@ async function scripted(ctx: AttemptContext, script: FakeAnthropicStep[] | ((ctx
   return fake.fetch;
 }
 
+/**
+ * Scripts name store A items by id, as if the model had seen them (#597). The conversation that sent the request gives each
+ * such id in a scripted reply a handle and the reply sends that; any other id stays as written and is refused.
+ */
+function withShownHandles(ctx: AttemptContext, inner: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    const response = await inner(input, init);
+    let text = await response.text();
+    const ids = [...ctx.binding.aListingIds, ...ctx.binding.aVariantIds].filter((id) => text.includes(id));
+    if (ids.length > 0) {
+      // Tool results come back as user messages too, so match the customer's words anywhere in the request.
+      const sent = typeof init?.body === "string" ? init.body : "";
+      const live = await storeScoped(ctx.stores.storeAId).aiConversation.findMany({
+        orderBy: { lastMessageAt: "desc" },
+        select: { id: true, messages: true },
+      });
+      const conversation = live.find((row) => (row.messages as Array<{ role: string; parts?: Array<{ text?: string }> }>)
+        .some((message) => message.role === "user" && message.parts?.some((part) => part.text && sent.includes(JSON.stringify(part.text).slice(1, -1)))));
+      if (!conversation) throw new Error("No conversation for this scripted reply.");
+      const handles = itemHandles(ctx.stores.storeAId, conversation.id);
+      for (const id of ids) {
+        const key = ctx.binding.aListingIds.has(id) ? "listingId" : "variantId";
+        const shown = await handles.toModel({ [key]: id }) as Record<string, string>;
+        text = text.replaceAll(id, shown[key]!);
+      }
+    }
+    return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
+  };
+}
+
 describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
   const leftover: CreatedEvalStores[] = [];
 
@@ -123,7 +155,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       priorTicketMicros: BigInt(0),
       ticketCapMicros: BigInt(4000000),
       full: false,
-      fetchForAttempt,
+      fetchForAttempt: async (ctx) => withShownHandles(ctx, await fetchForAttempt(ctx)),
       settleTimeoutMs: 8_000,
       stripTimeoutMs: 8_000,
       retryDelayMs: () => 0,
@@ -225,6 +257,32 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(await platformAdmin.store.count({ where: { slug: { in: [result.stores?.slugA ?? "", result.stores?.slugB ?? ""] } } })).toBe(0);
   }, 90_000);
 
+  it("never looks a dish up online: a dish missing from the recipe base comes back not found and is not saved", async () => {
+    const dish = `Unseeded stew ${randomInt(1_000_000)}`;
+    const fake = createFakeAnthropicFetch({
+      expectedKey: KEY,
+      steps: [
+        { kind: "tool", toolName: "get_recipe", toolInput: { dish, servings: 4 } },
+        { kind: "text", text: "I couldn't find that recipe. Tell me the ingredients and I'll find them." },
+      ],
+    });
+    const result = await run([evalCase({
+      id: "unseeded-dish",
+      category: "recipe-to-cart",
+      turns: [`${dish} for 4 people.`],
+      mustHave: [],
+      mayHave: [],
+      gaps: [],
+      dish: { name: dish, core: [{ label: "rice", options: ["rice"] }], askServings: false },
+    })], [listing("rice", "rice-parboiled-long-grain", "A", 1299), listing("yam", "yam-white-puna", "B", 899)], () => fake.fetch, { maxAttempts: 1 });
+    expect(result.result.cases.map((item) => item.id)).toEqual(["unseeded-dish"]);
+    const tools = fake.requests.flatMap((request) => (Array.isArray(request.body?.tools) ? request.body.tools : []));
+    expect(tools.some((tool) => (tool as { name?: unknown }).name === "web_search")).toBe(false);
+    expect(fake.requests).toHaveLength(2);
+    expect(JSON.stringify(fake.requests[1]?.body?.messages)).toContain("recipe_not_found");
+    expect(await findRecipe(dish)).toBeNull();
+  }, 60_000);
+
   it("reads evidence as app_runtime and denies another store read and write", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
     const result = await run([evalCase({
@@ -302,9 +360,9 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(fields.has("line_id")).toBe(true);
     expect(fields.has("substitute_variant_id")).toBe(true);
     expect(scored?.rejectedAttempts.some((item) => item.id === "schema-invalid-id")).toBe(true);
-    // Refused ids are rejected attempts; another store's id and a backup the tool silently dropped are harm.
-    expect(scored?.hallucinated.map((item) => item.crossStore ? "cross-store" : item.id).sort()).toEqual(["cross-store", "missing-backup"]);
-    expect(scored?.rejectedAttempts.map((item) => item.id).sort()).toEqual(["missing-line", "missing-listing", "missing-named", "missing-option", "missing-option-variant", "missing-sub", "schema-invalid-id"]);
+    // Refused ids are rejected attempts; another store's id is harm. An unknown backup handle refuses the whole add (#597).
+    expect(scored?.hallucinated.map((item) => item.crossStore ? "cross-store" : item.id).sort()).toEqual(["cross-store"]);
+    expect(scored?.rejectedAttempts.map((item) => item.id).sort()).toEqual(["missing-backup", "missing-line", "missing-listing", "missing-named", "missing-option", "missing-option-variant", "missing-sub", "schema-invalid-id"]);
     expect(scored?.pass).toBe(false);
     expect(invalidWasAudited).toBe(false);
   }, 90_000);
@@ -444,7 +502,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
         mayHave: [],
         gaps: [],
         addsFromTurn: 2,
-        dish: { core: [{ label: "rice", options: ["rice"] }], askServings: false },
+        dish: { name: "Jollof", core: [{ label: "rice", options: ["rice"] }], askServings: false },
       }),
       evalCase({
         id: "wrong-backup",

@@ -35,9 +35,11 @@ import {
   ASSISTANT_DISABLED_STATUS,
   assistantChatEnabled,
 } from "./contract";
+import { readAiOnboardingSettings, turnCostFlagMicros } from "../admin/ai-onboarding-settings";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
-import { acceptanceForTurn, shownProductIds } from "./shown";
+import { acceptanceForTurn, shownProducts } from "./shown";
+import { itemHandles, type ItemHandles } from "./handles";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
@@ -68,6 +70,8 @@ const RESTING_MESSAGE = "The helper is resting right now. You can still shop and
 export interface ChatHandlerOptions {
   model?: LanguageModel;
   now?: () => Date;
+  /** False never looks a dish up online; the #146 eval runs on the seeded recipe base only (#607). */
+  onlineRecipeLookup?: boolean;
   /** Test seam. Runs after the unlocked transcript read and before classification. */
   afterSnapshot?: (messages: UIMessage[]) => Promise<void>;
 }
@@ -239,7 +243,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
       acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
     };
-    const tools = assistantTools(turnCtx, { lookupModel: model });
+    const handles = itemHandles(store.id, turn.id);
+    const tools = assistantTools(turnCtx, { lookupModel: model, onlineLookup: options.onlineRecipeLookup }, handles);
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
       const current = withUser.find((message) => message.id === parsed.id);
@@ -247,6 +252,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     }
     const sentHistory = retryVisible(history, parsed.id, alreadyThere);
     let modelMessages: ModelMessage[];
+    let shown: string[];
     try {
       let attachmentIndex = 0;
       modelMessages = await convertToModelMessages(withoutReasoning(sentHistory), {
@@ -259,6 +265,9 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         },
       });
       if (prepared.length > 0) overlayCurrentFiles(modelMessages, sentHistory, parsed.id, scrubbed, prepared);
+      modelMessages = await handlesInToolCalls(modelMessages, handles);
+      shown = (await handles.toModel(shownProducts(sentHistory)) as ReturnType<typeof shownProducts>)
+        .map((row) => `${row.item}: ${row.variantId}`);
     } catch {
       console.error("[assistant] message could not be prepared", turn.id);
       await releaseLease(store.id, turn.id);
@@ -273,7 +282,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
           content: ASSISTANT_STATIC_PROMPT,
           providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
         },
-        { role: "system", content: storeContextMessage(store, at, shownProductIds(sentHistory)) },
+        { role: "system", content: storeContextMessage(store, at, shown) },
         ...modelMessages,
       ],
       allowSystemInMessages: true,
@@ -329,6 +338,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         await persistTurn({
           storeId: store.id,
           conversationId: turn.id,
+          turnId: parsed.id,
           messages,
           result,
           modelId,
@@ -358,7 +368,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         while (true) {
           const next = await reader.read();
           if (next.done) break;
-          const outgoing = scrubOutboundChunk(next.value);
+          const outgoing = await idsInToolInput(scrubOutboundChunk(next.value), handles);
           if (!outgoing) continue;
           takeReply(outgoing);
           writer.write(outgoing as typeof next.value);
@@ -420,6 +430,7 @@ async function turnFinishedNormally(result: { finishReason: PromiseLike<string> 
 async function persistTurn(args: {
   storeId: string;
   conversationId: string;
+  turnId: string;
   messages: UIMessage[];
   result: { steps: PromiseLike<Array<{ usage: unknown }>> };
   modelId: ReturnType<typeof assistantModelId>;
@@ -457,6 +468,26 @@ async function persistTurn(args: {
   } catch (error) {
     console.error("[assistant] transcript not saved", args.conversationId, error);
     await releaseLease(args.storeId, args.conversationId);
+    return;
+  }
+  // AI oversight (#544) flags a costly turn for platform review; the threshold is a platform setting (#561).
+  const threshold = await readAiOnboardingSettings().then(turnCostFlagMicros, (error: unknown) => {
+    console.error("[assistant] cost threshold not read", args.conversationId, error);
+    return null;
+  });
+  if (threshold !== null && cost > BigInt(threshold)) {
+    await storeScoped(args.storeId).aiAction.create({
+      data: {
+        storeId: args.storeId,
+        conversationId: args.conversationId,
+        tool: "turn_cost",
+        input: {},
+        output: { costMicros: Number(cost), turn: args.turnId },
+        ok: true,
+      },
+    }).catch((error: unknown) => {
+      console.error("[assistant] turn cost not saved", args.conversationId, error);
+    });
   }
 }
 
@@ -607,6 +638,25 @@ function completedAssistant(messages: UIMessage[], clientId: string): UIMessage 
   const assistant = span.find((message) => message.role === "assistant");
   if (assistant && replyStatus(assistant) === "complete") return assistant;
   return null;
+}
+
+/** History keeps ids, as the tools and the customer's screen use them; the model sees their handles. */
+async function handlesInToolCalls(messages: ModelMessage[], handles: ItemHandles): Promise<ModelMessage[]> {
+  return Promise.all(messages.map(async (message) => {
+    if (message.role !== "assistant" || typeof message.content === "string") return message;
+    const content = await Promise.all(message.content.map(async (part) => (
+      part.type === "tool-call" ? { ...part, input: await handles.toModel(part.input) } : part
+    )));
+    return { ...message, content } as ModelMessage;
+  }));
+}
+
+/** The model's tool input names handles; the stream and the saved transcript keep ids, also for a call the schema refused. */
+async function idsInToolInput(value: unknown, handles: ItemHandles): Promise<unknown> {
+  if (!value || typeof value !== "object") return value;
+  const part = value as { type?: string; input?: unknown };
+  if (part.type !== "tool-input-available" && part.type !== "tool-input-error") return value;
+  return { ...part, input: await handles.toIds(part.input) };
 }
 
 function scrubOutboundChunk(value: unknown): unknown {

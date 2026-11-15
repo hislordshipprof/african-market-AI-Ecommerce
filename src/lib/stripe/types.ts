@@ -91,6 +91,24 @@ export interface RefundResult {
   orderId?: string;
 }
 
+/** A payout to a store's bank (#548). `arrivalDate` is Unix seconds. */
+export interface Payout {
+  id: string;
+  amountCents: number;
+  arrivalDate: number;
+  status: string;
+}
+
+/** One balance transaction in a payout, traced back to the platform PaymentIntent when it has one. */
+export interface PayoutTransaction {
+  id: string;
+  type: string;
+  amountCents: number;
+  feeCents: number;
+  netCents: number;
+  paymentIntentId: string | null;
+}
+
 export interface StripeProvider {
   createConnectAccount(input: {
     email: string;
@@ -116,6 +134,8 @@ export interface StripeProvider {
     amountCents: number,
     idempotencyKey?: string,
     applicationFeeAmount?: number,
+    /** Sent with the capture; carries `coupon_id` for a coupon order (#557). */
+    metadata?: Record<string, string>,
   ): Promise<CaptureResult>;
 
   cancelPaymentIntent(
@@ -150,6 +170,18 @@ export interface StripeProvider {
   retrieveRefund(
     refundId: string,
   ): Promise<RefundResult>;
+
+  /** The connected account's latest payouts, newest first. */
+  listPayouts(accountId: string, limit: number): Promise<Payout[]>;
+
+  /** Throws a 404 error when the payout is not the account's. */
+  retrievePayout(accountId: string, payoutId: string): Promise<Payout>;
+
+  /** The payout's balance transactions, without the payout's own. */
+  listPayoutTransactions(accountId: string, payoutId: string): Promise<PayoutTransaction[]>;
+
+  /** A single-use Express Dashboard login link. Never store, log or send it. */
+  createLoginLink(accountId: string): Promise<{ url: string }>;
 }
 
 export class ProviderStateError extends Error {

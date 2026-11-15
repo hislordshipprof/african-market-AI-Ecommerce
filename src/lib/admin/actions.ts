@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidateStore } from "../get-store";
-import { platformAdmin, platformAdminTransaction, lockStoreAddress } from "../db";
+import { platformAdmin, platformAdminTransaction, lockStoreAddress, readStorePlanRows } from "../db";
 import { requirePlatformAdmin } from "./session";
+import { addressStamp, coordinatesForStore, insertStore } from "./store-create";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
 import { isSlugRoutable } from "../slug";
 import type { ThemePreset } from "../theme";
@@ -11,12 +12,16 @@ import { z } from "zod";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
-import { getAddressProvider } from "../address/provider";
-import { setPilot } from "../billing/service";
+import { setPilot, setPlanOverride } from "../billing/service";
+import { effectivePlan } from "../billing/plan";
+import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
+import { queueStoreRequestNotices } from "../directory/store-requests";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { VALID_US_TIMEZONES } from "./timezone";
+import { SLOT_FIELD_NAMES, readSlotForm } from "./slot-form";
+import type { SlotSchedule } from "../order/slot-schedule";
 
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const MAX_CENTS = 2_147_483_647;
@@ -54,7 +59,7 @@ function formText(data: unknown, key: string): string | null {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "storeDeliveryFee", "storeDeliveryEnabled"]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "phone", "storeDeliveryFee", "storeDeliveryEnabled", "listed", ...SLOT_FIELD_NAMES]) {
     const v = formText(data, key);
     if (v != null) raw[key] = v;
   }
@@ -83,8 +88,11 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     city: string | null;
     state: string | null;
     zip: string | null;
+    phone: string | null;
     storeDeliveryEnabled: boolean;
     storeDeliveryFeeCents: number;
+    pickupSlotSettings: SlotSchedule | null;
+    storeDeliverySlotSettings: SlotSchedule | null;
   };
 } {
   const errors: Record<string, string> = {};
@@ -112,6 +120,13 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
   const city = formText(data, "city")?.trim() || null;
   const state = formText(data, "state")?.trim().toUpperCase() || null;
   const zip = formText(data, "zip")?.trim() || null;
+  const phoneRaw = formText(data, "phone")?.trim() || null;
+  const phoneDigits = phoneRaw?.replace(/\D/g, "") ?? "";
+  // Couriers take E.164 (Uber Direct needs a pickup phone to book, #527).
+  const phone = !phoneRaw ? null
+    : phoneDigits.length === 10 ? `+1${phoneDigits}`
+    : phoneDigits.length === 11 && phoneDigits.startsWith("1") ? `+${phoneDigits}`
+    : null;
   const storeDeliveryEnabled = formText(data, "storeDeliveryEnabled") === "on";
   const storeDeliveryFeeCents = Math.round(parseFloatOrDefault(formText(data, "storeDeliveryFee"), 0) * 100);
 
@@ -155,8 +170,9 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     errors.themePreset = "Invalid theme preset";
   }
 
-  if (!["active", "suspended"].includes(status)) {
-    errors.status = "Status must be active or suspended";
+  // `setup` is where an approved store application starts (#554); saving the form keeps it there.
+  if (!["active", "suspended", "setup"].includes(status)) {
+    errors.status = "Status must be active, suspended or setup";
   }
 
   if (!Number.isFinite(prepTimeMinutes) || prepTimeMinutes < 0 || prepTimeMinutes > 480) {
@@ -189,6 +205,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
 
   if (state && !/^[A-Z]{2}$/.test(state)) errors.state = "State must be a 2-letter code";
   if (zip && !/^\d{5}$/.test(zip)) errors.zip = "ZIP must be 5 digits";
+  if (phoneRaw && !phone) errors.phone = "Phone must be a 10-digit US number";
   if (!Number.isFinite(storeDeliveryFeeCents) || storeDeliveryFeeCents < 0 || storeDeliveryFeeCents > 10_000) {
     errors.storeDeliveryFee = "Delivery fee must be $0–$100";
   }
@@ -198,6 +215,11 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     }
     if (deliveryRadiusMi <= 0) errors.deliveryRadiusMi = "Delivery radius must be greater than 0";
   }
+
+  const read = (key: string) => formText(data, key);
+  const pickupSlots = readSlotForm(read, "pickupSlots");
+  const deliverySlots = readSlotForm(read, "deliverySlots");
+  Object.assign(errors, pickupSlots.errors, deliverySlots.errors);
 
   let hours: unknown = null;
   if (hoursRaw) {
@@ -230,8 +252,11 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
       city,
       state,
       zip,
+      phone,
       storeDeliveryEnabled,
       storeDeliveryFeeCents,
+      pickupSlotSettings: pickupSlots.schedule,
+      storeDeliverySlotSettings: deliverySlots.schedule,
     },
   };
 }
@@ -240,9 +265,10 @@ const STORE_FORM_FIELDS = [
   "slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours",
   "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes",
   "pickupEnabled", "timezone", "storeId",
-  "addressLine1", "addressLine2", "city", "state", "zip",
-  "storeDeliveryFee", "storeDeliveryEnabled",
-] as const;
+  "addressLine1", "addressLine2", "city", "state", "zip", "phone",
+  "storeDeliveryFee", "storeDeliveryEnabled", "listed",
+  ...SLOT_FIELD_NAMES,
+];
 const storeFormSchema = z.strictObject({
   slug: z.string().max(80).nullable(),
   name: z.string().max(200).nullable(),
@@ -264,71 +290,21 @@ const storeFormSchema = z.strictObject({
   city: z.string().max(80).nullable(),
   state: z.string().max(8).nullable(),
   zip: z.string().max(12).nullable(),
+  phone: z.string().max(40).nullable(),
   storeDeliveryFee: z.string().max(20).nullable(),
   storeDeliveryEnabled: z.string().max(10).nullable(),
+  listed: z.string().max(10).nullable(),
+  ...Object.fromEntries(SLOT_FIELD_NAMES.map((name) => [name, z.string().max(400).nullable()])),
 });
 
 function boundStoreForm(data: FormData): boolean {
   return parseInput(storeFormSchema, readFormFields(data, STORE_FORM_FIELDS)).ok;
 }
 
-function addressStamp(row: {
-  addressLine1: string | null;
-  addressLine2: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
-}): string {
-  return [row.addressLine1, row.addressLine2, row.city, row.state, row.zip]
-    .map((part) => (part ?? "").trim().toLowerCase())
-    .join("|");
-}
-
 class StoreAddressChanged extends Error {
   constructor() {
     super("STORE_ADDRESS_CHANGED");
   }
-}
-
-async function coordinatesForStore(
-  values: {
-    addressLine1: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    addressLine2: string | null;
-    storeDeliveryEnabled: boolean;
-  },
-  previous: {
-    addressLine1: string | null;
-    addressLine2: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    lat: number | null;
-    lng: number | null;
-  } | null,
-): Promise<{ lat: number | null; lng: number | null } | { error: string }> {
-  if (
-    previous &&
-    previous.lat != null &&
-    previous.lng != null &&
-    addressStamp(values) === addressStamp(previous)
-  ) {
-    return { lat: previous.lat, lng: previous.lng };
-  }
-  if (!values.addressLine1) return { lat: null, lng: null };
-  const located = await getAddressProvider().locate({
-    line1: values.addressLine1,
-    city: values.city ?? "",
-    state: values.state ?? "",
-    zip: values.zip ?? "",
-  });
-  if (!located.ok) {
-    if (values.storeDeliveryEnabled) return { error: "We couldn't confirm that address" };
-    return { lat: null, lng: null };
-  }
-  return { lat: located.match.lat, lng: located.match.lng };
 }
 
 function deliveryAudit(row: {
@@ -353,6 +329,20 @@ function deliveryAudit(row: {
     storeDeliveryEnabled: row.storeDeliveryEnabled,
     storeDeliveryFeeCents: row.storeDeliveryFeeCents,
   };
+}
+
+/** Spec §6.1 step 5, run when the platform admin saves a store with its full address. */
+async function queueCourierRegistration(store: {
+  id: string;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  uberLocationId: string | null;
+  doordashStoreId: string | null;
+}): Promise<void> {
+  if (!hasFullAddress(store) || (store.uberLocationId && store.doordashStoreId)) return;
+  await requestCourierRegistration(store.id);
 }
 
 export async function createStore(
@@ -398,67 +388,12 @@ export async function createStore(
     }
   }
 
-  const store = await platformAdminTransaction(async (tx) => {
-    const s = await tx.store.create({
-      data: {
-        slug: values.slug,
-        name: values.name,
-        logoUrl: values.logoUrl,
-        brandColor: finalBrandColor,
-        themePreset: values.themePreset,
-        status: values.status,
-        hours: values.hours !== null ? values.hours : Prisma.JsonNull,
-        prepTimeMinutes: values.prepTimeMinutes,
-        deliveryRadiusMi: values.deliveryRadiusMi,
-        minimumOrderCents: values.minimumOrderCents,
-        pickupEnabled: values.pickupEnabled,
-        autoRefundLimitCents: values.autoRefundLimitCents,
-        supportSlaMinutes: values.supportSlaMinutes,
-        timezone: values.timezone,
-        addressLine1: values.addressLine1,
-        addressLine2: values.addressLine2,
-        city: values.city,
-        state: values.state,
-        zip: values.zip,
-        lat: coords.lat,
-        lng: coords.lng,
-        storeDeliveryEnabled: values.storeDeliveryEnabled,
-        storeDeliveryFeeCents: values.storeDeliveryFeeCents,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        storeId: s.id,
-        actorId: session.user.id,
-        actorEmail: session.user.email,
-        action: "store.create",
-        entityType: "store",
-        entityId: s.id,
-        after: {
-          slug: s.slug,
-          name: s.name,
-          logoUrl: s.logoUrl,
-          brandColor: s.brandColor,
-          themePreset: s.themePreset,
-          status: s.status,
-          hours: s.hours,
-          prepTimeMinutes: s.prepTimeMinutes,
-          deliveryRadiusMi: Number(s.deliveryRadiusMi),
-          minimumOrderCents: s.minimumOrderCents,
-          pickupEnabled: s.pickupEnabled,
-          autoRefundLimitCents: s.autoRefundLimitCents,
-          supportSlaMinutes: s.supportSlaMinutes,
-          timezone: s.timezone,
-          ...deliveryAudit(s),
-        },
-      },
-    });
-
-    return s;
-  });
+  const store = await platformAdminTransaction((tx) =>
+    insertStore(tx, { ...values, brandColor: finalBrandColor, lat: coords.lat, lng: coords.lng }, session.user),
+  );
 
   revalidateStore(store);
+  await queueCourierRegistration(store);
 
   return {
     success: true,
@@ -549,10 +484,15 @@ export async function updateStore(
         city: values.city,
         state: values.state,
         zip: values.zip,
+        phone: values.phone,
         lat: coords.lat,
         lng: coords.lng,
         storeDeliveryEnabled: values.storeDeliveryEnabled,
         storeDeliveryFeeCents: values.storeDeliveryFeeCents,
+        // The platform admin's override of the owner's directory switch (#450).
+        listed: formText(data, "listed") === "on",
+        pickupSlotSettings: values.pickupSlotSettings ?? Prisma.JsonNull,
+        storeDeliverySlotSettings: values.storeDeliverySlotSettings ?? Prisma.JsonNull,
       },
     });
 
@@ -579,6 +519,7 @@ export async function updateStore(
           autoRefundLimitCents: before.autoRefundLimitCents,
           supportSlaMinutes: before.supportSlaMinutes,
           timezone: before.timezone,
+          listed: before.listed,
           ...deliveryAudit(before),
         },
         after: {
@@ -596,6 +537,7 @@ export async function updateStore(
           autoRefundLimitCents: s.autoRefundLimitCents,
           supportSlaMinutes: s.supportSlaMinutes,
           timezone: s.timezone,
+          listed: s.listed,
           ...deliveryAudit(s),
         },
       },
@@ -614,6 +556,8 @@ export async function updateStore(
   if (before.slug !== store.slug) {
     revalidateStore({ id: before.id, slug: before.slug });
   }
+  await queueCourierRegistration(store);
+  if (inDirectory(store) && !inDirectory(before)) await queueStoreRequestNotices(store.id);
 
   return {
     success: true,
@@ -671,20 +615,64 @@ export async function setStoreStatus(
   if ("noop" in result) return { success: true, storeId: result.storeId };
 
   revalidateStore(result.store);
+  if (inDirectory(result.store)) await queueStoreRequestNotices(result.store.id);
   return { success: true, storeId: result.store.id };
 }
 
+/** Shown in the Store directory, so a waiting "tell me when a store opens" request may match it (#455). */
+function inDirectory(store: { listed: boolean; status: string }): boolean {
+  return store.listed && store.status === "active";
+}
+
+/** Every store with the plan it runs on, a running override included. */
 export async function listStores() {
   await requirePlatformAdmin();
-  return platformAdmin.store.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { subscription: { select: { plan: true, status: true, pilot: true, paymentFailedAt: true, trialEndsAt: true } } },
+  return platformAdminTransaction(async (tx) => {
+    const stores = await tx.store.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { subscription: { select: { status: true, pilot: true, paymentFailedAt: true } } },
+    });
+    const plans = new Map((await readStorePlanRows(tx, stores.map((s) => s.id))).map((row) => [row.storeId, row]));
+    return stores.map((store) => ({ ...store, plan: effectivePlan(plans.get(store.id)) }));
   });
 }
 
+/** The billing row, with the override only while it runs (database clock). */
 export async function getStoreSubscription(storeId: string) {
   await requirePlatformAdmin();
-  return platformAdmin.storeSubscription.findUnique({ where: { storeId } });
+  return platformAdminTransaction(async (tx) => {
+    const row = await tx.storeSubscription.findUnique({ where: { storeId } });
+    const [planRow] = await readStorePlanRows(tx, [storeId]);
+    if (!row) return null;
+    return {
+      ...row,
+      plan: effectivePlan(planRow),
+      stripePlan: row.plan,
+      overridePlan: planRow?.overridePlan ?? null,
+      overrideEndsAt: planRow?.overrideEndsAt ?? null,
+      overrideReason: planRow?.overridePlan ? row.overrideReason : null,
+    };
+  });
+}
+
+/** Platform admin sets a time-boxed plan override with a reason (#547). Never touches Stripe. */
+export async function setPlanOverrideAction(formData: FormData): Promise<void> {
+  const session = await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({
+    storeId: z.string().min(1).max(200),
+    plan: z.enum(["starter", "pro"]),
+    endsOn: z.iso.date(),
+    reason: z.string().max(500),
+  }), readFormFields(formData, ["storeId", "plan", "endsOn", "reason"]));
+  if (!fields.ok) redirect("/admin/stores");
+  const { storeId, plan, endsOn, reason } = fields.data;
+  const result = await setPlanOverride(
+    { storeId, plan, endsAt: new Date(`${endsOn}T00:00:00Z`), reason },
+    { id: session.user.id, email: session.user.email },
+  );
+  revalidatePath(`/admin/stores/${storeId}`);
+  revalidatePath("/admin/billing/subscriptions");
+  redirect(`/admin/stores/${encodeURIComponent(storeId)}${result.ok ? "?override=saved" : `?overrideError=${encodeURIComponent(result.error)}`}`);
 }
 
 /** Platform admin grants or removes the pilot offer (3 free months, at most 5 stores). */
@@ -702,6 +690,31 @@ export async function setPilotAction(formData: FormData): Promise<void> {
   const query = result.ok ? "" : `?pilotError=${encodeURIComponent(result.error)}`;
   revalidatePath(`/admin/stores/${fields.data.storeId}`);
   redirect(`/admin/stores/${fields.data.storeId}${query}`);
+}
+
+/** Platform admin queues the courier registration job again for one store (#526). */
+export async function retryCourierRegistrationAction(formData: FormData): Promise<void> {
+  const session = await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({ storeId: z.string().min(1).max(200) }), readFormFields(formData, ["storeId"]));
+  if (!fields.ok) redirect("/admin/stores");
+  const { storeId } = fields.data;
+  const store = await platformAdmin.store.findUnique({ where: { id: storeId }, select: { id: true } });
+  if (!store) redirect("/admin/stores");
+  await platformAdminTransaction((tx) =>
+    tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "store.courier_registration_retry",
+        entityType: "store",
+        entityId: storeId,
+      },
+    }),
+  );
+  const queued = await requestCourierRegistration(storeId);
+  revalidatePath(`/admin/stores/${storeId}`);
+  redirect(`/admin/stores/${storeId}?courierRetry=${queued ? "queued" : "failed"}`);
 }
 
 export async function getStoreById(id: string) {

@@ -19,8 +19,30 @@ import { SectionReveal } from "@/components/storefront/scroll-motion";
 import { MarketMarquee } from "@/components/storefront/marquee";
 import { ReviewsCarousel } from "@/components/storefront/reviews-carousel";
 import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
+import { headers } from "next/headers";
+import { listDirectoryStores } from "@/lib/directory/stores";
+import { storefrontUrl } from "@/lib/directory/links";
+import { DirectoryHome } from "@/components/directory/directory-home";
+import { statePages } from "@/lib/directory/places";
 
 export default async function StorefrontPage() {
+  const headerList = await headers();
+  // The proxy marks the root domain and www only when no store matched the request.
+  if (headerList.get("x-platform-root") === "1") {
+    const root = process.env.PLATFORM_ROOT_DOMAIN ?? "";
+    const host = headerList.get("host") ?? root;
+    const stores = (await listDirectoryStores()).flatMap((store) => {
+      const href = storefrontUrl(store.slug, root, host);
+      return href ? [{ ...store, href }] : [];
+    });
+    const states = statePages(stores).map(({ code, name, slug, stores }) => ({
+      code,
+      name,
+      href: `/stores/${slug}`,
+      stores: stores.map(({ slug, name, city, href }) => ({ slug, name, city, href })),
+    }));
+    return <DirectoryHome stores={stores} states={states} />;
+  }
   const { store, suspended } = await getStoreWithStatus();
   const checkout = checkCheckoutReady(store.stripeOnboardingStatus);
   if (suspended)
@@ -51,7 +73,7 @@ export default async function StorefrontPage() {
     <StorefrontShell store={store}>
       {!checkout.enabled && (
         <div className="sf-container" style={{ paddingBlock: "var(--sf-space-sm)" }}>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+          <div className="rounded-lg border border-line bg-raised px-4 py-3 text-sm text-ink">
             {checkout.message}
           </div>
         </div>

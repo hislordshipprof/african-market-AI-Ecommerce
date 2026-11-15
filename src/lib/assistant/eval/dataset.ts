@@ -135,8 +135,8 @@ function parseExcluded(raw: unknown, id: string): string[] {
 
 function parseDish(raw: unknown, id: string): EvalCase["dish"] {
   if (raw == null) return undefined;
-  const dish = raw as { core?: unknown; askServings?: unknown };
-  if (!Array.isArray(dish.core) || dish.core.length === 0 || typeof dish.askServings !== "boolean") {
+  const dish = raw as { name?: unknown; core?: unknown; askServings?: unknown };
+  if (typeof dish.name !== "string" || dish.name.trim() === "" || !Array.isArray(dish.core) || dish.core.length === 0 || typeof dish.askServings !== "boolean") {
     throw new Error(`Eval case ${id} has a malformed dish.`);
   }
   const core = dish.core.map((group) => {
@@ -147,7 +147,7 @@ function parseDish(raw: unknown, id: string): EvalCase["dish"] {
     }
     return { label: record.label, options: record.options as string[] };
   });
-  return { core, askServings: dish.askServings };
+  return { name: dish.name, core, askServings: dish.askServings };
 }
 
 function parseGroups(raw: unknown, id: string): MustGroup[] {

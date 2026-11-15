@@ -1,8 +1,10 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import recipeBase from "../../../../prisma/recipe-base.json";
 import { ASSISTANT_STEP_CAP } from "../chat-handler";
 import { assistantModelId } from "../model";
+import type { SeedRecipe } from "../recipe-base";
 import { TICKET_SPEND_PATH, loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
 import { fingerprintFromRequest } from "./fingerprint";
 import { assessOfficial } from "./gate";
@@ -33,8 +35,14 @@ export async function runLiveEval(): Promise<void> {
     process.exit(1);
   }
   const { assistantSpendState } = await import("../spend");
-  const { assertRuntimeRole } = await import("./fixture-store");
+  const { assertRuntimeRole, unseededDishes } = await import("./fixture-store");
   await assertRuntimeRole();
+  // The run never looks a dish up online (#607), so every dish must come from the curated base.
+  const unseeded = await unseededDishes(cases, fixture, recipeBase as SeedRecipe[]);
+  if (unseeded.length > 0) {
+    console.error(`The curated recipe base does not answer: ${unseeded.join(", ")}. Reset the lane database before a live eval.`);
+    process.exit(1);
+  }
   const ledger = await assistantSpendState();
   if (ledger.resting) {
     console.error("The assistant spend ledger is resting. Reset the lane database before a live eval.");

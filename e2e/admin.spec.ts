@@ -26,7 +26,7 @@ async function adminSignIn(page: import("@playwright/test").Page) {
   await page.click("button[type='submit']");
 
   try {
-    await page.waitForURL("**/admin/stores", { timeout: 15000 });
+    await page.waitForURL("**/admin", { timeout: 15000 });
   } catch {
     const url = page.url();
     const errText = await page.locator(".bg-red-50").textContent().catch(() => "");
@@ -62,11 +62,17 @@ test.describe("Platform admin console", () => {
     await expect(page.getByLabel("Email")).toBeVisible();
   });
 
-  test("sign-in with valid credentials and TOTP reaches stores", async ({
+  test("sign-in with valid credentials and TOTP lands on the home page", async ({
     page,
   }) => {
     await adminSignIn(page);
-    await expect(page.locator("h1")).toHaveText("Stores");
+    await expect(page.locator("h1")).toHaveText("Home");
+  });
+
+  test("sign-in and 2FA pages stay outside the admin menu", async ({ page }) => {
+    await page.goto("/admin/sign-in");
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
   });
 
   test("sign-in form works over the poster when WebGL is unavailable", async ({
@@ -122,6 +128,7 @@ test.describe("Platform admin console", () => {
 test.describe("Store management (authenticated)", () => {
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
+    await page.goto("/admin/stores");
   });
 
   test("stores list page shows seeded stores", async ({ page }) => {
@@ -721,7 +728,7 @@ test.describe("Catalog review (authenticated)", () => {
 test.describe("2FA enrollment (unenrolled admin)", () => {
   const UNENROLLED_EMAIL = "unenrolled-admin@platform.test";
 
-  test("unenrolled admin is redirected to enroll-2fa, completes enrollment, reaches stores", async ({
+  test("unenrolled admin is redirected to enroll-2fa, completes enrollment, lands on home", async ({
     page,
   }) => {
     await page.goto("/admin/sign-in");
@@ -748,7 +755,274 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     await page.fill("input[inputmode='numeric']", code);
     await page.click("button:has-text('Verify and continue')");
 
-    await page.waitForURL("**/admin/stores", { timeout: 15000 });
-    await expect(page.locator("h1")).toHaveText("Stores");
+    // The backup codes show once, before the admin moves on (#395).
+    await expect(page.getByRole("heading", { name: "Save your backup codes" })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator("ul li")).toHaveCount(10);
+    await page.getByRole("button", { name: /saved them/ }).click();
+    await page.waitForURL("**/admin", { timeout: 15000 });
+    await expect(page.locator("h1")).toHaveText("Home");
+  });
+});
+
+test.describe("Admin shell (authenticated)", () => {
+  const MENU = ["Home", "Stores", "Subscriptions", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger", "Courier settings", "AI and onboarding"];
+
+  test.beforeEach(async ({ page }) => {
+    await adminSignIn(page);
+  });
+
+  test("every admin page has the menu with the current page marked", async ({ page }) => {
+    const pages: Array<[string, string]> = [
+      ["/admin", "Home"],
+      ["/admin/stores", "Stores"],
+      ["/admin/stores/new", "Stores"],
+      ["/admin/billing/subscriptions", "Subscriptions"],
+      ["/admin/applications", "Applications"],
+      ["/admin/store-requests", "Store requests"],
+      ["/admin/catalog/products", "Products"],
+      ["/admin/catalog/review", "Catalog review"],
+      ["/admin/orders", "Refunds"],
+      ["/admin/orders/check", "Orders to check"],
+      ["/admin/couriers/incidents", "Courier incidents"],
+      ["/admin/support", "Messages"],
+      ["/admin/ai/conversations", "AI conversations"],
+      ["/admin/ai/eval-spend", "AI eval and spend"],
+      ["/admin/billing/ledger", "Fee ledger"],
+      ["/admin/settings/couriers", "Courier settings"],
+      ["/admin/settings/ai-onboarding", "AI and onboarding"],
+    ];
+    for (const [path, current] of pages) {
+      await page.goto(path);
+      const menu = page.getByRole("navigation", { name: "Admin" });
+      await expect(menu.getByRole("link")).toHaveText(MENU);
+      await expect(menu.locator("[aria-current='page']")).toHaveText(current);
+      // Scoped to the shell: the settings page also names the admin in its last-changed line.
+      await expect(page.locator("header").getByText(ADMIN_EMAIL)).toBeVisible();
+    }
+  });
+
+  test("home counts link to their queues", async ({ page }) => {
+    const links: Array<[string, string]> = [
+      ["count-stores", "/admin/stores"],
+      ["count-refunds", "/admin/orders"],
+      ["count-orders-to-check", "/admin/orders/check"],
+      ["count-messages", "/admin/support"],
+      ["count-catalog-review", "/admin/catalog/review"],
+    ];
+    for (const [testId, href] of links) {
+      await expect(page.getByTestId(testId)).toHaveAttribute("href", href);
+    }
+    await expect(page.getByTestId("count-stores")).toContainText(/\d+ active/);
+    await expect(page.getByTestId("count-catalog-review")).toContainText(/\d+/);
+  });
+
+  test("the phone menu opens, closes with Escape and navigates", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const toggle = page.getByRole("button", { name: "Menu" });
+    const menu = page.getByRole("navigation", { name: "Admin" });
+    await expect(menu).toBeHidden();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(toggle).toBeFocused();
+    await toggle.click();
+    await menu.getByRole("link", { name: "Catalog review" }).click();
+    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+    await expect(menu).toBeHidden();
+  });
+
+  test("store edit cards follow the dark theme", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/admin/stores");
+    await page.locator(`tr:has-text("tante-marie") a:has-text("Edit")`).click();
+    const background = (id: string) =>
+      page.locator(`section[aria-labelledby='${id}']`).evaluate((el) => getComputedStyle(el).backgroundColor);
+    const billing = await background("billing");
+    expect(billing).not.toBe("rgb(255, 255, 255)");
+    expect(await background("couriers")).toBe(billing);
+  });
+
+  test("sign-out ends the session and returns to sign-in", async ({ page }) => {
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.waitForURL("**/admin/sign-in", { timeout: 15000 });
+    await page.goto("/admin/stores");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+});
+
+test.describe("Courier settings (#535)", () => {
+  test("signed out, /admin/settings/couriers redirects to sign-in", async ({ page }) => {
+    await page.goto("/admin/settings/couriers");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin changes the courier choice, a switch and the timeout; an out-of-range timeout is refused", async ({ page }) => {
+    const original = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+    const startedAt = new Date();
+    try {
+      await adminSignIn(page);
+      await page.goto("/admin/settings/couriers");
+      await expect(page.locator("h1")).toHaveText("Courier settings");
+
+      // The weight limit stays at its value: customer-journey.spec reads it at the same time.
+      await page.getByRole("radio", { name: /Uber first/ }).check();
+      await page.getByRole("switch", { name: "DoorDash Drive" }).uncheck();
+      await page.getByLabel("Wait for a courier").fill("900");
+      await expect(page.getByText("15 min", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Save courier settings" }).click();
+      await expect(page.getByText(/^Saved\./)).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByRole("radio", { name: /Uber first/ })).toBeChecked();
+      await expect(page.getByRole("switch", { name: "DoorDash Drive" })).not.toBeChecked();
+      await expect(page.getByRole("switch", { name: "Uber Direct" })).toBeChecked();
+      await expect(page.getByLabel("Wait for a courier")).toHaveValue("900");
+      await expect(page.getByLabel("Courier weight limit")).toHaveValue(String(original.courierWeightLimitLb));
+
+      // The browser's own range check is lifted so the server's refusal is what the admin sees.
+      await page.locator("form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.getByLabel("Wait for a courier").fill("1500");
+      await page.getByRole("button", { name: "Save courier settings" }).click();
+      await expect(page.getByText("Enter whole seconds from 300 to 1200.")).toBeVisible();
+      await expect(page.getByText(/Nothing was saved/)).toBeVisible();
+      const stored = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+      expect(stored.courierAssignmentTimeoutS).toBe(900);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.platformSettings.update({
+          where: { id: "platform" },
+          data: {
+            courierSelectionMode: original.courierSelectionMode,
+            courierAssignmentTimeoutS: original.courierAssignmentTimeoutS,
+            doordashEnabled: original.doordashEnabled,
+            uberEnabled: original.uberEnabled,
+          },
+        });
+        await tx.auditLog.deleteMany({ where: { entityType: "platform_settings", createdAt: { gte: startedAt } } });
+      });
+    }
+  });
+});
+
+test.describe("AI and onboarding settings (#561)", () => {
+  test("signed out, /admin/settings/ai-onboarding redirects to sign-in", async ({ page }) => {
+    await page.goto("/admin/settings/ai-onboarding");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin changes the go-live floor, sees who changed it last, and an out-of-range value is refused", async ({ page }) => {
+    const original = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+    const floor = original.goLiveListingFloor === 35 ? 36 : 35;
+    const startedAt = new Date();
+    try {
+      await adminSignIn(page);
+      await page.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "AI and onboarding" }).first().click();
+      await expect(page.locator("h1")).toHaveText("AI and onboarding settings");
+
+      // Only the floor changes: the AI oversight spec reads the sample size at the same time.
+      await page.getByLabel("Listings needed to go live").fill(String(floor));
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(page.getByText(/^Saved\./)).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByLabel("Listings needed to go live")).toHaveValue(String(floor));
+      await expect(page.getByTestId("last-changed")).toContainText(`Last changed by ${ADMIN_EMAIL}`);
+
+      // The browser's own range check is lifted so the server's refusal is what the admin sees.
+      await page.locator("form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.getByLabel("Listings needed to go live").fill("0");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(page.getByText("Enter whole listings from 1 to 200.")).toBeVisible();
+      await expect(page.getByText(/Nothing was saved/)).toBeVisible();
+      const stored = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+      expect(stored.goLiveListingFloor).toBe(floor);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.platformSettings.update({ where: { id: "platform" }, data: { goLiveListingFloor: original.goLiveListingFloor } });
+        await tx.auditLog.deleteMany({ where: { action: "platform.ai_onboarding_settings_update", createdAt: { gte: startedAt } } });
+      });
+    }
+  });
+});
+
+test.describe("Courier incident log (#536)", () => {
+  test("signed out, the list and a detail page redirect to sign-in", async ({ page }) => {
+    await page.goto("/admin/couriers/incidents");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+    await page.goto("/admin/couriers/incidents/some-order");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin finds an incident by store and kind, reads the redacted timeline, adds a note and resolves it", async ({ page }) => {
+    const number = 900_000 + Math.floor(Math.random() * 90_000);
+    const seeded = await withPlatformCatalog(async (tx) => {
+      const store = await tx.store.findFirstOrThrow({ where: { slug: "tante-marie" }, select: { id: true, name: true } });
+      const customer = await tx.customer.create({ data: { storeId: store.id, name: "Incident Shopper", phone: "+13015550199" } });
+      const order = await tx.order.create({
+        data: { storeId: store.id, customerId: customer.id, number, status: "COURIER_REQUESTED", fulfillment: "courier", subtotalCents: 4000, bufferCents: 0, totalCents: 4000, totalAuthorizedCents: 4000 },
+      });
+      const delivery = await tx.delivery.create({
+        data: { storeId: store.id, orderId: order.id, provider: "doordash", externalId: `e2e-536-${number}`, status: "cancelled", quoteFeeCents: 899 },
+      });
+      await tx.deliveryEvent.create({
+        data: {
+          storeId: store.id,
+          orderId: order.id,
+          deliveryId: delivery.id,
+          externalEventId: `DELIVERY_CANCELLED:${number}`,
+          type: "cancelled",
+          payload: { event_name: "DELIVERY_CANCELLED", cancellation_reason: "no_available_dashers", dropoff_phone_number: "+13015550199", dasher_dropoff_phone_number: "+18555550100" },
+        },
+      });
+      return { storeId: store.id, storeName: store.name, orderId: order.id, customerId: customer.id };
+    });
+    try {
+      await adminSignIn(page);
+      await page.goto("/admin/couriers/incidents");
+      await expect(page.locator("h1")).toHaveText("Courier incidents");
+      await page.getByLabel("Store").selectOption(seeded.storeId);
+      await page.getByLabel("What happened").selectOption("provider_cancelled");
+      await page.getByRole("button", { name: "Show incidents" }).click();
+      await expect(page).toHaveURL(/kind=provider_cancelled/);
+      const row = page.getByTestId(`incident-row-${number}`);
+      await expect(row).toContainText(seeded.storeName);
+      await expect(row).toContainText("Courier cancelled");
+      await expect(row).toContainText("DoorDash Drive");
+      await expect(row).toContainText("Open");
+
+      await row.getByRole("link", { name: `#${number}` }).click();
+      await expect(page.locator("h1")).toContainText(`Order #${number}`);
+      await expect(page.getByTestId("incident-timeline")).toContainText(/no available dashers/i);
+      await page.getByText("Event details").click();
+      await expect(page.getByTestId("incident-timeline")).toContainText("[redacted]");
+      await expect(page.locator("body")).not.toContainText("5550199");
+      await expect(page.locator("body")).not.toContainText("5550100");
+
+      await page.getByLabel("Note").fill("Rebooked with Uber by phone.");
+      await page.getByRole("button", { name: "Add note" }).click();
+      await expect(page.getByTestId("incident-notes")).toContainText("Rebooked with Uber by phone.");
+      await page.getByLabel("Note").fill("Delivered by the store.");
+      await page.getByRole("button", { name: "Mark resolved" }).click();
+      await expect(page.getByTestId("incident-notes")).toContainText("Delivered by the store.");
+      await expect(page.getByText("Resolved", { exact: true }).first()).toBeVisible();
+
+      await page.goto(`/admin/couriers/incidents?store=${seeded.storeId}`);
+      await expect(page.getByTestId(`incident-row-${number}`)).toContainText("Resolved");
+      const audit = await withPlatformCatalog((tx) => tx.auditLog.findMany({ where: { entityType: "courier_incident", entityId: seeded.orderId }, select: { action: true } }));
+      expect(audit.map((a) => a.action).sort()).toEqual(["courier_incident.note", "courier_incident.resolve"]);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.auditLog.deleteMany({ where: { entityType: "courier_incident", entityId: seeded.orderId } });
+        await tx.deliveryEvent.deleteMany({ where: { orderId: seeded.orderId } });
+        await tx.delivery.deleteMany({ where: { orderId: seeded.orderId } });
+        await tx.order.deleteMany({ where: { id: seeded.orderId } });
+        await tx.customer.deleteMany({ where: { id: seeded.customerId } });
+      });
+      // Notes are append-only for app_user (no DELETE): they go with the order's FK cascade.
+      const leftover = await withPlatformCatalog((tx) => tx.courierIncidentNote.count({ where: { orderId: seeded.orderId } }));
+      expect(leftover).toBe(0);
+    }
   });
 });
