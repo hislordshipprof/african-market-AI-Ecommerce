@@ -32,7 +32,12 @@ export default async function AiConversationsPage({ searchParams }: { searchPara
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
       <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">AI conversations</h1>
       <p className="mt-1 max-w-prose text-muted-foreground">
-        Up to 5 random shopper chats and 5 random copilot chats per store for each UTC day, plus every chat that was flagged.
+        {sample.samplePerStore > 0
+          ? `Up to ${sample.samplePerStore} random shopper chats and ${sample.samplePerStore} random copilot chats per store for each UTC day, plus every chat that was flagged.`
+          : "Every chat that was flagged for each UTC day. Random sampling is set to 0."}{" "}
+        <Link href="/admin/settings/ai-onboarding" className={`rounded-sm text-foreground underline underline-offset-2 ${FOCUS}`}>
+          Change the sample size or cost flag
+        </Link>
       </p>
 
       <form method="get" className="mt-6 grid gap-3 rounded-xl border border-border bg-card p-4 sm:flex sm:flex-wrap sm:items-end">

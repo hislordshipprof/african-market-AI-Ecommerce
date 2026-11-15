@@ -26,6 +26,7 @@ import { clientIp } from "../assistant/client-ip";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform, storeScoped } from "../db";
 import { loadCheckoutDraft } from "../assistant/checkout-draft";
+import { applyCartCoupon, CouponRefusedError, removeCartCoupon, type ApplyCouponResult } from "../coupon/checkout";
 import type { PickupSlot } from "../order/pickup-slots";
 import { ATTRIBUTION_COOKIE, acquisitionSource } from "../directory/attribution";
 
@@ -95,6 +96,10 @@ async function signedInUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+// Quotes re-run on each contact edit, so the limit is generous; it backs up the coupon checks (#557).
+const QUOTE_PER_IP = 600;
+const QUOTE_WINDOW_MS = 60 * 60_000;
+
 export async function quoteCheckoutAction(
   contact: Contact,
   fulfillment: Fulfillment,
@@ -113,6 +118,8 @@ export async function quoteCheckoutAction(
     : readDelivery(input.fulfillment, delivery);
   if (request && "error" in request) return { ok: false, error: request.error };
   try {
+    const limit = await takeRateLimit(`checkout-quote:ip:${clientIp(await headers())}`, QUOTE_PER_IP, QUOTE_WINDOW_MS);
+    if (!limit.ok) return { ok: false, error: "Too many requests. Please wait and try again." };
     const store = await getStore();
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
@@ -130,6 +137,7 @@ export async function quoteCheckoutAction(
         input.contact,
         input.fulfillment,
         request,
+        { actorUserId },
       ),
       checkoutSlotOptions(store.id, input.fulfillment),
     ]);
@@ -166,7 +174,7 @@ export async function createPaymentIntentAction(
   if (!when.ok) return { ok: false, error: "Payment setup failed" };
   try {
     const store = await getStore();
-    const gate = checkCheckoutReady(store.stripeOnboardingStatus);
+    const gate = checkCheckoutReady(store);
     if (!gate.enabled) {
       return { ok: false, error: gate.message ?? "Checkout is not available" };
     }
@@ -196,7 +204,7 @@ export async function createPaymentIntentAction(
       input.contact,
       input.fulfillment,
       request,
-      { recheckCourier: input.fulfillment === "courier" },
+      { recheckCourier: input.fulfillment === "courier", actorUserId },
     );
     if (quote.problems.length) {
       const error = quote.problems.map((p) => p.message).join(" ");
@@ -279,7 +287,7 @@ export async function placeOrderAction(
   whatsappUpdates?: unknown,
 ): Promise<
   | { ok: true; token: string }
-  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" }
+  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" | "coupon_refused" }
   | { ok: false; error: string; code: "slot_unavailable"; slots: SlotOptions }
 > {
   const input = readCheckout(contact, fulfillment);
@@ -293,6 +301,9 @@ export async function placeOrderAction(
   if (!payment.ok || !note.ok || !when.ok || !whatsapp.ok) return { ok: false, error: "Could not place order" };
   try {
     const store = await getStore();
+    // A store in setup or suspended places no order (#555); a hold from before a suspension lapses on its own.
+    const gate = checkCheckoutReady({ status: store.status, stripeOnboardingStatus: "complete" });
+    if (!gate.enabled) return { ok: false, error: gate.message ?? "Checkout is not available" };
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
     const result = await placeOrder(
@@ -314,7 +325,7 @@ export async function placeOrderAction(
     if (e instanceof BasketAlreadyOrderedError) {
       return { ok: false, error: e.message, code: e.code };
     }
-    if (e instanceof BasketChangedError) {
+    if (e instanceof BasketChangedError || e instanceof CouponRefusedError) {
       return { ok: false, error: e.message, code: e.code };
     }
     if (e instanceof SlotUnavailableError) {
@@ -325,6 +336,27 @@ export async function placeOrderAction(
       error: e instanceof Error ? e.message : "Could not place order",
     };
   }
+}
+
+/** Puts one store coupon code on the shopper's cart (#557). The next quote shows what it takes off. */
+export async function applyCouponAction(code: unknown): Promise<ApplyCouponResult> {
+  const parsed = parseInput(z.string().max(40), code);
+  if (!parsed.ok) return { ok: false, error: "That code isn't valid at this store." };
+  const store = await getStore();
+  const resolved = await resolveShopperCart();
+  if (!resolved) return { ok: false, error: "No cart found" };
+  return applyCartCoupon(store.id, resolved.cartId, parsed.data, {
+    ip: clientIp(await headers()),
+    userId: await signedInUserId(),
+  });
+}
+
+export async function removeCouponAction(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const store = await getStore();
+  const resolved = await resolveShopperCart();
+  if (!resolved) return { ok: false, error: "No cart found" };
+  await removeCartCoupon(store.id, resolved.cartId);
+  return { ok: true };
 }
 
 export async function confirmAddressAction(delivery: unknown): Promise<

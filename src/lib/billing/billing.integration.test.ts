@@ -24,6 +24,8 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
   let storeB = "";
   const extraStores: string[] = [];
   const sent: EmailMessage[] = [];
+  const ownAdmins = [`admin1@${run}.test`, `admin2@${run}.test`];
+  const ownCustomer = `customer@${run}.test`;
   const admin = { id: "system_00000000000000000000000", email: "system@platform.internal" };
   let seq = 0;
 
@@ -110,6 +112,12 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     await raw.$connect();
     storeA = (await raw.store.create({ data: { slug: `sub-a-${run}`, name: "Sub A" } })).id;
     storeB = (await raw.store.create({ data: { slug: `sub-b-${run}`, name: "Sub B" } })).id;
+    await raw.user.createMany({
+      data: [
+        ...ownAdmins.map((email) => ({ id: `u_${email}`, name: "Admin", email, role: "platform_admin" })),
+        { id: `u_${ownCustomer}`, name: "Customer", email: ownCustomer, role: "customer" },
+      ],
+    });
     setStripeProvider({
       ...fakeStripeProvider,
       verifyWebhookSignature: (input) => stripeProvider.verifyWebhookSignature(input),
@@ -133,6 +141,7 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
       await tx.assistantChatMonth.deleteMany({ where: { storeId: { in: ids } } });
       await tx.store.deleteMany({ where: { id: { in: ids } } });
     });
+    await raw.user.deleteMany({ where: { email: { in: [...ownAdmins, ownCustomer] } } });
     await raw.$disconnect();
   });
 
@@ -184,8 +193,10 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     expect(row.paymentFailedAt).not.toBeNull();
     const store = await platformAdmin.store.findUniqueOrThrow({ where: { id: storeA } });
     expect(store.status).toBe("active");
-    const adminCount = await raw.user.count({ where: { role: "platform_admin" } });
-    expect(sent.filter((m) => m.subject.includes("Subscription payment failed"))).toHaveLength(adminCount);
+    // Other files add and remove platform admins in the shared lane DB, so check this file's own users.
+    const alerted = sent.filter((m) => m.subject.includes("Subscription payment failed")).map((m) => m.to);
+    expect(alerted.filter((to) => to.endsWith(`@${run}.test`)).sort()).toEqual([...ownAdmins].sort());
+    expect(alerted).not.toContain(ownCustomer);
 
     await deliver(invoiceEvent("invoice.paid", { customer: `cus_${run}_a`, subscription: `sub_${run}_a` }));
     const recovered = await storeScoped(storeA).storeSubscription.findUniqueOrThrow({ where: { storeId: storeA } });

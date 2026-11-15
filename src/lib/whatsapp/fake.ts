@@ -9,6 +9,8 @@ import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
  *   recipient's last inbound message (131047);
  * - text body 1–4096 characters; interactive body 1–1024, 1–3 reply buttons,
  *   titles 1–20 characters, ids 1–256 and unique (131009);
+ * - list (#559): body 1–4096, button 1–20, 1–10 rows, row titles 1–24,
+ *   descriptions up to 72, ids 1–200 and unique (131009);
  * - templates only by an approved name and language (132001), and the
  *   owner_link_code template with exactly a body code and a copy-code button
  *   code of at most 15 characters (132000);
@@ -90,6 +92,20 @@ function check(message: OutboundMessage, now: number): void {
       for (const button of buttons) {
         if (button.title.length < 1 || button.title.length > 20) invalid(131009);
         if (button.id.length < 1 || button.id.length > 256) invalid(131009);
+      }
+      return;
+    }
+    case "list": {
+      checkWindow(message.to, now);
+      if (message.body.length < 1 || message.body.length > 4096) invalid(131009);
+      if (message.button.length < 1 || message.button.length > 20) invalid(131009);
+      const { rows } = message;
+      if (rows.length < 1 || rows.length > 10) invalid(131009);
+      if (new Set(rows.map((row) => row.id)).size !== rows.length) invalid(131009);
+      for (const row of rows) {
+        if (row.title.length < 1 || row.title.length > 24) invalid(131009);
+        if (row.id.length < 1 || row.id.length > 200) invalid(131009);
+        if ((row.description ?? "").length > 72) invalid(131009);
       }
       return;
     }

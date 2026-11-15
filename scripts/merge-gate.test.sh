@@ -2,6 +2,9 @@
 # Tests for the review half of the merge gate (scripts/merge-gate.sh). Run: bash scripts/merge-gate.test.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# merge-ticket.sh reads these three from its environment. A ci-main.sh run started by a merge that had just merged main
+# in inherited MERGED_MAIN=1 and skipped the merge-in path in the cases below (#644); each case sets what it needs.
+unset MERGED_MAIN DEPLOY OWNER_ACCEPTS_BLOCKING
 . "$ROOT/scripts/merge-gate.sh"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 fail=0

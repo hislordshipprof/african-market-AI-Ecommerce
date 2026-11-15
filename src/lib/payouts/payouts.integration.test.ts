@@ -116,7 +116,7 @@ describe.skipIf(!hasDb)("store payouts (#548, lane DB)", () => {
     const res = await csv(new Request("http://localhost/x"), { params: Promise.resolve({ payoutId: firstPayout }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Disposition")).toContain(`${storeA.slug}-payout-2026-11-06.csv`);
-    expect(await res.text()).toContain("#101,45.50,3.00,0.00,1.71,10.00,36.79\r\n");
+    expect(await res.text()).toContain("#101,45.50,0.00,3.00,0.00,1.71,10.00,36.79\r\n");
   });
 
   it("refuses staff before any Stripe call", async () => {

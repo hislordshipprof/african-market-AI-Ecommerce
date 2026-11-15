@@ -64,4 +64,24 @@ describe("fake WhatsApp provider", () => {
     await fakeWhatsAppProvider.send(orderUpdateMessage(TO, template, "Ada", "order/tok"));
     expect(getFakeOutbox()[0].from).toBeNull();
   });
+  it("records a list message in the window and rejects one outside it or past Meta's list limits (#559)", async () => {
+    const list = (rows: Array<{ id: string; title: string; description?: string }>, button = "Choose") => ({
+      type: "list" as const, to: TO, body: "Pick one", button, rows,
+    });
+    const row = { id: "Garri (2 kg)", title: "Garri", description: "2 kg · $5.99" };
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list([row])))).toBe(131047);
+    noteInbound(TO);
+    await fakeWhatsAppProvider.send(list([row, { id: "Yam (1 tuber)", title: "Yam" }]));
+    expect(getFakeOutbox()).toHaveLength(1);
+
+    const rows = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `r${index}`, title: `Row ${index}` }));
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list(rows(11))))).toBe(131009);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list([])))).toBe(131009);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list([{ id: "a", title: "x".repeat(25) }])))).toBe(131009);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list([{ id: "a", title: "A", description: "d".repeat(73) }])))).toBe(131009);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list([{ id: "a", title: "A" }, { id: "a", title: "B" }])))).toBe(131009);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list([{ id: "i".repeat(201), title: "A" }])))).toBe(131009);
+    expect(await rejectionCode(fakeWhatsAppProvider.send(list([row], "b".repeat(21))))).toBe(131009);
+    expect(getFakeOutbox()).toHaveLength(1);
+  });
 });

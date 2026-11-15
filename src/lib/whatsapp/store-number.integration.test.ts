@@ -68,7 +68,7 @@ async function until(check: () => boolean): Promise<void> {
 
 let seq = 0;
 function text(body: string): InboundMessage {
-  return { id: `wamid.swn-${suffix}-${++seq}`, from: "14045550123", fromUserId: null, type: "text", text: body };
+  return { id: `wamid.swn-${suffix}-${++seq}`, from: "14045550123", fromUserId: null, type: "text", text: body, timestamp: null, replyId: null };
 }
 
 async function asPlatformAdmin(fn: (tx: typeof authPrisma) => Promise<unknown>): Promise<void> {

@@ -29,11 +29,12 @@ interface Props {
   storeSlug: string;
   place: string;
   located: boolean;
-  suspended: boolean;
+  /** The store's status: only an active store is in the directory (#449, #555). */
+  status: string;
   initial: Listing;
 }
 
-export function DirectoryListingForm({ storeName, storeSlug, place, located, suspended, initial }: Props) {
+export function DirectoryListingForm({ storeName, storeSlug, place, located, status, initial }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [listing, setListing] = useState<Listing>(initial);
@@ -107,12 +108,14 @@ export function DirectoryListingForm({ storeName, storeSlug, place, located, sus
                   ? `Shoppers see ${storeName}${place ? ` in ${place}` : ""}. Your street address stays private.`
                   : "Off. Shoppers can still reach your storefront by its link."}
               </p>
-              {listing.listed && (!located || suspended) ? (
+              {listing.listed && (!located || status !== "active") ? (
                 <p role="note" className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-foreground">
                   <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                  {suspended
-                    ? "Your store is paused, so it stays out of the directory until it is active again."
-                    : "Your store appears once the platform team confirms its address. Ask them if it is missing."}
+                  {status === "setup"
+                    ? "Your store appears once it goes live."
+                    : status !== "active"
+                      ? "Your store is paused, so it stays out of the directory until it is active again."
+                      : "Your store appears once the platform team confirms its address. Ask them if it is missing."}
                 </p>
               ) : null}
             </CardContent>

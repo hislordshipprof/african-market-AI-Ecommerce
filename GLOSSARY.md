@@ -31,9 +31,26 @@ _Avoid_: Picker (a picker is staff doing a pick, not a separate role)
 A member of our team who approves store applications, sets up stores and supports them.
 _Avoid_: Platform team (only the customer-facing label on a platform admin's support reply)
 
+**Plan override**:
+A plan a platform admin gives a store until a date, with a reason (for example, comped Pro). It decides the store's plan features while it runs, even over a Stripe downgrade, and never changes what Stripe bills. It always has an end date; after it, the store's Stripe plan applies again.
+
 **Store application**:
-A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted 12 months after the decision.
+A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted once the retention set by the platform admin (default 12 months) has passed since the decision.
 _Avoid_: Sign-up, lead, merchant application
+
+**Setup**:
+Where every new store starts, from an approved store application or the stores page. Its storefront shows "Opening soon", checkout is refused before any payment call, and the Store directory never lists it. Stores created before the go-live checklist stayed live.
+_Avoid_: Draft, pending, password page
+
+**Go-live checklist**:
+What a store in setup must finish before it goes live, shown on the store admin home and the platform admin's store page: payouts connected, hours and time zone set, pickup or a delivery option on, at least the go-live listing floor of active listings with a price (a platform setting, default 20), no placeholder weights on active listings, a plan chosen or a pilot store, and courier registration done or not needed (Starter). A test order is recommended after going live, never required.
+
+**Go live**:
+The store owner's button that moves a store from setup to live once every checklist item is done, with an audit row. A platform admin can go live for a store with items still open, only with a reason, which the audit row keeps.
+_Avoid_: Launch, publish
+
+**Suspended**:
+A store a platform admin took offline. Suspension is separate from going live and wins over everything: the storefront is offline, checkout is refused and the store cannot go live. Lifting it returns the store to where the suspension found it, setup or live.
 
 **Customer**:
 A person who buys from a store, whether or not they have an account.
@@ -133,11 +150,14 @@ A pending owner report the Store copilot drafted and has not applied. Stock chan
 ## Assistants
 
 **Shopper assistant**:
-The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
+The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront, and on the store's own WhatsApp number (#559), where it replies only inside Meta's 24-hour window and checks out through a **WhatsApp checkout link**. It never pays by itself: it hands off to the normal checkout with a **Review card**, and only the customer's Pay tap there places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
 _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 
 **Choice chips**:
 The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
+
+**Item handle**:
+A short name such as `i3` (listing), `v12` (variant) or `c2` (cart line) that the Shopper assistant's tools show the model in place of a long id, and take back as input (#597). Each conversation keeps its own handles, so one never resolves in another conversation or store; an unknown handle is refused, never guessed.
 
 **Shopper constraint**:
 An allergen to avoid, a dietary claim that must hold, or an ingredient to avoid, taken from the customer's words and saved on the conversation (#485). The Shopper assistant checks them on Product attributes only, never by matching product names: search leaves out an excluded listing, and add and swap refuse one with the reason. A constraint is hard: it gates search, recipes, add and swap. An ingredient term that names only a form of a known Ingredient, such as fresh tomato, triggers the clarify rule; one close to no known Ingredient is not saved, and the assistant says once that it can't check it. While any is saved, the store's own swap is not used: a may-be-unavailable line with no backup that passes gets Exact item only, a refund, including lines already in the cart (owner, 2026-11-12).
@@ -180,6 +200,9 @@ A Copilot alert asking the owner to confirm a listing whose confidence fell belo
 **Linked WhatsApp number**:
 The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
 
+**WhatsApp checkout link**:
+The link the Shopper assistant sends on WhatsApp when a customer is ready to check out. It opens the store's normal checkout with the cart the chat filled, works once and for 60 minutes, and places nothing: the customer pays on that page, as a guest or signed in. A used or expired link shows "This checkout link has expired".
+
 **WhatsApp order updates**:
 Order status messages a customer gets on WhatsApp from the Store WhatsApp number instead of SMS, after ticking "Get order updates on WhatsApp" at checkout (default off, offered only when the store's number is Live). Email is unchanged. If a WhatsApp message cannot go, that update goes by SMS once. Replying STOP turns them off for that store.
 
@@ -187,10 +210,10 @@ Order status messages a customer gets on WhatsApp from the Store WhatsApp number
 The store's own WhatsApp Business number, which customers message (ADR-0010). Linked by the owner or a platform admin through Meta's Embedded Signup (in test mode, ids typed into a form); "Live" once registered. By default the store keeps the WhatsApp Business app on it (coexistence). Not the Linked WhatsApp number, which is the owner's personal number.
 
 **Daily sample**:
-The AI conversations a platform admin reviews for one UTC day (#544): up to 5 random Shopper assistant chats and 5 random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. The same day always shows the same sample.
+The AI conversations a platform admin reviews for one UTC day (#544): up to N random Shopper assistant chats and N random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. N is an AI and onboarding setting, 5 by default; 0 shows only auto-flagged chats. The same day always shows the same sample.
 
 **Auto-flag**:
-A reason the platform marks an AI chat for review without a person: the grounder removed an amount, a tool refused a made-up id, a constraint or Cannot confirm refusal, `forward_to_store`, or a turn over the cost threshold ($0.02).
+A reason the platform marks an AI chat for review without a person: the grounder removed an amount, a tool refused a made-up id, a constraint or Cannot confirm refusal, `forward_to_store`, or a turn over the cost threshold (an AI and onboarding setting, 2 cents by default). A shopper turn is marked when it is saved, so a later threshold change applies from the next turn; copilot chats and transcript views use the threshold in force when viewed.
 
 **Review label**:
 A platform admin's verdict on one AI chat: wrong item, wrong price, unsafe, tone or other, with an optional note. Stored in `ai_review_flags`, owned by the chat's store, and deleted with the chat or after 90 days.
@@ -200,6 +223,13 @@ _Avoid_: Flag (on its own), rating
 
 **Order**:
 One customer's purchase from exactly one store.
+
+**Store coupon**:
+A code a store owner creates (#556) that takes a percent or a fixed amount off the goods of one order; the store funds it. A cart takes one code. The discount is never on tip or fees, is recomputed on the goods picked at capture, and is never removed by a short (#557). Shown to the shopper as "Promo CODE".
+_Avoid_: Voucher, promo (alone), discount code
+
+**Coupon use**:
+An order placed with a store coupon. It counts toward the code's total and per-customer limits until the order is cancelled.
 
 **Tracking link**:
 The unguessable link in every customer message that opens the order's tracking page without signing in.
@@ -273,6 +303,10 @@ A platform admin recorded the amount they repaid outside the app. The order beco
 **RefundRequest**:
 One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
 
+**Fee ledger**:
+The platform admin's monthly report of what the platform keeps (#546), at `/admin/billing/ledger`, built from our order and refund rows, not from Stripe. Each captured order is a row: captured amount, service fee, courier fee passed through, the platform's card fee share, the application fee, and the platform net (service fee less the platform's card fee share). An order counts in the month its capture was confirmed; a cancel, refund or manual repayment never changes that row. A refund that returns fee is a negative row in the UTC month it succeeded, and a manual repayment is its own row in the month it was recorded. Months are UTC calendar months.
+_Avoid_: Commission report
+
 **Open request**:
 A RefundRequest that is still unanswered: reserved, unknown, or created at the provider but not yet succeeded, failed or canceled. Manual repayment waits until no request is open.
 
@@ -315,6 +349,9 @@ Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen
 
 **Courier settings**:
 The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+
+**AI and onboarding settings**:
+The platform-wide numbers a platform admin sets at `/admin/settings/ai-onboarding` (#561): the go-live listing floor (1 to 200, default 20), the Daily sample size per store (0 to 20, default 5), the Auto-flag cost threshold (1 to 100 cents, default 2) and how long a rejected store application is kept (1 to 24 months, default 12). Out of range is refused, never clamped; every save writes an audit row, and the page shows who changed them last and when.
 
 **Assignment timeout**:
 How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.

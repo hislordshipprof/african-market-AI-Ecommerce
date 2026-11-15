@@ -19,6 +19,7 @@ import { scheduleCourierCancel, scheduleCourierPacking } from "../inngest/notify
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
+import { platformFeeLedger } from "../admin/fee-ledger-query";
 import { FakeStripeError, fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
@@ -1535,6 +1536,25 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "refund_failed" },
     });
     expect(alerts.length).toBe(1);
+  });
+
+  it("a capture found at cancel whose refund fails stays in the fee ledger as captured", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    setNextRefundStatus(order.paymentIntentId!, "failed");
+
+    expect((await reconcileStuckOrder(storeId, order.id)).ok).toBe(false);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated).toMatchObject({ status: "REFUND_FAILED", readyAt: null, cancelledAt: null, confirmedCaptureCents: 5000 });
+    const ledger = await platformFeeLedger(updated!.captureConfirmedAt!.toISOString().slice(0, 7));
+    expect(ledger.rows.filter((row) => row.id === order.id).map((row) => [row.kind, row.capturedCents, row.refundFailed])).toEqual([
+      ["capture", 5000, true],
+    ]);
   });
 
   it("Codex-1/C4: CANCELLING + Stripe succeeded but refund pending does not finalize CANCELLED", async () => {

@@ -7,6 +7,7 @@ const data = defaultFakePayouts(ACCOUNT);
 const [second, first] = data.payouts;
 const orders: PayoutOrder[] = FAKE_PAYOUT_ORDERS.map((o, i) => ({
   ...o,
+  discountCents: 0,
   id: `order_${o.key}`,
   number: 101 + i,
   paymentIntentId: fakePayoutPaymentIntentId(o.key, ACCOUNT),
@@ -28,6 +29,16 @@ describe("payoutBreakdown", () => {
     expect(result.rows[1]).toMatchObject({ goodsCents: 3000 - 99 - 599, cardFeeCents: 97, refundsCents: 0, netCents: 2205 });
     expect(result.otherCents).toBe(0);
     expect(result.rows.reduce((sum, r) => sum + r.netCents, 0)).toBe(first.amountCents);
+  });
+
+  it("shows the store-funded promo discount on its own, with goods before it, and the rows still sum to the payout", () => {
+    // Order 101 captured $50.00 after a $5.00 SAVE5 promo: the card already paid $5.00 less, so net does not move.
+    const promo = orders.map((o) => (o.number === 101 ? { ...o, discountCents: 500 } : o));
+    const result = payoutBreakdown(first.amountCents, data.transactions.get(first.id)!, promo);
+    expect(result.rows[0]).toMatchObject({ goodsCents: 5000 - 150 - 300 + 500, discountCents: 500, netCents: 4679 - 1000 });
+    expect(result.rows[1]).toMatchObject({ discountCents: 0 });
+    expect(result.rows.reduce((sum, r) => sum + r.netCents, 0)).toBe(first.amountCents);
+    expect(payoutCsv(result).split("\r\n")[1]).toBe("#101,50.50,5.00,3.00,0.00,1.71,10.00,36.79");
   });
 
   it("shows a refund on an order paid in an earlier payout as the refund only, less the fee Stripe credited back", () => {
@@ -61,9 +72,9 @@ describe("payoutCsv", () => {
     const result = payoutBreakdown(first.amountCents, data.transactions.get(first.id)!, orders);
     const csv = payoutCsv(result);
     const lines = csv.trim().split("\r\n");
-    expect(lines[0]).toBe("Order,Goods,Tip,Tax,Card fee,Refunds,Net to store");
-    expect(lines[1]).toBe("#101,45.50,3.00,0.00,1.71,10.00,36.79");
-    expect(lines.at(-2)).toBe("Other Stripe activity,,,,,,0.00");
-    expect(lines.at(-1)).toBe("Payout total,,,,,,58.84");
+    expect(lines[0]).toBe("Order,Goods,Promo discount,Tip,Tax,Card fee,Refunds,Net to store");
+    expect(lines[1]).toBe("#101,45.50,0.00,3.00,0.00,1.71,10.00,36.79");
+    expect(lines.at(-2)).toBe("Other Stripe activity,,,,,,,0.00");
+    expect(lines.at(-1)).toBe("Payout total,,,,,,,58.84");
   });
 });
