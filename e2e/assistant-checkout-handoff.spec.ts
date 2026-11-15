@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
-import { handoffTimezone } from "./handoff-timezone";
+import { HANDOFF_PREP_MINUTES, handoffTimezone } from "./handoff-timezone";
 import { storeUrl } from "./urls";
 
 async function scoped<T>(prisma: PrismaClient, storeId: string, run: (tx: Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]) => Promise<T>) {
@@ -25,7 +25,7 @@ async function createHandoffStore(prisma: PrismaClient) {
       stripeOnboardingStatus: "complete",
       stripeAccountId: `acct_${slug.replace(/[^a-z0-9]/g, "").slice(0, 20)}`,
       pickupEnabled: true,
-      prepTimeMinutes: 30,
+      prepTimeMinutes: HANDOFF_PREP_MINUTES,
       timezone: handoffTimezone(new Date()),
       minimumOrderCents: 0,
     },
