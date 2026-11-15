@@ -19,10 +19,13 @@ export function StoryCard({ className, ...props }: ComponentProps<typeof Card>) 
 export function StorySurface({
   children,
   asMain = true,
+  wide = false,
   scene = BODIJA_MARKET,
 }: {
   children: ReactNode;
   asMain?: boolean;
+  /** A two-column form from 1024px, for a step too tall for one column on a laptop. */
+  wide?: boolean;
   scene?: StoryScene;
 }) {
   const Tag = asMain ? "main" : "div";
@@ -92,7 +95,7 @@ export function StorySurface({
 
         {/* Visible from the first paint. The entrance only moves it, so slow JS never hides the form. */}
         <motion.div
-          className="relative z-10 w-full max-w-md motion-reduce:!transform-none"
+          className={cn("relative z-10 w-full max-w-md motion-reduce:!transform-none", wide && "lg:max-w-[46rem]")}
           initial={{ y: 16 }}
           animate={{ y: 0 }}
           transition={{ duration: 0.5, ease: [0, 0, 0, 1] }}

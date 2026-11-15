@@ -150,7 +150,7 @@ export default function Enroll2FA() {
     error && error !== SESSION_ENDED ? { "aria-invalid": true, "aria-describedby": ERROR_ID } : {};
 
   return (
-    <StorySurface>
+    <StorySurface wide={Boolean(totpUri) && !verified}>
       <StoryCard className="gap-5 py-6">
         <CardHeader className="px-6 sm:px-8">
           {!verified && (
@@ -201,7 +201,7 @@ export default function Enroll2FA() {
           )}
 
           {totpUri && !verified && (
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:items-start lg:gap-8">
               <section className="flex flex-col gap-3">
                 <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
                   1. <span className="md:hidden">Add this account to</span>
