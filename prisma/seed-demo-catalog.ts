@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { lockMasterProduct, readAdminChanges, withoutAdminChanges } from "./master-catalog-upsert";
+import { existingCategoryId, lockMasterProduct, readAdminChanges, withoutAdminChanges } from "./master-catalog-upsert";
 
 interface CatalogProduct {
   id: string;
@@ -1126,7 +1126,7 @@ export async function seedDemoCatalog(prisma: PrismaClient) {
       const existing = await lockMasterProduct(tx, p.id);
       if (existing?.status === "merged") return;
       const changes = await readAdminChanges(tx, p.id);
-      const values = { name: p.name, categoryId: p.categoryId };
+      const values = { name: p.name, categoryId: await existingCategoryId(tx, p.categoryId) };
       if (existing) await tx.masterProduct.update({ where: { id: p.id }, data: withoutAdminChanges(values, changes) });
       else await tx.masterProduct.create({ data: { id: p.id, ...values } });
       for (const syn of p.synonyms) {

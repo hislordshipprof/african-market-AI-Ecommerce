@@ -165,8 +165,90 @@ export async function readAdminChanges(tx: Prisma.TransactionClient, productId: 
 }
 
 /** The seed's values without the columns an admin changed. */
-export function withoutAdminChanges<T extends Partial<Record<SeededField, unknown>>>(values: T, changes: AdminChanges): Partial<T> {
-  return Object.fromEntries(Object.entries(values).filter(([field]) => !changes.fields.has(field as SeededField))) as Partial<T>;
+export function withoutAdminChanges<T extends object>(values: T, changes: { fields: ReadonlySet<string> }): Partial<T> {
+  return Object.fromEntries(Object.entries(values).filter(([field]) => !changes.fields.has(field))) as Partial<T>;
+}
+
+/** The category columns the seed writes. */
+const SEEDED_CATEGORY_FIELDS = new Set(["name", "slug", "localName", "imageUrl", "sortOrder", "taxCode"]);
+
+export type CategoryAdminChanges = {
+  /** Seeded columns a platform admin changed; the seed leaves them as the admin set them. */
+  fields: Set<string>;
+  /** A platform admin deleted the category; the seed does not recreate it. */
+  deleted: boolean;
+};
+
+/**
+ * What platform admins changed on a seeded category, read from the audit rows #541's category admin writes (#675).
+ * A move renumbers the whole sibling group but audits only the moved category, so a move of any sibling keeps
+ * the order of every category in the group.
+ */
+export async function readCategoryAdminChanges(tx: Prisma.TransactionClient, categoryId: string): Promise<CategoryAdminChanges> {
+  const rows = await tx.$queryRaw<Array<{ parent_id: string | null }>>`SELECT parent_id FROM categories WHERE id = ${categoryId} FOR UPDATE`;
+  const existing = rows[0];
+  const audits = await tx.auditLog.findMany({
+    where: { entityType: "category", entityId: categoryId, action: { in: ["catalog.category_edit", "catalog.category_image", "catalog.category_delete"] } },
+    select: { action: true, after: true },
+  });
+  const changes: CategoryAdminChanges = { fields: new Set(), deleted: !existing && audits.some((row) => row.action === "catalog.category_delete") };
+  for (const row of audits) {
+    if (row.action === "catalog.category_image") changes.fields.add("imageUrl");
+    if (row.action === "catalog.category_edit") {
+      for (const field of Object.keys(jsonObject(row.after))) if (SEEDED_CATEGORY_FIELDS.has(field)) changes.fields.add(field);
+    }
+  }
+  if (existing) {
+    const siblings = await tx.category.findMany({ where: { parentId: existing.parent_id }, select: { id: true } });
+    const moved = await tx.auditLog.count({
+      where: { entityType: "category", action: "catalog.category_move", entityId: { in: siblings.map((row) => row.id) } },
+    });
+    if (moved > 0) changes.fields.add("sortOrder");
+  }
+  return changes;
+}
+
+/** The seed's category for a product, or null when the category is gone (an admin deleted it). */
+export async function existingCategoryId(tx: Prisma.TransactionClient, categoryId: string | null): Promise<string | null> {
+  if (!categoryId) return null;
+  return (await tx.category.findUnique({ where: { id: categoryId }, select: { id: true } }))?.id ?? null;
+}
+
+/** The recipe snapshot fields `catalog.recipe_edit` records; a rename also moves `key`. */
+const RECIPE_EDIT_FIELDS = ["key", "name", "aliases", "servings", "ingredients"] as const;
+
+/**
+ * The fields platform admins edited on a recipe, from its `catalog.recipe_edit` rows (#675): each holds the whole
+ * editor snapshot before and after, so a field counts when its two values differ.
+ */
+export async function readRecipeAdminChanges(tx: Prisma.TransactionClient, recipeId: string): Promise<{ fields: Set<string> }> {
+  const rows = await tx.auditLog.findMany({
+    where: { entityType: "recipe", entityId: recipeId, action: "catalog.recipe_edit" },
+    select: { before: true, after: true },
+  });
+  const fields = new Set<string>();
+  for (const row of rows) {
+    const [before, after] = [jsonObject(row.before), jsonObject(row.after)];
+    for (const field of RECIPE_EDIT_FIELDS) if (JSON.stringify(before[field]) !== JSON.stringify(after[field])) fields.add(field);
+  }
+  return { fields };
+}
+
+/**
+ * The recipe a seeded dish key names, the row with that key or the one an admin renamed away from it, locked until
+ * the seed's transaction ends so an admin save cannot land between the read and the write.
+ */
+export async function lockSeededRecipe(tx: Prisma.TransactionClient, key: string): Promise<{ id: string } | null> {
+  const byKey = await tx.recipe.findUnique({ where: { key }, select: { id: true } });
+  const renamed = byKey ? null : await tx.auditLog.findFirst({
+    where: { entityType: "recipe", action: "catalog.recipe_edit", before: { path: ["key"], equals: key } },
+    orderBy: { createdAt: "desc" },
+    select: { entityId: true },
+  });
+  const id = byKey?.id ?? renamed?.entityId;
+  if (!id) return null;
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM recipes WHERE id = ${id} FOR UPDATE`;
+  return rows[0] ?? null;
 }
 
 /** Holds the product's row until the seed's transaction ends, so an admin save cannot land between the read and the write. */
@@ -209,6 +291,7 @@ export async function upsertMasterProduct(
 
   const existing = await lockMasterProduct(tx, row.id);
   if (existing?.status === "merged") return { keptAdminChanges: true };
+  fields.categoryId = await existingCategoryId(tx, categoryId);
   const changes = await readAdminChanges(tx, row.id);
   if (existing && ADMIN_STATUSES.has(existing.status)) changes.fields.add("status");
 
