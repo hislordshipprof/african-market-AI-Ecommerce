@@ -447,7 +447,7 @@ StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|counter_sale|sho
 
 Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id, source[manual|ai])
 Order(id, tenant_id, number, customer_id, status, fulfillment[delivery|pickup], address, totals..., 
-      payment_intent_id, captured_amount, tip, platform_fee, delivery_fee, notes)
+      payment_intent_id, captured_amount, tip, platform_fee, delivery_fee, notes, acquisition_source?[directory])
 OrderLine(id, order_id, variant_id, qty_ordered, qty_picked, unit_price, swap_rule, status, substituted_variant_id, substituted_unit_price)
 SubstitutionRequest(id, store_id, order_id, order_line_id unique, proposed_variant_id?, proposed_unit_price?, qty, status[pending|approved|declined|timed_out], expires_at, answered_at)  # RLS on store_id
 Delivery(id, order_id, provider, external_id, status, quote_fee, actual_fee, tracking_url, courier_json, proof_url, pin)
