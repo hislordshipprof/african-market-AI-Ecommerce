@@ -6,7 +6,8 @@ import {
 const ORDER_FACTS = Prisma.sql`
   o.id AS "orderId", o.store_id AS "storeId", s.name AS "storeName", o.number AS "orderNumber", o.fulfillment,
   o.confirmed_capture_cents AS "capturedAmountCents", o.platform_fee_cents AS "platformFeeCents",
-  o.service_fee_cents AS "serviceFeeCents", o.delivery_fee_cents AS "deliveryFeeCents"`;
+  o.service_fee_cents AS "serviceFeeCents", o.delivery_fee_cents AS "deliveryFeeCents",
+  o.tax_cents AS "taxCents", o.tax_liable_party AS "taxLiableParty"`;
 
 /** UTC month bounds as timestamps, matching the UTC values Prisma stores in timestamp(3) columns. */
 function bounds(month: LedgerMonth) {
@@ -32,6 +33,7 @@ export function refundFactsSql(month: LedgerMonth): Prisma.Sql {
   return Prisma.sql`
     SELECT ${ORDER_FACTS}, r.id AS "refundId", r.amount_cents AS "amountCents",
            r.refund_application_fee AS "refundApplicationFee", r.service_fee_share_cents AS "serviceFeeShareCents",
+           r.platform_tax_share_cents AS "platformTaxShareCents",
            r.fee_refund_id IS NOT NULL AS "feeShareReturned", r.created_at AS "createdAt", r.succeeded_at AS "succeededAt"
     FROM refund_requests r
     JOIN orders o ON o.id = r.order_id AND o.store_id = r.store_id

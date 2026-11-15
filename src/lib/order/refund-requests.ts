@@ -11,7 +11,7 @@ import type { RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
 import { recordCapture } from "./capture-record";
-import { serviceFeeShareOfRefund } from "./platform-fee";
+import { refundShares } from "./platform-fee";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
 
@@ -55,6 +55,13 @@ export async function openRefundRequest(tx: Tx, orderId: string): Promise<Refund
 
 export async function findOpenRefundRequest(storeId: string, orderId: string): Promise<RefundRequestRow | null> {
   return storeScopedTransaction(storeId, (tx) => openRefundRequest(tx, orderId));
+}
+
+/** The tax earlier refunds of the order took (#65), counting any not known to have failed, so tax shares never add up past the tax. */
+export function taxRefundedCents(rows: Array<{ state: string; providerStatus: string | null; taxShareCents: number }>): number {
+  return rows
+    .filter((row) => row.state !== "NOT_CREATED" && row.providerStatus !== "failed" && row.providerStatus !== "canceled")
+    .reduce((sum, row) => sum + row.taxShareCents, 0);
 }
 
 function countedCents(listed: RefundResult[], statuses: string[]): number {
@@ -385,6 +392,11 @@ export async function submitRefund(
     const count = await tx.refundRequest.count({ where: { orderId } });
     const key = cause.cause === "platform" ? platformRefundKey(orderId, cause.submissionId) : `refund:${orderId}:${count + 1}`;
     const refundApplicationFee = refundsApplicationFee(cause, current.fulfillment);
+    const taxBefore = taxRefundedCents(await tx.refundRequest.findMany({ where: { orderId } }));
+    // A cancel refunds everything left, so all the tax left; any other refund is split into goods, fee share and tax share.
+    const shares = cause.cause === "cancel"
+      ? { serviceFeeCents: 0, taxCents: Math.max(0, current.taxCents - taxBefore) }
+      : refundShares(amount, current, taxBefore);
     const row = await tx.refundRequest.create({
       data: {
         storeId,
@@ -393,8 +405,11 @@ export async function submitRefund(
         key,
         amountCents: amount,
         refundApplicationFee,
-        // The store never received the service fee, so its share of a courier refund after delivery comes from the platform fee.
-        serviceFeeShareCents: cause.cause !== "cancel" && !refundApplicationFee ? serviceFeeShareOfRefund(amount, current) : 0,
+        // The store never received the service fee, nor the tax the platform collects, so their shares of a courier
+        // refund after delivery come from the platform fee (#495, #65). Store-collected tax is reversed with the transfer.
+        serviceFeeShareCents: refundApplicationFee ? 0 : shares.serviceFeeCents,
+        taxShareCents: shares.taxCents,
+        platformTaxShareCents: refundApplicationFee || current.taxLiableParty === "store" ? 0 : shares.taxCents,
         state: "RESERVED",
       },
     });
@@ -692,16 +707,16 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
 }
 
 /**
- * Once a courier issue refund has succeeded, return its service fee share from the platform's
- * application fee. A failure is logged and retried by the next evaluation of the order.
+ * Once a courier refund after delivery has succeeded, return its service fee share and the share of the tax the
+ * platform collected from the platform's application fee. A failure is logged and retried by the next evaluation.
  */
 async function returnServiceFeeShares(storeId: string, orderId: string): Promise<void> {
   const due = await storeScoped(storeId).refundRequest.findMany({
-    where: { orderId, serviceFeeShareCents: { gt: 0 }, feeRefundId: null, providerStatus: "succeeded" },
+    where: { orderId, OR: [{ serviceFeeShareCents: { gt: 0 } }, { platformTaxShareCents: { gt: 0 } }], feeRefundId: null, providerStatus: "succeeded" },
   });
   for (const row of due) {
     try {
-      const { feeRefundId } = await getStripeProvider().refundApplicationFeePart(row.paymentIntentId, row.serviceFeeShareCents, row.key);
+      const { feeRefundId } = await getStripeProvider().refundApplicationFeePart(row.paymentIntentId, row.serviceFeeShareCents + row.platformTaxShareCents, row.key);
       await saveRequest(storeId, row.id, { feeRefundId });
     } catch (err) {
       const code = (err as { code?: unknown } | null)?.code;

@@ -1041,7 +1041,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
-                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
+                  OR (provider_status = 'succeeded' AND (service_fee_share_cents > 0 OR platform_tax_share_cents > 0) AND fee_refund_id IS NULL)
               ))
               AND store_id IN (${Prisma.join(storeIds)})
             ORDER BY updated_at ASC
@@ -1073,7 +1073,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
-                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
+                  OR (provider_status = 'succeeded' AND (service_fee_share_cents > 0 OR platform_tax_share_cents > 0) AND fee_refund_id IS NULL)
               )
             ORDER BY updated_at ASC
             LIMIT 50

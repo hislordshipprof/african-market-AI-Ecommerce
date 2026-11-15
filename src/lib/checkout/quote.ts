@@ -48,6 +48,19 @@ export function appliedCouponId(input: QuoteCouponInput | null | undefined, quot
   return input && "coupon" in input && quote.coupon && !quote.coupon.message ? input.coupon.id : null;
 }
 
+/** 10% of goods and tax, capped at $20 (#64, #65). */
+function holdBufferCents(goodsCents: number, taxCents: number): number {
+  return Math.min(Math.round((goodsCents + taxCents) * 0.1), 2000);
+}
+
+/** The quote with Stripe Tax's amount added, on the same formula as computeQuote. */
+export function withTax(quote: CheckoutQuote, taxCents: number): CheckoutQuote {
+  const goodsCents = quote.subtotalCents - quote.discountCents;
+  const totalCents = quote.totalCents - quote.taxCents + taxCents;
+  const bufferCents = holdBufferCents(goodsCents, taxCents);
+  return { ...quote, taxCents, totalCents, bufferCents, holdCents: totalCents + bufferCents };
+}
+
 export function computeQuote(
   minimumOrderCents: number,
   cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean }>,
@@ -57,6 +70,7 @@ export function computeQuote(
   delivery?: StoreDeliveryQuote | null,
   courier?: CourierQuoteInput | null,
   coupon?: QuoteCouponInput | null,
+  taxCents = 0,
 ): CheckoutQuote {
   const problems: FlowProblem[] = [];
   let subtotalCents = 0;
@@ -148,8 +162,8 @@ export function computeQuote(
   const discountCents = applied?.discountCents ?? 0;
   const goodsCents = subtotalCents - discountCents;
   const serviceFeeCentsQuoted = serviceFeeCents(goodsCents, serviceFee);
-  const totalCents = goodsCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents + courierFeeCents;
-  const bufferCents = Math.min(Math.round(goodsCents * 0.1), 2000);
+  const totalCents = goodsCents + taxCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents + courierFeeCents;
+  const bufferCents = holdBufferCents(goodsCents, taxCents);
   const holdCents = totalCents + bufferCents;
 
   return {
@@ -159,7 +173,7 @@ export function computeQuote(
     courierFeeCents,
     ...(courierProvider ? { courierProvider } : {}),
     serviceFeeCents: serviceFeeCentsQuoted,
-    taxCents: 0,
+    taxCents,
     tipCents,
     discountCents,
     ...(coupon && applied
