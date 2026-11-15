@@ -12,6 +12,7 @@ import { revalidateStorefront } from "../storefront/cache";
 import { requirePlatformAdmin } from "./session";
 import { z } from "zod";
 import { readSynonymForm, synonymFormSchema, type SynonymField, type SynonymForm } from "./catalog-structure-form";
+import { MERGED_PRODUCT_MESSAGE } from "./master-catalog-form";
 
 export type SynonymState = {
   ok?: boolean;
@@ -79,8 +80,9 @@ export async function addProductSynonym(_prev: SynonymState, form: FormData): Pr
 
   return finish(await platformAdminTransaction(async (tx): Promise<Result> => {
     await lockMasterProductRow(tx, productId);
-    const product = await tx.masterProduct.findUnique({ where: { id: productId }, select: { id: true } });
+    const product = await tx.masterProduct.findUnique({ where: { id: productId }, select: { status: true } });
     if (!product) return { ok: false, message: "Product not found" };
+    if (product.status === "merged") return { ok: false, message: MERGED_PRODUCT_MESSAGE };
     if ((await sameProductSynonymIds(tx, productId, term, null)).length > 0) {
       return { ok: false, message: "Check the highlighted fields", fieldErrors: { term: DUPLICATE } };
     }

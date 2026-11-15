@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveMasterProduct, type MasterProductEditor, type SaveState } from "@/lib/admin/master-catalog";
-import { MASTER_STATUSES, MASTER_STATUS_LABELS, STORAGE_OPTIONS, type MasterProductField } from "@/lib/admin/master-catalog-form";
+import { EDITABLE_STATUSES, MASTER_STATUS_LABELS, STORAGE_OPTIONS, type MasterProductField } from "@/lib/admin/master-catalog-form";
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 const FIELD = `min-h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground aria-[invalid=true]:border-destructive ${FOCUS}`;
@@ -94,7 +94,7 @@ export function ProductForm({ product, categories }: Pick<MasterProductEditor, "
 
       <Field id="status" label="Status" hint="Archived products take no new listings. Stores already selling one keep selling it." error={error("status")}>
         <select id="status" name="status" defaultValue={product.status} className={`${FIELD} sm:max-w-xs`} {...described("status")}>
-          {MASTER_STATUSES.map((status) => (
+          {EDITABLE_STATUSES.map((status) => (
             <option key={status} value={status}>{MASTER_STATUS_LABELS[status]}</option>
           ))}
         </select>
