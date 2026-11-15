@@ -24,3 +24,11 @@ export function e164Digits(e164: string): string {
 export function lastFour(value: string): string {
   return value.replace(/\D/g, "").slice(-4);
 }
+
+/**
+ * Meta's business-scoped user id: a country code, an optional ".ENT" (parent
+ * id), a dot, then up to 128 letters and digits, e.g. "US.13491208655302741918".
+ */
+export function isBsuid(value: string): boolean {
+  return /^[A-Z]{2}(\.ENT)?\.[A-Za-z0-9]{1,128}$/.test(value);
+}
