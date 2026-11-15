@@ -1,6 +1,5 @@
 import { Prisma } from "@prisma/client";
 import {
-  authPrisma,
   claimStripeBillingEvent,
   lockPilotOffer,
   lockStoreSubscriptionRow,
@@ -11,7 +10,7 @@ import {
   storeScoped,
   storeScopedTransaction,
 } from "../db";
-import { sendEmail } from "../email/send";
+import { emailPlatformAdmins } from "../email/platform-admins";
 import { escapeHtml } from "../format";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import type { WebhookEvent } from "../stripe/types";
@@ -410,13 +409,6 @@ async function resolveStore(
   const linked = await tx.storeSubscription.findUnique({ where: { storeId: claimedStore }, select: { stripeCustomerId: true } });
   if (linked?.stripeCustomerId && customerId && linked.stripeCustomerId !== customerId) return null;
   return claimedStore;
-}
-
-async function emailPlatformAdmins(subject: string, html: string, key: string): Promise<void> {
-  const admins = await authPrisma.user.findMany({ where: { role: "platform_admin" }, select: { email: true } });
-  await Promise.allSettled(
-    admins.map((admin) => sendEmail({ to: admin.email, subject, html, idempotencyKey: `${key}-${admin.email}` })),
-  );
 }
 
 /** The storefront stays up; the owner sees a banner and every platform admin gets an email. */
