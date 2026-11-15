@@ -4,6 +4,7 @@ import { quotedFrom } from "./from";
 import { liveSandbox, providerSandbox } from "../test-live-provider";
 import { ResendSender } from "./send";
 import { rejectionMessage } from "../store-application/service";
+import { storeOpenedEmail } from "../directory/store-requests";
 
 const apiKey = process.env.RESEND_API_KEY;
 const fromAddress = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
@@ -68,5 +69,18 @@ describe.skipIf(!liveSandbox || !apiKey)("Resend magic-link sandbox", () => {
     });
     const result = await new ResendSender(apiKey!, fromAddress).send(message);
     expect(result.id).toMatch(/\S/);
+  }), 20_000);
+
+  it("a store-opened notice (#455) resent after a crash with its request key is accepted once", sandbox.test(async () => {
+    const message = {
+      to: "delivered@resend.dev",
+      ...storeOpenedEmail("10001", { name: "Mama Ngozi African Market", city: "Houston", state: "TX", distanceMi: 3.2, href: "https://mama-ngozi.example.com/?ref=directory" }),
+      idempotencyKey: `directory-request-sandbox-${Date.now()}`,
+    };
+    const sender = new ResendSender(apiKey!, fromAddress);
+    const first = await sender.send(message);
+    const second = await sender.send(message);
+    expect(first.id).toMatch(/\S/);
+    expect(second.id).toBe(first.id);
   }), 20_000);
 });
