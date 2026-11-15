@@ -111,7 +111,8 @@ function orderMoney(order: OrderFacts, capturedCents: number) {
     courierFeeCents: courier,
     applicationFeeCents: applicationFee,
     platformCardFeeCents: split.platformCardFeeCents,
-    platformNetCents: applicationFee - courier - storeCardFee - split.platformCardFeeCents,
+    // Courier fees and the tax the platform collects pass through; only their card fees are its cost.
+    platformNetCents: applicationFee - courier - platformTax - storeCardFee - split.platformCardFeeCents,
   };
 }
 
@@ -147,6 +148,7 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
     const captured = order.capturedAmountCents ?? orderRefunds.reduce((sum, r) => sum + r.amountCents, 0);
     if (captured <= 0) continue;
     const money = orderMoney(order, captured);
+    const platformTax = platformTaxCents(order);
     let returned = 0;
     for (const refund of orderRefunds) {
       const left = Math.max(0, money.applicationFeeCents - returned);
@@ -159,9 +161,11 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
       returned += fee;
       const inMonth = refund.succeededAt >= month.startsAt && refund.succeededAt < month.endsAt;
       if (fee <= 0 || !inMonth) continue;
-      const courierBack = refund.refundApplicationFee && money.applicationFeeCents > 0
-        ? Math.round((fee * money.courierFeeCents) / money.applicationFeeCents)
-        : 0;
+      const share = (cents: number) => (refund.refundApplicationFee && money.applicationFeeCents > 0
+        ? Math.round((fee * cents) / money.applicationFeeCents)
+        : 0);
+      const courierBack = share(money.courierFeeCents);
+      const taxBack = share(platformTax);
       rows.push({
         kind: "refund",
         refundFailed: false,
@@ -176,7 +180,7 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
         platformCardFeeCents: 0,
         applicationFeeCents: 0,
         feeRefundedCents: negative(fee),
-        platformNetCents: negative(fee - courierBack),
+        platformNetCents: negative(fee - courierBack - taxBack),
       });
     }
   }

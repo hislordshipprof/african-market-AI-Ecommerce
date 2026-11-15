@@ -57,3 +57,29 @@ describe("fee ledger CSV", () => {
     ]);
   });
 });
+
+describe("fee ledger with sales tax (#65)", () => {
+  const order = {
+    storeId: "s1", storeName: "Ada's Market", orderNumber: 9, fulfillment: "pickup",
+    platformFeeCents: null, serviceFeeCents: 299, deliveryFeeCents: 0,
+  };
+  const at = new Date("2026-11-05T15:00:00Z");
+
+  it("passes the tax the platform collects through, like the courier fee: only its card fee is the platform's cost", () => {
+    const untaxed: CaptureFacts = { ...order, orderId: "o1", capturedAmountCents: 10_000, at, refundFailed: false };
+    const taxed: CaptureFacts = { ...order, orderId: "o2", capturedAmountCents: 10_825, taxCents: 825, taxLiableParty: "platform", at, refundFailed: false };
+    const [plain, withTax] = buildFeeLedger(ledgerMonth("2026-11"), [untaxed, taxed], [], []).rows;
+    // $97.01 store part: card fee 281 + 30 = 311; fee 299 + 311 = 610; platform card fee 9 on the service fee.
+    expect(plain).toMatchObject({ applicationFeeCents: 610, platformNetCents: 290 });
+    // The tax's own card fee, 2.9% of 825 = 24, is all it costs the platform.
+    expect(withTax).toMatchObject({ applicationFeeCents: 1435, platformCardFeeCents: 33, platformNetCents: 266 });
+
+    const cancel: RefundFacts = {
+      ...taxed, refundId: "r1", amountCents: 10_825, refundApplicationFee: true, serviceFeeShareCents: 0,
+      feeShareReturned: false, createdAt: at, succeededAt: at,
+    };
+    const refund = buildFeeLedger(ledgerMonth("2026-11"), [], [cancel], []).rows[0];
+    // The tax goes back with the refund and was never the platform's: only the 610 fee leaves its net.
+    expect(refund).toMatchObject({ feeRefundedCents: -1435, platformNetCents: -610 });
+  });
+});
