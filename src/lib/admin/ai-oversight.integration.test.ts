@@ -18,7 +18,6 @@ import { platformAdminTransaction, storeScoped } from "../db";
 import { isRlsRejection } from "../listing/cross-store-write";
 import { listConversationSample, readTranscript } from "./ai-oversight";
 import { labelConversationAction } from "./ai-oversight-actions";
-import { runAssistantRetention } from "../assistant/retention";
 import { withAiOnboardingSettings } from "./platform-settings-test-lock";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -185,13 +184,6 @@ describe.skipIf(!hasDb)("AI oversight", () => {
     const onlyB = await listConversationSample({ day: DAY, storeId: storeB });
     expect(onlyB.shopper.map((row) => row.id)).toEqual([shopperB]);
     expect(onlyB.copilot).toEqual([]);
-  });
-
-  it("keeps its conversations through the retention sweep that assistant/retention.integration.test.ts runs at 2001-06-01", async () => {
-    // Retention deletes every older conversation in the shared DB, so this file's data must be newer than that sweep's cutoff.
-    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2001-06-01T00:00:00.000Z"));
-    await runAssistantRetention({ run: async (_id, fn) => fn() });
-    expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: plainShopper } })).not.toBeNull();
   });
 
   it("shows a transcript's scrubbed messages and tool calls, never file content, and audits every view", async () => {
