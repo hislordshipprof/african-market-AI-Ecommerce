@@ -33,7 +33,7 @@ A multi-tenant e-commerce platform for independent African grocery markets in th
 | D2 | How customers find stores | Each store's own branded storefront; Phase 2 **Store directory** (search by state / near me → store's site), not a combined marketplace ([ADR-0007](../adr/0007-store-directory-instead-of-marketplace.md)) |
 | D3 | Revenue | Store subscription (Starter $49/mo, Pro $99/mo; first 5 pilot stores 3 months free) + a customer service fee of 3% of goods (min $0.99, max $2.99), 0% commission to the store; courier fee = real quote, **no markup** ([ADR-0021](../adr/0021-pricing-and-courier-plan.md), [ADR-0006](../adr/0006-delivery-options-and-courier-selection.md)) |
 | D4 | Heavy items (>50 lb item or order) | Not courier-eligible: Store delivery or Pickup. 50 lb is an adjustable platform setting ([ADR-0006](../adr/0006-delivery-options-and-courier-selection.md)) |
-| D5 | Store & catalog onboarding | Platform team sets up every store (no self-serve sign-up in v1); AI-assisted catalog (shelf photos → draft listings), store reviews |
+| D5 | Store & catalog onboarding | Stores apply on the public /sell page and a platform admin approves each one (no instant self-serve sign-up in v1; amended 2026-11-14, #554); AI-assisted catalog (shelf photos → draft listings), store reviews |
 | D6 | Couriers | Platform picks the cheaper available of Uber Direct / DoorDash Drive, auto-failover; customer sees the brand, doesn't choose it ([ADR-0006](../adr/0006-delivery-options-and-courier-selection.md)) |
 | D7 | Payments | Stripe Connect; each store is a connected account |
 | D8 | Who can join | Any independent US grocery/food store; no restaurants in v1 ([ADR-0004](../adr/0004-any-independent-grocery-or-food-store.md)) |
@@ -116,7 +116,8 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ## 6. Store admin
 
 ### 6.1 Onboarding (target: 1 day)
-1. Platform admin creates tenant, slug, branding.
+0. Application (#554): the store applies on the public `/sell` page on the root domain (business name, kind of store, address, owner name, email, phone, a web or social link, pickup or delivery today). The form is limited to 5 applications an hour per IP and has a honeypot field, no CAPTCHA; a second pending application with the same email or phone is dropped. Applications are platform data in `store_applications`, read only by platform-admin code. On `/admin/applications` a platform admin approves one in a single audited step: the store is created with the shared create path in status `setup` (#555), the owner invite is sent and courier registration (step 5) is queued; a second approve creates nothing. Reject needs an internal reason and sends one plain email without it. Rejected applications are deleted 12 months after the decision by a daily job.
+1. Platform admin creates tenant, slug, branding (from an approved application, or directly on the stores page).
 2. Owner completes Stripe Connect Express onboarding (KYC, bank).
 3. Catalog: staff photograph shelves → AI matches to master catalog or drafts new listings (name, local names, category, size, image) → owner sets prices & reviews → publish. CSV import also supported.
 4. Settings: hours, prep time, delivery radius (default 8 mi), minimum order, free-delivery threshold, pickup on/off, own driver on/off, auto-refund limit.
@@ -167,7 +168,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ---
 
 ## 7. Platform admin console
-- Tenants: create, suspend, plan/billing, settings override.
+- Tenants: approve or reject store applications (§6.1 step 0), create, suspend, plan/billing, settings override.
 - Master catalog: products, synonyms (by language), images, recipes, category tree; merge duplicates proposed by AI.
   - Built (#540): the product list (`/admin/catalog/products`: catalog search, filters, paging) and editor (fields, status, photo upload to WebP). A product is archived, never deleted; every save is audited and refreshes the storefronts that list it. A save from an editor opened before someone else's save is refused with a reload message.
 - Orders & disputes across tenants; manual refund; courier incident log.

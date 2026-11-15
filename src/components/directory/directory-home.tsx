@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { NearMe, type StateGroup } from "./near-me";
 import { StoreCard, type CardStore } from "./store-card";
 import styles from "./directory.module.css";
@@ -7,6 +8,7 @@ export function DirectoryHome({ stores, states }: { stores: CardStore[]; states:
     <div className={styles.page}>
       <header className={styles.bar}>
         <span className={styles.wordmark}>African Markets</span>
+        <Link className={styles.sell} href="/sell">Sell on African Markets</Link>
       </header>
       <main className={styles.main}>
         <section className={styles.intro}>
