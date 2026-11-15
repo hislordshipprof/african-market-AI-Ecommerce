@@ -8,6 +8,7 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-ap
 import { createAssistantModel } from "../model";
 import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
 import { WEB_SEARCH_MICROS } from "../cost";
+import { readConstraints } from "../constraints";
 import { RECIPE_LOOKUPS_PER_STORE_DAY, saveLookedUpRecipe, takeLookupSlot } from "../recipes";
 import { failNextSpendWrites, setSpendClock, utcDay } from "../spend";
 import { setShopperNeeds, type AssistantContext } from "./execute";
@@ -156,6 +157,35 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     // Store B sells scotch bonnet; store A does not, so it is not carried here.
     expect(result.notCarried).toContain("scotch bonnet pepper");
     expect(result.notCarried).toContain("onion");
+  });
+
+  it("leaves out what the customer already has at home for the rest of the conversation, until taken back", async () => {
+    const ctx = await conversation(storeA);
+    expect(await setShopperNeeds(ctx, { have_at_home: ["Rice", "tomatoes"] })).toMatchObject({ ok: true, haveAtHome: ["rice", "tomatoes"] });
+    const first = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(first.haveAtHome).toEqual(["rice"]);
+    expect(first.inStock.map((item) => item.ingredient)).not.toContain("rice");
+    // Tomatoes at home are not tomato paste.
+    expect(first.lowOrOut.map((item) => item.ingredient)).toContain("tomato paste");
+    // Kept for the conversation: a later recipe still leaves it out.
+    const again = await getRecipe(ctx, { dish: "Jollof", servings: 10 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(again.haveAtHome).toEqual(["rice"]);
+    // Taken back: the next recipe proposes it again.
+    expect(await setShopperNeeds(ctx, { remove: ["rice"] })).toMatchObject({ haveAtHome: ["tomatoes"] });
+    const back = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(back.inStock.map((item) => item.ingredient)).toContain("rice");
+    expect(back).not.toHaveProperty("haveAtHome");
+  });
+
+  it("keeps only the 50 newest have-at-home items in a conversation", async () => {
+    const ctx = await conversation(storeA);
+    for (let batch = 0; batch < 6; batch++) {
+      await setShopperNeeds(ctx, { have_at_home: Array.from({ length: 10 }, (_, i) => `item ${batch * 10 + i}`) });
+    }
+    const kept = (await readConstraints(storeA, ctx.conversationId)).haveAtHome;
+    expect(kept).toHaveLength(50);
+    expect(kept[0]).toBe("item 10");
+    expect(kept.at(-1)).toBe("item 59");
   });
 
   it("finds a seeded dish the shopper named with what they want in it, with no lookup", async () => {
