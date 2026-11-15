@@ -260,7 +260,7 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
       const base = await sell(storeA, await master("Sub base", known));
       const create = (name: string, allergens: string[], price: number) => Promise.all(Array.from({ length: name === "Sub peanut" ? 40 : 5 }, async (_, index) => {
         const id = await master(`${name} ${index}`, { ...known, allergens });
-        return storeScoped(storeA).listing.create({ data: { storeId: storeA, masterProductId: id, price, stockMode: "unlimited", frozen: false, perishable: false } });
+        return storeScoped(storeA).listing.create({ data: { storeId: storeA, masterProductId: id, price, stockMode: "unlimited", frozen: false, perishable: false, variants: { create: { label: "1 lb", price, weightG: 454 } } } });
       }));
       await create("Sub peanut", ["peanuts"], 100);
       const safe = await create("Sub safe", [], 500);
