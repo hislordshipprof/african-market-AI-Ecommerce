@@ -11,6 +11,7 @@ import { assistantChatCap } from "../billing/plan";
 import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "./fake";
 import { setWhatsAppProvider } from "./index";
 import { linkStoreNumber } from "./store-number";
+import { shopperSenderKey } from "./token-box";
 import { handleStoreInboundMessage } from "./store-inbound";
 import { CHECKOUT_LINK_TTL_MS, redeemCheckoutLink } from "./checkout-link";
 import { SHOPPER_TURNS_PER_HOUR, TYPE_YOUR_LIST_REPLY } from "./shopper";
@@ -29,7 +30,7 @@ const PHONE_A = String(1_200_000_000 + base);
 const PHONE_B = String(2_200_000_000 + base);
 const WABA_A = String(4_200_000_000 + base);
 const WABA_B = String(5_200_000_000 + base);
-const LINK = /\/checkout\/link\/([A-Za-z0-9_-]{43})/;
+const LINK = /\/api\/checkout-link\/([A-Za-z0-9_-]{43})/;
 
 let senderSeq = 0;
 /** A fresh 11-digit wa_id per test, so rate rows and carts never cross tests. */
@@ -86,12 +87,14 @@ describe.skipIf(!hasDb)("WhatsApp shopper conversations (#559)", () => {
   const actorId = `s559-${base}`;
   const actorEmail = `${actorId}@example.com`;
 
-  async function shopperCart(storeId: string): Promise<string | null> {
-    const rows = await storeScoped(storeId).cart.findMany({
-      where: { whatsAppShopperCarts: { some: {} } },
-      select: { id: true },
+  /** The cart this sender's chat with this store fills. */
+  async function shopperCart(storeId: string, from: string): Promise<string | null> {
+    const senderKey = shopperSenderKey(storeId, from);
+    if (!senderKey) throw new Error("WHATSAPP_TOKEN_KEY is not set");
+    const row = await storeScoped(storeId).whatsAppShopperCart.findUnique({
+      where: { storeId_senderKey: { storeId, senderKey } },
     });
-    return rows.at(-1)?.id ?? null;
+    return row?.cartId ?? null;
   }
 
   beforeAll(async () => {
@@ -182,7 +185,7 @@ describe.skipIf(!hasDb)("WhatsApp shopper conversations (#559)", () => {
     expect(texts(from)).toEqual(["Here is what I found.", "Here is what I found."]);
     expect(sentTo(from).every((entry) => entry.from === PHONE_A)).toBe(true);
 
-    const cartId = await shopperCart(storeA);
+    const cartId = await shopperCart(storeA, from);
     expect(cartId).not.toBeNull();
     const lines = await storeScoped(storeA).cartLine.findMany({ where: { cartId: cartId! } });
     expect(lines.map((line) => line.qty)).toEqual([2]);
@@ -220,7 +223,7 @@ describe.skipIf(!hasDb)("WhatsApp shopper conversations (#559)", () => {
       message(now, from, { type: "interactive", replyId: flour.id }),
       { model, now: () => now },
     );
-    const cartId = await shopperCart(storeA);
+    const cartId = await shopperCart(storeA, from);
     const lines = await storeScoped(storeA).cartLine.findMany({
       where: { cartId: cartId! },
       include: { variant: { include: { listing: true } } },
@@ -256,7 +259,7 @@ describe.skipIf(!hasDb)("WhatsApp shopper conversations (#559)", () => {
     expect(review).toContain("https://s559a-");
     expect(review).toContain("$24.00");
     const token = LINK.exec(review!)![1];
-    const cartId = await shopperCart(storeA);
+    const cartId = await shopperCart(storeA, from);
 
     expect(await redeemCheckoutLink(storeB, token, null, now)).toEqual({ ok: false });
     expect(await redeemCheckoutLink(storeA, token, null, now)).toEqual({ ok: true, cartId });
@@ -357,8 +360,8 @@ describe.skipIf(!hasDb)("WhatsApp shopper conversations (#559)", () => {
     await handleStoreInboundMessage(PHONE_A, message(now, from, { text: "add two egusi" }), { model: atA.model, now: () => now });
     await handleStoreInboundMessage(PHONE_B, message(now, from, { text: "basket summary" }), { model: atB.model, now: () => now });
 
-    const cartA = await shopperCart(storeA);
-    const cartB = await shopperCart(storeB);
+    const cartA = await shopperCart(storeA, from);
+    const cartB = await shopperCart(storeB, from);
     expect(cartA).not.toBe(cartB);
     expect(await storeScoped(storeB).cart.findUnique({ where: { id: cartA! } })).toBeNull();
     expect(await storeScoped(storeB).cartLine.count({ where: { cartId: cartB! } })).toBe(0);
@@ -376,7 +379,7 @@ describe.skipIf(!hasDb)("WhatsApp shopper conversations (#559)", () => {
     const options = { model, now: () => now };
 
     await handleStoreInboundMessage(PHONE_A, message(now, from, { text: "hello" }), options);
-    const cartId = await shopperCart(storeA);
+    const cartId = await shopperCart(storeA, from);
     await storeScoped(storeA).aiConversation.updateMany({
       where: { cartId: cartId! },
       data: { inFlightUntil: new Date(Date.now() + 60_000) },

@@ -13,9 +13,14 @@ afterEach(() => {
 });
 
 describe("assistant import boundary", () => {
-  it("assistant code cannot reach Stripe or placeOrder", () => {
+  it("assistant code, including the WhatsApp channel and its checkout link (#559), cannot reach Stripe or placeOrder", () => {
     const hits = findForbiddenImports(
-      [path.join(SRC, "lib/assistant"), path.join(SRC, "app/api/assistant")],
+      [
+        path.join(SRC, "lib/assistant"),
+        path.join(SRC, "app/api/assistant"),
+        path.join(SRC, "lib/whatsapp"),
+        path.join(SRC, "app/api/checkout-link"), path.join(SRC, "app/checkout/link-expired"),
+      ],
       SRC,
     );
     expect(hits).toEqual([]);

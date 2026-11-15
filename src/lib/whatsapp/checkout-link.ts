@@ -12,7 +12,7 @@ function hashToken(token: string): string {
 }
 
 export function checkoutLinkPath(token: string): string {
-  return `/checkout/link/${token}`;
+  return `/api/checkout-link/${token}`;
 }
 
 /** A new single-use link bound to this store's cart. Only the token's hash is stored. */

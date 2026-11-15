@@ -1,5 +1,5 @@
 import type { LanguageModel, UIMessage, UIMessageChunk } from "ai";
-import { platform, storeScopedTransaction } from "../db";
+import { lockWhatsAppShopper, platform, storeScopedTransaction } from "../db";
 import { MAX_TEXT } from "../assistant/attachments";
 import { openAssistant, runShopperTurn } from "../assistant/chat-handler";
 import { assistantChatEnabled } from "../assistant/contract";
@@ -111,7 +111,7 @@ export async function handleShopperMessage(
 /** The sender's open cart at this store, or a new one. A cart an account has since claimed is not reused. */
 async function shopperCartId(storeId: string, senderKey: string): Promise<string> {
   return storeScopedTransaction(storeId, async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`whatsapp-shopper:${storeId}:${senderKey}`}))`;
+    await lockWhatsAppShopper(tx, storeId, senderKey);
     const row = await tx.whatsAppShopperCart.findUnique({
       where: { storeId_senderKey: { storeId, senderKey } },
       include: { cart: { select: { userId: true } } },
