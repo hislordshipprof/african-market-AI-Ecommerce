@@ -22,7 +22,7 @@ export const REQUEST_BROWSER_LIMIT = 5;
 const REQUEST_IP_LIMIT = 20;
 const BATCH = 50;
 
-const schema = z.strictObject({
+export const storeRequestInput = z.strictObject({
   zip: z.string().max(10),
   contact: z.string().max(254),
   consent: z.literal(true),
@@ -37,11 +37,11 @@ export type ParsedRequest =
 
 export type RequestResult = { ok: true } | { ok: false; message: string };
 
-const BAD = "Enter a 5-digit ZIP code, an email or US mobile number, and tick the box.";
+export const STORE_REQUEST_BAD = "Enter a 5-digit ZIP code, an email or US mobile number, and tick the box.";
 
 export function parseStoreRequest(input: unknown): ParsedRequest {
-  const parsed = parseInput(schema, input);
-  if (!parsed.ok) return { ok: false, message: BAD };
+  const parsed = parseInput(storeRequestInput, input);
+  if (!parsed.ok) return { ok: false, message: STORE_REQUEST_BAD };
   if (parsed.data.website !== "") return { ok: false, spam: true };
   const zip = /^(\d{5})(-\d{4})?$/.exec(parsed.data.zip.trim())?.[1];
   if (!zip) return { ok: false, message: "Enter a 5-digit ZIP code." };
