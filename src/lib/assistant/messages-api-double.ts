@@ -472,6 +472,14 @@ function usageOf(step: FakeAnthropicStep) {
   };
 }
 
+/** Two deltas, cut inside the first dollar amount so the adapter sees a price split across deltas. */
+function splitText(text: string): string[] {
+  if (text.length < 2) return [text];
+  const dollar = text.indexOf("$");
+  const cut = dollar >= 0 && dollar + 2 < text.length ? dollar + 2 : Math.floor(text.length / 2);
+  return [text.slice(0, cut), text.slice(cut)];
+}
+
 function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_0"): unknown[] {
   const usage = usageOf(step);
   const start = {
@@ -530,7 +538,9 @@ function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_
     start,
     { type: "ping" },
     { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: step.text ?? "ok" } },
+    ...splitText(step.text ?? "ok").map((text) => (
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }
+    )),
     { type: "content_block_stop", index: 0 },
     {
       type: "message_delta",

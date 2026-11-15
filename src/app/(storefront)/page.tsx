@@ -23,6 +23,7 @@ import { headers } from "next/headers";
 import { listDirectoryStores } from "@/lib/directory/stores";
 import { storefrontUrl } from "@/lib/directory/links";
 import { DirectoryHome } from "@/components/directory/directory-home";
+import { statePages } from "@/lib/directory/places";
 
 export default async function StorefrontPage() {
   const headerList = await headers();
@@ -34,10 +35,16 @@ export default async function StorefrontPage() {
       const href = storefrontUrl(store.slug, root, host);
       return href ? [{ ...store, href }] : [];
     });
-    return <DirectoryHome stores={stores} />;
+    const states = statePages(stores).map(({ code, name, slug, stores }) => ({
+      code,
+      name,
+      href: `/stores/${slug}`,
+      stores: stores.map(({ slug, name, city, href }) => ({ slug, name, city, href })),
+    }));
+    return <DirectoryHome stores={stores} states={states} />;
   }
   const { store, suspended } = await getStoreWithStatus();
-  const checkout = checkCheckoutReady(store.stripeOnboardingStatus);
+  const checkout = checkCheckoutReady(store);
   if (suspended)
     return (
       <main className="sf-storefront sf-section sf-container">
@@ -46,6 +53,20 @@ export default async function StorefrontPage() {
           title="We'll be back soon"
           description="This store is temporarily offline. Please check back later."
         />
+      </main>
+    );
+  // A store in setup is not open yet (#555): no shelves, no cart, no checkout until it goes live.
+  if (store.status === "setup")
+    return (
+      <main className="sf-storefront sf-section sf-container">
+        <h1 className="sf-page-title">{store.name}</h1>
+        <EmptyState
+          title="Opening soon"
+          description="We're getting the shelves ready. Online ordering opens soon."
+        >
+          {/* No "Explore the aisles" link: nothing can be bought until the store goes live. */}
+          <></>
+        </EmptyState>
       </main>
     );
   const [categories, banners, collections, rails] = await Promise.all([

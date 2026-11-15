@@ -37,7 +37,8 @@ start_main_run_if_due() {
   last=$(cat "$root/.builder/ci-main-last" 2>/dev/null || true)
   due=$(git -C "$root" rev-list --count "${last:-origin/main~${CI_MAIN_EVERY:-3}}..origin/main" 2>/dev/null || echo "${CI_MAIN_EVERY:-3}")
   if [ "$due" -ge "${CI_MAIN_EVERY:-3}" ]; then
-    nohup bash "$root/scripts/ci-main.sh" >/dev/null 2>&1 &
+    # The run is not part of this merge: MERGED_MAIN=1 (set when main was just merged in) must not reach its tests (#644).
+    env -u MERGED_MAIN -u DEPLOY -u OWNER_ACCEPTS_BLOCKING nohup bash "$root/scripts/ci-main.sh" >/dev/null 2>&1 &
     echo "Started the full run on main ($due merge(s) since the last one)."
   fi
 }

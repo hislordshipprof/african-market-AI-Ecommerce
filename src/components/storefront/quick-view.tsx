@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useReducedMotion } from "motion/react";
+import { useReducedMotion } from "./use-reduced-motion";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import type { StorefrontListing, StorefrontListingDetail } from "@/lib/storefront/service";

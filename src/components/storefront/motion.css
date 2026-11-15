@@ -124,6 +124,18 @@
 .sf-credit h3 { font:650 20px var(--font-display); text-transform:capitalize; }
 .sf-credit p { margin-block:12px; color:var(--muted-foreground); font-size:14px; }
 .sf-credit a { text-decoration:underline; text-underline-offset:4px; }
+/* Hero slide change (#563: CSS, so the animation library stays off the first load). The first slide never animates in. */
+.sf-hero-subject { transform:rotate(-4deg); }
+.sf-hero-slide[data-enter] { animation:sf-fade-in .65s ease-out both; }
+.sf-hero-slide[data-leaving] { animation:sf-fade-out .65s ease-out both; pointer-events:none; }
+.sf-hero-slide[data-enter] .sf-hero-copy > * { animation:sf-hero-rise .5s cubic-bezier(.34,1.3,.64,1) both; }
+.sf-hero-slide[data-enter] .sf-hero-copy > :nth-child(2) { animation-delay:90ms; }
+.sf-hero-slide[data-enter] .sf-hero-copy > :nth-child(3) { animation-delay:180ms; }
+.sf-hero-slide[data-enter] .sf-hero-subject { animation:sf-hero-subject-in 1s cubic-bezier(.22,1,.36,1) both; }
+@keyframes sf-fade-in { from { opacity:0; } }
+@keyframes sf-fade-out { to { opacity:0; } }
+@keyframes sf-hero-rise { from { opacity:0; transform:translateY(24px); } }
+@keyframes sf-hero-subject-in { from { opacity:0; transform:translateX(70px) rotate(-7deg); } to { transform:rotate(-4deg); } }
 @keyframes sf-ken-burns { from { transform:scale(1); } to { transform:scale(1.08); } }
 @keyframes sf-spin { to { transform:rotate(360deg); } }
 @keyframes sf-route-fade { from { opacity:.5; } to { opacity:1; } }

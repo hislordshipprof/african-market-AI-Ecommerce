@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { copilotDailyDigest } from "../copilot/digest";
 import { courierRegistrationRetry } from "../delivery/courier-functions";
-import { assistantRetention, dailyConfidence, inngestFunctions, reconcileStuckTransitional, sweepOrphanedAuthorized } from "./functions";
+import { assistantRetention, dailyConfidence, directoryStoreRequestNotices, inngestFunctions, reconcileStuckTransitional, storeApplicationRetention, sweepOrphanedAuthorized } from "./functions";
 
-function cronOf(fn: { opts: { triggers?: Array<{ cron?: string }> } }): string | undefined {
-  return fn.opts.triggers?.find((trigger) => trigger.cron)?.cron;
+function cronOf(fn: { opts: { triggers?: ReadonlyArray<{ cron?: string } | { event: string }> } }): string | undefined {
+  return fn.opts.triggers?.flatMap((trigger) => ("cron" in trigger && trigger.cron ? [trigger.cron] : []))[0];
 }
 
 /** Idle runs across a 30-day month. Daily crons are UTC so DST cannot double them. */
@@ -24,18 +24,24 @@ describe("Inngest cron budget (ADR-0016)", () => {
     const confidence = cronOf(dailyConfidence);
     const digest = cronOf(copilotDailyDigest);
     const courierRetry = cronOf(courierRegistrationRetry);
+    const applications = cronOf(storeApplicationRetention);
     expect(orphan).toBe("*/15 * * * *");
     expect(reconcile).toBe("*/15 * * * *");
     expect(retention).toBe("TZ=UTC 17 3 * * *");
     expect(confidence).toBe("TZ=UTC 23 9 * * *");
     expect(digest).toBe("TZ=UTC 0 * * * *");
     expect(courierRetry).toBe("TZ=UTC 41 6 * * *");
+    expect(applications).toBe("TZ=UTC 29 3 * * *");
+    expect(inngestFunctions).toContain(storeApplicationRetention);
+    const storeRequests = cronOf(directoryStoreRequestNotices);
+    expect(storeRequests).toBe("TZ=UTC 7 15 * * *");
+    expect(inngestFunctions).toContain(directoryStoreRequestNotices);
     expect(inngestFunctions).toContain(courierRegistrationRetry);
     expect(inngestFunctions).toContain(dailyConfidence);
     expect(inngestFunctions).toContain(copilotDailyDigest);
     const total = monthlyRuns(orphan!) + monthlyRuns(reconcile!) + monthlyRuns(retention!) + monthlyRuns(confidence!)
-      + monthlyRuns(digest!) + monthlyRuns(courierRetry!);
-    expect(total).toBe(6_570);
+      + monthlyRuns(digest!) + monthlyRuns(courierRetry!) + monthlyRuns(applications!) + monthlyRuns(storeRequests!);
+    expect(total).toBe(6_630);
     expect(total).toBeLessThan(35_000);
   });
 });

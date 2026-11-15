@@ -2,6 +2,7 @@ import { storeScoped } from "../db";
 
 const orderInclude = {
   customer: true,
+  coupon: { select: { code: true } },
   lines: {
     include: {
       listingVariant: { include: { listing: { include: { masterProduct: { select: { name: true } } } } } },

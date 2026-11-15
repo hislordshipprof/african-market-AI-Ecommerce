@@ -13,6 +13,8 @@ import { issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
 import { courierBrand } from "@/lib/delivery/dispatch";
 import type { DeliveryProviderName } from "@/lib/delivery/provider";
 import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
+import { OrderUpdates } from "@/components/pwa/order-updates";
+import { vapidPublicKey } from "@/lib/push/sender";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
 
@@ -70,6 +72,9 @@ export default async function OrderPage({
               </p>
             </FlowCard>
           )}
+          {realOrder.trackingToken === token && (
+            <OrderUpdates token={token} publicKey={vapidPublicKey()} storeName={context.store.name} />
+          )}
           {realOrder.status === "SUBSTITUTION_PENDING" && realOrder.trackingToken === token && (
             <FlowCard title="An item is short">
               <p>The store couldn&rsquo;t find everything you ordered. Choose a swap or a refund.</p>
@@ -91,6 +96,9 @@ export default async function OrderPage({
               ))}
             </ul>
             <p><strong>Subtotal:</strong> {money(realOrder.subtotalCents)}</p>
+            {realOrder.discountCents > 0 && (
+              <p><strong>{realOrder.coupon ? `Promo ${realOrder.coupon.code}` : "Promo discount"}:</strong> −{money(realOrder.discountCents)}</p>
+            )}
             {realOrder.serviceFeeCents > 0 && (
               <p><strong>Service fee:</strong> {money(realOrder.serviceFeeCents)}</p>
             )}

@@ -24,6 +24,9 @@ const unconfiguredWhatsAppProvider: WhatsAppProvider = {
   send: async () => {
     throw new WhatsAppNotConfiguredError();
   },
+  connectStoreNumber: async () => {
+    throw new WhatsAppNotConfiguredError();
+  },
 };
 
 let override: WhatsAppProvider | null = null;
@@ -58,4 +61,11 @@ export function sendWhatsAppMessage(message: OutboundMessage): Promise<SendResul
   return getWhatsAppProvider().send(message);
 }
 
-export type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
+export type {
+  ConnectedStoreNumber,
+  ConnectStoreNumberInput,
+  OutboundMessage,
+  SendResult,
+  WhatsAppProvider,
+  WhatsAppSender,
+} from "./types";

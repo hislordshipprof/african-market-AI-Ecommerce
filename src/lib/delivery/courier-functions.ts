@@ -1,29 +1,34 @@
 import { inngest } from "../inngest/client";
 import { sendSkipped, sendWithTimeout } from "../inngest/notify";
-import { DoorDashDriveProvider } from "./doordash";
-import { UberDirectProvider } from "./uber-direct";
 import { copyCourierProof } from "./proof";
+import { readCourierSettings } from "./courier-settings";
 import { COURIER_REGISTRATION_REQUESTED, findStoresNeedingCourierRegistration, registerStoreCouriers } from "./courier-registration";
 import {
   COURIER_BOTH_FAILED,
   courierFailoverFailed,
   COURIER_DELIVERY_CREATED,
+  COURIER_ORDER_CANCELLED,
+  COURIER_ORDER_PACKING,
   COURIER_ORDER_READY,
+  cancelOrderCouriers,
+  dispatchPackingOrder,
   COURIER_PROOF_RECEIVED,
+  courierProviders,
   dispatchReadyOrder,
   runCourierFailover,
   type CourierEvent,
   type DispatchDeps,
 } from "./dispatch";
 
-/** Both adapters read their keys per call, so a provider without keys fails its quote and is skipped. */
 function productionDeps(): DispatchDeps {
-  return { providers: [new DoorDashDriveProvider(), new UberDirectProvider()], emit: emitCourierEvent };
+  return { providers: courierProviders(), emit: emitCourierEvent, settings: () => readCourierSettings() };
 }
 
 /** Event ids let Inngest drop a repeat from a retried step. */
 function eventId(event: CourierEvent): string {
   if (event.name === COURIER_ORDER_READY) return `courier-order-ready-${event.data.orderId}`;
+  if (event.name === COURIER_ORDER_PACKING) return `courier-order-packing-${event.data.orderId}`;
+  if (event.name === COURIER_ORDER_CANCELLED) return `courier-order-cancelled-${event.data.orderId}`;
   if (event.name === COURIER_PROOF_RECEIVED) return `courier-proof-${event.data.deliveryId}`;
   if (event.name === COURIER_DELIVERY_CREATED) return `courier-delivery-created-${event.data.deliveryId}`;
   if (event.name === COURIER_BOTH_FAILED) return `courier-both-failed-${event.data.orderId}`;
@@ -44,9 +49,32 @@ export async function emitCourierEvent(event: CourierEvent): Promise<void> {
   }
 }
 
+/** The packing, ready and cancel jobs for one order run one at a time, so two of them never book two couriers (#562). */
+const ONE_PER_ORDER = { scope: "env" as const, key: `"courier-order-" + event.data.orderId`, limit: 1 };
+
+/** Books the courier when packing starts (#562). A failure here is tried again at Ready. */
+export const courierDispatchOnPacking = inngest.createFunction(
+  { id: "courier/dispatch-on-packing", idempotency: "event.data.orderId", concurrency: ONE_PER_ORDER, triggers: [{ event: COURIER_ORDER_PACKING }] },
+  async ({ event, step }) => {
+    const { storeId, orderId } = event.data as { storeId?: string; orderId?: string };
+    if (!storeId || !orderId) return;
+    await step.run("courier-dispatch-packing", () => dispatchPackingOrder(storeId, orderId, productionDeps()));
+  },
+);
+
+/** Cancels the courier of an order cancelled before capture (#562). A transient provider error retries. */
+export const courierCancelOnOrderCancelled = inngest.createFunction(
+  { id: "courier/cancel-on-order-cancelled", idempotency: "event.data.orderId", concurrency: ONE_PER_ORDER, triggers: [{ event: COURIER_ORDER_CANCELLED }] },
+  async ({ event, step }) => {
+    const { storeId, orderId } = event.data as { storeId?: string; orderId?: string };
+    if (!storeId || !orderId) return;
+    await step.run("courier-cancel-order", () => cancelOrderCouriers(storeId, orderId, productionDeps()));
+  },
+);
+
 /** Books the courier once a courier order is Ready. A retried step finds the booked delivery and books no other. */
 export const courierDispatchOnReady = inngest.createFunction(
-  { id: "courier/dispatch-on-ready", idempotency: "event.data.orderId", triggers: [{ event: COURIER_ORDER_READY }] },
+  { id: "courier/dispatch-on-ready", idempotency: "event.data.orderId", concurrency: ONE_PER_ORDER, triggers: [{ event: COURIER_ORDER_READY }] },
   async ({ event, step }) => {
     const { storeId, orderId } = event.data as { storeId?: string; orderId?: string };
     if (!storeId || !orderId) return;

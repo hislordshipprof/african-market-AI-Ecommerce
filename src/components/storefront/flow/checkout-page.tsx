@@ -18,6 +18,8 @@ import { cartItemKey } from "@/lib/storefront/cart-store";
 import { clearCart } from "@/lib/cart/actions";
 import {
   quoteCheckoutAction,
+  applyCouponAction,
+  removeCouponAction,
   createPaymentIntentAction,
   placeOrderAction,
   confirmAddressAction,
@@ -46,6 +48,7 @@ import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import type { SlotOptions } from "@/lib/checkout/slots";
+import { CouponField } from "./coupon-field";
 import styles from "./cart-checkout.module.css";
 
 type Outcome =
@@ -63,6 +66,8 @@ interface StripeConfig {
   prefill?: CheckoutPrefill | null;
   /** Pickup times drawn with the page, so they show before the first quote (#565). */
   pickupSlots?: SlotOptions;
+  /** The store has a registered WhatsApp number, so checkout offers order updates there (#560). */
+  whatsappUpdates?: boolean;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -299,6 +304,7 @@ function RealCheckoutForm({
     () => prefill?.contact ?? { name: "", phone: "", email: "" },
   );
   const [saveCard, setSaveCard] = useState(false);
+  const [whatsappUpdates, setWhatsappUpdates] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(cardView.preselectedId);
   const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
@@ -323,6 +329,8 @@ function RealCheckoutForm({
   const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
+  // Bumped when the cart's code changes, so the quote is asked again (#557).
+  const [couponRev, setCouponRev] = useState(0);
   const metadata = lines.map((line) => ({
     line,
     item: catalog.find((item) => cartItemKey(item) === cartItemKey(line)),
@@ -332,7 +340,16 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
-  const delivery = fulfillment === "store-delivery" && confirmed
+  async function applyCoupon(code: string) {
+    const result = await applyCouponAction(code);
+    if (result.ok) setCouponRev((rev) => rev + 1);
+    return result;
+  }
+  async function removeCoupon() {
+    await removeCouponAction();
+    setCouponRev((rev) => rev + 1);
+  }
+  const delivery = fulfillment !== "pickup" && confirmed
     ? {
         line1: confirmed.line1,
         line2: line2 || null,
@@ -342,11 +359,11 @@ function RealCheckoutForm({
         leaveAtDoor: !frozen && leaveAtDoor,
       }
     : undefined;
-  const currentKey = JSON.stringify({ contact, fulfillment, delivery });
+  const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
-    if (confirmed || line1.trim().length < 3 || fulfillment !== "store-delivery") return;
+    if (confirmed || line1.trim().length < 3 || fulfillment === "pickup") return;
     const controller = new AbortController();
     suggestAbort.current = controller;
     const timer = setTimeout(() => {
@@ -373,7 +390,7 @@ function RealCheckoutForm({
         if (result.ok) {
           setQuote(result.quote);
           setSlotOptions(result.slots);
-          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery }));
+          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery, couponRev }));
         } else {
           setError(result.error);
         }
@@ -426,7 +443,7 @@ function RealCheckoutForm({
       setError(fulfillment === "pickup" ? "Choose a pickup time." : "Choose a delivery time.");
       return;
     }
-    if (fulfillment === "store-delivery" && !delivery) {
+    if (fulfillment !== "pickup" && !delivery) {
       setError("Confirm your delivery address.");
       return;
     }
@@ -480,6 +497,13 @@ function RealCheckoutForm({
         chosenSlot,
       );
       if (!piResult.ok) {
+        if (piResult.code === "quote_changed") {
+          setQuote(piResult.quote);
+          setQuoteKey(currentKey);
+          setError(piResult.error);
+          setPayState("idle");
+          return;
+        }
         if (piResult.code === "slot_unavailable") {
           takeFreshSlots(piResult.slots, piResult.error);
           return;
@@ -540,6 +564,7 @@ function RealCheckoutForm({
         notes,
         chosenSlot,
         delivery,
+        stripeConfig.whatsappUpdates ? whatsappUpdates : false,
       );
       if (!orderResult.ok) {
         if (orderResult.code === "slot_unavailable") {
@@ -551,6 +576,13 @@ function RealCheckoutForm({
         if (orderResult.code === "basket_changed" || orderResult.code === "basket_already_ordered") {
           setError(orderResult.error);
           setPayState("idle");
+          return;
+        }
+        if (orderResult.code === "coupon_refused") {
+          // The hold was released and the code taken off; the next quote shows the full price.
+          setError(orderResult.error);
+          setPayState("idle");
+          setCouponRev((rev) => rev + 1);
           return;
         }
         throw new Error(orderResult.error);
@@ -649,6 +681,7 @@ function RealCheckoutForm({
       }
       contact={contact}
       setContact={setContact}
+      whatsapp={stripeConfig.whatsappUpdates ? { checked: whatsappUpdates, onChange: setWhatsappUpdates } : undefined}
       address={undefined}
       setAddress={() => {}}
       query=""
@@ -672,6 +705,7 @@ function RealCheckoutForm({
       setAppliedPromo={() => {}}
       promoMessage=""
       setPromoMessage={() => {}}
+      coupon={{ apply: applyCoupon, remove: removeCoupon }}
       tipPercent={0}
       setTipPercent={() => {}}
       customTip=""
@@ -684,7 +718,7 @@ function RealCheckoutForm({
       payState={payState}
       frozen={frozen}
       weightG={weightG}
-      courierEligible={false}
+      courierEligible={settings.courierOffered}
       onSubmit={pay}
       signedIn={Boolean(stripeConfig.signedIn)}
       paymentSection={
@@ -859,6 +893,8 @@ interface CheckoutLayoutProps {
   setFulfillment: (f: Fulfillment) => void;
   contact: { name: string; phone: string; email: string };
   setContact: (c: { name: string; phone: string; email: string }) => void;
+  /** Present only when the store has a registered WhatsApp number (#560). */
+  whatsapp?: { checked: boolean; onChange: (checked: boolean) => void };
   address: FlowAddress | undefined;
   setAddress: (a: FlowAddress | undefined) => void;
   query: string;
@@ -883,6 +919,11 @@ interface CheckoutLayoutProps {
   setAppliedPromo: (v: string) => void;
   promoMessage: string;
   setPromoMessage: (v: string) => void;
+  /** Real checkout: the cart's store coupon, put on and taken off on the server (#557). */
+  coupon?: {
+    apply: (code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    remove: () => Promise<void>;
+  };
   tipPercent: number | null;
   setTipPercent: (v: number | null) => void;
   customTip: string;
@@ -913,14 +954,19 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     suggestions, setSuggestions, searching, notes, setNotes,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
     slot, setSlot, slots, slotRequired = false, promo, setPromo,
-    setAppliedPromo, promoMessage, setPromoMessage,
+    setAppliedPromo, promoMessage, setPromoMessage, coupon,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
-    signedIn = false, identityLocked = false,
+    signedIn = false, identityLocked = false, whatsapp,
   } = props;
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
+
+  const courierReasons = (quote?.problems ?? [])
+    .filter((problem) => problem.code === "ineligible" || problem.code === "outside-radius")
+    .map((problem) => problem.message);
+  const courierQuoted = Boolean(quote?.courierProvider) && !quotePending;
 
   return (
     <div className={styles.page}>
@@ -968,6 +1014,18 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     Courier · {money(699)} demo quote
                   </Chip>
                 )}
+                {isRealPayment && courierEligible && (
+                  <Chip
+                    type="button"
+                    selected={fulfillment === "courier"}
+                    onClick={() => setFulfillment("courier")}
+                  >
+                    <Truck size={18} />
+                    {fulfillment === "courier" && courierQuoted && quote
+                      ? `Courier · ${money(quote.courierFeeCents)}`
+                      : "Courier"}
+                  </Chip>
+                )}
               </div>
               <p className={styles.muted}>
                 Order weight: {(weightG / 453.592).toFixed(1)} lb. Delivery
@@ -979,6 +1037,16 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   lb or less; frozen goods also require confirmed insulated
                   packaging. Choose pickup or store delivery.
                 </p>
+              )}
+              {isRealPayment && fulfillment === "courier" && (
+                courierQuoted && quote ? (
+                  <p className={styles.muted} role="status">
+                    Delivered by {quote.courierProvider === "Uber Direct" ? "Uber" : "DoorDash"}. You pay the
+                    courier&rsquo;s own quote, with no markup.
+                  </p>
+                ) : courierReasons.length > 0 ? (
+                  <p className={styles.error} role="status">{courierReasons.join(" ")}</p>
+                ) : null
               )}
               {frozen && (
                 <p className={styles.notice}>
@@ -1147,6 +1215,19 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     Enter a valid phone number with at least 10 digits.
                   </p>
                 )}
+              {whatsapp && (
+                <label className={styles.choice}>
+                  <input
+                    type="checkbox"
+                    checked={whatsapp.checked}
+                    onChange={(event) => whatsapp.onChange(event.target.checked)}
+                  />
+                  <span>
+                    Get order updates on WhatsApp
+                    <small>Instead of texts, from {settings.name}. Reply STOP to turn them off.</small>
+                  </span>
+                </label>
+              )}
               <label className={styles.field}>
                 Email (required)
                 <input
@@ -1224,7 +1305,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </li>
               ))}
             </ul>
-            {!isRealPayment && (
+            {coupon ? (
+              <CouponField
+                applied={quote?.coupon ?? null}
+                apply={coupon.apply}
+                remove={coupon.remove}
+                disabled={payState !== "idle"}
+              />
+            ) : (
               <>
                 <label className={styles.field}>
                   Promo code

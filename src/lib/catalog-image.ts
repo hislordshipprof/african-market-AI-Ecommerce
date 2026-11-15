@@ -1,4 +1,6 @@
-import { uploadToR2 } from "./r2";
+import { randomBytes } from "node:crypto";
+import { isPhotoType, looksLikeSvg } from "./image/photo-type";
+import { isServableCatalogKey, uploadToR2 } from "./r2";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -172,5 +174,45 @@ export async function downloadAndUploadImage(
     return { ok: true, key, url, bytes: image.buffer.byteLength };
   } catch (cause) {
     return { ok: false, reason: "upload", cause };
+  }
+}
+
+const MAX_INPUT_PIXELS = 16_777_216;
+
+export type CatalogPhotoResult =
+  | { ok: true; key: string; url: string }
+  | { ok: false; reason: "svg" | "not_photo" | "storage" | "upload" };
+
+/** Catalog photos need the public bucket and its keys. */
+export function catalogStorageConfigured(): boolean {
+  return !!(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET);
+}
+
+/**
+ * An uploaded product photo: checked by its own bytes (never SVG), re-encoded to WebP (long edge 960px,
+ * no metadata) and stored under a new `catalog/{productId}-{random}.webp` key, so caches never serve the old one.
+ */
+export async function uploadCatalogPhoto(productId: string, bytes: Uint8Array): Promise<CatalogPhotoResult> {
+  if (looksLikeSvg(bytes)) return { ok: false, reason: "svg" };
+  if (!isPhotoType(bytes)) return { ok: false, reason: "not_photo" };
+  if (!catalogStorageConfigured()) return { ok: false, reason: "storage" };
+  const key = `catalog/${productId}-${randomBytes(8).toString("hex")}.webp`;
+  if (!isServableCatalogKey(key)) return { ok: false, reason: "upload" };
+
+  let webp: Buffer;
+  try {
+    const { default: sharp } = await import("sharp");
+    webp = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "warning", animated: false })
+      .rotate()
+      .resize(960, 960, { fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
+  } catch {
+    return { ok: false, reason: "not_photo" };
+  }
+  try {
+    return { ok: true, key, url: await uploadToR2(key, webp, "image/webp") };
+  } catch {
+    return { ok: false, reason: "upload" };
   }
 }

@@ -30,8 +30,12 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
   let storeA = "";
   let storeB = "";
   let storeC = "";
+  let storeD = "";
+  let storeE = "";
   let data: StoreAnalytics;
   let edges: StoreAnalytics;
+  let promo: StoreAnalytics;
+  let serviceFee: StoreAnalytics;
 
   async function asStore<T>(storeId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return raw.$transaction(async (tx) => {
@@ -39,6 +43,12 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
       await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
       return fn(tx);
     });
+  }
+
+  /** A coupon row, because an order with a discount must name one (orders_discount_needs_coupon_check). */
+  async function coupon(tx: Prisma.TransactionClient, storeId: string, code: string) {
+    const system = await raw.user.upsert({ where: { email: "system@platform.internal" }, update: {}, create: { id: "system_00000000000000000000000", email: "system@platform.internal", name: "System" } });
+    return (await tx.storeCoupon.create({ data: { storeId, code, kind: "fixed", amountOffCents: 100, startsAt: at("2026-01-01T00:00:00Z"), createdById: system.id } })).id;
   }
 
   async function seedStoreA() {
@@ -112,7 +122,7 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
       const variant = await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 999, weightG: 1000 } });
       const customer = await tx.customer.create({ data: { storeId: storeB, name: "B shopper" } });
       const cart = await tx.cart.create({ data: { storeId: storeB } });
-      const order = await tx.order.create({ data: { storeId: storeB, number: 1, customerId: customer.id, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0, status: "COMPLETED", capturedAmountCents: 99_900, platformFeeCents: 2927, createdAt: at("2026-11-03T15:00:00Z"), readyAt: at("2026-11-03T15:05:00Z"), sourceCartId: cart.id } });
+      const order = await tx.order.create({ data: { storeId: storeB, number: 1, customerId: customer.id, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0, status: "COMPLETED", capturedAmountCents: 99_900, platformFeeCents: 2927, discountCents: 5000, couponId: await coupon(tx, storeB, "BIG50"), createdAt: at("2026-11-03T15:00:00Z"), readyAt: at("2026-11-03T15:05:00Z"), sourceCartId: cart.id } });
       await tx.orderLine.create({ data: { storeId: storeB, orderId: order.id, listingVariantId: variant.id, qtyOrdered: 100, qtyPicked: 100, unitPriceCents: 999, status: "picked" } });
       const conv = await tx.aiConversation.create({ data: { storeId: storeB, cartId: cart.id, model: "test", createdAt: at("2026-11-03T14:00:00Z") } });
       await tx.aiAction.create({ data: { storeId: storeB, conversationId: conv.id, tool: "search_catalog", input: { query: "store b only" }, output: { ok: true, items: [] }, ok: true, createdAt: at("2026-11-03T14:01:00Z") } });
@@ -147,6 +157,40 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     });
   }
 
+  /**
+   * Promo discounts (store D), hand-computed; the store funds the discount, so captured is goods less discount:
+   * D1 pickup 11-02  egusi 1×$10.00, SAVE2 −$2.00        captured 800
+   * D2 pickup 11-04  egusi 2×$10.00, SAVE10 −$1.50       captured 1850
+   * D3 cancelled 11-04 with a $9.99 discount (never captured), D4 on 11-08 with $7.77 (outside the range): neither counts.
+   * Discounts in range 200 + 150 = 350. Store B's $50.00 discount must not reach store D.
+   */
+  async function seedStoreD() {
+    await asStore(storeD, async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeD, name: "Efe" } });
+      const couponId = await coupon(tx, storeD, "SAVE2");
+      const base = { storeId: storeD, customerId: customer.id, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0, couponId };
+      await tx.order.create({ data: { ...base, number: 1, status: "COMPLETED", capturedAmountCents: 800, platformFeeCents: 53, discountCents: 200, createdAt: at("2026-11-02T15:00:00Z") } });
+      await tx.order.create({ data: { ...base, number: 2, status: "COMPLETED", capturedAmountCents: 1850, platformFeeCents: 84, discountCents: 150, createdAt: at("2026-11-04T15:00:00Z") } });
+      await tx.order.create({ data: { ...base, number: 3, status: "CANCELLED", discountCents: 999, createdAt: at("2026-11-04T16:00:00Z"), cancelledAt: at("2026-11-04T17:00:00Z") } });
+      await tx.order.create({ data: { ...base, number: 4, status: "COMPLETED", capturedAmountCents: 100, platformFeeCents: 33, discountCents: 777, createdAt: at("2026-11-08T15:00:00Z") } });
+    });
+  }
+
+  /**
+   * Service-fee orders (ADR-0021, captureSplit). The card fee is the store's 2.9% + 30¢ on what it keeps; the customer's service fee is not part of it.
+   * E1 pickup 11-02  goods 1500 + service fee 99 = captured 1599; card fee round(1500 x 2.9%) + 30 = 74; platform fee stored 99 + 74 = 173; net 1599 - 173 = 1426
+   * E2 courier 11-03 goods 2000 + service fee 99 + courier fee 500 = captured 2599; card fee 58 + 30 = 88; platform fee stored 99 + 88 = 187; net 2599 - 187 - 500 = 1912
+   * Card fee 74 + 88 = 162, courier 500, net 3338.
+   */
+  async function seedStoreE() {
+    await asStore(storeE, async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeE, name: "Femi" } });
+      const base = { storeId: storeE, customerId: customer.id, status: "COMPLETED" as const, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0 };
+      await tx.order.create({ data: { ...base, number: 1, fulfillment: "pickup", serviceFeeCents: 99, capturedAmountCents: 1599, platformFeeCents: 173, createdAt: at("2026-11-02T15:00:00Z") } });
+      await tx.order.create({ data: { ...base, number: 2, fulfillment: "courier", deliveryFeeCents: 500, serviceFeeCents: 99, capturedAmountCents: 2599, platformFeeCents: 187, createdAt: at("2026-11-03T15:00:00Z") } });
+    });
+  }
+
   beforeAll(async () => {
     raw = testPrismaClient();
     await raw.$connect();
@@ -156,8 +200,14 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     storeC = (await raw.store.create({ data: { slug: `an-c-${run}`, name: "Analytics C", timezone: TZ } })).id;
     await seedStoreB();
     await seedStoreC();
+    storeD = (await raw.store.create({ data: { slug: `an-d-${run}`, name: "Analytics D", timezone: TZ } })).id;
+    await seedStoreD();
+    storeE = (await raw.store.create({ data: { slug: `an-e-${run}`, name: "Analytics E", timezone: TZ } })).id;
+    await seedStoreE();
     data = await storeAnalytics(storeA, TZ, RANGE);
     edges = await storeAnalytics(storeC, TZ, RANGE);
+    promo = await storeAnalytics(storeD, TZ, RANGE);
+    serviceFee = await storeAnalytics(storeE, TZ, RANGE);
   });
 
   afterAll(async () => {
@@ -166,7 +216,7 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
 
   it("sales match the hand-computed fixture to the cent, by day and by fulfilment", () => {
     expect(data.sales.totals).toEqual({
-      orders: 3, goodsCents: 8700, averageOrderCents: 2900, refundsCents: 2100, cardFeeCents: 397, courierFeeCents: 899, netCents: 7240,
+      orders: 3, goodsCents: 8700, averageOrderCents: 2900, discountsCents: 0, refundsCents: 2100, cardFeeCents: 397, courierFeeCents: 899, netCents: 7240,
     });
     const byDay = Object.fromEntries(data.sales.days.map((d) => [d.day, d]));
     expect(data.sales.days).toHaveLength(7);
@@ -219,9 +269,9 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
 
   it("each CSV matches the on-screen numbers", () => {
     const sales = analyticsCsv("sales", data, USAGE).split("\r\n");
-    expect(sales).toContain("2026-11-03,2,57.00,28.50,0.00,2.60,8.99,57.40");
-    expect(sales).toContain("Courier,1,37.00,37.00,11.00,1.63,8.99,24.37");
-    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,3,87.00,29.00,21.00,3.97,8.99,72.40");
+    expect(sales).toContain("2026-11-03,2,57.00,28.50,0.00,0.00,2.60,8.99,57.40");
+    expect(sales).toContain("Courier,1,37.00,37.00,0.00,11.00,1.63,8.99,24.37");
+    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,3,87.00,29.00,0.00,21.00,3.97,8.99,72.40");
     expect(analyticsCsv("products", data, USAGE)).toContain("Top seller,Egusi,4,42.00,,,\r\n");
     expect(analyticsCsv("customers", data, USAGE)).toContain("Repeat rate %,100\r\n");
     expect(analyticsCsv("operations", data, USAGE)).toContain("Cancelled: Out of stock,1\r\n");
@@ -235,15 +285,34 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     expect(edges.sales.totals).toMatchObject({ refundsCents: 500, courierFeeCents: 941, netCents: -471 });
   });
 
+  it("the card fee leaves out the customer's service fee, and net to store is unchanged by it", () => {
+    expect(serviceFee.sales.totals).toMatchObject({ orders: 2, cardFeeCents: 162, courierFeeCents: 500, netCents: 3338 });
+    const byDay = Object.fromEntries(serviceFee.sales.days.map((d) => [d.day, d]));
+    expect(byDay["2026-11-02"]).toMatchObject({ cardFeeCents: 74, courierFeeCents: 0, netCents: 1426 });
+    expect(byDay["2026-11-03"]).toMatchObject({ cardFeeCents: 88, courierFeeCents: 500, netCents: 1912 });
+    expect(analyticsCsv("sales", serviceFee, USAGE).split("\r\n")).toContain("2026-11-02,1,15.99,15.99,0.00,0.00,0.74,0.00,14.26");
+  });
+
   it("exports a negative amount as a plain number a spreadsheet can sum", () => {
     const sales = analyticsCsv("sales", edges, USAGE).split("\r\n");
-    expect(sales).toContain("2026-11-02,0,0.00,0.00,5.00,0.00,0.00,-4.71");
-    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,1,0.01,0.01,5.00,0.59,9.41,-4.71");
+    expect(sales).toContain("2026-11-02,0,0.00,0.00,0.00,5.00,0.00,0.00,-4.71");
+    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,1,0.01,0.01,0.00,5.00,0.59,9.41,-4.71");
     // Shopper search text that would run as a formula stays guarded.
     expect(analyticsCsv("products", edges, USAGE)).toContain("\"Searched, not carried\",'-1+cmd,,,,,1\r\n");
   });
 
   it("does not count a chat whose order was cancelled before capture as leading to an order", () => {
     expect(edges.assistant).toEqual({ chatsInRange: 1, ledToCart: 1, ledToOrder: 0 });
+  });
+
+  it("totals the store-funded discounts on captured orders in the range, by day, and never another store's", async () => {
+    expect(promo.sales.totals.discountsCents).toBe(350);
+    const byDay = Object.fromEntries(promo.sales.days.map((d) => [d.day, d]));
+    expect(byDay["2026-11-02"].discountsCents).toBe(200);
+    expect(byDay["2026-11-04"].discountsCents).toBe(150);
+    expect(promo.sales.byFulfillment.find((f) => f.fulfillment === "pickup")?.discountsCents).toBe(350);
+    const b = await storeAnalytics(storeB, TZ, RANGE);
+    expect(b.sales.totals.discountsCents).toBe(5000);
+    expect(analyticsCsv("sales", promo, USAGE).split("\r\n")).toContain("Total 2026-11-01 to 2026-11-07,2,26.50,13.25,3.50,0.00,1.37,0.00,25.13");
   });
 });

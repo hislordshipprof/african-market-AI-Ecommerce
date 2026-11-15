@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
 });
 
-const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));
+const { headerState, revalidated } = vi.hoisted(() => ({ headerState: new Headers(), revalidated: [] as string[] }));
 
 vi.mock("next/headers", () => ({
   headers: async () => headerState,
@@ -13,7 +13,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => () => fn(),
-  revalidateTag: () => {},
+  revalidateTag: (tag: string) => revalidated.push(tag),
   revalidatePath: () => {},
 }));
 
@@ -23,11 +23,12 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { retryCourierRegistrationAction, updateStore } from "./actions";
+import { forceGoLiveAction, retryCourierRegistrationAction, updateStore } from "./actions";
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
 import { inngest } from "../inngest/client";
+import { STORE_LISTED } from "../directory/store-requests";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-hrs`;
@@ -136,6 +137,35 @@ describe("store hours schema", () => {
     expect(await readHours(storeId)).toEqual(storedShape);
   });
 
+  it("platform admin overrides the directory listing from the store form, with an audit row (#450)", async () => {
+    revalidated.length = 0;
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
+    const listedEvents = () => send.mock.calls.filter(([payload]) => (payload as { name?: string }).name === STORE_LISTED);
+    const listed = storeForm(storeId, storedShape);
+    listed.set("listed", "on");
+    expect(await updateStore({}, listed)).toMatchObject({ success: true, storeId });
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.listed).toBe(true);
+    expect(revalidated).toContain("store-directory");
+    // Going into the directory runs the "tell me when a store opens" notices (#455); staying in does not.
+    expect(listedEvents()).toEqual([[{ name: STORE_LISTED, data: { storeId } }]]);
+    expect(await updateStore({}, listed)).toMatchObject({ success: true, storeId });
+    expect(listedEvents()).toHaveLength(1);
+    send.mockRestore();
+    vi.unstubAllEnvs();
+
+    expect(await updateStore({}, storeForm(storeId, storedShape))).toMatchObject({ success: true, storeId });
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.listed).toBe(false);
+    const audits = await storeScopedTransaction(storeId, (tx) =>
+      tx.auditLog.findMany({ where: { action: "store.update" }, orderBy: { createdAt: "desc" }, take: 3 }),
+    );
+    expect(audits.map((row) => [(row.before as { listed: boolean }).listed, (row.after as { listed: boolean }).listed])).toEqual([
+      [true, false],
+      [true, true],
+      [false, true],
+    ]);
+  });
+
   it("platform admin turns on store delivery with a confirmed store address, which queues courier registration (#526)", async () => {
     setAddressProvider(fakeAddressBackend());
     vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
@@ -170,6 +200,18 @@ describe("store hours schema", () => {
     expect(still?.addressLine1).toBe("4600 Silver Hill Rd");
     expect(still?.lat).toBeCloseTo(38.845, 2);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("saves the store phone in E.164 for the courier's pickup, and refuses one that is not a phone (#527)", async () => {
+    const data = storeForm(storeId, storedShape);
+    data.set("phone", "(301) 555-0100");
+    expect(await updateStore({}, data)).toMatchObject({ success: true, storeId });
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.phone).toBe("+13015550100");
+
+    const bad = storeForm(storeId, storedShape);
+    bad.set("phone", "12345");
+    expect((await updateStore({}, bad)).fieldErrors?.phone).toBeTruthy();
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.phone).toBe("+13015550100");
   });
 
   it("turning on store delivery geocodes again when the saved address has no coordinates", async () => {
@@ -222,5 +264,28 @@ describe("store hours schema", () => {
     data.set("storeId", storeId);
 
     await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=failed`);
+  });
+
+  it("platform admin forces a store in setup live only with a reason; the audit row keeps it (#555)", async () => {
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`UPDATE stores SET status = 'setup' WHERE id = ${storeId}`;
+    });
+    const blank = new FormData();
+    blank.set("storeId", storeId);
+    blank.set("reason", "  ");
+    await expect(forceGoLiveAction(blank)).rejects.toThrow(
+      `REDIRECT:/admin/stores/${storeId}?goLiveError=${encodeURIComponent("Give a reason for going live with items open.")}`,
+    );
+    expect((await authPrisma.store.findUniqueOrThrow({ where: { id: storeId } })).status).toBe("setup");
+
+    const data = new FormData();
+    data.set("storeId", storeId);
+    data.set("reason", "Launch partner, Stripe review pending");
+    await expect(forceGoLiveAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?goLive=forced`);
+    expect((await authPrisma.store.findUniqueOrThrow({ where: { id: storeId } })).status).toBe("active");
+    const audit = await platformAdmin.auditLog.findFirst({ where: { entityId: storeId, action: "store.go_live_forced" } });
+    expect(audit).toMatchObject({ actorId: userId, after: { status: "active", reason: "Launch partner, Stripe review pending" } });
   });
 });

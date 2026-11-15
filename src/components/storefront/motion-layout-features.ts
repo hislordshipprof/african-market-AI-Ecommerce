@@ -1,5 +1,4 @@
 import { domMax } from "motion/react";
 
-// Only result grids request projection. Hero/rails keep the smaller domAnimation bundle.
-const layoutFeatures = { renderer: domMax.renderer, layout: domMax.layout };
-export default layoutFeatures;
+// Result grids animate entry, exit and position; loaded after hydration, never on the home page (#563).
+export default domMax;

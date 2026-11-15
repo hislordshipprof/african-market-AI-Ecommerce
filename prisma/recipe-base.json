@@ -24,7 +24,7 @@
     "ingredients": [
       { "name": "ground egusi", "masterProductId": "egusi-ground", "qty": 2, "unit": "cup" },
       { "name": "red palm oil", "masterProductId": "palm-oil-red", "qty": 0.5, "unit": "cup" },
-      { "name": "fluted pumpkin leaves", "masterProductId": "ugu-leaves-frozen", "qty": 1, "unit": "pack" },
+      { "name": "fluted pumpkin leaves", "masterProductId": "ugu-leaves-fresh", "qty": 1, "unit": "pack" },
       { "name": "ground crayfish", "masterProductId": "crayfish-ground", "qty": 2, "unit": "tbsp" },
       { "name": "stockfish", "masterProductId": "stockfish-cut", "qty": 1, "unit": "pack" },
       { "name": "scotch bonnet pepper", "masterProductId": "pepper-scotch-bonnet", "qty": 2, "unit": "each" },
@@ -113,6 +113,18 @@
       { "name": "onion", "qty": 2, "unit": "each" },
       { "name": "garlic", "qty": 4, "unit": "clove" },
       { "name": "injera", "masterProductId": "injera", "qty": 4, "unit": "each" }
+    ]
+  },
+  {
+    "name": "Chechebsa (kita firfir)",
+    "aliases": ["ethiopian breakfast", "chechebsa", "kita firfir", "kita fir fir"],
+    "cuisine": "East African",
+    "servings": 2,
+    "ingredients": [
+      { "name": "teff flour", "masterProductId": "teff-flour-ivory", "qty": 1, "unit": "cup" },
+      { "name": "berbere", "masterProductId": "berbere", "qty": 1, "unit": "tbsp" },
+      { "name": "niter kibbeh", "masterProductId": "niter-kibbeh", "qty": 3, "unit": "tbsp" },
+      { "name": "honey", "masterProductId": "honey-malab", "qty": 2, "unit": "tbsp" }
     ]
   },
   {

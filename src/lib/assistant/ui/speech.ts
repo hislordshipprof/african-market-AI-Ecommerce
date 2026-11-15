@@ -54,10 +54,16 @@ function compose(prefix: string, spoken: string): string {
   return `${prefix.trimEnd()} ${spoken}`;
 }
 
+/** Cut at the limit without leaving half of a surrogate pair. */
+function cutAtLimit(text: string): string {
+  const cut = text.slice(0, LIMIT);
+  return /[\ud800-\udbff]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
 /** Reaching the limit exactly counts: the draft is full, so listening stops there. */
 function clamp(text: string): { text: string; limited: boolean } {
   if (text.length < LIMIT) return { text, limited: false };
-  return { text: text.slice(0, LIMIT), limited: true };
+  return { text: cutAtLimit(text), limited: true };
 }
 
 function paint(state: SpeechState, finals: ReadonlyMap<number, string>, prefix = state.prefix): SpeechState {
@@ -90,7 +96,7 @@ export function beginSpeech(prefix: string, session: number): SpeechState {
     interim: "",
     interimIndex: 0,
     committed: new Map(),
-    draft: full ? prefix.slice(0, LIMIT) : prefix,
+    draft: full ? cutAtLimit(prefix) : prefix,
     notice: full ? SPEECH_LIMIT_MESSAGE : null,
   };
 }

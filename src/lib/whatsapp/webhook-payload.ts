@@ -17,6 +17,11 @@ const messageSchema = z.looseObject({
   timestamp: z.string().max(20).optional(),
   type: z.string().min(1).max(40),
   text: z.looseObject({ body: z.string().max(65_536) }).optional(),
+  interactive: z.looseObject({
+    type: z.string().max(40),
+    list_reply: z.looseObject({ id: z.string().min(1).max(256) }).optional(),
+    button_reply: z.looseObject({ id: z.string().min(1).max(256) }).optional(),
+  }).optional(),
 });
 
 const statusSchema = z.looseObject({
@@ -52,10 +57,20 @@ export interface InboundMessage {
   type: string;
   /** Text body for type "text"; null for every other type. */
   text: string | null;
+  /** Meta's send time in Unix seconds; null when missing or not a number. */
+  timestamp: number | null;
+  /** The id of a tapped list row or reply button (type "interactive"); null otherwise. */
+  replyId: string | null;
+}
+
+/** An inbound message and the business number it was sent to. */
+export interface AddressedMessage {
+  phoneNumberId: string;
+  message: InboundMessage;
 }
 
 export interface ExtractedWebhook {
-  messages: InboundMessage[];
+  messages: AddressedMessage[];
   /** Numeric error codes of `failed` delivery statuses, for logs only. */
   failedStatusCodes: number[];
   /** Messages skipped because they had no usable id or shape. */
@@ -63,16 +78,18 @@ export interface ExtractedWebhook {
 }
 
 /**
- * Messages and failed statuses addressed to the platform's number, in order.
- * Anything for another phone_number_id, or another object, is ignored.
+ * Messages, each with the phone_number_id it was sent to, and failed
+ * statuses, in order. A change with no phone_number_id, or another object,
+ * is ignored. The caller routes by number (#558).
  */
-export function extractWebhook(payload: WhatsAppWebhook, phoneNumberId: string | undefined): ExtractedWebhook {
+export function extractWebhook(payload: WhatsAppWebhook): ExtractedWebhook {
   const result: ExtractedWebhook = { messages: [], failedStatusCodes: [], unreadableMessages: 0 };
-  if (payload.object !== "whatsapp_business_account" || !phoneNumberId) return result;
+  if (payload.object !== "whatsapp_business_account") return result;
   for (const entry of payload.entry) {
     for (const change of entry.changes) {
       const { value } = change;
-      if (value.metadata?.phone_number_id !== phoneNumberId) continue;
+      const phoneNumberId = value.metadata?.phone_number_id;
+      if (!phoneNumberId) continue;
       for (const candidate of value.messages ?? []) {
         const parsed = messageSchema.safeParse(candidate);
         if (!parsed.success) {
@@ -81,11 +98,18 @@ export function extractWebhook(payload: WhatsAppWebhook, phoneNumberId: string |
         }
         const message = parsed.data;
         result.messages.push({
-          id: message.id,
-          from: message.from ?? null,
-          fromUserId: message.from_user_id ?? null,
-          type: message.type,
-          text: message.type === "text" && message.text ? message.text.body : null,
+          phoneNumberId,
+          message: {
+            id: message.id,
+            from: message.from ?? null,
+            fromUserId: message.from_user_id ?? null,
+            type: message.type,
+            text: message.type === "text" && message.text ? message.text.body : null,
+            timestamp: message.timestamp && /^\d{1,12}$/.test(message.timestamp) ? Number(message.timestamp) : null,
+            replyId: message.type === "interactive"
+              ? message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null
+              : null,
+          },
         });
       }
       for (const status of value.statuses ?? []) {

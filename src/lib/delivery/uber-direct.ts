@@ -14,6 +14,8 @@ const AUTH_URL = "https://auth.uber.com/oauth/v2/token";
 const API_URL = "https://api.uber.com";
 const KEY_NAMES = ["UBER_DIRECT_CLIENT_ID", "UBER_DIRECT_CLIENT_SECRET", "UBER_DIRECT_CUSTOMER_ID"] as const;
 const TIMEOUT_MS = 10_000;
+// "pickup_deadline_dt ≥ pickup_ready_dt + 30 min" for a scheduled window: https://developer.uber.com/docs/deliveries/guides/delivery-window
+const PICKUP_WINDOW_MS = 30 * 60_000;
 // Renew a minute early so a token never expires between the check and Uber reading it.
 const TOKEN_MARGIN_MS = 60_000;
 
@@ -197,6 +199,7 @@ export class UberDirectProvider implements DeliveryProvider {
       dropoff_phone_number: req.dropoff.phone,
       manifest_total_value: req.orderValueCents,
       external_store_id: req.pickup.providerStoreId,
+      pickup_ready_dt: req.pickupReadyAt?.toISOString(),
     });
     const created = requiredDate(res.created, "created");
     return {
@@ -230,6 +233,8 @@ export class UberDirectProvider implements DeliveryProvider {
       manifest_items: [{ name: "Grocery order", quantity: 1, size: "large", price: req.orderValueCents }],
       manifest_total_value: req.orderValueCents,
       tip: req.tipCents,
+      // "Send this field when preparation time is known": https://developer.uber.com/docs/deliveries/guides/delivery-window
+      pickup_ready_dt: req.pickupReadyAt?.toISOString(),
       // Uber picks the PIN and texts it to the customer: https://developer.uber.com/docs/deliveries/guides/pincode
       dropoff_verification: req.dropoffPin ? { pincode: { enabled: true } } : { picture: true },
     });
@@ -245,6 +250,18 @@ export class UberDirectProvider implements DeliveryProvider {
   /** POST /v1/customers/{customer_id}/deliveries/{delivery_id}/cancel */
   async cancel(externalId: string): Promise<void> {
     await this.client.request("eats.deliveries", "POST", this.path(`/deliveries/${encodeURIComponent(externalId)}/cancel`));
+  }
+
+  /**
+   * POST /v1/customers/{customer_id}/deliveries/{delivery_id} updates a delivery; pickup_ready_dt is editable until
+   * pickup is complete: https://developer.uber.com/docs/deliveries/faq. A later ready time alone is refused
+   * ("pickup_deadline_dt: The pickup window is too small", sandbox 2026-11-14), so the deadline moves with it.
+   */
+  async reschedule(externalId: string, pickupReadyAt: Date): Promise<void> {
+    await this.client.request("eats.deliveries", "POST", this.path(`/deliveries/${encodeURIComponent(externalId)}`), {
+      pickup_ready_dt: pickupReadyAt.toISOString(),
+      pickup_deadline_dt: new Date(pickupReadyAt.getTime() + PICKUP_WINDOW_MS).toISOString(),
+    });
   }
 
   /**
@@ -279,7 +296,7 @@ export class UberDirectProvider implements DeliveryProvider {
       occurredAt,
       trackingUrl: text(data.tracking_url),
       actualFeeCents: type === "delivered" && data.fee !== undefined ? feeCents(data.fee) : null,
-      courier: courier ? { name: text(courier.name), vehicle, dropoffEta: optionalDate(data.dropoff_eta) } : null,
+      courier: courier ? { name: text(courier.name), vehicle, pickupEta: optionalDate(data.pickup_eta), dropoffEta: optionalDate(data.dropoff_eta) } : null,
       proof: {
         photoUrl: text(field(data, "dropoff", "verification", "picture", "image_url")),
         pinEntered: text(field(data, "dropoff", "verification", "pin_code", "entered")),

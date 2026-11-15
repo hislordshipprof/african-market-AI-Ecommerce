@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
 import { resolveHost, isSlugRoutable } from "@/lib/slug";
+import { ATTRIBUTION_COOKIE, ATTRIBUTION_MAX_AGE, DIRECTORY_REF } from "@/lib/directory/attribution";
 import { needsNoScriptCsp, newCspNonce, NO_SCRIPT_CSP, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
 const COOKIE_NAME = "store_override";
@@ -65,6 +66,13 @@ export function proxy(request: NextRequest) {
     headers.set("x-store-slug", slug);
   }
 
+  // State and city pages are cached for every host, so only the root domain may reach them (#451).
+  if (isDirectoryOnlyPath(request.nextUrl.pathname) && headers.get("x-platform-root") !== "1") {
+    const response = NextResponse.rewrite(new URL("/_directory-not-here", request.url));
+    stampSecurity(headers, response);
+    return response;
+  }
+
   const browserId = browserIdentity(request);
   headers.set("x-shop-browser", browserId);
   const policy = reportOnlyPolicy(newCspNonce(), process.env);
@@ -78,7 +86,20 @@ export function proxy(request: NextRequest) {
     response.headers.set("Content-Security-Policy", NO_SCRIPT_CSP);
   }
   rememberBrowser(request, response, browserId);
+  if (headers.get("x-platform-root") !== "1" && request.nextUrl.searchParams.get("ref") === DIRECTORY_REF) {
+    response.cookies.set(ATTRIBUTION_COOKIE, DIRECTORY_REF, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: ATTRIBUTION_MAX_AGE,
+      secure: request.nextUrl.protocol === "https:",
+    });
+  }
   return response;
+}
+
+function isDirectoryOnlyPath(pathname: string): boolean {
+  return pathname === "/sitemap.xml" || pathname === "/robots.txt" || pathname.startsWith("/stores/");
 }
 
 function stampSecurity(requestHeaders: Headers, response: NextResponse) {

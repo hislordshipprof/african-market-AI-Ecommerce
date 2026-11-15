@@ -33,6 +33,8 @@ export interface FlowStore {
   storeDeliveryFeeCents: number;
   autoRefundLimitCents: number;
   insulatedPackaging: boolean;
+  /** A Pro store registered with a courier, with a pickup point (#527). Each order's eligibility comes with its quote. */
+  courierOffered: boolean;
   /** Closed now, and an order placed now is queued for the next opening. */
   closed: boolean;
   /** "Wed 9:00 AM CT" while closed, else empty. */
@@ -82,6 +84,7 @@ export type FlowErrorCode =
   | "minimum-order"
   | "max-quantity"
   | "ineligible"
+  | "quote-changed"
   | "invalid-contact";
 export interface FlowProblem {
   code: FlowErrorCode;
@@ -99,6 +102,8 @@ export interface CheckoutQuote {
   taxCents: number;
   tipCents: number;
   discountCents: number;
+  /** The store coupon code on the cart (#557): what it took off goods, or why it gave nothing. */
+  coupon?: { code: string; discountCents: number; message?: string };
   totalCents: number;
   bufferCents: number;
   holdCents: number;

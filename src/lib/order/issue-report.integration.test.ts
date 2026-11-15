@@ -42,6 +42,8 @@ describe.skipIf(!hasDb)("customer issue report", () => {
   let store = { id: "", autoRefundLimitCents: 4000 };
   let variantId = "";
   let number = 0;
+  let ownerId = "";
+  let couponId = "";
   let JPEG = new Uint8Array();
 
   beforeAll(async () => {
@@ -52,6 +54,10 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     });
     store = { id: created.id, autoRefundLimitCents: created.autoRefundLimitCents };
     variantId = (await countedListing(store.id, 50)).variantId;
+    ownerId = (await raw.user.create({ data: { id: crypto.randomUUID(), email: `${run}@example.com`, name: "Owner", emailVerified: true } })).id;
+    couponId = (await storeScoped(store.id).storeCoupon.create({
+      data: { storeId: store.id, code: "TENOFF", kind: "percent", percentOff: 10, startsAt: new Date("2026-01-01T00:00:00Z"), createdById: ownerId },
+    })).id;
     reset();
     setStripeProvider(fakeStripeProvider);
   });
@@ -78,20 +84,23 @@ describe.skipIf(!hasDb)("customer issue report", () => {
       await tx.auditLog.deleteMany({ where: { storeId: store.id } });
       await tx.order.deleteMany({ where: { storeId: store.id } });
       await tx.customer.deleteMany({ where: { storeId: store.id } });
+      await tx.storeCoupon.deleteMany({ where: { storeId: store.id } });
       await tx.stockEvent.deleteMany({ where: { storeId: store.id } });
       await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
       await tx.listing.deleteMany({ where: { storeId: store.id } });
       await tx.store.deleteMany({ where: { id: store.id } });
     });
+    if (ownerId) await raw.user.deleteMany({ where: { id: ownerId } });
     await raw.$disconnect();
   });
 
   /** A completed order (pickup unless a courier fee is given): three lines, captured at the picked total. */
-  async function completedOrder(lines: Array<{ qtyPicked: number; unitPriceCents: number }>, hoursAgo: number, serviceFeeCents = 0, courierFeeCents = 0) {
+  async function completedOrder(lines: Array<{ qtyPicked: number; unitPriceCents: number; discountCents?: number }>, hoursAgo: number, serviceFeeCents = 0, courierFeeCents = 0) {
     number += 1;
     const customer = await storeScoped(store.id).customer.create({ data: { storeId: store.id, name: `Issue ${number}` } });
     const goods = lines.reduce((sum, line) => sum + line.qtyPicked * line.unitPriceCents, 0);
-    const captured = goods + serviceFeeCents + courierFeeCents;
+    const discountCents = lines.reduce((sum, line) => sum + (line.discountCents ?? 0), 0);
+    const captured = goods - discountCents + serviceFeeCents + courierFeeCents;
     const pi = `pi_issue_${number}_${run}`;
     setAuthorizedAmount(pi, captured);
     const fee = courierFeeCents > 0 ? captureSplit({ capturedCents: captured, serviceFeeCents, courierFeeCents }).applicationFeeCents : undefined;
@@ -110,6 +119,8 @@ describe.skipIf(!hasDb)("customer issue report", () => {
         totalCents: captured,
         capturedAmountCents: captured,
         serviceFeeCents,
+        discountCents,
+        couponId: discountCents > 0 ? couponId : null,
         paymentIntentId: pi,
         trackingToken: `tok_${number}_${run}`,
         completedAt: new Date(Date.now() - hoursAgo * HOUR),
@@ -123,6 +134,7 @@ describe.skipIf(!hasDb)("customer issue report", () => {
         qtyOrdered: line.qtyPicked,
         qtyPicked: line.qtyPicked,
         unitPriceCents: line.unitPriceCents,
+        discountCents: line.discountCents ?? 0,
         status: "picked",
       })),
     });
@@ -185,6 +197,25 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     });
     expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2163 });
     expect((await written(order.id)).requests[0]).toMatchObject({ amountCents: 2163 });
+  });
+
+  it("#557: an issue refund deducts each line's share of the coupon discount, and the fee share follows the discounted goods", async () => {
+    // $66.00 goods, 10% off stored per line (90 / 120 / 450), $59.40 charged for goods + $1.78 fee.
+    const { order, token } = await completedOrder([
+      { qtyPicked: 2, unitPriceCents: 450, discountCents: 90 },
+      { qtyPicked: 1, unitPriceCents: 1200, discountCents: 120 },
+      { qtyPicked: 3, unitPriceCents: 1500, discountCents: 450 },
+    ], 1, 178);
+    const [cheap, middle] = order.lines;
+    const result = await submitIssueReport(store, token, {
+      type: "damaged",
+      lines: [{ lineId: cheap.id, qty: 1 }, { lineId: middle.id, qty: 1 }],
+      note: "",
+      photo: JPEG,
+    });
+    // Goods (450 − 45) + (1200 − 120) = 1485; fee 178 × 1485 / 5940 = 44.5 → 45. Refund $15.30.
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 1530 });
+    expect((await written(order.id)).requests[0]).toMatchObject({ amountCents: 1530 });
   });
 
   it("#495: a courier issue refund returns the service fee share from the platform fee, so the store funds the goods only", async () => {

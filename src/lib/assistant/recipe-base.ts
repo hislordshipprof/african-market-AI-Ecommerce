@@ -20,6 +20,24 @@ export function dishKey(text: string): string {
   return /[\p{L}\p{N}]/u.test(key) ? key : "";
 }
 
+/** Keys a dish name is looked up by, in order: the whole name, then the part before its first " with " (#607). */
+export function dishKeys(dish: string): string[] {
+  const key = dishKey(dish);
+  if (!key) return [];
+  const head = key.split(" with ")[0] ?? "";
+  return head && head !== key ? [key, head] : [key];
+}
+
+/** The declaration that answers a dish name, by the keys and order the database lookup uses. */
+export function declaredRecipe(recipes: SeedRecipe[], dish: string): SeedRecipe | null {
+  for (const key of dishKeys(dish)) {
+    const match = recipes.find((recipe) => dishKey(recipe.name) === key)
+      ?? recipes.find((recipe) => (recipe.aliases ?? []).some((alias) => dishKey(alias) === key));
+    if (match) return match;
+  }
+  return null;
+}
+
 export interface SeedRecipe {
   name: string;
   aliases?: string[];

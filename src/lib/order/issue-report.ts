@@ -7,6 +7,8 @@ import { prepareProofPhoto } from "./delivery-proof";
 import { evaluateOrderRefundStateAfterCommit, recordIssueRefundNotStarted, submitRefund } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
 import { serviceFeeRefundCents } from "./platform-fee";
+import { lineChargeCents, type ChargeLine } from "./substitution-pricing";
+import { lineDiscountShareCents } from "../coupon/discount";
 
 export const ISSUE_TYPES = ["missing", "damaged", "wrong", "poor_freshness"] as const;
 export type IssueType = (typeof ISSUE_TYPES)[number];
@@ -62,10 +64,13 @@ type OrderWithLines = ReportableOrder & {
   capturedAmountCents: number | null;
   tipCents: number;
   deliveryFeeCents: number;
-  lines: Array<{ id: string; qtyPicked: number; unitPriceCents: number }>;
+  lines: Array<ChargeLine & { id: string; discountCents: number }>;
 };
 
-/** Picked quantity × unit price for the chosen lines; fees and tip are never part of it. Null when a line is not this order's. */
+/**
+ * Picked quantity × unit price for the chosen lines, less each line's share of the coupon discount (#557),
+ * plus the service fee on those goods; tip and delivery are never part of it. Null when a line is not this order's.
+ */
 function issueAmountCents(order: OrderWithLines, chosen: IssueReportInput["lines"]): number | null {
   if (chosen.length === 0) return null;
   const byId = new Map(order.lines.map((line) => [line.id, line]));
@@ -76,7 +81,8 @@ function issueAmountCents(order: OrderWithLines, chosen: IssueReportInput["lines
     if (!line || seen.has(pick.lineId)) return null;
     if (!Number.isInteger(pick.qty) || pick.qty < 1 || pick.qty > line.qtyPicked) return null;
     seen.add(pick.lineId);
-    total += pick.qty * line.unitPriceCents;
+    const goods = pick.qty * line.unitPriceCents;
+    total += goods - lineDiscountShareCents({ discountCents: line.discountCents, chargeCents: lineChargeCents(line) }, goods);
   }
   return total > 0 ? total + serviceFeeRefundCents(total, order) : null;
 }
