@@ -1,5 +1,6 @@
 import { platformAdminTransaction } from "../db";
 import { revalidateStore } from "../get-store";
+import { queueStoreRequestNotices } from "./store-requests";
 import { CUISINE_TAGS, CUISINE_TAGS_MAX, LISTING_BLURB_MAX, blurbLength, isCuisineTag, normalizeBlurb, type CuisineTag } from "./listing-fields";
 
 export interface DirectoryListing {
@@ -57,5 +58,6 @@ export async function saveDirectoryListing(
   });
   if (!store) return refuse("Store not found.");
   revalidateStore(store);
+  if (!store.listed && after.listed) await queueStoreRequestNotices(storeId);
   return { ok: true };
 }
