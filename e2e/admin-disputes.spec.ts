@@ -20,6 +20,8 @@ async function asPlatformAdmin<T>(run: (tx: Prisma.TransactionClient) => Promise
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      // The pg adapter sends timestamptz without an offset; the app pins UTC (src/lib/db.ts), so this client does too.
+      await tx.$executeRaw`SELECT set_config('TimeZone', 'UTC', true)`;
       return run(tx);
     });
   } finally {
