@@ -134,6 +134,7 @@ export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps
     } catch (err) {
       logUnavailable(input.orderId, provider.name, "create", err);
       if (i < candidates.length - 1) {
+        await recordCourierEvent(input.storeId, input.orderId, null, "failover_triggered", { fromProvider: provider.name, reason: "create_failed" });
         await deps.emit({
           name: COURIER_FAILOVER_TRIGGERED,
           data: { storeId: input.storeId, orderId: input.orderId, fromProvider: provider.name, reason: "create_failed" },
@@ -185,7 +186,25 @@ async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDe
   if (order.store.storeDeliveryEnabled) options.push("store-delivery");
   if (order.store.pickupEnabled) options.push("pickup");
   options.push("cancel");
+  await recordCourierEvent(storeId, orderId, null, "both_failed", { options });
   await emit({ name: COURIER_BOTH_FAILED, data: { storeId, orderId, orderNumber: order.number, options } });
+}
+
+/**
+ * Failover and both-fail also land on the order's delivery events, so the courier incident log reads them from the
+ * database (#536). Keyed on the replaced delivery when there is one, so a replayed step writes it once.
+ */
+async function recordCourierEvent(
+  storeId: string,
+  orderId: string,
+  deliveryId: string | null,
+  type: "failover_triggered" | "both_failed",
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await storeScoped(storeId).deliveryEvent.createMany({
+    data: [{ storeId, orderId, deliveryId, externalEventId: deliveryId ? type : null, type, payload: payload as object }],
+    skipDuplicates: true,
+  });
 }
 
 function logUnavailable(referenceId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
@@ -528,6 +547,7 @@ export async function runCourierFailover(
     const alternates = enabledProviders(deps.providers.filter((p) => !used.some((u) => u.provider === p.name)), settings);
     if (alternates.length > 0) {
       const fromProvider = delivery.provider as DeliveryProviderName;
+      await recordCourierEvent(storeId, delivery.orderId, deliveryId, "failover_triggered", { fromProvider, reason: "assignment_timeout" });
       await deps.emit({ name: COURIER_FAILOVER_TRIGGERED, data: { storeId, orderId: delivery.orderId, fromProvider, reason: "assignment_timeout" } });
     }
     const ready = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: delivery.orderId }, select: { status: true, readyEstimateAt: true } });

@@ -103,6 +103,7 @@ model Store {
   reorderListItems      ReorderListItem[]
   notificationLogs      NotificationLog[]
   deliveryEvents        DeliveryEvent[]
+  courierIncidentNotes  CourierIncidentNote[]
   pushSubscriptions     PushSubscription[]
   supportThreads        SupportThread[]
   supportMessages       SupportMessage[]
@@ -148,6 +149,7 @@ model User {
   accounts                Account[]
   twoFactor               TwoFactor[]
   auditLogs               AuditLog[]
+  courierIncidentNotes    CourierIncidentNote[]
   memberships             StoreMembership[]
   invitesSent             StoreInvite[]
   stockEvents             StockEvent[]
@@ -1289,6 +1291,7 @@ model Order {
   issueReports         IssueReport[]
   notificationLogs     NotificationLog[]
   deliveryEvents       DeliveryEvent[]
+  courierIncidentNotes CourierIncidentNote[]
   deliveries           Delivery[]
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
@@ -1434,7 +1437,28 @@ model DeliveryEvent {
   @@unique([deliveryId, externalEventId])
   @@index([storeId])
   @@index([storeId, orderId])
+  @@index([type, createdAt])
   @@map("delivery_events")
+}
+
+/// A platform admin's note on a courier incident (#536); resolves marks the incident resolved. Incidents themselves
+/// are derived on read from delivery_events. Append-only.
+model CourierIncidentNote {
+  id          String   @id @default(cuid())
+  storeId     String   @map("store_id")
+  orderId     String   @map("order_id")
+  authorId    String   @map("author_id")
+  authorEmail String   @map("author_email")
+  body        String
+  resolves    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  store  Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order  Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, orderId, createdAt])
+  @@map("courier_incident_notes")
 }
 
 /// A store's own driver for one slot (#566). Only the link token's hash is kept; the link dies at expiresAt or revokedAt.

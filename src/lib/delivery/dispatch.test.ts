@@ -362,6 +362,50 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     expect(events.map((e) => e.name)).toEqual([COURIER_BOTH_FAILED]);
   });
 
+  /** The failover and both-fail rows on an order's delivery events (#536), by type. */
+  async function incidentEvents(ids: { storeId: string; orderId: string }) {
+    const rows = await storeScoped(ids.storeId).deliveryEvent.findMany({
+      where: { orderId: ids.orderId, type: { in: ["failover_triggered", "both_failed"] } },
+      select: { type: true, deliveryId: true, payload: true },
+    });
+    return rows.sort((a, b) => a.type.localeCompare(b.type));
+  }
+
+  it("#536: a create error's failover and a both-fail are recorded on the order's delivery events", async () => {
+    const ids = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const uber = new StubProvider("uber", 749);
+    uber.failCreate = true;
+    const doordash = new StubProvider("doordash", 899);
+    doordash.failCreate = true;
+
+    await selectAndDispatch({ ...ids, request }, { providers: [doordash, uber], emit, settings });
+
+    expect(await incidentEvents(ids)).toEqual([
+      { type: "both_failed", deliveryId: null, payload: { options: ["pickup", "cancel"] } },
+      { type: "failover_triggered", deliveryId: null, payload: { fromProvider: "uber", reason: "create_failed" } },
+    ]);
+  });
+
+  it("#536: a timeout failover is recorded once against the delivery it replaced, even when its step runs again", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId, deliveryId } = await dispatched(uber, doordash);
+    doordash.failCreate = true;
+    const fake = makeFakeStep();
+    const replaying = {
+      ...fake,
+      async run<T>(name: string, fn: () => Promise<T>) {
+        const out = await fake.run(name, fn);
+        return name === "courier-redispatch" ? fake.run(name, fn) : out;
+      },
+    };
+
+    await runCourierFailover(replaying, { storeId, deliveryId }, { providers: [uber, doordash], emit, settings });
+
+    const failovers = (await incidentEvents({ storeId, orderId })).filter((e) => e.type === "failover_triggered");
+    expect(failovers).toEqual([{ type: "failover_triggered", deliveryId, payload: { fromProvider: "uber", reason: "assignment_timeout" } }]);
+  });
+
   it("a cancel the provider refuses because a courier has the order keeps the delivery and books no second courier", async () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
