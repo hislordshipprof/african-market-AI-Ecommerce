@@ -15,11 +15,18 @@ export interface ShopperConstraints {
   asked: Record<string, string>;
   /** Unknown listings the customer confirmed, one at a time, with the constraint keys unknown at that time. */
   confirmed: Array<{ listingId: string; messageId: string; at: string; needs: NeedKey[] }>;
+  /** What the customer already has at home: recipes leave these ingredients out. It gates nothing. */
+  haveAtHome: string[];
+  /** The most the customer wants the cart's items to cost. A limit, not a need: it never changes a swap. */
+  budgetCents?: number;
 }
 
 export type ConstraintStatus = "ok" | "excluded" | "unknown";
 
-const EMPTY: ShopperConstraints = { avoidAllergens: [], requireClaims: [], avoidIngredients: [], preferences: [], asked: {}, confirmed: [] };
+/** The schema caps one call at 10; this caps the conversation, keeping the newest. */
+const HAVE_AT_HOME_CAP = 50;
+
+const EMPTY: ShopperConstraints = { avoidAllergens: [], requireClaims: [], avoidIngredients: [], preferences: [], asked: {}, confirmed: [], haveAtHome: [] };
 
 function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -51,6 +58,10 @@ export function parseConstraints(raw: unknown): ShopperConstraints {
         return [{ listingId: row.listingId, messageId: row.messageId, at: row.at, needs: strings(row.needs) as NeedKey[] }];
       })
       : [],
+    haveAtHome: strings(record.haveAtHome),
+    ...(typeof record.budgetCents === "number" && Number.isInteger(record.budgetCents) && record.budgetCents > 0
+      ? { budgetCents: record.budgetCents }
+      : {}),
   };
 }
 
@@ -127,7 +138,7 @@ export interface ConstraintChange {
 export async function changeConstraints(
   storeId: string,
   conversationId: string,
-  input: { avoidAllergens: Allergen[]; requireClaims: DietaryClaim[]; avoidIngredients: string[]; remove: string[] },
+  input: { avoidAllergens: Allergen[]; requireClaims: DietaryClaim[]; avoidIngredients: string[]; remove: string[]; budgetCents?: number; haveAtHome?: string[] },
 ): Promise<ConstraintChange> {
   const ask: ConstraintChange["ask"] = [];
   const unchecked: string[] = [];
@@ -166,8 +177,48 @@ export async function changeConstraints(
     constraints.requireClaims = constraints.requireClaims.filter((name) => !removed.has(name));
     constraints.avoidIngredients = constraints.avoidIngredients.filter((item) => !removed.has(item.term));
     constraints.preferences = constraints.preferences.filter((term) => !removed.has(term) && !answered.has(term));
+    for (const term of input.haveAtHome ?? []) {
+      const kept = term.trim().toLowerCase();
+      if (kept && !constraints.haveAtHome.includes(kept)) constraints.haveAtHome.push(kept);
+    }
+    constraints.haveAtHome = constraints.haveAtHome.filter((term) => !removed.has(term)).slice(-HAVE_AT_HOME_CAP);
+    if (input.budgetCents != null) constraints.budgetCents = input.budgetCents;
+    if (removed.has("budget")) delete constraints.budgetCents;
   });
   return { constraints, ask, cannotCheck: unchecked };
+}
+
+function words(text: string): string[] {
+  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+/** A word and the singulars it could be: tomatoes → tomato, leaves → leaf, berries → berry, olives → olive. */
+function singulars(word: string): string[] {
+  if (word.length < 4) return [word];
+  const forms = [word];
+  if (word.endsWith("ies")) forms.push(`${word.slice(0, -3)}y`);
+  if (word.endsWith("ves")) forms.push(`${word.slice(0, -3)}f`, `${word.slice(0, -3)}fe`);
+  if (word.endsWith("es")) forms.push(word.slice(0, -2));
+  if (word.endsWith("s")) forms.push(word.slice(0, -1));
+  return forms;
+}
+
+function sameWord(left: string, right: string): boolean {
+  const forms = singulars(right);
+  return singulars(left).some((form) => forms.includes(form));
+}
+
+/**
+ * The customer's have-at-home term names this recipe ingredient: all its words are in the ingredient's name
+ * and it ends on the same word, so rice covers long grain rice and oil covers vegetable oil, but tomatoes
+ * does not cover tomato paste.
+ */
+export function haveAtHomeCovers(term: string, ingredient: string): boolean {
+  const said = words(term);
+  const named = words(ingredient);
+  const last = named.at(-1);
+  return said.length > 0 && last != null && sameWord(said.at(-1)!, last)
+    && said.every((word) => named.some((other) => sameWord(word, other)));
 }
 
 /** A constraint by kind and value, so an allergen and an ingredient with the same name never share a status. */

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import {
   backupSwap,
+  decideAddQty,
   decideLineQty,
   decideNamedSubstitute,
   substituteIdForSwap,
@@ -14,7 +15,7 @@ import {
   type CartWriteTx,
   type SwapRuleValue,
 } from "../../cart/service";
-import { storeScoped, storeScopedRawQuery } from "../../db";
+import { lockCartLineByVariant, storeScoped, storeScopedRawQuery } from "../../db";
 import { effectiveAttributesSql, needExcludesSql } from "../../catalog/attribute-sql";
 import { scrubKnownStrings } from "../card-scrub";
 import {
@@ -82,6 +83,7 @@ const MESSAGES: Record<string, string> = {
   excluded: "That item does not meet the customer's needs.",
   cannot_confirm: "I can't confirm that item meets the customer's needs.",
   unchecked_swap: "The store's own swap does not check the customer's needs. Name a substitute that meets them, or Exact item only for a refund.",
+  over_budget: "Adding this would take the cart's items over the customer's budget.",
 };
 
 function fail(code: string): ToolFailure {
@@ -238,6 +240,8 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     requireClaims: parsed.require_claims,
     avoidIngredients: parsed.avoid_ingredients,
     remove: parsed.remove,
+    budgetCents: parsed.budget_cents,
+    haveAtHome: parsed.have_at_home,
   });
   const { refund, failsNeeds } = hasConstraints(saved) ? await reviewCartLines(ctx, saved) : { refund: [], failsNeeds: [] };
   const output = {
@@ -246,6 +250,8 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     requireClaims: saved.requireClaims,
     avoidIngredients: saved.avoidIngredients.map((item) => item.term),
     preferences: saved.preferences,
+    ...(saved.haveAtHome.length > 0 ? { haveAtHome: saved.haveAtHome } : {}),
+    ...(saved.budgetCents != null ? { budgetCents: saved.budgetCents } : {}),
     ...(ask.length > 0 ? { ask } : {}),
     ...(cannotCheck.length > 0 ? { cannotCheck } : {}),
     ...(failsNeeds.length > 0 ? { failsNeeds } : {}),
@@ -359,13 +365,16 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
   return refused;
 }
 
+// Enough local names to explain an item without filling the model's context.
+const ALSO_CALLED_LIMIT = 8;
+
 export async function showProducts(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(showProductsInput, input);
   const scoped = storeScoped(ctx.storeId);
   const listings = await scoped.listing.findMany({
     where: { id: { in: parsed.listing_ids } },
     include: {
-      masterProduct: true,
+      masterProduct: { include: { synonyms: { select: { term: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: ALSO_CALLED_LIMIT } } },
       variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
     },
   });
@@ -402,6 +411,8 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
       badge: stockBadge(factsOf(listing)),
       mayBeUnavailable: mayBeUnavailable(listing),
       ...verdictFields(verdicts?.get(listing.id)),
+      ...(listing.masterProduct?.description ? { about: listing.masterProduct.description } : {}),
+      ...(listing.masterProduct?.synonyms.length ? { alsoCalled: listing.masterProduct.synonyms.map((row) => row.term) } : {}),
     });
   }
   return recordRead(ctx, "show_products", parsed, { ok: true, cards, notFound, ...(excluded.length > 0 ? { excluded } : {}) });
@@ -442,16 +453,24 @@ export async function checkAvailability(ctx: AssistantContext, input: unknown): 
 
 export async function suggestSubstitutes(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(suggestSubstitutesInput, input);
+  const found = await swapCandidates(ctx, parsed.listing_id, 5);
+  if (!found.ok) return recordRead(ctx, "suggest_substitutes", parsed, fail(found.code));
+  return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items: found.items, ...(found.reason ? { reason: found.reason } : {}) });
+}
+
+/**
+ * In-stock listings of the same category that meet the saved needs: a swap that may itself be out is no swap,
+ * and one with no variant cannot be kept as a substitute.
+ */
+async function swapCandidates(ctx: AssistantContext, listingId: string, limit: number) {
   const scoped = storeScoped(ctx.storeId);
   const listing = await scoped.listing.findUnique({
-    where: { id: parsed.listing_id },
+    where: { id: listingId },
     include: { masterProduct: true },
   });
-  if (!listing) return recordRead(ctx, "suggest_substitutes", parsed, fail("listing_not_found"));
+  if (!listing) return { ok: false as const, code: "listing_not_found" };
   const categoryId = listing.masterProduct?.categoryId;
-  if (!categoryId) {
-    return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items: [], reason: "no_category" });
-  }
+  if (!categoryId) return { ok: true as const, items: [], reason: "no_category" };
   const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
   const constrained = hasConstraints(constraints);
   // The saved needs filter in SQL before the cap, so excluded listings cannot crowd out allowed ones.
@@ -462,7 +481,7 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
     WHERE l.active AND l.id <> ${listing.id} AND mp.category_id = ${categoryId}
       ${constrained ? Prisma.sql`AND NOT ${needExcludesSql(shopperNeed(constraints))}` : Prisma.empty}
     ORDER BY l.confidence DESC, l.price ASC, l.id ASC
-    LIMIT 5
+    LIMIT 40
   `);
   const ids = ranked.map((row) => row.id);
   const byId = new Map((await scoped.listing.findMany({
@@ -472,16 +491,19 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
   const verdicts = constrained ? await listingVerdicts(ctx.storeId, ids, constraints) : null;
   const items = ids.flatMap((id) => {
     const candidate = byId.get(id);
-    if (!candidate || isExcluded(verdicts, id)) return [];
+    const variant = candidate?.variants[0];
+    if (!candidate || !variant || isExcluded(verdicts, id) || mayBeUnavailable(candidate)) return [];
     return [{
       listingId: candidate.id,
       name: listingName(candidate),
-      priceCents: candidate.variants[0]?.price ?? candidate.price,
-      mayBeUnavailable: mayBeUnavailable(candidate),
+      variantId: variant.id,
+      packLabel: variant.label,
+      priceCents: variant.price,
+      mayBeUnavailable: false,
       ...verdictFields(verdicts?.get(candidate.id)),
     }];
   });
-  return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items });
+  return { ok: true as const, items: items.slice(0, limit) };
 }
 
 async function chooseBackup(
@@ -690,7 +712,7 @@ function rememberSearchLabels(
 async function itemsNotShown(
   ctx: AssistantContext,
   items: Array<{ variant_id: string; qty: number }>,
-): Promise<Array<{ variantId: string; name: string }>> {
+): Promise<Array<{ variantId: string; name: string } | { variantId: string; notInStore: true }>> {
   const acceptance = ctx.acceptance;
   if (!acceptance) return [];
   const explicitAdd = isExplicitProductAdd(acceptance.customerText);
@@ -721,12 +743,13 @@ async function itemsNotShown(
     },
   });
   const byId = new Map(rows.map((row) => [row.id, row]));
-  const refused = new Map<string, string>();
+  const refused = new Map<string, string | null>();
   for (const item of items) {
     const row = byId.get(item.variant_id);
     const listing = row?.listing;
+    // Usually one character miscopied from a near-identical id: naming it by the id got that id quoted in the reply.
     if (!listing || listing.storeId !== ctx.storeId) {
-      refused.set(item.variant_id, item.variant_id);
+      refused.set(item.variant_id, null);
       continue;
     }
     const names = namesForListing({
@@ -756,7 +779,7 @@ async function itemsNotShown(
       refused.set(item.variant_id, names[0] ?? item.variant_id);
     }
   }
-  return [...refused].map(([variantId, name]) => ({ variantId, name }));
+  return [...refused].map(([variantId, name]) => (name == null ? { variantId, notInStore: true as const } : { variantId, name }));
 }
 
 function describedAdd(applied: AppliedAddLine) {
@@ -803,6 +826,9 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         code: "not_shown",
         message: MESSAGES.not_shown,
         notShown,
+        ...(notShown.some((item) => "notInStore" in item)
+          ? { hint: "A notInStore variant_id is no product in this store. Use the handle a tool returned here for that item, and never write a handle in the reply." }
+          : {}),
       });
     }
   }
@@ -827,10 +853,26 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
     [...new Set(allowed.flatMap((item) => (item.backup_variant_id ? listingOf.get(item.backup_variant_id) ?? [] : [])))],
   );
   const backupRefused = (id: string | undefined) => !!id && backups.has(listingOf.get(id) ?? "");
-  const constrained = hasConstraints(await readConstraints(ctx.storeId, ctx.conversationId));
+  const saved = await readConstraints(ctx.storeId, ctx.conversationId);
+  const constrained = hasConstraints(saved);
   return recordWrite(ctx, "add_to_cart", raw, async (tx) => {
     const items = [];
+    let subtotal = (await readCartMoney(tx, ctx.cartId)).totals.subtotalCents;
     for (const item of allowed) {
+      if (saved.budgetCents != null) {
+        const variant = await tx.listingVariant.findUnique({
+          where: { id: item.variant_id },
+          select: { price: true, listing: { select: { maxPerOrder: true } } },
+        });
+        const existing = variant ? await lockCartLineByVariant(tx, ctx.cartId, item.variant_id) : null;
+        const decision = variant
+          ? decideAddQty({ existingQty: existing?.qty ?? 0, addQty: item.qty, maxPerOrder: variant.listing.maxPerOrder, clampToMax: true })
+          : null;
+        if (variant && decision?.ok && subtotal + variant.price * decision.added > saved.budgetCents) {
+          items.push({ ...fail("over_budget"), variantId: item.variant_id, budgetCents: saved.budgetCents, subtotalCents: subtotal });
+          continue;
+        }
+      }
       const applied = await applyAddLine(tx, ctx.storeId, ctx.cartId, item.variant_id, item.qty, {
         source: "ai",
         clampToMax: true,
@@ -840,6 +882,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         items.push(fail(applied.code));
         continue;
       }
+      subtotal += applied.variant.price * applied.added;
       const flagged = mayBeUnavailable(applied.listing);
       let swapRule = applied.swapRule;
       let substituteVariantId: string | null = null;
@@ -866,6 +909,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         swapRule,
         mayBeUnavailable: flagged,
         ...(substituteVariantId ? { substituteVariantId } : {}),
+        ...(flagged && swapRule !== "named_substitute" ? await swapIdeas(ctx, applied.listing.id) : {}),
       });
     }
     items.push(...refusedItems);
@@ -880,6 +924,16 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       ...money.totals,
     };
   });
+}
+
+/** Swaps the reply may suggest for a line that may be unavailable; the customer's yes keeps one as its named substitute. */
+async function swapIdeas(
+  ctx: AssistantContext,
+  listingId: string,
+): Promise<{ swapIdeas?: Array<{ listingId: string; name: string; variantId: string; packLabel: string }> }> {
+  const found = await swapCandidates(ctx, listingId, 3);
+  if (!found.ok || found.items.length === 0) return {};
+  return { swapIdeas: found.items.map(({ listingId: id, name, variantId, packLabel }) => ({ listingId: id, name, variantId, packLabel })) };
 }
 
 export async function updateCart(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -897,6 +951,11 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
     }
     const decision = decideLineQty(parsed.qty, line.variant.listing.maxPerOrder);
     if (!decision.ok) return fail("max_per_order");
+    const { budgetCents } = await readConstraints(ctx.storeId, ctx.conversationId);
+    if (budgetCents != null && parsed.qty > line.qty) {
+      const { subtotalCents } = (await readCartMoney(tx, ctx.cartId)).totals;
+      if (subtotalCents + line.variant.price * (parsed.qty - line.qty) > budgetCents) return { ...fail("over_budget"), budgetCents, subtotalCents };
+    }
     await tx.cartLine.update({ where: { id: line.id }, data: { qty: parsed.qty } });
     const money = await readCartMoney(tx, ctx.cartId);
     const fresh = money.lines.find((row) => row.id === line.id);
