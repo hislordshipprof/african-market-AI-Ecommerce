@@ -155,6 +155,7 @@ const STORE_SCOPED_MODELS = [
   "ownerReportItem",
   "ownerWhatsAppLink",
   "pickBatch",
+  "productProposal",
   "pushSubscription",
   "refundRequest",
   "reorderList",
@@ -338,12 +339,14 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "courierIncidentNote",
   "ingredient",
   "ingredientSynonym",
+  "listing",
   "masterProduct",
   "masterProductIngredient",
   "order",
   "paymentDispute",
   "paymentDisputeEvent",
   "platformSettings",
+  "productProposal",
   "productSynonym",
   "recipe",
   "recipeIngredient",
@@ -415,6 +418,7 @@ const STORE_SCOPED_TX_MODELS = [
   "paymentIntentRelease",
   "pickBatch",
   "platformSettings",
+  "productProposal",
   "pushSubscription",
   "refundRequest",
   "reorderList",
@@ -1039,7 +1043,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
-                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
+                  OR (provider_status = 'succeeded' AND (service_fee_share_cents > 0 OR platform_tax_share_cents > 0) AND fee_refund_id IS NULL)
               ))
               AND store_id IN (${Prisma.join(storeIds)})
             ORDER BY updated_at ASC
@@ -1071,7 +1075,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
-                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
+                  OR (provider_status = 'succeeded' AND (service_fee_share_cents > 0 OR platform_tax_share_cents > 0) AND fee_refund_id IS NULL)
               )
             ORDER BY updated_at ASC
             LIMIT 50
@@ -1434,6 +1438,10 @@ export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, 
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
 }
 
+/** Serializes reviews of one product proposal (#553), so a second approve or reject sees the first. */
+export async function lockProductProposalRow(tx: Pick<PrismaClient, "$queryRaw">, proposalId: string) {
+  await tx.$queryRaw`SELECT 1 FROM product_proposals WHERE id = ${proposalId} FOR UPDATE`;
+}
 
 /** Serialises catalog duplicate scans for the rest of the transaction (#542). */
 export async function lockDuplicateScan(tx: RawTx): Promise<void> {

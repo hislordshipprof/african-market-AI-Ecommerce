@@ -181,6 +181,52 @@ export async function deleteListingPhoto(key: string): Promise<void> {
   await deleteFromProofBucket(key);
 }
 
+const PRODUCT_PROPOSAL_PHOTO_KEY_RE = /^product-proposals\/[a-z0-9-]+\/[a-z0-9]+\.jpg$/;
+
+/** A crop of a shelf photo for a product proposal (#553): private in the proof bucket until an admin approves it. */
+export function productProposalPhotoKey(storeId: string, photoId: string): string {
+  return `product-proposals/${storeId}/${photoId}.jpg`;
+}
+
+export function isProductProposalPhotoKey(key: string): boolean {
+  return PRODUCT_PROPOSAL_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadProductProposalPhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isProductProposalPhotoKey(key)) throw new Error("not a product-proposal key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
+export async function deleteProductProposalPhoto(key: string): Promise<void> {
+  if (!isProductProposalPhotoKey(key)) throw new Error("not a product-proposal key");
+  await deleteFromProofBucket(key);
+}
+
+/** The bytes of a private shelf or proposal photo, or null when it is missing. */
+export async function readPrivatePhoto(key: string): Promise<Uint8Array | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !(isListingPhotoKey(key) || isProductProposalPhotoKey(key))) return null;
+  try {
+    const response = await getR2Client().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    return response.Body ? await response.Body.transformToByteArray() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read through the store-member shelf-photo and platform-admin proposal-photo routes only. */
+export async function streamPrivatePhoto(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !(isListingPhotoKey(key) || isProductProposalPhotoKey(key))) return null;
+  return getObject(bucket, key);
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {

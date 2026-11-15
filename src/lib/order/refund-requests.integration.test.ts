@@ -10,6 +10,7 @@ import { evaluateOrderRefundState, reconcileRefundRequest, REPLAY_LEASE_MS, subm
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import { updateListing } from "../listing/service";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { fakeTaxCalculator, setTaxCalculatorForTests } from "../tax/calculator";
 
 const reviewFault = vi.hoisted(() => ({ failAlert: false }));
 
@@ -185,6 +186,27 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     expect(coveredCancel.status).toBe("CANCELLED");
     expect(coveredCancel.captureCents).toBe(3000);
   }, 30_000);
+
+  it("#671: a cancel refund of a taxed order returns all its tax and reverses the whole sale", async () => {
+    const { order, pi } = await readyToRefund(1083);
+    const tax = fakeTaxCalculator({ TX: { rate: 0.0825 } });
+    setTaxCalculatorForTests(tax);
+    try {
+      const calculation = await tax.calculate({
+        address: { line1: "600 Congress Ave", city: "Austin", state: "TX", postalCode: "78701" },
+        lines: [{ reference: "line", amountCents: 1000, taxCode: null }], liableParty: "platform", stripeAccount: null, idempotencyKey: `sale-${order.id}`,
+      });
+      const transaction = await tax.recordTransaction({ calculationId: calculation.id!, reference: `order_${order.id}`, liableParty: "platform", stripeAccount: null });
+      await storeScoped(storeId).order.update({ where: { id: order.id }, data: { taxCents: 83, taxCalculationId: calculation.id, taxTransactionId: transaction.id } });
+      await submitRefund(storeId, order.id, pi);
+      await evaluateOrderRefundState(order.id);
+      const [request] = await storeScoped(storeId).refundRequest.findMany({ where: { orderId: order.id } });
+      expect(request).toMatchObject({ amountCents: 1083, taxShareCents: 83, taxReversalId: tax.reversals[0]?.id });
+      expect(tax.reversals.map((reversal) => reversal.plan)).toEqual([{ mode: "full", totalCents: 1083 }]);
+    } finally {
+      setTaxCalculatorForTests(null);
+    }
+  });
 
   it("a replay after a partial dashboard refund reuses the stored amount, then refunds the rest", async () => {
     const { order, pi } = await readyToRefund();

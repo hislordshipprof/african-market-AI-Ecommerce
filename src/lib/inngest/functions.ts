@@ -4,6 +4,7 @@ import { platform } from "../db";
 import { autoCancelOrder, cancelOrder, reconcileStuckOrder } from "../order/service";
 import { applySubstitutionTimeout } from "../order/substitution";
 import { releaseOrphanHolds } from "../checkout/service";
+import { recordPendingTaxTransactions, reversePendingTaxRefunds } from "../tax/capture-tax";
 import { isValidTimezone, openMinutesDeadline } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { resendOrderNotifications } from "./notify";
@@ -380,6 +381,11 @@ export const reconcileStuckTransitional = inngest.createFunction(
         await recordReconcileResult(row.storeId, row.id);
       });
     }
+
+    // Captured orders whose tax transaction failed after capture (#65 E10).
+    await step.run("record-pending-tax", () => recordPendingTaxTransactions(50));
+    // Succeeded refunds whose tax reversal failed or waited for the transaction (#671).
+    await step.run("reverse-pending-tax", () => reversePendingTaxRefunds(50));
   },
 );
 

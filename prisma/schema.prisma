@@ -29,6 +29,8 @@ model Store {
   city                      String?
   state                     String?
   zip                       String?
+  /// Who collects sales tax on this store's orders (ADR-0008): "platform" (marketplace facilitator) or "store".
+  taxLiableParty            String   @default("platform") @map("tax_liable_party")
   /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
   phone                     String?
   lat                       Float?
@@ -101,6 +103,7 @@ model Store {
   ownerReports          OwnerReport[]
   ownerReportItems      OwnerReportItem[]
   listingDrafts         ListingDraft[]
+  productProposals      ProductProposal[]
   reorderLists          ReorderList[]
   reorderListItems      ReorderListItem[]
   notificationLogs      NotificationLog[]
@@ -176,6 +179,8 @@ model User {
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
   listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
   listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  productProposals        ProductProposal[]        @relation("ProductProposalProposer")
+  productProposalReviews  ProductProposal[]        @relation("ProductProposalReviewer")
   storeCouponsCreated     StoreCoupon[]
   reorderLists            ReorderList[]            @relation("ReorderListSaver")
 
@@ -408,12 +413,15 @@ model Category {
   imageUrl  String?  @map("image_url")
   sortOrder Int      @map("sort_order")
   parentId  String?  @map("parent_id")
+  /// Stripe tax code (#65); null falls back to the parent's, then the Stripe account's preset.
+  taxCode   String?  @map("tax_code")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   parent         Category?       @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
   children       Category[]      @relation("CategoryTree")
   masterProducts MasterProduct[]
+  productProposals ProductProposal[]
 
   @@index([parentId])
   @@map("categories")
@@ -458,6 +466,7 @@ model MasterProduct {
   attributeProposals AttributeProposal[]
   recipeIngredients  RecipeIngredient[]
   listingDrafts      ListingDraft[]
+  productProposals   ProductProposal[]
 
   @@index([categoryId])
   @@index([status])
@@ -593,6 +602,7 @@ model Listing {
   ownerReportItems  OwnerReportItem[]
   draftsListedAs    ListingDraft[]           @relation("ListingDraftExisting")
   draftsPublishedAs ListingDraft[]           @relation("ListingDraftPublished")
+  productProposal   ProductProposal?
   reorderListItems  ReorderListItem[]
   collectionItems   StoreCollectionListing[]
   attributes        ListingAttributes?
@@ -948,6 +958,7 @@ model ListingDraft {
   masterProduct   MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
   existingListing Listing?       @relation("ListingDraftExisting", fields: [existingListingId], references: [id], onDelete: SetNull)
   listing         Listing?       @relation("ListingDraftPublished", fields: [listingId], references: [id], onDelete: Restrict)
+  productProposal ProductProposal?
 
   @@index([storeId, status, createdAt])
   @@index([createdById])
@@ -956,6 +967,48 @@ model ListingDraft {
   @@index([existingListingId])
   @@index([listingId])
   @@map("listing_drafts")
+}
+
+/// A new master product a store owner suggested while publishing an unmatched listing draft (#553).
+/// The store's custom listing sells at once; a platform admin approves (a new or an existing master
+/// product, and the listing is re-pointed to it) or rejects (the listing stays as it is).
+model ProductProposal {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  /// The proposing store's custom listing, re-pointed to the master product on approval.
+  listingId       String    @unique @map("listing_id")
+  draftId         String?   @unique @map("draft_id")
+  proposedById    String    @map("proposed_by_id")
+  name            String
+  localName       String?   @map("local_name")
+  size            String?
+  categoryId      String?   @map("category_id")
+  /// Private crop of the shelf photo, under product-proposals/<storeId>/; used only once an admin approves it.
+  photoKey        String?   @map("photo_key")
+  /// pending | approved | rejected
+  status          String    @default("pending")
+  masterProductId String?   @map("master_product_id")
+  rejectReason    String?   @map("reject_reason")
+  reviewedById    String?   @map("reviewed_by_id")
+  reviewedAt      DateTime? @map("reviewed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing       Listing        @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  draft         ListingDraft?  @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  proposedBy    User           @relation("ProductProposalProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  reviewedBy    User?          @relation("ProductProposalReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  masterProduct MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, createdAt])
+  @@index([status, createdAt])
+  @@index([proposedById])
+  @@index([reviewedById])
+  @@index([categoryId])
+  @@index([masterProductId])
+  @@map("product_proposals")
 }
 
 model StoreBanner {
@@ -1036,6 +1089,12 @@ model Cart {
   courierProvider       String?   @map("courier_provider")
   courierQuoteKey       String?   @map("courier_quote_key")
   courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
+  /// The Stripe Tax calculation last shown at checkout (#65), for the basket and address in taxQuoteKey.
+  taxCents              Int?      @map("tax_cents")
+  taxLines              Json?     @map("tax_lines")
+  taxLiableParty        String?   @map("tax_liable_party")
+  taxCalculationId      String?   @map("tax_calculation_id")
+  taxQuoteKey           String?   @map("tax_quote_key")
   /// The one store coupon code the shopper entered (#557), upper-case. Checked on every quote and at placement.
   couponCode            String?   @map("coupon_code")
   source                String    @default("manual")
@@ -1385,6 +1444,14 @@ model Order {
   driverRouteId           String?   @map("driver_route_id")
   /// The open pick batch this order is in (#564); cleared when staff leave the batch.
   pickBatchId             String?   @map("pick_batch_id")
+  /// Sales tax (#65, ADR-0008): Stripe Tax's rounded total, its lines, who collects it, and the
+  /// calculation it came from (the checkout's, replaced by the final one at capture).
+  taxCents                Int       @default(0) @map("tax_cents")
+  taxLines                Json      @default("[]") @map("tax_lines")
+  taxLiableParty          String    @default("platform") @map("tax_liable_party")
+  taxCalculationId        String?   @map("tax_calculation_id")
+  /// The Stripe tax transaction recorded after capture; null with a captured order means it is pending.
+  taxTransactionId        String?   @map("tax_transaction_id")
   /// Checkout opt-in to WhatsApp order updates (#560); NULL keeps SMS.
   whatsappOptInAt         DateTime? @map("whatsapp_opt_in_at")
   createdAt               DateTime  @default(now()) @map("created_at")
@@ -1439,6 +1506,16 @@ model RefundRequest {
   providerStatus       String?   @map("provider_status")
   /// #495: on a courier issue refund, the service fee part the platform returns from its application fee.
   serviceFeeShareCents Int       @default(0) @map("service_fee_share_cents")
+  /// #65: the sales tax paid on the goods this refund returns.
+  taxShareCents        Int       @default(0) @map("tax_share_cents")
+  /// #65: on a courier refund of an order whose tax the platform collects, the tax the platform returns from its
+  /// application fee with the service fee share, so the store's transfer reversal never pays it.
+  platformTaxShareCents Int      @default(0) @map("platform_tax_share_cents")
+  /// #671: what the Stripe Tax reversal for this refund returns, set when the request is reserved:
+  /// { mode: "full" | "flat" | "lines", totalCents, lines?: [{ reference, amountCents, taxCents }] }. Null reverses nothing.
+  taxReversal          Json?     @map("tax_reversal")
+  /// #671: the Stripe Tax reversal transaction, once made; null with a plan is pending for the sweep.
+  taxReversalId        String?   @map("tax_reversal_id")
   feeRefundId          String?   @map("fee_refund_id")
   /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
   succeededAt          DateTime? @map("succeeded_at")
@@ -1687,6 +1764,8 @@ model OrderLine {
   substitutedUnitPriceCents Int?     @map("substituted_unit_price_cents")
   /// This line's share of the order's coupon discount, written at capture (#557); an issue refund deducts it.
   discountCents             Int      @default(0) @map("discount_cents")
+  /// This line's sales tax from the final calculation, written at capture (#671); a refund of the line returns it.
+  taxCents                  Int      @default(0) @map("tax_cents")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @default(now()) @updatedAt @map("updated_at")
 
