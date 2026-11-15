@@ -113,8 +113,8 @@ const SEEDED_FIELDS = [
 ] as const;
 type SeededField = (typeof SEEDED_FIELDS)[number];
 
-/** Statuses only an admin sets. The seed never moves a product out of them. */
-const ADMIN_STATUSES = new Set(["archived", "rejected", "merged"]);
+/** Statuses only an admin sets. The seed never moves a product out of them; a merged product it leaves whole. */
+const ADMIN_STATUSES = new Set(["archived", "rejected"]);
 
 /** Audit actions whose `after` names the master-product columns the admin changed. */
 const FIELD_EDIT_ACTIONS = ["catalog.product_edit", "catalog.edit"];
@@ -208,22 +208,19 @@ export async function upsertMasterProduct(
   };
 
   const existing = await lockMasterProduct(tx, row.id);
-  if (!existing) {
-    await tx.masterProduct.create({ data: { id: row.id, ...fields, status: variant.statusOnCreate, imageUrl: variant.imageUrl } });
-    await upsertSynonyms(tx, row);
-    return { keptAdminChanges: false };
-  }
-  if (existing.status === "merged") return { keptAdminChanges: true };
-
+  if (existing?.status === "merged") return { keptAdminChanges: true };
   const changes = await readAdminChanges(tx, row.id);
-  const keepStatus = changes.fields.has("status") || ADMIN_STATUSES.has(existing.status);
-  if (keepStatus) changes.fields.add("status");
-  const update = withoutAdminChanges({
-    ...fields,
-    ...(variant.statusOnUpdate !== undefined ? { status: variant.statusOnUpdate } : {}),
-    ...(variant.imageUrl !== null ? { imageUrl: variant.imageUrl } : {}),
-  }, changes);
-  await tx.masterProduct.update({ where: { id: row.id }, data: update });
+  if (existing && ADMIN_STATUSES.has(existing.status)) changes.fields.add("status");
+
+  await tx.masterProduct.upsert({
+    where: { id: row.id },
+    update: withoutAdminChanges({
+      ...fields,
+      ...(variant.statusOnUpdate !== undefined ? { status: variant.statusOnUpdate } : {}),
+      ...(variant.imageUrl !== null ? { imageUrl: variant.imageUrl } : {}),
+    }, changes),
+    create: { id: row.id, ...fields, status: variant.statusOnCreate, imageUrl: variant.imageUrl },
+  });
   await upsertSynonyms(tx, row, changes.synonymIds);
   return { keptAdminChanges: changes.fields.size > 0 || changes.synonymIds.size > 0 };
 }
