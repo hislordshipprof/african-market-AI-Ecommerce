@@ -1158,9 +1158,13 @@ export async function markReady(
         taxCalculationId: tax.calculationId,
       },
     });
+    const lineTax = new Map(tax.lineTaxes.map((line) => [line.reference, line.taxCents]));
     for (const [index, line] of lines.entries()) {
       const share = charge.lineDiscountsCents[index];
-      if (line.discountCents !== share) await tx.orderLine.update({ where: { id: line.id }, data: { discountCents: share } });
+      const taxCents = lineTax.get(line.id) ?? 0;
+      if (line.discountCents !== share || line.taxCents !== taxCents) {
+        await tx.orderLine.update({ where: { id: line.id }, data: { discountCents: share, taxCents } });
+      }
     }
 
     return {

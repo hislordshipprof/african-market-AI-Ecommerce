@@ -54,6 +54,20 @@ describe("tax part of a refund (#65, decision 2026-11-15-06)", () => {
     expect(refundOfGoodsCents(100, order, 165)).toBe(100 + 3);
   });
 
+  it("#671: a refund tied to lines returns those lines' exact tax, scaled only when the amount is lowered", () => {
+    // $20 of exempt food and $10 of taxed goods with 83¢ tax and a $5 tip: the proportional rule would give the food 55¢.
+    const mixed = { serviceFeeCents: 90, capturedAmountCents: 3000 + 90 + 83 + 500, tipCents: 500, deliveryFeeCents: 0, taxCents: 83 };
+    const food = { goodsCents: 2000, taxCents: 0 };
+    const taxed = { goodsCents: 1000, taxCents: 83 };
+    expect(refundOfGoodsCents(2000, mixed, 0, food)).toBe(2000 + 60);
+    expect(refundShares(2060, mixed, 0, food)).toEqual({ goodsCents: 2000, serviceFeeCents: 60, taxCents: 0 });
+    expect(refundShares(1000 + 30 + 83, mixed, 0, taxed)).toEqual({ goodsCents: 1000, serviceFeeCents: 30, taxCents: 83 });
+    // The store approves $5.65 of it: $5 of goods, 15¢ fee share, half the line's tax 41.5 → 42.
+    expect(refundShares(557, mixed, 0, taxed)).toEqual({ goodsCents: 500, serviceFeeCents: 15, taxCents: 42 });
+    // Never more than the tax earlier refunds left.
+    expect(refundShares(1000 + 30 + 83, mixed, 80, taxed).taxCents).toBe(3);
+  });
+
   it("an order placed before tax refunds no tax", () => {
     expect(taxRefundCents(1000, { ...order, taxCents: 0, capturedAmountCents: 2000 + 60 + 899 + 500 })).toBe(0);
   });

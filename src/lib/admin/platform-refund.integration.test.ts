@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 
@@ -17,6 +17,7 @@ const { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, storeFun
 const { captureSplit } = await import("../order/platform-fee");
 const { getStoreOrders } = await import("../order/service");
 const { countedListing } = await import("../order/stock-ledger-test-helpers");
+const { fakeTaxCalculator, setTaxCalculatorForTests } = await import("../tax/calculator");
 
 const hasDb = !!process.env.DATABASE_URL;
 const ADMIN = { id: crypto.randomUUID(), email: `ops-${Date.now()}@platform.test` };
@@ -185,13 +186,27 @@ describe.skipIf(!hasDb)("platform manual refund (#538)", () => {
     expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2165);
   });
 
-  it("#65: two courier refunds of half the goods each never return more tax than the order paid", async () => {
+  it("#65/#671: two courier refunds of half the goods each never return more tax than the order paid, and each reverses its amount", async () => {
     // $20 goods + $1.65 platform tax: half is 82.5 → 83¢, so the second half carries only the 82¢ left.
     const order = await capturedOrder({ goods: 2000, courierFee: 899, tax: 165 });
+    const tax = fakeTaxCalculator({ TX: { rate: 0.0825 } });
+    setTaxCalculatorForTests(tax);
+    onTestFinished(() => setTaxCalculatorForTests(null));
+    const [line] = await storeScoped(stores[0]).orderLine.findMany({ where: { orderId: order.id } });
+    const calculation = await tax.calculate({
+      address: { line1: "600 Congress Ave", city: "Austin", state: "TX", postalCode: "78701" },
+      lines: [{ reference: line.id, amountCents: 2000, taxCode: null }], liableParty: "platform", stripeAccount: null, idempotencyKey: `sale-${order.id}`,
+    });
+    const transaction = await tax.recordTransaction({ calculationId: calculation.id!, reference: `order_${order.id}`, liableParty: "platform", stripeAccount: null });
+    await storeScoped(stores[0]).order.update({ where: { id: order.id }, data: { taxCalculationId: calculation.id, taxTransactionId: transaction.id } });
     expect(await platformRefundAction(null, form(order.id, "10.83"))).toMatchObject({ ok: true, amountCents: 1083 });
     expect(await platformRefundAction(null, form(order.id, "10.83"))).toMatchObject({ ok: true, amountCents: 1083 });
     const requests = (await written(stores[0], order.id)).requests;
     expect(requests.map((row) => row.platformTaxShareCents).sort()).toEqual([82, 83]);
+    // An amount not tied to a line reverses its goods and tax as a flat amount; together, the whole sale.
+    expect(tax.reversals.map((reversal) => reversal.plan).sort((a, b) => b.totalCents - a.totalCents)).toEqual([
+      { mode: "flat", totalCents: 1083 }, { mode: "flat", totalCents: 1082 },
+    ]);
   });
 
   it("a double submit and a concurrent submit of one form refund once", async () => {
