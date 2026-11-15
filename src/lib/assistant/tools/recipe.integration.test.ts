@@ -33,6 +33,7 @@ interface RecipeOutput {
   inStock: Placed[];
   lowOrOut: Placed[];
   notCarried: string[];
+  similar?: Placed[];
   excluded?: string[];
   preferences?: string[];
 }
@@ -74,7 +75,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     });
   }
 
-  async function listing(storeId: string, masterProductId: string, name: string, confidence = 1) {
+  async function listing(storeId: string, masterProductId: string | null, name: string, confidence = 1) {
     const row = await storeScoped(storeId).listing.create({
       data: { storeId, masterProductId, customName: name, price: 500, stockMode: "unlimited", confidence, frozen: false, perishable: false },
     });
@@ -207,6 +208,50 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(offered.map((item) => item.listingId)).not.toContain(honeyBeans.listingId);
     expect(offered.map((item) => item.listingId)).not.toContain(butterSpice.listingId);
     expect(result.notCarried).toEqual(expect.arrayContaining(["honey", "niter kibbeh"]));
+  });
+
+  it("offers an unmapped ingredient's contains-match only as a similar item, and fills it once an exact listing exists", async () => {
+    const store = (await raw.store.create({ data: { slug: `recipe-onion-${suffix}`, name: "Recipe onion", themePreset: "palm-and-shea" } })).id;
+    try {
+      const mix = await listing(store, "gino-pepper-onion-paste", `Gino pepper and onion mix ${suffix}`);
+      const ctx = await conversation(store);
+      const before = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
+      expect([...before.inStock, ...before.lowOrOut].map((item) => item.listingId)).not.toContain(mix.listingId);
+      expect(before.notCarried).not.toContain("onion");
+      expect(before.similar).toEqual([expect.objectContaining({ ingredient: "onion", ...mix })]);
+
+      // Case and punctuation fold: "ONION." is the ingredient onion.
+      const onions = await listing(store, null, "ONION.");
+      const after = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
+      expect(after.inStock).toEqual([expect.objectContaining({ ingredient: "onion", ...onions })]);
+      expect(after.similar).toBeUndefined();
+    } finally {
+      await storeScoped(store).cart.deleteMany({});
+      await storeScoped(store).listing.deleteMany({});
+      await raw.store.delete({ where: { id: store } });
+    }
+  });
+
+  it("applies the same exact-first rule to a dish looked up online", async () => {
+    const store = (await raw.store.create({ data: { slug: `recipe-online-${suffix}`, name: "Recipe online", themePreset: "palm-and-shea" } })).id;
+    try {
+      const onions = await listing(store, null, "Onion");
+      const mix = await listing(store, "gino-pepper-onion-paste", `Gino pepper and onion mix ${suffix}`);
+      const spray = await listing(store, null, `Vegetable oil spray ${suffix}`);
+      const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["onion", "vegetable oil"], "https://recipes.example/online")] });
+      const result = await getRecipe(await conversation(store), { dish: `kelewele online ${suffix}`, servings: 2 }, {
+        lookupModel: createAssistantModel({ fetch: fake.fetch }),
+      }) as unknown as RecipeOutput;
+      expect(result).toMatchObject({ ok: true, lookedUp: true });
+      expect(result.inStock).toEqual([expect.objectContaining({ ingredient: "onion", ...onions })]);
+      expect(result.similar).toEqual([expect.objectContaining({ ingredient: "vegetable oil", ...spray })]);
+      expect([...result.inStock, ...result.lowOrOut].map((item) => item.listingId)).not.toContain(mix.listingId);
+      expect(result.notCarried).toEqual([]);
+    } finally {
+      await storeScoped(store).cart.deleteMany({});
+      await storeScoped(store).listing.deleteMany({});
+      await raw.store.delete({ where: { id: store } });
+    }
   });
 
   it("a dish whose full name the base answers is not cut down to the part before with", async () => {
@@ -359,13 +404,18 @@ describe.skipIf(!hasDb)("get_recipe", () => {
       platformAdmin.ingredient.create({ data: { name: `${name} ${suffix}` } })));
     ingredientIds.push(onion.id, tomato.id, grain.id);
     const mix = await listing(storeA, "gino-pepper-onion-paste", `Gino pepper and onion mix ${suffix}`);
+    const onions = await listing(storeA, null, "Onion");
+    await known(storeA, onions.listingId, [onion.id]);
     const pastes = await storeScoped(storeA).listing.findMany({ where: { customName: { contains: `tomato paste ${suffix}` } }, select: { id: true } });
     await known(storeA, mix.listingId, [onion.id, tomato.id]);
     await known(storeA, rice.listingId, [grain.id]);
     for (const paste of pastes) await known(storeA, paste.id, [tomato.id]);
 
+    // Onion fills with the onion listing, never with the mix that only has the word in its name (#633).
     const plain = await getRecipe(ctxA, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
-    expect(plain.inStock.map((item) => item.ingredient)).toContain("onion");
+    expect(plain.inStock).toContainEqual(expect.objectContaining({ ingredient: "onion", listingId: onions.listingId }));
+    expect([...plain.inStock, ...plain.lowOrOut].map((item) => item.listingId)).not.toContain(mix.listingId);
+    expect(plain.similar).toBeUndefined();
 
     const ruledOut = await conversation(storeA);
     await setShopperNeeds(ruledOut, { avoid_ingredients: [`onion ${suffix}`, `rice ${suffix}`] });
@@ -420,7 +470,8 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
     try {
       const result = await getRecipe(ctx, { dish: `kelewele crowd ${suffix}`, servings: 2 }) as unknown as RecipeOutput;
-      expect([...result.inStock, ...result.lowOrOut].map((item) => item.listingId)).toEqual([allowed.listingId]);
+      expect([...result.inStock, ...result.lowOrOut]).toEqual([]);
+      expect(result.similar?.map((item) => item.listingId)).toEqual([allowed.listingId]);
       expect(result.excluded ?? []).toEqual([]);
     } finally {
       await storeScoped(store).cart.deleteMany({});
