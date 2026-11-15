@@ -26,6 +26,7 @@ import IncidentsPage from "@/app/admin/(shell)/couriers/incidents/page";
 import IncidentPage from "@/app/admin/(shell)/couriers/incidents/[orderId]/page";
 import { addCourierIncidentNoteAction, getCourierIncident, listCourierIncidents } from "./courier-incidents";
 import { auth } from "../auth";
+import { testPrismaClient } from "../test-prisma";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -145,8 +146,11 @@ describe.skipIf(!process.env.DATABASE_URL)("courier incident detail and notes (#
 
   afterAll(async () => {
     const userIds = Object.values(sessions).map((s) => s.userId);
+    // Notes are append-only for app_user; the owner role clears them.
+    const owner = testPrismaClient();
+    await owner.$executeRaw`DELETE FROM courier_incident_notes WHERE store_id IN (${storeA}, ${storeB})`;
+    await owner.$disconnect();
     await asPlatformAdmin(async (tx) => {
-      await tx.$executeRaw`DELETE FROM courier_incident_notes WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM delivery_events WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM deliveries WHERE store_id IN (${storeA}, ${storeB})`;
@@ -238,6 +242,8 @@ describe.skipIf(!process.env.DATABASE_URL)("courier incident detail and notes (#
     expect(Number(seenByA[0].n)).toBe(0);
     const seenByB = await storeScopedTransaction(storeB, (tx) => tx.$queryRaw<Array<{ body: string }>>`SELECT body FROM courier_incident_notes`);
     expect(seenByB.map((r) => r.body)).toEqual(["Platform note on B"]);
+    // Append-only: store B can read the platform's note on its order but cannot delete it.
+    await expect(storeScopedTransaction(storeB, (tx) => tx.$executeRaw`DELETE FROM courier_incident_notes`)).rejects.toThrow(/permission denied/);
   });
 
   it("only a 2FA-verified platform admin: a store owner, a customer and a signed-out visitor are sent to sign-in and nothing is written", async () => {

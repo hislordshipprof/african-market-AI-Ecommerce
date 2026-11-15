@@ -114,8 +114,9 @@ beforeAll(() => {
 
 afterAll(async () => {
   if (!hasDb) return;
+  // Notes are append-only for app_user; the owner role clears them.
+  await prisma.$executeRaw`DELETE FROM courier_incident_notes WHERE store_id = ANY(${storeIds})`;
   await asPlatformAdmin(async (tx) => {
-    await tx.$executeRaw`DELETE FROM courier_incident_notes WHERE store_id = ANY(${storeIds})`;
     await tx.auditLog.deleteMany({ where: { storeId: { in: storeIds } } });
     await tx.deliveryEvent.deleteMany({ where: { storeId: { in: storeIds } } });
     await tx.delivery.deleteMany({ where: { storeId: { in: storeIds } } });
