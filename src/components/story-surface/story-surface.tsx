@@ -5,10 +5,14 @@ import { MotionConfig, motion } from "motion/react";
 import { cn } from "cn";
 import { Card } from "@/components/ui/card";
 import { DepthSceneGate } from "./depth-scene-gate";
-import { BODIJA_MARKET, type StoryScene } from "./scenes";
-
-const WIDE_MEDIA = "(min-width: 768px)";
-const TALL_MEDIA = "(max-width: 767.98px)";
+import {
+  BODIJA_MARKET,
+  POSTER_MID_MEDIA,
+  POSTER_MID_PRELOAD_MEDIA,
+  POSTER_TALL_PRELOAD_MEDIA,
+  POSTER_WIDE_MEDIA,
+  type StoryScene,
+} from "./scenes";
 
 /** The panel every story surface form sits on. Solid, so AA holds over any part of the photo. */
 export function StoryCard({ className, ...props }: ComponentProps<typeof Card>) {
@@ -18,10 +22,13 @@ export function StoryCard({ className, ...props }: ComponentProps<typeof Card>) 
 export function StorySurface({
   children,
   asMain = true,
+  wide = false,
   scene = BODIJA_MARKET,
 }: {
   children: ReactNode;
   asMain?: boolean;
+  /** A two-column form from 1024px, for a step too tall for one column on a laptop. */
+  wide?: boolean;
   scene?: StoryScene;
 }) {
   const Tag = asMain ? "main" : "div";
@@ -32,14 +39,21 @@ export function StorySurface({
         rel="preload"
         as="image"
         href={scene.posterWide.src}
-        media={WIDE_MEDIA}
+        media={POSTER_WIDE_MEDIA}
+        fetchPriority="high"
+      />
+      <link
+        rel="preload"
+        as="image"
+        href={scene.posterMid.src}
+        media={POSTER_MID_PRELOAD_MEDIA}
         fetchPriority="high"
       />
       <link
         rel="preload"
         as="image"
         href={scene.posterTall.src}
-        media={TALL_MEDIA}
+        media={POSTER_TALL_PRELOAD_MEDIA}
         fetchPriority="high"
       />
       {/* Phones anchor the form in thumb reach, except under a store header, where the
@@ -63,7 +77,8 @@ export function StorySurface({
             transition={{ duration: 1.2, ease: [0, 0, 0, 1] }}
           >
             <picture>
-              <source media={WIDE_MEDIA} srcSet={scene.posterWide.src} />
+              <source media={POSTER_WIDE_MEDIA} srcSet={scene.posterWide.src} />
+              <source media={POSTER_MID_MEDIA} srcSet={scene.posterMid.src} />
               <img
                 src={scene.posterTall.src}
                 alt=""
@@ -83,7 +98,7 @@ export function StorySurface({
 
         {/* Visible from the first paint. The entrance only moves it, so slow JS never hides the form. */}
         <motion.div
-          className="relative z-10 w-full max-w-md motion-reduce:!transform-none"
+          className={cn("relative z-20 w-full max-w-md motion-reduce:!transform-none", wide && "lg:max-w-[46rem]")}
           initial={{ y: 16 }}
           animate={{ y: 0 }}
           transition={{ duration: 0.5, ease: [0, 0, 0, 1] }}
@@ -97,7 +112,13 @@ export function StorySurface({
             {scene.place}
           </span>
         </p>
-        <div className="pointer-events-none absolute bottom-12 left-[max(6vw,3rem)] z-10 hidden max-w-[min(34rem,42vw)] text-white lg:block">
+        {/* The wide card reaches the line's corner until about 1456px, so the line waits for 2xl. */}
+        <div
+          className={cn(
+            "pointer-events-none absolute bottom-12 left-[max(6vw,3rem)] z-10 hidden max-w-[min(34rem,42vw)] text-white",
+            wide ? "2xl:block" : "lg:block",
+          )}
+        >
           <p className="font-display text-[clamp(1.25rem,1.6vw,1.625rem)] leading-[1.15] font-bold text-balance">
             {scene.line}
           </p>

@@ -445,10 +445,16 @@ model MasterProduct {
   allergensStatus   String   @default("unknown") @map("allergens_status")
   dietaryClaims     String[] @default([]) @map("dietary_claims")
   dietaryStatus     String   @default("unknown") @map("dietary_status")
+  /// Set with status "merged": the product that took this one's listings, synonyms and recipe links.
+  mergedIntoId      String?  @map("merged_into_id")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   category           Category?                 @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  mergedInto         MasterProduct?            @relation("MasterProductMerge", fields: [mergedIntoId], references: [id], onDelete: Restrict)
+  mergedFrom         MasterProduct[]           @relation("MasterProductMerge")
+  duplicatePairsA    CatalogDuplicatePair[]    @relation("DuplicatePairA")
+  duplicatePairsB    CatalogDuplicatePair[]    @relation("DuplicatePairB")
   listings           Listing[]
   synonyms           ProductSynonym[]
   ingredients        MasterProductIngredient[]
@@ -458,7 +464,37 @@ model MasterProduct {
 
   @@index([categoryId])
   @@index([status])
+  @@index([mergedIntoId])
   @@map("master_products")
+}
+
+/// A possible duplicate in the master catalog (#542). Product A has the smaller id. A dismissed pair is
+/// never proposed again; an open pair is replaced on the next scan.
+model CatalogDuplicatePair {
+  id             String    @id @default(cuid())
+  productAId     String    @map("product_a_id")
+  productBId     String    @map("product_b_id")
+  nameSimilarity Float     @map("name_similarity") @db.Real
+  sharedTerms    Int       @map("shared_terms")
+  score          Float     @db.Real
+  /// open | dismissed | merged
+  status         String    @default("open")
+  /// same | different | unsure; null until Claude judges the pair.
+  verdict        String?
+  verdictReason  String?   @map("verdict_reason")
+  judgedAt       DateTime? @map("judged_at") @db.Timestamptz(6)
+  decidedById    String?   @map("decided_by_id")
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  productA MasterProduct @relation("DuplicatePairA", fields: [productAId], references: [id], onDelete: Cascade)
+  productB MasterProduct @relation("DuplicatePairB", fields: [productBId], references: [id], onDelete: Cascade)
+
+  @@unique([productAId, productBId])
+  @@index([productBId])
+  @@index([status, score])
+  @@map("catalog_duplicate_pairs")
 }
 
 model ProductSynonym {

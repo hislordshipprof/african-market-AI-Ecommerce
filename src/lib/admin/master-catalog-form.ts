@@ -1,18 +1,28 @@
 import { z } from "zod";
 
-/** Master product statuses. Archived replaces delete: listings on it keep selling, nothing new matches it. */
-export const MASTER_STATUSES = ["active", "needs_review", "rejected", "archived"] as const;
+/**
+ * Master product statuses. Archived replaces delete: listings on it keep selling, nothing new matches it.
+ * Merged is set only by a duplicate merge, which moves everything to the product it was merged into.
+ */
+export const MASTER_STATUSES = ["active", "needs_review", "rejected", "archived", "merged"] as const;
 export type MasterStatus = (typeof MASTER_STATUSES)[number];
+
+/** The statuses the editor may set. */
+export const EDITABLE_STATUSES = ["active", "needs_review", "rejected", "archived"] as const satisfies readonly MasterStatus[];
 
 export const MASTER_STATUS_LABELS: Record<MasterStatus, string> = {
   active: "Active",
   needs_review: "Needs review",
   rejected: "Rejected",
   archived: "Archived",
+  merged: "Merged",
 };
 
 /** Every master product action refuses with this when the row moved on since the admin loaded it. */
 export const STALE_PRODUCT_MESSAGE = "Someone else changed this product after you opened it. Reload the page to see their changes, then make yours again.";
+
+/** A merged product is read-only: its listings and synonyms now live on the product it was merged into. */
+export const MERGED_PRODUCT_MESSAGE = "This product was merged into another one and can no longer be edited.";
 
 export const STORAGE_OPTIONS = ["ambient", "chilled", "frozen"] as const;
 
@@ -70,7 +80,7 @@ export const masterProductFormSchema = z.strictObject({
   frozen: z.boolean(),
   perishable: z.boolean(),
   storage: z.enum(["", ...STORAGE_OPTIONS], "Choose a storage option").transform((value) => value || null),
-  status: z.enum(MASTER_STATUSES, "Choose a status"),
+  status: z.enum(EDITABLE_STATUSES, "Choose a status"),
 });
 export type MasterProductForm = z.infer<typeof masterProductFormSchema>;
 export type MasterProductField = Exclude<keyof MasterProductForm, "productId" | "version">;
