@@ -1,9 +1,21 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { generateTOTP } from "../../../e2e/totp";
 
 vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
+});
+
+const { limiter } = vi.hoisted(() => ({ limiter: { fail: false } }));
+
+vi.mock("../rate-limit/app-limiter", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../rate-limit/app-limiter")>();
+  return {
+    ...original,
+    takeRateLimit: (...args: Parameters<typeof original.takeRateLimit>) =>
+      limiter.fail ? Promise.reject(new Error("limiter down")) : original.takeRateLimit(...args),
+  };
 });
 
 const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));
@@ -145,6 +157,22 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
   let ownerB = "";
   let cookiesA = "";
   let cookiesB = "";
+  const extraStores: string[] = [];
+
+  /** Another store Ada owns, so a test gets its own five code sends an hour. */
+  async function adaStore(): Promise<{ id: string; slug: string; name: string }> {
+    const id = crypto.randomUUID();
+    const slug = `wa-x${extraStores.length}-${suffix}`;
+    const name = `Extra Market ${extraStores.length} ${suffix}`;
+    extraStores.push(id);
+    await asPlatformAdmin(async (tx) => {
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${id}, ${name}, ${slug}, 'active', now())`;
+      await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${id}, ${ada}, 'owner', now())`;
+    });
+    headerState.set("cookie", cookiesA);
+    headerState.set("x-store-slug", slug);
+    return { id, slug, name };
+  }
 
   async function signInWithTotp(email: string): Promise<string> {
     const signedIn = await authPost("/sign-in/email", { email, password });
@@ -194,22 +222,24 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
   });
 
   afterEach(() => {
+    limiter.fail = false;
     setWhatsAppProvider(null);
     vi.unstubAllEnvs();
   });
 
   afterAll(async () => {
+    const stores = [storeA, storeB, ...extraStores];
     await asPlatformAdmin(async (tx) => {
-      await tx.$executeRaw`DELETE FROM owner_whatsapp_links WHERE store_id IN (${storeA}, ${storeB})`;
-      await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id IN (${storeA}, ${storeB}) OR actor_id IN (${ada}, ${ownerB})`;
-      await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${storeA}, ${storeB})`;
+      await tx.$executeRaw`DELETE FROM owner_whatsapp_links WHERE store_id IN (${Prisma.join(stores)})`;
+      await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id IN (${Prisma.join(stores)}) OR actor_id IN (${ada}, ${ownerB})`;
+      await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${Prisma.join(stores)})`;
       for (const userId of [ada, ownerB]) {
         await tx.$executeRaw`DELETE FROM two_factors WHERE user_id = ${userId}`;
         await tx.$executeRaw`DELETE FROM sessions WHERE user_id = ${userId}`;
         await tx.$executeRaw`DELETE FROM accounts WHERE user_id = ${userId}`;
       }
       await tx.$executeRaw`DELETE FROM users WHERE id IN (${ada}, ${ownerB})`;
-      await tx.$executeRaw`DELETE FROM stores WHERE id IN (${storeA}, ${storeB})`;
+      await tx.$executeRaw`DELETE FROM stores WHERE id IN (${Prisma.join(stores)})`;
     });
   });
 
@@ -298,7 +328,8 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
       WHERE store_id = ${storeA} AND user_id = ${ada}`);
     expect((await deliverText(phone.digits, expiredCode)).status).toBe(200);
     expect((await storeScoped(storeA).ownerWhatsAppLink.findUnique({ where }))?.verified).toBe(false);
-    expect(textsTo(phone.digits)).toEqual([WRONG_CODE_REPLY]);
+    // An expired code is no longer a candidate (F11): the sender gets the generic reply.
+    expect(textsTo(phone.digits)).toEqual([NOT_LINKED_REPLY]);
 
     expect(await startWhatsAppLinkAction(phoneForm(phone.e164))).toEqual({ ok: true });
     const code = lastCodeTo(phone.digits);
@@ -436,5 +467,142 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     const claimed = await authPrisma.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM whatsapp_inbound_messages WHERE id = ${usernameId}`;
     expect(claimed).toHaveLength(1);
+  });
+
+  /** Meta delivering one message; `from` null is a username user known only by BSUID. */
+  async function deliverFrom(
+    sender: { digits: string | null; bsuid: string | null },
+    message: Record<string, unknown>,
+  ): Promise<Response> {
+    if (sender.bsuid) noteInbound(sender.bsuid);
+    return deliverMessages(
+      [{ profile: { name: "Sender" }, ...(sender.digits ? { wa_id: sender.digits } : {}), ...(sender.bsuid ? { user_id: sender.bsuid } : {}) }],
+      [{
+        ...(sender.digits ? { from: sender.digits } : {}),
+        ...(sender.bsuid ? { from_user_id: sender.bsuid } : {}),
+        id: `wamid.in-${suffix}-${++messageSeq}`,
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        ...message,
+      }],
+    );
+  }
+
+  function newBsuid(): string {
+    return `US.${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+  }
+
+  it("the owner's BSUID is stored when they answer the code, and a later message with no phone number reaches them by BSUID", async () => {
+    const store = await adaStore();
+    const phone = randomUsNumber();
+    const bsuid = newBsuid();
+    expect(await startWhatsAppLinkAction(phoneForm(phone.typed))).toEqual({ ok: true });
+    const code = lastCodeTo(phone.digits);
+    expect((await deliverFrom({ digits: phone.digits, bsuid }, { type: "text", text: { body: code } })).status).toBe(200);
+    const where = { storeId_userId: { storeId: store.id, userId: ada } };
+    expect(await storeScoped(store.id).ownerWhatsAppLink.findUnique({ where })).toMatchObject({ verified: true, bsuid });
+
+    // The owner adopts a username: Meta now sends only the BSUID.
+    expect((await deliverFrom({ digits: null, bsuid }, { type: "text", text: { body: "how are sales?" } })).status).toBe(200);
+    const toBsuid = getFakeOutbox().filter((entry) => entry.message.to === bsuid).map((entry) => entry.message);
+    expect(toBsuid).toEqual([{ type: "text", to: bsuid, body: ownerMessageReply({ storeName: store.name }) }]);
+
+    // Another store's data never answers this BSUID.
+    expect(await storeScoped(storeB).ownerWhatsAppLink.count({ where: { bsuid } })).toBe(0);
+  });
+
+  it("an owner verified before BSUIDs gets theirs recorded on their next message", async () => {
+    const store = await adaStore();
+    const phone = randomUsNumber();
+    await linkAs(cookiesA, store.slug, phone);
+    const where = { storeId_userId: { storeId: store.id, userId: ada } };
+    expect((await storeScoped(store.id).ownerWhatsAppLink.findUnique({ where }))?.bsuid).toBeNull();
+
+    const bsuid = newBsuid();
+    expect((await deliverFrom({ digits: phone.digits, bsuid }, { type: "text", text: { body: "hello" } })).status).toBe(200);
+    expect((await storeScoped(store.id).ownerWhatsAppLink.findUnique({ where }))?.bsuid).toBe(bsuid);
+    expect((await deliverFrom({ digits: null, bsuid }, { type: "text", text: { body: "hello again" } })).status).toBe(200);
+    expect(getFakeOutbox().filter((entry) => entry.message.to === bsuid)).toHaveLength(1);
+  });
+
+  it("an unlinked username user (BSUID only) is claimed and gets no reply", async () => {
+    const bsuid = newBsuid();
+    expect((await deliverFrom({ digits: null, bsuid }, { type: "text", text: { body: "123456" } })).status).toBe(200);
+    expect(getFakeOutbox()).toHaveLength(0);
+  });
+
+  it("an owner demoted while a code is live cannot verify it, and gets the generic reply (F4)", async () => {
+    const store = await adaStore();
+    const phone = randomUsNumber();
+    expect(await startWhatsAppLinkAction(phoneForm(phone.typed))).toEqual({ ok: true });
+    const code = lastCodeTo(phone.digits);
+    await asPlatformAdmin((tx) => tx.$executeRaw`
+      UPDATE store_memberships SET role = 'staff' WHERE store_id = ${store.id} AND user_id = ${ada}`);
+
+    expect((await deliverText(phone.digits, code)).status).toBe(200);
+    const where = { storeId_userId: { storeId: store.id, userId: ada } };
+    expect((await storeScoped(store.id).ownerWhatsAppLink.findUnique({ where }))?.verified).toBe(false);
+    expect(textsTo(phone.digits)).toEqual([NOT_LINKED_REPLY]);
+    const audit = await storeScoped(store.id).auditLog.count({ where: { action: "whatsapp_link.verify" } });
+    expect(audit).toBe(0);
+  });
+
+  it("a verified owner who mistypes a code for their own link is told it is wrong, and no attempt is counted (F10)", async () => {
+    const store = await adaStore();
+    const phone = randomUsNumber();
+    await linkAs(cookiesA, store.slug, phone);
+    expect(await startWhatsAppLinkAction(phoneForm(phone.typed))).toEqual({ ok: true });
+    const code = lastCodeTo(phone.digits);
+    const wrong = code === "000000" ? "111111" : "000000";
+
+    expect((await deliverText(phone.digits, wrong)).status).toBe(200);
+    expect(textsTo(phone.digits).slice(1)).toEqual([WRONG_CODE_REPLY]);
+    const where = { storeId_userId: { storeId: store.id, userId: ada } };
+    expect(await storeScoped(store.id).ownerWhatsAppLink.findUnique({ where })).toMatchObject({
+      verified: true,
+      verificationAttempts: 0,
+    });
+    expect((await deliverText(phone.digits, code)).status).toBe(200);
+    expect(textsTo(phone.digits).at(-1)).toBe(`Your number is now linked to ${store.name}.`);
+  });
+
+  it("a verified link is matched on wa_id only, never on the typed number (F8)", async () => {
+    const store = await adaStore();
+    const phone = randomUsNumber();
+    const metaId = randomUsNumber();
+    await linkAs(cookiesA, store.slug, phone);
+    // Meta's send response gave a wa_id that differs from the typed digits.
+    await asPlatformAdmin((tx) => tx.$executeRaw`
+      UPDATE owner_whatsapp_links SET wa_id = ${metaId.digits} WHERE store_id = ${store.id} AND user_id = ${ada}`);
+
+    expect(await resolveOwnerByPhone(phone.e164)).toBeNull();
+    expect(await resolveOwnerByPhone(metaId.e164)).toMatchObject({ storeId: store.id, userId: ada });
+  });
+
+  it("an owner's edit, revoke, reaction or group message is claimed and gets no reply (F16)", async () => {
+    const store = await adaStore();
+    const phone = randomUsNumber();
+    await linkAs(cookiesA, store.slug, phone);
+    const before = textsTo(phone.digits).length;
+    for (const message of [
+      { type: "edit", edit: { original_message_id: "wamid.x" } },
+      { type: "revoke", revoke: { original_message_id: "wamid.x" } },
+      { type: "reaction", reaction: { message_id: "wamid.x", emoji: "👍" } },
+      { type: "text", text: { body: "hi all" }, group_id: "120363000000000000" },
+    ]) {
+      expect((await deliverFrom({ digits: phone.digits, bsuid: null }, message)).status).toBe(200);
+    }
+    expect(textsTo(phone.digits)).toHaveLength(before);
+    expect((await deliverText(phone.digits, "hello")).status).toBe(200);
+    expect(textsTo(phone.digits).at(-1)).toBe(ownerMessageReply({ storeName: store.name }));
+  });
+
+  it("a reply rate-limit failure after the claim commits answers 200 and sends nothing (F5)", async () => {
+    const stranger = randomUsNumber();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    limiter.fail = true;
+    expect((await deliverText(stranger.digits, "hello")).status).toBe(200);
+    expect(getFakeOutbox()).toHaveLength(0);
+    expect(errorLog.mock.calls.flat().join(" ")).toContain("whatsapp_reply_rate_limit_failed");
+    errorLog.mockRestore();
   });
 });

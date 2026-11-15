@@ -1,4 +1,5 @@
 import { WhatsAppApiError } from "./errors";
+import { isBsuid } from "./phone";
 import { APPROVED_TEMPLATES, isOrderUpdateTemplate, OWNER_LINK_TEMPLATE } from "./templates";
 import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
 
@@ -7,6 +8,7 @@ import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
  * rules this platform depends on, with Meta's error codes:
  * - free-form messages (text, interactive, media) only within 24 hours of the
  *   recipient's last inbound message (131047);
+ * - no business-scoped user id recipient for the authentication template (131062);
  * - text body 1–4096 characters; interactive body 1–1024, 1–3 reply buttons,
  *   titles 1–20 characters, ids 1–256 and unique (131009);
  * - list (#559): body 1–4096, button 1–20, 1–10 rows, row titles 1–24,
@@ -76,7 +78,10 @@ function checkOrderUpdate(message: Extract<OutboundMessage, { type: "template" }
 }
 
 function check(message: OutboundMessage, now: number): void {
-  if (!/^\d{8,15}$/.test(digits(message.to))) invalid(131009);
+  if (isBsuid(message.to)) {
+    // Meta: BSUID recipients are not supported for authentication templates (131062).
+    if (message.type === "template" && message.name === OWNER_LINK_TEMPLATE.name) invalid(131062);
+  } else if (!/^\d{8,15}$/.test(digits(message.to))) invalid(131009);
   switch (message.type) {
     case "text":
       checkWindow(message.to, now);
@@ -138,13 +143,13 @@ export const fakeWhatsAppProvider: WhatsAppProvider = {
       return Promise.reject(error);
     }
     sequence += 1;
-    const result: SendResult = { messageId: `wamid.fake-${sequence}`, waId: digits(message.to) };
+    const result: SendResult = { messageId: `wamid.fake-${sequence}`, waId: isBsuid(message.to) ? null : digits(message.to) };
     outbox.push({ message, result, from: from?.phoneNumberId ?? null });
     return Promise.resolve(result);
   },
 };
 
-/** Meta opens the 24-hour window when the user writes to the business. */
+/** Meta opens the 24-hour window when the user writes to the business (by wa_id or BSUID). */
 export function noteInbound(waId: string, at: number = Date.now()): void {
   lastInbound.set(digits(waId), at);
 }
