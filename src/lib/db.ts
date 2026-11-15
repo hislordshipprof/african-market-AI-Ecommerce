@@ -53,6 +53,23 @@ if (!globalForPrisma.prisma) {
 
 const prisma = globalForPrisma.prisma;
 
+type TxRawMethods = "$queryRaw" | "$executeRaw";
+type DelegateKey = {
+  [K in keyof PrismaClient]: PrismaClient[K] extends { findMany: unknown } ? K : never;
+}[keyof PrismaClient];
+
+/** The listed delegates of a transaction client, plus the raw query methods bound to it. */
+function txWithRaw<K extends DelegateKey>(
+  tx: Prisma.TransactionClient,
+  models: readonly K[],
+): Pick<PrismaClient, K | TxRawMethods> {
+  const picked: Record<string, unknown> = {};
+  for (const model of models) picked[model] = tx[model];
+  picked.$queryRaw = tx.$queryRaw.bind(tx);
+  picked.$executeRaw = tx.$executeRaw.bind(tx);
+  return picked as Pick<PrismaClient, K | TxRawMethods>;
+}
+
 function wrapPlatformDelegate<D extends object>(delegate: D): D {
   return new Proxy(delegate as Record<string, unknown>, {
     get(target, prop: string) {
@@ -107,56 +124,61 @@ function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
   }) as unknown as D;
 }
 
+/** Store-scoped delegates, one per line in sorted order: adding a model is one line here. */
+const STORE_SCOPED_MODELS = [
+  "aiAction",
+  "aiConversation",
+  "aiReviewFlag",
+  "assistantChatMonth",
+  "assistantUndoReceipt",
+  "auditLog",
+  "cart",
+  "cartLine",
+  "copilotAlert",
+  "copilotClientMessage",
+  "copilotConversation",
+  "customer",
+  "delivery",
+  "deliveryEvent",
+  "driverRoute",
+  "guestBrowserCart",
+  "issueReport",
+  "listing",
+  "listingDraft",
+  "listingImport",
+  "listingVariant",
+  "notificationLog",
+  "order",
+  "orderLine",
+  "orderPushSubscription",
+  "ownerReport",
+  "ownerReportItem",
+  "ownerWhatsAppLink",
+  "pickBatch",
+  "pushSubscription",
+  "refundRequest",
+  "reorderList",
+  "reorderListItem",
+  "rlsTestFixture",
+  "stockEvent",
+  "stockProposal",
+  "storeBanner",
+  "storeCollection",
+  "storeCollectionListing",
+  "storeCoupon",
+  "storeInvite",
+  "storeMembership",
+  "storeSubscription",
+  "substitutionRequest",
+  "supportMessage",
+  "supportThread",
+  "whatsAppOptOut",
+] as const;
+
 export function storeScoped(storeId: string) {
-  return {
-    rlsTestFixture: wrapDelegate(storeId, prisma.rlsTestFixture),
-    storeMembership: wrapDelegate(storeId, prisma.storeMembership),
-    storeInvite: wrapDelegate(storeId, prisma.storeInvite),
-    listing: wrapDelegate(storeId, prisma.listing),
-    listingVariant: wrapDelegate(storeId, prisma.listingVariant),
-    listingImport: wrapDelegate(storeId, prisma.listingImport),
-    stockEvent: wrapDelegate(storeId, prisma.stockEvent),
-    auditLog: wrapDelegate(storeId, prisma.auditLog),
-    storeBanner: wrapDelegate(storeId, prisma.storeBanner),
-    storeCollection: wrapDelegate(storeId, prisma.storeCollection),
-    storeCollectionListing: wrapDelegate(storeId, prisma.storeCollectionListing),
-    cart: wrapDelegate(storeId, prisma.cart),
-    cartLine: wrapDelegate(storeId, prisma.cartLine),
-    customer: wrapDelegate(storeId, prisma.customer),
-    order: wrapDelegate(storeId, prisma.order),
-    orderLine: wrapDelegate(storeId, prisma.orderLine),
-    refundRequest: wrapDelegate(storeId, prisma.refundRequest),
-    issueReport: wrapDelegate(storeId, prisma.issueReport),
-    substitutionRequest: wrapDelegate(storeId, prisma.substitutionRequest),
-    aiConversation: wrapDelegate(storeId, prisma.aiConversation),
-    aiAction: wrapDelegate(storeId, prisma.aiAction),
-    aiReviewFlag: wrapDelegate(storeId, prisma.aiReviewFlag),
-    assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
-    guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
-    ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
-    whatsAppOptOut: wrapDelegate(storeId, prisma.whatsAppOptOut),
-    copilotConversation: wrapDelegate(storeId, prisma.copilotConversation),
-    copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
-    stockProposal: wrapDelegate(storeId, prisma.stockProposal),
-    copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
-    ownerReport: wrapDelegate(storeId, prisma.ownerReport),
-    ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
-    reorderList: wrapDelegate(storeId, prisma.reorderList),
-    reorderListItem: wrapDelegate(storeId, prisma.reorderListItem),
-    driverRoute: wrapDelegate(storeId, prisma.driverRoute),
-    pickBatch: wrapDelegate(storeId, prisma.pickBatch),
-    listingDraft: wrapDelegate(storeId, prisma.listingDraft),
-    notificationLog: wrapDelegate(storeId, prisma.notificationLog),
-    delivery: wrapDelegate(storeId, prisma.delivery),
-    deliveryEvent: wrapDelegate(storeId, prisma.deliveryEvent),
-    pushSubscription: wrapDelegate(storeId, prisma.pushSubscription),
-    orderPushSubscription: wrapDelegate(storeId, prisma.orderPushSubscription),
-    supportThread: wrapDelegate(storeId, prisma.supportThread),
-    supportMessage: wrapDelegate(storeId, prisma.supportMessage),
-    storeSubscription: wrapDelegate(storeId, prisma.storeSubscription),
-    assistantChatMonth: wrapDelegate(storeId, prisma.assistantChatMonth),
-    storeCoupon: wrapDelegate(storeId, prisma.storeCoupon),
-  };
+  return Object.fromEntries(
+    STORE_SCOPED_MODELS.map((model) => [model, wrapDelegate(storeId, prisma[model])]),
+  ) as { [K in (typeof STORE_SCOPED_MODELS)[number]]: PrismaClient[K] };
 }
 
 export type StoreScopedClient = ReturnType<typeof storeScoped>;
@@ -199,13 +221,17 @@ export function customerScoped(userId: string) {
 
 export type CustomerScopedClient = ReturnType<typeof customerScoped>;
 
+const CUSTOMER_SCOPED_TX_MODELS = [
+  "cardSaveConsent",
+  "customerAddress",
+  "platformCustomerProfile",
+] as const;
+type CustomerScopedTxModels = (typeof CUSTOMER_SCOPED_TX_MODELS)[number] | TxRawMethods;
+
 export async function customerScopedTransaction<T>(
   userId: string,
   fn: (
-    tx: Pick<
-      PrismaClient,
-      "platformCustomerProfile" | "customerAddress" | "cardSaveConsent" | "$queryRaw" | "$executeRaw"
-    >,
+    tx: Pick<PrismaClient, CustomerScopedTxModels>,
   ) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
@@ -213,13 +239,7 @@ export async function customerScopedTransaction<T>(
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.user_id', ${id}, true)`;
-    return fn({
-      platformCustomerProfile: tx.platformCustomerProfile,
-      customerAddress: tx.customerAddress,
-      cardSaveConsent: tx.cardSaveConsent,
-      $queryRaw: tx.$queryRaw.bind(tx),
-      $executeRaw: tx.$executeRaw.bind(tx),
-    });
+    return fn(txWithRaw(tx, CUSTOMER_SCOPED_TX_MODELS));
   }, { timeout: opts?.timeout ?? 8_000, maxWait: opts?.maxWait ?? 4_000 });
 }
 
@@ -304,8 +324,36 @@ export async function appUserQuery<T>(
   });
 }
 
+const PLATFORM_ADMIN_TX_MODELS = [
+  "aiAction",
+  "aiConversation",
+  "aiReviewFlag",
+  "attributeProposal",
+  "auditLog",
+  "category",
+  "copilotConversation",
+  "courierIncidentNote",
+  "ingredient",
+  "ingredientSynonym",
+  "masterProduct",
+  "masterProductIngredient",
+  "order",
+  "platformSettings",
+  "productSynonym",
+  "refundRequest",
+  "stockProposal",
+  "store",
+  "storeApplication",
+  "storeInvite",
+  "storeMembership",
+  "storeSubscription",
+  "supportMessage",
+  "supportThread",
+] as const;
+type PlatformAdminTxModels = (typeof PLATFORM_ADMIN_TX_MODELS)[number] | TxRawMethods;
+
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "aiReviewFlag" | "copilotConversation" | "stockProposal" | "supportThread" | "supportMessage" | "storeSubscription" | "storeApplication" | "platformSettings" | "courierIncidentNote" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, PlatformAdminTxModels>) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -315,34 +363,7 @@ export async function platformAdminTransaction<T>(
     if (zone) {
       await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
     }
-    return fn({
-      store: tx.store,
-      order: tx.order,
-      auditLog: tx.auditLog,
-      refundRequest: tx.refundRequest,
-      storeMembership: tx.storeMembership,
-      storeInvite: tx.storeInvite,
-      masterProduct: tx.masterProduct,
-      category: tx.category,
-      productSynonym: tx.productSynonym,
-      ingredient: tx.ingredient,
-      ingredientSynonym: tx.ingredientSynonym,
-      masterProductIngredient: tx.masterProductIngredient,
-      attributeProposal: tx.attributeProposal,
-      aiConversation: tx.aiConversation,
-      aiAction: tx.aiAction,
-      aiReviewFlag: tx.aiReviewFlag,
-      copilotConversation: tx.copilotConversation,
-      stockProposal: tx.stockProposal,
-      supportThread: tx.supportThread,
-      supportMessage: tx.supportMessage,
-      storeSubscription: tx.storeSubscription,
-      storeApplication: tx.storeApplication,
-      platformSettings: tx.platformSettings,
-      courierIncidentNote: tx.courierIncidentNote,
-      $queryRaw: tx.$queryRaw.bind(tx),
-      $executeRaw: tx.$executeRaw.bind(tx),
-    });
+    return fn(txWithRaw(tx, PLATFORM_ADMIN_TX_MODELS));
   }, opts);
 }
 
@@ -351,9 +372,57 @@ export interface TransactionOptions {
   maxWait?: number;
 }
 
+const STORE_SCOPED_TX_MODELS = [
+  "aiAction",
+  "aiConversation",
+  "assistantUndoReceipt",
+  "auditLog",
+  "cart",
+  "cartLine",
+  "copilotAlert",
+  "copilotClientMessage",
+  "copilotConversation",
+  "copilotDigest",
+  "customer",
+  "delivery",
+  "deliveryEvent",
+  "driverRoute",
+  "guestBrowserCart",
+  "ingredient",
+  "ingredientSynonym",
+  "issueReport",
+  "listing",
+  "listingAttributes",
+  "listingDraft",
+  "listingImport",
+  "listingIngredient",
+  "listingVariant",
+  "notificationLog",
+  "order",
+  "orderLine",
+  "orderPushSubscription",
+  "ownerReport",
+  "ownerReportItem",
+  "paymentIntentRelease",
+  "pickBatch",
+  "platformSettings",
+  "pushSubscription",
+  "refundRequest",
+  "reorderList",
+  "reorderListItem",
+  "stockEvent",
+  "stockProposal",
+  "storeCoupon",
+  "storeSubscription",
+  "substitutionRequest",
+  "supportMessage",
+  "supportThread",
+] as const;
+type StoreScopedTxModels = (typeof STORE_SCOPED_TX_MODELS)[number] | TxRawMethods;
+
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "reorderList" | "reorderListItem" | "driverRoute" | "pickBatch" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "orderPushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "storeCoupon" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, StoreScopedTxModels>) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -363,54 +432,7 @@ export async function storeScopedTransaction<T>(
     if (zone) {
       await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
     }
-    return fn({
-      listing: tx.listing,
-      listingVariant: tx.listingVariant,
-      listingImport: tx.listingImport,
-      stockEvent: tx.stockEvent,
-      auditLog: tx.auditLog,
-      cart: tx.cart,
-      cartLine: tx.cartLine,
-      customer: tx.customer,
-      order: tx.order,
-      orderLine: tx.orderLine,
-      paymentIntentRelease: tx.paymentIntentRelease,
-      refundRequest: tx.refundRequest,
-      issueReport: tx.issueReport,
-      substitutionRequest: tx.substitutionRequest,
-      aiConversation: tx.aiConversation,
-      aiAction: tx.aiAction,
-      assistantUndoReceipt: tx.assistantUndoReceipt,
-      guestBrowserCart: tx.guestBrowserCart,
-      copilotConversation: tx.copilotConversation,
-      copilotClientMessage: tx.copilotClientMessage,
-      stockProposal: tx.stockProposal,
-      copilotAlert: tx.copilotAlert,
-      copilotDigest: tx.copilotDigest,
-      ownerReport: tx.ownerReport,
-      ownerReportItem: tx.ownerReportItem,
-      reorderList: tx.reorderList,
-      reorderListItem: tx.reorderListItem,
-      driverRoute: tx.driverRoute,
-      pickBatch: tx.pickBatch,
-      listingDraft: tx.listingDraft,
-      notificationLog: tx.notificationLog,
-      delivery: tx.delivery,
-      deliveryEvent: tx.deliveryEvent,
-      pushSubscription: tx.pushSubscription,
-      orderPushSubscription: tx.orderPushSubscription,
-      supportThread: tx.supportThread,
-      supportMessage: tx.supportMessage,
-      listingAttributes: tx.listingAttributes,
-      listingIngredient: tx.listingIngredient,
-      storeSubscription: tx.storeSubscription,
-      ingredient: tx.ingredient,
-      ingredientSynonym: tx.ingredientSynonym,
-      platformSettings: tx.platformSettings,
-      storeCoupon: tx.storeCoupon,
-      $queryRaw: tx.$queryRaw.bind(tx),
-      $executeRaw: tx.$executeRaw.bind(tx),
-    });
+    return fn(txWithRaw(tx, STORE_SCOPED_TX_MODELS));
   }, { timeout: opts?.timeout, maxWait: opts?.maxWait });
 }
 
