@@ -338,6 +338,22 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     expect(await swept()).not.toContain(order.id);
   });
 
+  it("#65: a tax share refund that errors on a courier order with no service fee is retried by the stuck-order sweep", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 2, unitPriceCents: 1000 }], 1, 0, 899, { cents: 165 });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(fakeStripeProvider, "refundApplicationFeePart").mockRejectedValueOnce(new Error("Stripe down"));
+    const result = await submitIssueReport(store, token, { type: "missing", lines: [{ lineId: order.lines[0].id, qty: 1 }], note: "", photo: JPEG });
+    // $10 of $20 goods: 82.5 → 83¢ of tax.
+    expect(result).toMatchObject({ state: "auto_refunded", amountCents: 1083 });
+    expect((await written(order.id)).requests[0]).toMatchObject({ serviceFeeShareCents: 0, platformTaxShareCents: 83, feeRefundId: null });
+    const swept = async () => (await findStuckTransitionalOrders({ storeIds: [store.id] })).map((row) => row.id);
+    expect(await swept()).toContain(order.id);
+    await reconcileStuckOrder(store.id, order.id);
+    expect((await written(order.id)).requests[0].feeRefundId).toMatch(/^fr_fake_/);
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(1000);
+    expect(await swept()).not.toContain(order.id);
+  });
+
   it("the same order 49 h after completion is refused and nothing is written", async () => {
     const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 900 }], 49);
     const calls = refundRequests.length;

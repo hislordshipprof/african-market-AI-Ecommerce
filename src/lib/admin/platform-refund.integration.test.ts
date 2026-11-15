@@ -185,6 +185,15 @@ describe.skipIf(!hasDb)("platform manual refund (#538)", () => {
     expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2165);
   });
 
+  it("#65: two courier refunds of half the goods each never return more tax than the order paid", async () => {
+    // $20 goods + $1.65 platform tax: half is 82.5 → 83¢, so the second half carries only the 82¢ left.
+    const order = await capturedOrder({ goods: 2000, courierFee: 899, tax: 165 });
+    expect(await platformRefundAction(null, form(order.id, "10.83"))).toMatchObject({ ok: true, amountCents: 1083 });
+    expect(await platformRefundAction(null, form(order.id, "10.83"))).toMatchObject({ ok: true, amountCents: 1083 });
+    const requests = (await written(stores[0], order.id)).requests;
+    expect(requests.map((row) => row.platformTaxShareCents).sort()).toEqual([82, 83]);
+  });
+
   it("a double submit and a concurrent submit of one form refund once", async () => {
     const order = await capturedOrder({ goods: 3000 });
     const submissionId = crypto.randomUUID();
