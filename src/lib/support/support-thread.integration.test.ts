@@ -424,6 +424,18 @@ describe.skipIf(!hasDb)("support thread", () => {
         expect(ours.get(1)?.waiting).toBe(false);
         expect(threads).toHaveLength(100);
         expect(hidden).toBeGreaterThan(0);
+
+
+        // The order detail's Open in Messages (#537) names one thread: Messages shows it even past the cap.
+        const shown = new Set(threads.map((t) => t.id));
+        const past = orders.map((o) => `chat-d-${o.number}-${suffix}`).find((id) => !shown.has(id))!;
+        const selected = await listEscalatedThreads(past);
+        expect(selected.threads[0]?.id).toBe(past);
+        expect(selected.threads.filter((t) => t.id === past)).toHaveLength(1);
+        expect(selected.hidden).toBe(hidden - 1);
+        // A resolved thread is not in the queue, so selecting it adds nothing.
+        await scoped.supportThread.update({ where: { id: past }, data: { state: "resolved" } });
+        expect((await listEscalatedThreads(past)).threads.map((t) => t.id)).not.toContain(past);
       } finally {
         await scoped.supportThread.deleteMany({});
         await scoped.order.deleteMany({});

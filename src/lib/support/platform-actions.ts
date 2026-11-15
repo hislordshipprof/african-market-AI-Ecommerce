@@ -5,9 +5,10 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { Prisma, platformAdminTransaction } from "../db";
 import { requirePlatformAdmin } from "../admin/session";
 import { parseInput } from "../security/parse-input";
-import { messageBodySchema, orderMessagesTag, type ThreadMessage } from "./thread";
+import { messageBodySchema, orderMessagesTag, PLATFORM_QUEUE_WHERE, type ThreadMessage } from "./thread";
 
 const QUEUE_LIMIT = 100;
+const THREAD_ID = /^[A-Za-z0-9_-]{1,200}$/;
 
 export type EscalatedThread = {
   id: string;
@@ -46,11 +47,13 @@ const QUEUE_SELECT = {
  * Every store's escalated threads not yet resolved, waiting ones first, oldest escalation first.
  * Waiting means the newest message is the customer's (escalated, or no reply since it). A replied thread is `open` again and stays
  * listed until a platform admin resolves it. `hidden` counts the threads past the cap.
+ * `selectedThreadId`, from the order detail's Open in Messages, comes first even past the cap when it is in the queue.
  */
-export async function listEscalatedThreads(): Promise<{ threads: EscalatedThread[]; hidden: number }> {
+export async function listEscalatedThreads(selectedThreadId?: string): Promise<{ threads: EscalatedThread[]; hidden: number }> {
   await requirePlatformAdmin();
+  const selectedId = typeof selectedThreadId === "string" && THREAD_ID.test(selectedThreadId) ? selectedThreadId : null;
   const { rows, total } = await platformAdminTransaction(async (tx) => {
-    const listed = { escalatedAt: { not: null }, state: { not: "resolved" } } satisfies Prisma.SupportThreadWhereInput;
+    const listed = PLATFORM_QUEUE_WHERE;
     const lastReplyAt = tx.supportThread.fields.lastReplyAt;
     const waiting = await tx.supportThread.findMany({
       where: { ...listed, OR: [{ state: "escalated" }, { lastReplyAt: null }, { lastCustomerAt: { gt: lastReplyAt } }] },
@@ -71,7 +74,15 @@ export async function listEscalatedThreads(): Promise<{ threads: EscalatedThread
           select: QUEUE_SELECT,
         })
       : [];
-    return { rows: [...waiting, ...answered], total: await tx.supportThread.count({ where: listed }) };
+    const queue = [...waiting, ...answered];
+    const selected = selectedId && !queue.some((row) => row.id === selectedId)
+      ? await tx.supportThread.findFirst({ where: { ...listed, id: selectedId }, select: QUEUE_SELECT })
+      : null;
+    const pinned = selectedId ? queue.filter((row) => row.id === selectedId) : [];
+    return {
+      rows: [...(selected ? [selected] : pinned), ...queue.filter((row) => row.id !== selectedId)],
+      total: await tx.supportThread.count({ where: listed }),
+    };
   });
   const now = Date.now();
   const threads = rows.map((t: QueueRow) => ({

@@ -28,6 +28,8 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "private, no-store" },
         ],
       },
+      // Every order detail view is audited (#537): no browser cache or back-forward cache copy.
+      { source: "/admin/orders/search/:orderId", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
     ];
   },
   images: {
