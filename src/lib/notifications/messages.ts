@@ -2,6 +2,7 @@ import { customerStatusLabel } from "../customer-account/order-history-view";
 import { quotedFrom, stripHeaderChars } from "../email/from";
 import { escapeHtml, money } from "../format";
 import { fulfilledStatus } from "../order/constants";
+import type { PushMessage } from "../push/sender";
 import { presetPrimary, readableFillColor } from "../theme";
 import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage } from "../whatsapp/templates";
 import type { OutboundMessage, WhatsAppSender } from "../whatsapp/types";
@@ -24,6 +25,7 @@ export type NotifyLine = {
 
 export type NotifyOrder = {
   id: string;
+  storeId: string;
   number: number;
   status: string;
   fulfillment: string;
@@ -187,6 +189,7 @@ export type RenderedMessage = {
   subject?: string;
   html?: string;
   text?: string;
+  push?: { storeId: string; orderId: string; message: PushMessage };
   whatsapp?: { message: OutboundMessage; sender: WhatsAppSender };
 };
 
@@ -255,6 +258,15 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     from: quotedFrom(storeName, fromAddress),
     subject,
     html: parts.join(""),
+  };
+}
+
+/** A lock-screen line: the store's name and the status, never money or items. */
+export function renderPush(order: NotifyOrder, event: OrderNotifyEvent, url: string): RenderedMessage {
+  const body = `Order #${order.number}: ${headline(order, event)}`;
+  return {
+    to: order.id,
+    push: { storeId: order.storeId, orderId: order.id, message: { title: order.store.name, body, url, tag: `order-${order.number}` } },
   };
 }
 

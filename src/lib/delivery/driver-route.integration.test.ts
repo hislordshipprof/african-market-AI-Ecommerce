@@ -289,7 +289,8 @@ describe.skipIf(!hasDb)("own-driver route link", () => {
     expect(events.map((e) => e.type).sort()).toEqual(["delivered", "out_for_delivery"]);
     const notes = await scoped.notificationLog.findMany({ where: { orderId: a.id } });
     expect(notes.map((n) => `${n.event}:${n.channel}`).sort())
-      .toEqual(["delivered:email", "delivered:sms", "out_for_delivery:email", "out_for_delivery:sms"]);
+      // #563 adds a push row per event, as for every staff-marked update.
+      .toEqual(["delivered:email", "delivered:push", "delivered:sms", "out_for_delivery:email", "out_for_delivery:push", "out_for_delivery:sms"]);
   });
 
   it("the token cannot act on an order off its route, another store's order, or after revoke: each is not found", async () => {

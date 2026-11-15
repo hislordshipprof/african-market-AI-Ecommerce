@@ -175,7 +175,7 @@ describe.skipIf(!hasDb)("WhatsApp order updates (#560)", () => {
 
   it("an opted-in order hears from the store's own number instead of SMS, with the tracking link and no order id", async () => {
     const order = await place(storeA, true);
-    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "pending", sms: "pending", whatsapp: "pending" });
+    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "pending", push: "pending", sms: "pending", whatsapp: "pending" });
     await run(storeA, order.id, "placed");
 
     const outbox = getFakeOutbox();
@@ -189,7 +189,7 @@ describe.skipIf(!hasDb)("WhatsApp order updates (#560)", () => {
     expect(JSON.stringify(message)).not.toContain(`#${order.number}`);
     expect(getTestSentSms()).toHaveLength(0);
     expect(getTestSentEmails()).toHaveLength(1);
-    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "sent", sms: "skipped:whatsapp_sent", whatsapp: "sent" });
+    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "sent", push: "skipped:no_subscription", sms: "skipped:whatsapp_sent", whatsapp: "sent" });
 
     // A redelivered event sends nothing again.
     await run(storeA, order.id, "placed");
@@ -204,7 +204,7 @@ describe.skipIf(!hasDb)("WhatsApp order updates (#560)", () => {
 
   it("a customer who did not opt in gets SMS as before, with no whatsapp row", async () => {
     const order = await place(storeA, false);
-    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "pending", sms: "pending" });
+    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "pending", push: "pending", sms: "pending" });
     await run(storeA, order.id, "placed");
     expect(getFakeOutbox()).toHaveLength(0);
     expect(getTestSentSms()).toHaveLength(1);
@@ -226,7 +226,7 @@ describe.skipIf(!hasDb)("WhatsApp order updates (#560)", () => {
     expect(getTestSentSms()).toHaveLength(1);
     expect(getTestSentSms()[0].text).toContain(order.trackingToken!);
     expect(getTestSentEmails()).toHaveLength(1);
-    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "sent", sms: "sent", whatsapp: "failed:whatsapp_131000" });
+    expect(await rows(storeA, order.id, "placed")).toEqual({ email: "sent", push: "skipped:no_subscription", sms: "sent", whatsapp: "failed:whatsapp_131000" });
   });
 
   it("a template not approved falls back to SMS once", async () => {
