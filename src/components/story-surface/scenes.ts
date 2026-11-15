@@ -4,6 +4,12 @@ import mid from "../../../public/images/story/bodija-mid.webp";
 import tall from "../../../public/images/story/bodija-tall.webp";
 import wide from "../../../public/images/story/bodija-wide.webp";
 
+// Which poster file shows at which width. The depth scene reads the same queries, so it
+// decodes the file the poster already loaded. Range syntax leaves no gap at fractional widths.
+export const POSTER_WIDE_MEDIA = "(width >= 1280px)";
+export const POSTER_MID_MEDIA = "(768px <= width < 1280px)";
+export const POSTER_TALL_MEDIA = "(width < 768px)";
+
 export type StoryScene = {
   /** 1280px and up. The depth scene renders whichever wide poster is showing, so they line up. */
   posterWide: StaticImageData;

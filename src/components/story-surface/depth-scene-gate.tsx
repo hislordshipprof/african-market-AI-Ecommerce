@@ -4,15 +4,13 @@ import { Component, useCallback, useEffect, useState, useSyncExternalStore, type
 import dynamic from "next/dynamic";
 import { motion } from "motion/react";
 import type { StaticImageData } from "next/image";
-import type { StoryScene } from "./scenes";
+import { POSTER_WIDE_MEDIA, type StoryScene } from "./scenes";
 
 const DepthScene = dynamic(() => import("./depth-scene"), { ssr: false });
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 // The height check keeps a phone held sideways on the poster.
 const WIDE_ENOUGH = "(min-width: 768px) and (min-height: 500px)";
-// The poster's own breakpoint in story-surface.tsx, so the scene reuses the file already loaded.
-const FULL_SIZE_POSTER = "(min-width: 1280px)";
 
 type NetworkInformation = EventTarget & { saveData?: boolean; effectiveType?: string };
 
@@ -95,8 +93,10 @@ class SceneBoundary extends Component<{ onError: () => void; children: ReactNode
 
 function SceneLoader({ scene }: { scene: StoryScene }) {
   const [phase, setPhase] = useState<"waiting" | "loading" | "live" | "off">("waiting");
-  const [photo] = useState<StaticImageData>(() =>
-    window.matchMedia(FULL_SIZE_POSTER).matches ? scene.posterWide : scene.posterMid,
+  // Chosen once at mount: a resize across 1280px swaps the poster but keeps this texture.
+  // Same crop and ratio, so it stays aligned and is only softer or sharper than the poster.
+  const [poster] = useState<StaticImageData>(() =>
+    window.matchMedia(POSTER_WIDE_MEDIA).matches ? scene.posterWide : scene.posterMid,
   );
   const turnOff = useCallback(() => setPhase("off"), []);
   const goLive = useCallback(() => setPhase("live"), []);
@@ -108,7 +108,7 @@ function SceneLoader({ scene }: { scene: StoryScene }) {
       // A missing or corrupt photo or depth map would otherwise throw inside the canvas as
       // an uncaught error. Decoding first keeps the poster quietly; the scene then reads cache.
       void Promise.all(
-        [photo.src, scene.depth.src].map((src) => {
+        [poster.src, scene.depth.src].map((src) => {
           const image = new Image();
           image.src = src;
           return image.decode();
@@ -122,7 +122,7 @@ function SceneLoader({ scene }: { scene: StoryScene }) {
       live = false;
       cancel();
     };
-  }, [photo.src, scene.depth.src]);
+  }, [poster.src, scene.depth.src]);
 
   if (phase === "waiting" || phase === "off") return null;
   return (
@@ -133,7 +133,7 @@ function SceneLoader({ scene }: { scene: StoryScene }) {
       transition={{ duration: 0.6, ease: [0.45, 0, 0.05, 1] }}
     >
       <SceneBoundary onError={turnOff}>
-        <DepthScene scene={scene} photo={photo} onReady={goLive} onContextLost={turnOff} />
+        <DepthScene scene={scene} poster={poster} onReady={goLive} onContextLost={turnOff} />
       </SceneBoundary>
     </motion.div>
   );

@@ -60,12 +60,12 @@ const FRAGMENT = /* glsl */ `
 
 function DepthPlane({
   scene,
-  photo: poster,
+  poster,
   onReady,
   onContextLost,
 }: {
   scene: StoryScene;
-  photo: StaticImageData;
+  poster: StaticImageData;
   onReady: () => void;
   onContextLost: () => void;
 }) {
@@ -152,7 +152,7 @@ function DepthPlane({
 
 export default function DepthScene(props: {
   scene: StoryScene;
-  photo: StaticImageData;
+  poster: StaticImageData;
   onReady: () => void;
   onContextLost: () => void;
 }) {
