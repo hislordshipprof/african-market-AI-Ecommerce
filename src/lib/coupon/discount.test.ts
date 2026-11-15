@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { allocateLineDiscounts, goodsDiscountCents, lineDiscountShareCents } from "./discount";
+import { allocateLineDiscounts, couponTerms, goodsDiscountCents, lineDiscountShareCents } from "./discount";
 
-const PERCENT_15 = { kind: "percent", percentOff: 15, amountOffCents: null };
-const FIXED_5 = { kind: "fixed", percentOff: null, amountOffCents: 500 };
+const PERCENT_15 = { kind: "percent" as const, percentOff: 15, amountOffCents: null };
+const FIXED_5 = { kind: "fixed" as const, percentOff: null, amountOffCents: 500 };
 
 describe("goodsDiscountCents", () => {
   it("takes a percent of goods, rounding half up", () => {
@@ -16,6 +16,10 @@ describe("goodsDiscountCents", () => {
     expect(goodsDiscountCents(2000, FIXED_5)).toBe(500);
     expect(goodsDiscountCents(320, FIXED_5)).toBe(320);
     expect(goodsDiscountCents(0, FIXED_5)).toBe(0);
+  });
+
+  it("a stored kind that is neither percent nor fixed is an error, never a fixed discount", () => {
+    expect(() => couponTerms({ kind: "precent", percentOff: 15, amountOffCents: null })).toThrow("Unknown coupon kind");
   });
 });
 

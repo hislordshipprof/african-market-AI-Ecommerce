@@ -20,7 +20,7 @@ import { reserveOrderStock } from "../order/stock-ledger";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
 import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
-import { couponCustomerKey, readCartCoupon } from "../coupon/checkout";
+import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCheapestCourier } from "../delivery/dispatch";
 import { checkCourierEligibility, readCourierWeightSettings } from "../delivery/eligibility";
 import { courierOffered } from "../delivery/courier-offered";
@@ -163,12 +163,15 @@ export interface QuoteCheckoutOptions {
   actorUserId?: string | null;
 }
 
-/** The cart's coupon code checked for this shopper now, or null when the cart has none (#557). */
-async function cartCoupon(storeId: string, cartId: string, contact: Contact, actorUserId: string | null): Promise<QuoteCouponInput | null> {
+/**
+ * The cart's coupon code checked now, or null when the cart has none (#557). `email` is null for a
+ * quote, so a typed email is never checked against the store's orders; placement passes the contact's.
+ */
+async function cartCoupon(storeId: string, cartId: string, email: string | null, actorUserId: string | null): Promise<QuoteCouponInput | null> {
   const scoped = storeScoped(storeId);
   const cart = await scoped.cart.findUnique({ where: { id: cartId }, select: { couponCode: true } });
   if (!cart?.couponCode) return null;
-  return readCartCoupon(scoped, storeId, cart.couponCode, { email: contact.email, userId: actorUserId, now: new Date() });
+  return readCartCoupon(scoped, storeId, cart.couponCode, { email, userId: actorUserId, now: new Date() });
 }
 
 export async function quoteCheckout(
@@ -184,7 +187,7 @@ export async function quoteCheckout(
     getCartWithLines(storeId, cartId),
     platform.store.findUnique({ where: { id: storeId } }),
     readServiceFeeSettings(),
-    cartCoupon(storeId, cartId, contact, options.actorUserId ?? null),
+    cartCoupon(storeId, cartId, null, options.actorUserId ?? null),
   ]);
   if (!store) throw new Error("Store not found");
   const serverLines = (cart?.lines ?? []).map((line) => ({
@@ -615,6 +618,8 @@ export async function recordAuthorizedOrder(
       const coupon = cart.couponCode
         ? await readCartCoupon(tx, storeId, cart.couponCode, { email: input.contact.email, userId: couponUserId, now })
         : null;
+      const refused = customerRefusal(coupon);
+      if (refused) throw new CouponRefusedError(refused);
       const currentQuote = computeQuote(
         input.minimumOrderCents ?? 0,
         current,
@@ -1109,7 +1114,7 @@ export async function placeOrder(
   const [storeRow, serviceFee, coupon] = await Promise.all([
     platform.store.findUnique({ where: { id: storeId } }),
     readServiceFeeSettings(),
-    cartCoupon(storeId, cartId, contact, actorUserId),
+    cartCoupon(storeId, cartId, contact.email, actorUserId),
   ]);
   if (!storeRow) throw new Error("Store not found");
   const point = cart.delivery.lat != null && cart.delivery.lng != null
@@ -1133,6 +1138,11 @@ export async function placeOrder(
     && quote.problems.every((problem) => problem.code === "invalid-contact");
   if (contactOnly) {
     throw new Error(quote.problems.map((problem) => problem.message).join(" "));
+  }
+  const refused = customerRefusal(coupon);
+  if (refused) {
+    await dropRefusedCoupon(storeId, cartId, paymentIntentId);
+    throw new CouponRefusedError(refused);
   }
   if (quote.problems.length > 0 || pi.amount !== quote.holdCents) {
     await releaseLosingHold(storeId, cartId, paymentIntentId);
@@ -1183,6 +1193,10 @@ export async function placeOrder(
       })),
     });
   } catch (error) {
+    if (error instanceof CouponRefusedError) {
+      await dropRefusedCoupon(storeId, cartId, paymentIntentId);
+      throw error;
+    }
     if (error instanceof BasketAlreadyOrderedError) {
       const settled = await settleConsumedBasket({
         storeId,
@@ -1222,6 +1236,15 @@ export async function placeOrder(
   await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
 
   return { token: recorded.orderId, trackingToken: recorded.trackingToken, quote };
+}
+
+/**
+ * A guest learns of a per-customer or first-order refusal only here, after paying (#557): the hold is
+ * released and the code taken off the cart, so the next quote shows the full price.
+ */
+async function dropRefusedCoupon(storeId: string, cartId: string, paymentIntentId: string): Promise<void> {
+  await releaseLosingHold(storeId, cartId, paymentIntentId);
+  await removeCartCoupon(storeId, cartId);
 }
 
 async function recoverSavedCardConsent(

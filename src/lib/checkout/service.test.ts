@@ -263,8 +263,8 @@ describe("computeQuote", () => {
   });
 
   describe("store coupon (#557)", () => {
-    const SAVE20 = { code: "SAVE20", coupon: { id: "c1", kind: "percent", percentOff: 20, amountOffCents: null, minGoodsCents: 2500 } };
-    const FIVE_OFF = { code: "FIVEOFF", coupon: { id: "c2", kind: "fixed", percentOff: null, amountOffCents: 500, minGoodsCents: 0 } };
+    const SAVE20 = { code: "SAVE20", coupon: { id: "c1", kind: "percent" as const, percentOff: 20, amountOffCents: null, minGoodsCents: 2500 } };
+    const FIVE_OFF = { code: "FIVEOFF", coupon: { id: "c2", kind: "fixed" as const, percentOff: null, amountOffCents: 500, minGoodsCents: 0 } };
     const STORE_DELIVERY = { enabled: true, feeCents: 500, radiusMi: 5, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor: false };
 
     it("takes the discount off goods, charges the service fee on discounted goods, and holds the discounted total plus the buffer", () => {

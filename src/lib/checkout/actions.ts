@@ -26,7 +26,7 @@ import { clientIp } from "../assistant/client-ip";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform, storeScoped } from "../db";
 import { loadCheckoutDraft } from "../assistant/checkout-draft";
-import { applyCartCoupon, removeCartCoupon, type ApplyCouponResult } from "../coupon/checkout";
+import { applyCartCoupon, CouponRefusedError, removeCartCoupon, type ApplyCouponResult } from "../coupon/checkout";
 import type { PickupSlot } from "../order/pickup-slots";
 
 const contactSchema = z.strictObject({
@@ -95,6 +95,10 @@ async function signedInUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+// Quotes re-run on each contact edit, so the limit is generous; it backs up the coupon checks (#557).
+const QUOTE_PER_IP = 600;
+const QUOTE_WINDOW_MS = 60 * 60_000;
+
 export async function quoteCheckoutAction(
   contact: Contact,
   fulfillment: Fulfillment,
@@ -113,6 +117,8 @@ export async function quoteCheckoutAction(
     : readDelivery(input.fulfillment, delivery);
   if (request && "error" in request) return { ok: false, error: request.error };
   try {
+    const limit = await takeRateLimit(`checkout-quote:ip:${clientIp(await headers())}`, QUOTE_PER_IP, QUOTE_WINDOW_MS);
+    if (!limit.ok) return { ok: false, error: "Too many requests. Please wait and try again." };
     const store = await getStore();
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
@@ -279,7 +285,7 @@ export async function placeOrderAction(
   delivery?: unknown,
 ): Promise<
   | { ok: true; token: string }
-  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" }
+  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" | "coupon_refused" }
   | { ok: false; error: string; code: "slot_unavailable"; slots: SlotOptions }
 > {
   const input = readCheckout(contact, fulfillment);
@@ -311,7 +317,7 @@ export async function placeOrderAction(
     if (e instanceof BasketAlreadyOrderedError) {
       return { ok: false, error: e.message, code: e.code };
     }
-    if (e instanceof BasketChangedError) {
+    if (e instanceof BasketChangedError || e instanceof CouponRefusedError) {
       return { ok: false, error: e.message, code: e.code };
     }
     if (e instanceof SlotUnavailableError) {
@@ -325,17 +331,15 @@ export async function placeOrderAction(
 }
 
 /** Puts one store coupon code on the shopper's cart (#557). The next quote shows what it takes off. */
-export async function applyCouponAction(code: unknown, email?: unknown): Promise<ApplyCouponResult> {
+export async function applyCouponAction(code: unknown): Promise<ApplyCouponResult> {
   const parsed = parseInput(z.string().max(40), code);
-  const typed = parseInput(z.string().max(320).optional(), email);
-  if (!parsed.ok || !typed.ok) return { ok: false, error: "That code isn't valid at this store." };
+  if (!parsed.ok) return { ok: false, error: "That code isn't valid at this store." };
   const store = await getStore();
   const resolved = await resolveShopperCart();
   if (!resolved) return { ok: false, error: "No cart found" };
   return applyCartCoupon(store.id, resolved.cartId, parsed.data, {
     ip: clientIp(await headers()),
     userId: await signedInUserId(),
-    email: typed.data,
   });
 }
 

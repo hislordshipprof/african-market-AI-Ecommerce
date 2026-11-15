@@ -1,6 +1,12 @@
 /** Store coupon money (#557). Pure and in integer cents; the store funds every discount. */
 
-export type CouponTerms = { kind: string; percentOff: number | null; amountOffCents: number | null };
+export type CouponTerms = { kind: "percent" | "fixed"; percentOff: number | null; amountOffCents: number | null };
+
+/** A stored coupon's terms. An unknown kind throws rather than becoming a fixed discount. */
+export function couponTerms(row: { kind: string; percentOff: number | null; amountOffCents: number | null }): CouponTerms {
+  if (row.kind !== "percent" && row.kind !== "fixed") throw new Error(`Unknown coupon kind: ${row.kind}`);
+  return { kind: row.kind, percentOff: row.percentOff, amountOffCents: row.amountOffCents };
+}
 
 /** The discount on goods only: a percent rounds half up, a fixed amount is capped at the goods. */
 export function goodsDiscountCents(goodsCents: number, terms: CouponTerms): number {

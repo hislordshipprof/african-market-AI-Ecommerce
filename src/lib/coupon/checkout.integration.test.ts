@@ -1,11 +1,14 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
-import { computeQuote, recordAuthorizedOrder, BasketChangedError, type RecordAuthorizedOrderInput } from "../checkout/service";
+import { computeQuote, placeOrder, quoteCheckout, recordAuthorizedOrder, BasketChangedError, type RecordAuthorizedOrderInput } from "../checkout/service";
+import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 import type { Contact } from "../customer-flow/contracts";
 import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
-import { applyCartCoupon, COUPON_INVALID, COUPON_TOO_MANY_TRIES, readCartCoupon } from "./checkout";
+import { applyCartCoupon, COUPON_FIRST_ORDER, COUPON_INVALID, COUPON_TOO_MANY_TRIES, CouponRefusedError, readCartCoupon } from "./checkout";
+
+vi.mock("../inngest/send", () => ({ sendOrderAuthorized: vi.fn().mockResolvedValue(undefined) }));
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t557-${Date.now().toString(36)}`;
@@ -143,6 +146,9 @@ describe.skipIf(!hasDb)("store coupons at checkout (lane DB, app_runtime)", () =
     await recordAuthorizedOrder(storeId, await placeWithCode(storeId, "first@example.com", userId));
     const otherEmail = await readCartCoupon(storeScoped(storeId), storeId, "SAVE20", { email: "second@example.com", userId, now: NOW });
     expect(otherEmail).toEqual({ code: "SAVE20", refusal: "You have already used this code." });
+    // The quote checks a signed-in account by its own account, with no email at all.
+    expect(await readCartCoupon(storeScoped(storeId), storeId, "SAVE20", { email: null, userId, now: NOW }))
+      .toEqual({ code: "SAVE20", refusal: "You have already used this code." });
   });
 
   it("a cancelled order gives its use back", async () => {
@@ -191,6 +197,50 @@ describe.skipIf(!hasDb)("store coupons at checkout (lane DB, app_runtime)", () =
     expect(await applyCartCoupon(storeId, cart.id, "SAVE%", { ip: "203.0.113.8", userId: null, now: NOW })).toEqual({ ok: false, error: COUPON_INVALID });
   });
 
+  it("a guest quote answers the same for a customer's email and a stranger's; placement refuses the reuse and releases the hold", async () => {
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    resetFakeCheckoutPayments();
+    const storeId = await makeStore("oracle");
+    await makeCoupon(storeId, "SAVE20", { firstOrderOnly: true });
+    await recordAuthorizedOrder(storeId, await placeWithCode(storeId, "victim@example.com"));
+    const { cart } = await makeCart(storeId, "SAVE20");
+    const contact = (email: string): Contact => ({ name: "Ada Buyer", phone: "+15551234567", email });
+    const victim = await quoteCheckout(storeId, 0, cart.id, contact("victim@example.com"), "pickup");
+    const stranger = await quoteCheckout(storeId, 0, cart.id, contact("stranger@example.com"), "pickup");
+    expect(victim.coupon).toEqual(stranger.coupon);
+    expect(victim.holdCents).toBe(stranger.holdCents);
+
+    const account = (await raw.store.findUniqueOrThrow({ where: { id: storeId } })).stripeAccountId!;
+    const pi = await getCheckoutPayments().createPaymentIntent({
+      amount: victim.holdCents, currency: "usd", capture_method: "manual",
+      on_behalf_of: account, transfer_data: { destination: account },
+      metadata: { store_id: storeId, cart_id: cart.id },
+    }, `t557-oracle-${cart.id}`);
+    await getCheckoutPayments().confirmPaymentIntent(pi.id, { payment_method: "pm_card_visa" });
+    const placing = placeOrder(storeId, 0, cart.id, contact("Victim@Example.com"), "pickup", null, null, pi.id);
+    await expect(placing).rejects.toBeInstanceOf(CouponRefusedError);
+    await expect(placing).rejects.toThrow(COUPON_FIRST_ORDER);
+    expect((await getCheckoutPayments().retrievePaymentIntent(pi.id)).status).toBe("canceled");
+    expect((await storeScoped(storeId).cart.findUniqueOrThrow({ where: { id: cart.id } })).couponCode).toBeNull();
+    expect(await storeScoped(storeId).order.count()).toBe(1);
+    vi.unstubAllEnvs();
+  });
+
+  it("40 parallel wrong codes from one cart and IP: at most 10 are checked, the rest are refused as too many", async () => {
+    const t0 = new Date();
+    const storeId = await makeStore("burst");
+    const { cart } = await makeCart(storeId);
+    const ip = `192.0.2.${Math.floor(Math.random() * 200) + 1}-${RUN}`;
+    const results = await Promise.all(
+      Array.from({ length: 40 }, (_, i) => applyCartCoupon(storeId, cart.id, `GUESS${i}`, { ip, userId: null, now: t0 })),
+    );
+    const checked = results.filter((r) => !r.ok && r.error === COUPON_INVALID).length;
+    expect(checked).toBeLessThanOrEqual(10);
+    expect(results.filter((r) => !r.ok && r.error === COUPON_TOO_MANY_TRIES)).toHaveLength(40 - checked);
+  });
+
   it("limits wrong codes to 10 an hour per cart and 30 an hour per IP, and a right code is refused once limited", async () => {
     // The limiter drops windows by the real clock, so this test counts from now, not from NOW.
     const t0 = new Date();
@@ -206,12 +256,13 @@ describe.skipIf(!hasDb)("store coupons at checkout (lane DB, app_runtime)", () =
     const later = new Date(t0.getTime() + 60 * 60_000 + 1);
     expect(await applyCartCoupon(storeId, cart.id, "SAVE20", { ip, userId: null, now: later })).toEqual({ ok: true });
 
-    // The IP limit spans carts: 20 more wrong tries from two fresh carts reach 30.
-    for (let c = 0; c < 2; c++) {
+    // The IP limit spans carts: 30 wrong tries from three carts spend it.
+    const ip2 = `${ip}-b`;
+    for (let c = 0; c < 3; c++) {
       const fresh = await makeCart(storeId);
-      for (let i = 0; i < 10; i++) await applyCartCoupon(storeId, fresh.cart.id, `NOPE${i}`, { ip, userId: null, now: t0 });
+      for (let i = 0; i < 10; i++) await applyCartCoupon(storeId, fresh.cart.id, `NOPE${i}`, { ip: ip2, userId: null, now: t0 });
     }
-    const third = await makeCart(storeId);
-    expect(await applyCartCoupon(storeId, third.cart.id, "SAVE20", { ip, userId: null, now: t0 })).toEqual({ ok: false, error: COUPON_TOO_MANY_TRIES });
+    const fourth = await makeCart(storeId);
+    expect(await applyCartCoupon(storeId, fourth.cart.id, "SAVE20", { ip: ip2, userId: null, now: t0 })).toEqual({ ok: false, error: COUPON_TOO_MANY_TRIES });
   });
 });

@@ -1448,14 +1448,6 @@ export async function appRateLimitUpsert(
   return { count: Number(row.count), windowStart: BigInt(row.window_start) };
 }
 
-/** The count in the key's live window, without taking a slot; 0 when the window has passed. */
-export async function appRateLimitPeek(key: string, boundary: bigint): Promise<number> {
-  const rows = await prisma.$queryRaw<Array<{ count: number }>>`
-    SELECT count FROM app_rate_limits WHERE key = ${key} AND window_start >= ${boundary}
-  `;
-  return rows[0] ? Number(rows[0].count) : 0;
-}
-
 export async function appRateLimitCleanup(cutoff: bigint, limit: number): Promise<void> {
   // The outer window_start predicate is checked again after a row-lock wait
   // (READ COMMITTED), so a window refreshed by a concurrent upsert is kept.

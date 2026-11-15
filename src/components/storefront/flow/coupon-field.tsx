@@ -9,21 +9,25 @@ export function CouponField({
   applied,
   apply,
   remove,
+  disabled = false,
 }: {
   applied: { code: string; message?: string } | null;
   apply: (code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   remove: () => Promise<void>;
+  /** Checkout: no changes while a payment is under way. */
+  disabled?: boolean;
 }) {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
+  const busy = running || disabled;
   async function run(work: () => Promise<void>) {
-    setBusy(true);
+    setRunning(true);
     setMessage("");
     try {
       await work();
     } finally {
-      setBusy(false);
+      setRunning(false);
     }
   }
   return (
