@@ -3,8 +3,10 @@ import { getStoreById, getStoreSubscription, retryCourierRegistrationAction, set
 import { effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
 import { PILOT_FREE_MONTHS, PILOT_STORE_CAP } from "@/lib/billing/service";
 import { requirePlatformAdmin } from "@/lib/admin/session";
+import { getStoreNumber, storeNumberLinkMode } from "@/lib/whatsapp/store-number";
 import { StoreForm } from "../store-form";
 import { InviteOwnerForm } from "./invite-owner-form";
+import { WhatsAppNumberSection } from "./whatsapp-number-section";
 
 function courierState(id: string | null, error: string | null): string {
   if (id) return `Registered · ${id}`;
@@ -24,7 +26,7 @@ export default async function EditStorePage({
   const { pilotError, courierRetry } = await searchParams;
   const store = await getStoreById(id);
   if (!store) notFound();
-  const subscription = await getStoreSubscription(store.id);
+  const [subscription, storeNumber] = await Promise.all([getStoreSubscription(store.id), getStoreNumber(store.id)]);
   const plan = PLAN_NAMES[effectivePlan(subscription)];
 
   return (
@@ -85,6 +87,18 @@ export default async function EditStorePage({
           </form>
         )}
       </section>
+      <WhatsAppNumberSection
+        storeId={store.id}
+        mode={storeNumberLinkMode()}
+        number={storeNumber && {
+          status: storeNumber.status,
+          wabaId: storeNumber.wabaId,
+          phoneNumberId: storeNumber.phoneNumberId,
+          displayNumber: storeNumber.displayNumber,
+          coexistence: storeNumber.coexistence,
+          failureCode: storeNumber.failureCode,
+        }}
+      />
       <StoreForm mode="edit" store={store} />
       <div className="mt-8">
         <InviteOwnerForm storeId={store.id} />

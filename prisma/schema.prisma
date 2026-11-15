@@ -111,6 +111,8 @@ model Store {
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
   application           StoreApplication?
+  whatsAppNumber        StoreWhatsAppNumber?
+  whatsAppOptOuts       WhatsAppOptOut[]
   driverRoutes          DriverRoute[]
   pickBatches           PickBatch[]
 
@@ -1228,6 +1230,8 @@ model Order {
   totalAuthorizedCents    Int       @map("total_authorized_cents")
   paymentIntentId         String?   @unique @map("payment_intent_id")
   sourceCartId            String?   @map("source_cart_id")
+  /// "directory" when the shopper arrived from a Store directory link within 30 days (#454); null otherwise.
+  acquisitionSource       String?   @map("acquisition_source")
   capturedAmountCents     Int?      @map("captured_amount_cents")
   refundId                String?   @map("refund_id")
   platformFeeCents        Int?      @map("platform_fee_cents")
@@ -1274,6 +1278,8 @@ model Order {
   driverRouteId           String?   @map("driver_route_id")
   /// The open pick batch this order is in (#564); cleared when staff leave the batch.
   pickBatchId             String?   @map("pick_batch_id")
+  /// Checkout opt-in to WhatsApp order updates (#560); NULL keeps SMS.
+  whatsappOptInAt         DateTime? @map("whatsapp_opt_in_at")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1757,39 +1763,75 @@ model AssistantChatMonth {
 /// An application from the public /sell page (#554). Platform data with no RLS: only platform-admin code reads it.
 /// One pending application per email and per phone (partial unique indexes in the migration).
 model StoreApplication {
-  id             String    @id @default(cuid())
-  businessName   String    @map("business_name")
+  id                 String    @id @default(cuid())
+  businessName       String    @map("business_name")
   /// african | caribbean | other_grocery | specialty_food
-  storeType      String    @map("store_type")
-  addressLine1   String    @map("address_line1")
-  city           String
-  state          String
-  zip            String
-  ownerName      String    @map("owner_name")
+  storeType          String    @map("store_type")
+  addressLine1       String    @map("address_line1")
+  city               String
+  state              String
+  zip                String
+  ownerName          String    @map("owner_name")
   /// Lower-cased and trimmed.
-  email          String
+  email              String
   /// E.164, US only: +1 and 10 digits.
-  phone          String
-  website        String?
-  offersPickup   Boolean   @default(false) @map("offers_pickup")
-  offersDelivery Boolean   @default(false) @map("offers_delivery")
+  phone              String
+  website            String?
+  offersPickup       Boolean   @default(false) @map("offers_pickup")
+  offersDelivery     Boolean   @default(false) @map("offers_delivery")
   /// pending | approved | rejected
-  status         String    @default("pending")
+  status             String    @default("pending")
   /// Internal only; never sent to the applicant.
-  rejectReason   String?   @map("reject_reason")
-  decidedAt      DateTime? @map("decided_at")
-  decidedByEmail String?   @map("decided_by_email")
+  rejectReason       String?   @map("reject_reason")
+  decidedAt          DateTime? @map("decided_at")
+  decidedByEmail     String?   @map("decided_by_email")
   /// Set once the plain rejection email has gone; a rejected row without it can be sent again.
   rejectionEmailedAt DateTime? @map("rejection_emailed_at")
-  storeId        String?   @unique @map("store_id")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  storeId            String?   @unique @map("store_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   store Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
   @@index([status, decidedAt])
   @@map("store_applications")
+}
+
+/// A store's own WhatsApp number for customers (#558, ADR-0010). Written by raw SQL in src/lib/db.ts.
+model StoreWhatsAppNumber {
+  id            String   @id @default(cuid())
+  storeId       String   @unique @map("store_id")
+  wabaId        String   @map("waba_id")
+  /// Unique platform-wide among pending and registered rows (partial unique index in SQL), so an inbound message resolves to one store.
+  phoneNumberId String   @map("phone_number_id")
+  displayNumber String?  @map("display_number")
+  /// pending | registered | failed | disconnected
+  status        String   @default("pending")
+  coexistence   Boolean  @default(true)
+  /// AES-256-GCM ciphertext (WHATSAPP_TOKEN_KEY). Never read outside src/lib/whatsapp.
+  businessToken String?  @map("business_token")
+  failureCode   String?  @map("failure_code")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@map("store_whatsapp_numbers")
+}
+
+/// A customer who sent STOP to the store's own WhatsApp number (#560). Per store.
+model WhatsAppOptOut {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  /// Meta's digits-only sender id.
+  waId      String   @map("wa_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, waId])
+  @@map("whatsapp_opt_outs")
 }
 
 /// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.

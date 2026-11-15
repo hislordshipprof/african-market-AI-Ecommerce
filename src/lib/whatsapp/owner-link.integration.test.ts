@@ -381,7 +381,10 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     const before = await storeScoped(storeB).ownerWhatsAppLink.findUnique({ where });
     expect(before?.verified).toBe(true);
 
-    setWhatsAppProvider({ send: async () => { throw new WhatsAppApiError(130429, 429); } });
+    setWhatsAppProvider({
+      ...fakeWhatsAppProvider,
+      send: async () => { throw new WhatsAppApiError(130429, 429); },
+    });
     for (const entered of [randomUsNumber().typed, phone.typed]) {
       expect(await startWhatsAppLinkAction(phoneForm(entered))).toEqual({ error: SEND_FAILED_ERROR });
       const after = await storeScoped(storeB).ownerWhatsAppLink.findUnique({ where });

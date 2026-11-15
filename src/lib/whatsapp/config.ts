@@ -13,6 +13,7 @@ const whatsappEnvSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: optionalKey,
   WHATSAPP_VERIFY_TOKEN: optionalKey,
   WHATSAPP_APP_SECRET: optionalKey,
+  WHATSAPP_APP_ID: optionalKey,
 });
 
 export interface WhatsAppConfig {
@@ -20,10 +21,12 @@ export interface WhatsAppConfig {
   phoneNumberId?: string;
   verifyToken?: string;
   appSecret?: string;
+  /** Meta app id, for the Embedded Signup code exchange (#558). */
+  appId?: string;
 }
 
 /**
- * Reads the four WhatsApp keys. Called per use, never at import, so the app
+ * Reads the WhatsApp keys. Called per use, never at import, so the app
  * builds and starts without them. An empty value counts as unset.
  */
 export function readWhatsAppConfig(env: Record<string, string | undefined> = process.env): WhatsAppConfig {
@@ -32,12 +35,14 @@ export function readWhatsAppConfig(env: Record<string, string | undefined> = pro
     WHATSAPP_PHONE_NUMBER_ID: env.WHATSAPP_PHONE_NUMBER_ID,
     WHATSAPP_VERIFY_TOKEN: env.WHATSAPP_VERIFY_TOKEN,
     WHATSAPP_APP_SECRET: env.WHATSAPP_APP_SECRET,
+    WHATSAPP_APP_ID: env.WHATSAPP_APP_ID,
   });
   return {
     accessToken: parsed.WHATSAPP_ACCESS_TOKEN,
     phoneNumberId: parsed.WHATSAPP_PHONE_NUMBER_ID,
     verifyToken: parsed.WHATSAPP_VERIFY_TOKEN,
     appSecret: parsed.WHATSAPP_APP_SECRET,
+    appId: parsed.WHATSAPP_APP_ID,
   };
 }
 
