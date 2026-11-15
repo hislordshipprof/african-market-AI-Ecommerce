@@ -8,7 +8,7 @@ import { setStripeProvider } from "../stripe/index";
 import { fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { clearTestSentSms, getTestSentSms, setSmsSenderForTests, SmsTestSender } from "../notifications/sms";
-import { NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
+import { DEFAULT_CHANNEL_KINDS, NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
 import { notificationChannels } from "./channels";
 import { findOrderForTracking } from "../notifications/lookup";
 import { ProviderSendError } from "../notifications/provider-error";
@@ -168,7 +168,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     const pending = await storeScoped(storeId).notificationLog.findMany({
       where: { orderId, event, status: "pending" },
     });
-    expect(pending.map((row) => row.channel).sort()).toEqual([...NOTIFICATION_CHANNEL_KINDS].sort());
+    expect(pending.map((row) => row.channel).sort()).toEqual([...DEFAULT_CHANNEL_KINDS].sort());
     await handler({
       event: { data: { storeId, orderId, event } },
       step: makeFakeStep({ attempts }),

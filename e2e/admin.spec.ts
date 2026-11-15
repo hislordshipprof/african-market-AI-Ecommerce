@@ -765,7 +765,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Products", "Catalog review", "Refunds", "Orders to check", "Search orders", "Messages", "AI conversations"];
+  const MENU = ["Home", "Stores", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Search orders", "Messages", "AI conversations", "AI eval and spend"];
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -776,6 +776,7 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin", "Home"],
       ["/admin/stores", "Stores"],
       ["/admin/stores/new", "Stores"],
+      ["/admin/store-requests", "Store requests"],
       ["/admin/catalog/products", "Products"],
       ["/admin/catalog/review", "Catalog review"],
       ["/admin/orders", "Refunds"],
@@ -783,6 +784,7 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin/orders/search", "Search orders"],
       ["/admin/support", "Messages"],
       ["/admin/ai/conversations", "AI conversations"],
+      ["/admin/ai/eval-spend", "AI eval and spend"],
     ];
     for (const [path, current] of pages) {
       await page.goto(path);
@@ -841,5 +843,59 @@ test.describe("Admin shell (authenticated)", () => {
     await page.waitForURL("**/admin/sign-in", { timeout: 15000 });
     await page.goto("/admin/stores");
     await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+});
+
+test.describe("Courier settings (#535)", () => {
+  test("signed out, /admin/settings/couriers redirects to sign-in", async ({ page }) => {
+    await page.goto("/admin/settings/couriers");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin changes the courier choice, a switch and the timeout; an out-of-range timeout is refused", async ({ page }) => {
+    const original = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+    const startedAt = new Date();
+    try {
+      await adminSignIn(page);
+      await page.goto("/admin/settings/couriers");
+      await expect(page.locator("h1")).toHaveText("Courier settings");
+
+      // The weight limit stays at its value: customer-journey.spec reads it at the same time.
+      await page.getByRole("radio", { name: /Uber first/ }).check();
+      await page.getByRole("switch", { name: "DoorDash Drive" }).uncheck();
+      await page.getByLabel("Wait for a courier").fill("900");
+      await expect(page.getByText("15 min", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Save courier settings" }).click();
+      await expect(page.getByText(/^Saved\./)).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByRole("radio", { name: /Uber first/ })).toBeChecked();
+      await expect(page.getByRole("switch", { name: "DoorDash Drive" })).not.toBeChecked();
+      await expect(page.getByRole("switch", { name: "Uber Direct" })).toBeChecked();
+      await expect(page.getByLabel("Wait for a courier")).toHaveValue("900");
+      await expect(page.getByLabel("Courier weight limit")).toHaveValue(String(original.courierWeightLimitLb));
+
+      // The browser's own range check is lifted so the server's refusal is what the admin sees.
+      await page.locator("form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.getByLabel("Wait for a courier").fill("1500");
+      await page.getByRole("button", { name: "Save courier settings" }).click();
+      await expect(page.getByText("Enter whole seconds from 300 to 1200.")).toBeVisible();
+      await expect(page.getByText(/Nothing was saved/)).toBeVisible();
+      const stored = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+      expect(stored.courierAssignmentTimeoutS).toBe(900);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.platformSettings.update({
+          where: { id: "platform" },
+          data: {
+            courierSelectionMode: original.courierSelectionMode,
+            courierAssignmentTimeoutS: original.courierAssignmentTimeoutS,
+            doordashEnabled: original.doordashEnabled,
+            uberEnabled: original.uberEnabled,
+          },
+        });
+        await tx.auditLog.deleteMany({ where: { entityType: "platform_settings", createdAt: { gte: startedAt } } });
+      });
+    }
   });
 });

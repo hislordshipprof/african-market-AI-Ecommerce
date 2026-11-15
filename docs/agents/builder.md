@@ -39,7 +39,7 @@ Write the question in your report and end the run. Do not invent product decisio
 1. `pnpm build`
 2. `pnpm test:e2e` (seeds, starts server, runs tests — no manual server start needed)
 
-Stop any other server on your lane port (`E2E_PORT`, default 3000) before running `pnpm test:e2e`. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
+Use your own lane port (`E2E_PORT`), stop only the processes you started (by PID), and never `pkill` or `killall` by pattern: other lanes share this machine and a pattern kill can stop their servers or CI. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
 
 ## Verify before you claim done
 These five checks must pass on your pushed HEAD. You run 1 and 2 plus the affected parts of 3–5 (the pipeline's local-ci runs all five in full after each push; see below):

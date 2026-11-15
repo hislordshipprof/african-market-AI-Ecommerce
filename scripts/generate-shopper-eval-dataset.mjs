@@ -101,6 +101,8 @@ Object.assign(listings[3], { stockMode: "status", status: "out_of_stock" });
 Object.assign(listings[5], { maxPerOrder: 2 });
 for (const [index, product] of decoys.entries()) listings.push(listing(product, 100 + index, "B"));
 listings.push(listing(retired, 200, "A", { active: false }));
+// The rest of the Ethiopian breakfast recipe (#607). Last, so the case pools above are unchanged.
+for (const [index, id] of ["niter-kibbeh", "honey-malab"].entries()) listings.push(listing(take(id), 70 + index, "A"));
 
 const fixture = {
   schemaVersion: 1,
@@ -170,25 +172,25 @@ const dishes = {
     { label: "berbere", options: sold(["berbere"]) },
   ],
 };
-function dishCase(id, request, people, core, unclear, excluded) {
+function dishCase(id, name, request, people, core, unclear, excluded) {
   const turns = unclear
     ? [request.replace("{for}", ""), `For ${people} people.`, "Yes, add those."]
     : [request.replace("{for}", ` for ${people} people`), "Yes, add those."];
   return {
     ...caseOf(id, "recipe-to-cart", turns, { addsFromTurn: turns.length }),
     ...(excluded ? { excluded } : {}),
-    dish: { core, askServings: unclear },
+    dish: { name, core, askServings: unclear },
   };
 }
 
 for (let index = 0; index < 20; index += 1) {
-  cases.push(dishCase(`jollof-for-ten-${index + 1}`, "Jollof{for}. Use tomato paste, not fresh tomato, and no yellow onion.", 8 + (index % 5), dishes.jollof, index % 5 === 4, ["gino-pepper-onion-paste"]));
+  cases.push(dishCase(`jollof-for-ten-${index + 1}`, "Jollof", "Jollof{for}. Use tomato paste, not fresh tomato, and no yellow onion.", 8 + (index % 5), dishes.jollof, index % 5 === 4, ["gino-pepper-onion-paste"]));
 }
 for (let index = 0; index < 10; index += 1) {
-  cases.push(dishCase(`egusi-soup-${index + 1}`, "Egusi soup{for}.", 4 + (index % 4), dishes.egusi, index % 5 === 4));
+  cases.push(dishCase(`egusi-soup-${index + 1}`, "Egusi soup", "Egusi soup{for}.", 4 + (index % 4), dishes.egusi, index % 5 === 4));
 }
 for (let index = 0; index < 10; index += 1) {
-  cases.push(dishCase(`ethiopian-breakfast-${index + 1}`, "Ethiopian breakfast{for}, with teff and berbere.", 2 + (index % 3), dishes.breakfast, index % 5 === 4));
+  cases.push(dishCase(`ethiopian-breakfast-${index + 1}`, "Ethiopian breakfast", "Ethiopian breakfast{for}, with teff and berbere.", 2 + (index % 3), dishes.breakfast, index % 5 === 4));
 }
 
 inStock.slice(0, 35).forEach((item, index) => {

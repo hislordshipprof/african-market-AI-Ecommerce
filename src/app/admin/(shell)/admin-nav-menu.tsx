@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, ClipboardCheck, House, LogOut, Menu, MessagesSquare, Package, PackageSearch, Search, Store, Undo2, X } from "lucide-react";
+import { BellRing, Bot, ClipboardCheck, Gauge, House, LogOut, Menu, MessagesSquare, Package, PackageSearch, Search, Store, Undo2, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { ADMIN_NAV, currentNavHref, type AdminNavHref } from "./admin-nav";
 import { signOutAdmin } from "./sign-out";
@@ -11,6 +11,7 @@ import { signOutAdmin } from "./sign-out";
 const ICONS: Record<AdminNavHref, typeof House> = {
   "/admin": House,
   "/admin/stores": Store,
+  "/admin/store-requests": BellRing,
   "/admin/catalog/products": Package,
   "/admin/catalog/review": ClipboardCheck,
   "/admin/orders": Undo2,
@@ -18,6 +19,7 @@ const ICONS: Record<AdminNavHref, typeof House> = {
   "/admin/orders/search": Search,
   "/admin/support": MessagesSquare,
   "/admin/ai/conversations": Bot,
+  "/admin/ai/eval-spend": Gauge,
 };
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
