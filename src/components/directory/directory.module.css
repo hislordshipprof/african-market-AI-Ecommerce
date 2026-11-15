@@ -1185,7 +1185,7 @@ a.wordmark:focus-visible,
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 24px;
+  border-radius: 16px;
   border: 6px solid rgb(255 255 255 / 0.14);
   background: #fafaf7;
 }

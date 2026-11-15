@@ -190,9 +190,9 @@ function AllStores({ stores, cuisine }: { stores: CardStore[]; cuisine: CuisineC
   return (
     <section aria-labelledby="directory-stores" className={styles.results}>
       <h2 id="directory-stores" className={styles.count} aria-live="polite">
-        {shown.length === 1 ? `1 ${what}market` : `${shown.length} ${what}markets`}
+        {stores.length === 0 ? "No stores are listed yet" : shown.length === 1 ? `1 ${what}market` : `${shown.length} ${what}markets`}
       </h2>
-      {stores.length === 0 ? <p className={styles.empty}>No stores are listed yet. Check back soon.</p> : null}
+      {stores.length === 0 ? <p className={styles.empty}>Check back soon.</p> : null}
       {stores.length > 0 && shown.length === 0 && cuisine ? <NoneTagged cuisine={cuisine} /> : null}
       {shown.length > 0 ? <StoreGrid stores={shown} /> : null}
     </section>

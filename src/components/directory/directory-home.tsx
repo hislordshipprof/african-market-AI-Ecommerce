@@ -49,7 +49,7 @@ function HeroPhoto() {
       <picture className={styles.heroPhoto}>
         <source media={POSTER_WIDE_MEDIA} srcSet={scene.posterWide.src} />
         <source media={POSTER_MID_MEDIA} srcSet={scene.posterMid.src} />
-        <img src={scene.posterTall.src} alt="" fetchPriority="high" />
+        <img src={scene.posterTall.src} width={scene.posterTall.width} height={scene.posterTall.height} alt="" fetchPriority="high" />
       </picture>
       <p className={styles.heroCredit}>Photo: a stall at {scene.place}, Nigeria, by {scene.photographer}</p>
     </>
