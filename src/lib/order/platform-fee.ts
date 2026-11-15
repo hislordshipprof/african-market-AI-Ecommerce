@@ -79,36 +79,43 @@ export function serviceFeeRefundCents(goodsRefundedCents: number, order: RefundO
 }
 
 /**
- * A refund of goods returns the tax paid on them (decision 2026-11-15-06): the order's tax in proportion to
- * the goods, never more than what earlier refunds left of it. The stored tax lines are by rate, not by line.
+ * The goods a refund tied to order lines returns and the exact tax of those lines (#671), from the per-line tax
+ * stored at capture. A refund with no lines, or of an order captured before lines kept their tax, has none.
  */
-export function taxRefundCents(goodsRefundedCents: number, order: RefundOrder, taxRefundedBeforeCents = 0): number {
-  const goodsCharged = goodsChargedCents(order);
+export type LineTax = { goodsCents: number; taxCents: number };
+
+/**
+ * A refund of goods returns the tax paid on them: with `lineTax`, those lines' exact tax (#671), scaled when the
+ * refund covers less of their goods; otherwise the order's tax in proportion to the goods (decision 2026-11-15-06).
+ * Never more than what earlier refunds left of the tax.
+ */
+export function taxRefundCents(goodsRefundedCents: number, order: RefundOrder, taxRefundedBeforeCents = 0, lineTax: LineTax | null = null): number {
   const left = order.taxCents - taxRefundedBeforeCents;
-  if (left <= 0 || goodsCharged <= 0) return 0;
-  return Math.max(0, Math.min(left, Math.round((order.taxCents * goodsRefundedCents) / goodsCharged)));
+  const [tax, goods] = lineTax ? [lineTax.taxCents, lineTax.goodsCents] : [order.taxCents, goodsChargedCents(order)];
+  if (left <= 0 || goods <= 0) return 0;
+  return Math.max(0, Math.min(left, Math.round((tax * goodsRefundedCents) / goods)));
 }
 
 /** What the customer gets back for `goodsCents` of goods: the goods, their service fee share and their tax. */
-export function refundOfGoodsCents(goodsCents: number, order: RefundOrder, taxRefundedBeforeCents = 0): number {
-  return goodsCents + serviceFeeRefundCents(goodsCents, order) + taxRefundCents(goodsCents, order, taxRefundedBeforeCents);
+export function refundOfGoodsCents(goodsCents: number, order: RefundOrder, taxRefundedBeforeCents = 0, lineTax: LineTax | null = null): number {
+  return goodsCents + serviceFeeRefundCents(goodsCents, order) + taxRefundCents(goodsCents, order, taxRefundedBeforeCents, lineTax);
 }
 
 export type RefundShares = { goodsCents: number; serviceFeeCents: number; taxCents: number };
 
 /** A refund of `refundCents` split into the most goods it covers, their service fee share and their tax share. */
-export function refundShares(refundCents: number, order: RefundOrder, taxRefundedBeforeCents = 0): RefundShares {
+export function refundShares(refundCents: number, order: RefundOrder, taxRefundedBeforeCents = 0, lineTax: LineTax | null = null): RefundShares {
   let low = 0;
   let high = Math.max(0, refundCents);
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (refundOfGoodsCents(mid, order, taxRefundedBeforeCents) <= refundCents) low = mid;
+    if (refundOfGoodsCents(mid, order, taxRefundedBeforeCents, lineTax) <= refundCents) low = mid;
     else high = mid - 1;
   }
   return {
     goodsCents: low,
     serviceFeeCents: serviceFeeRefundCents(low, order),
-    taxCents: taxRefundCents(low, order, taxRefundedBeforeCents),
+    taxCents: taxRefundCents(low, order, taxRefundedBeforeCents, lineTax),
   };
 }
 

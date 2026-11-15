@@ -22,7 +22,10 @@ export type TaxLineInput = { reference: string; amountCents: number; taxCode: st
 
 export type TaxLine = { amount: number; rate: string; jurisdiction: string; taxabilityReason: string };
 
-export type TaxCalculation = { id: string | null; taxCents: number; lines: TaxLine[] };
+/** One basket line's tax (#671), by the reference the calculation was made with: the variant at checkout, the order line at capture. */
+export type LineTaxAmount = { reference: string; taxCents: number };
+
+export type TaxCalculation = { id: string | null; taxCents: number; lines: TaxLine[]; lineTaxes: LineTaxAmount[] };
 
 export type TaxCalculationInput = {
   address: TaxAddress;
@@ -40,9 +43,28 @@ export type TaxTransactionInput = {
   stripeAccount: string | null;
 };
 
+/**
+ * What one refund reverses of the order's tax transaction (#671): its lines' goods and exact tax, a flat amount
+ * with tax for a refund not tied to a line, or the whole sale. Amounts are positive cents, tax included in totalCents.
+ */
+export type TaxReversalPlan =
+  | { mode: "lines"; totalCents: number; lines: Array<{ reference: string; amountCents: number; taxCents: number }> }
+  | { mode: "flat"; totalCents: number }
+  | { mode: "full"; totalCents: number };
+
+export type TaxReversalInput = {
+  transactionId: string;
+  /** Unique per refund; also the idempotency key, so a retry makes no second reversal. */
+  reference: string;
+  liableParty: TaxLiableParty;
+  stripeAccount: string | null;
+  plan: TaxReversalPlan;
+};
+
 export interface TaxCalculator {
   calculate(input: TaxCalculationInput): Promise<TaxCalculation>;
   recordTransaction(input: TaxTransactionInput): Promise<{ id: string }>;
+  reverseTransaction(input: TaxReversalInput): Promise<{ id: string }>;
 }
 
 export const TAX_LOCATION_MESSAGE = "The store address is incomplete, so tax can't be worked out. Please contact the store.";
@@ -109,6 +131,7 @@ export function stripeTaxCalculator(client: () => Stripe = getStripeClient): Tax
             },
             address_source: "shipping",
           },
+          expand: ["line_items"],
           line_items: input.lines.map((line) => ({
             amount: line.amountCents,
             reference: line.reference,
@@ -124,9 +147,15 @@ export function stripeTaxCalculator(client: () => Stripe = getStripeClient): Tax
             id: null,
             taxCents: 0,
             lines: [{ amount: 0, rate: "0", jurisdiction: input.address.state!.trim().toUpperCase(), taxabilityReason: "stripe_tax_inactive" }],
+            lineTaxes: input.lines.map((line) => ({ reference: line.reference, taxCents: 0 })),
           };
         }
         throw new TaxUnavailableError(error);
+      }
+      let items = calculation.line_items?.data ?? [];
+      if (calculation.line_items?.has_more) {
+        items = await client().tax.calculations.listLineItems(calculation.id!, { limit: 100 }, accountOption(input.liableParty, input.stripeAccount))
+          .autoPagingToArray({ limit: 10_000 });
       }
       return {
         id: calculation.id,
@@ -137,6 +166,7 @@ export function stripeTaxCalculator(client: () => Stripe = getStripeClient): Tax
           jurisdiction: [entry.tax_rate_details.state, entry.tax_rate_details.tax_type].filter(Boolean).join(" ") || entry.tax_rate_details.country || "US",
           taxabilityReason: entry.taxability_reason,
         })),
+        lineTaxes: items.map((item) => ({ reference: item.reference, taxCents: item.amount_tax })),
       };
     },
     async recordTransaction(input) {
@@ -146,29 +176,58 @@ export function stripeTaxCalculator(client: () => Stripe = getStripeClient): Tax
       );
       return { id: transaction.id };
     },
+    async reverseTransaction(input) {
+      const account = accountOption(input.liableParty, input.stripeAccount);
+      const base = { original_transaction: input.transactionId, reference: input.reference };
+      let params: Stripe.Tax.TransactionCreateReversalParams;
+      if (input.plan.mode === "full") params = { mode: "full", ...base };
+      else if (input.plan.mode === "flat") params = { mode: "partial", ...base, flat_amount: -input.plan.totalCents };
+      else {
+        const items = await client().tax.transactions.listLineItems(input.transactionId, { limit: 100 }, account).autoPagingToArray({ limit: 10_000 });
+        const byReference = new Map(items.map((item) => [item.reference, item.id]));
+        params = {
+          mode: "partial",
+          ...base,
+          line_items: input.plan.lines.map((line) => {
+            const original = byReference.get(line.reference);
+            if (!original) throw new Error(`Tax transaction ${input.transactionId} has no line ${line.reference}`);
+            return { original_line_item: original, reference: line.reference, amount: -line.amountCents, amount_tax: -line.taxCents };
+          }),
+        };
+      }
+      const reversal = await client().tax.transactions.createReversal(params, { ...account, idempotencyKey: `tax-reversal:${input.reference}` });
+      return { id: reversal.id };
+    },
   };
 }
 
 export type FakeTaxRates = Record<string, { rate: number; exemptCodes?: string[] }>;
 export type FakeTaxCall =
   | { kind: "calculate"; input: TaxCalculationInput }
-  | { kind: "transaction"; input: TaxTransactionInput };
+  | { kind: "transaction"; input: TaxTransactionInput }
+  | { kind: "reversal"; input: TaxReversalInput };
+
+export type FakeTaxReversal = { id: string; transactionId: string; reference: string; plan: TaxReversalPlan };
 
 /**
  * Deterministic stand-in for Stripe Tax: per-state rates, per-code exemptions, each line rounded half
  * up. With no rates it collects nothing and checks no address, which is what tests and E2E use
  * unless they install rates.
  */
-export function fakeTaxCalculator(rates: FakeTaxRates = {}): TaxCalculator & { calls: FakeTaxCall[] } {
+export function fakeTaxCalculator(rates: FakeTaxRates = {}): TaxCalculator & { calls: FakeTaxCall[]; reversals: FakeTaxReversal[] } {
   const calls: FakeTaxCall[] = [];
+  const reversals: FakeTaxReversal[] = [];
   const transactions = new Map<string, string>();
-  // Each calculation lives on the account that made it: the store's when it is liable, else the platform's.
-  const calculations = new Map<string, string | null>();
+  type Left = Map<string, { amount: number; tax: number }>;
+  // Each calculation and transaction lives on the account that made it: the store's when it is liable, else the platform's.
+  const calculations = new Map<string, { account: string | null; lines: Left }>();
+  const recorded = new Map<string, { account: string | null; left: Left; reversed: boolean }>();
   const account = (input: { liableParty: TaxLiableParty; stripeAccount: string | null }) => (input.liableParty === "store" ? input.stripeAccount : null);
   let next = 0;
   const collecting = Object.keys(rates).length > 0;
   return {
     calls,
+    reversals,
     async calculate(input) {
       calls.push({ kind: "calculate", input });
       if (collecting && !completeAddress(input.address)) throw new TaxLocationError();
@@ -186,18 +245,64 @@ export function fakeTaxCalculator(rates: FakeTaxRates = {}): TaxCalculator & { c
       });
       next += 1;
       const id = `taxcalc_fake_${next}`;
-      calculations.set(id, account(input));
-      return { id, taxCents: lines.reduce((sum, line) => sum + line.amount, 0), lines };
+      calculations.set(id, {
+        account: account(input),
+        lines: new Map(input.lines.map((line, index) => [line.reference, { amount: line.amountCents, tax: lines[index].amount }])),
+      });
+      const lineTaxes = input.lines.map((line, index) => ({ reference: line.reference, taxCents: lines[index].amount }));
+      return { id, taxCents: lines.reduce((sum, line) => sum + line.amount, 0), lines, lineTaxes };
     },
     async recordTransaction(input) {
       calls.push({ kind: "transaction", input });
-      if (!calculations.has(input.calculationId) || calculations.get(input.calculationId) !== account(input)) {
+      const calculation = calculations.get(input.calculationId);
+      if (!calculation || calculation.account !== account(input)) {
         throw new Error(`No such tax calculation: '${input.calculationId}'`);
       }
       const existing = transactions.get(input.reference);
       if (existing) return { id: existing };
       const id = `tax_txn_fake_${transactions.size + 1}`;
       transactions.set(input.reference, id);
+      recorded.set(id, { account: calculation.account, left: new Map([...calculation.lines].map(([ref, line]) => [ref, { ...line }])), reversed: false });
+      return { id };
+    },
+    async reverseTransaction(input) {
+      calls.push({ kind: "reversal", input });
+      const transaction = recorded.get(input.transactionId);
+      if (!transaction || transaction.account !== account(input)) throw new Error(`No such transaction: '${input.transactionId}'`);
+      const existing = reversals.find((reversal) => reversal.reference === input.reference);
+      if (existing) return { id: existing.id };
+      const lines = [...transaction.left.values()];
+      const leftCents = lines.reduce((sum, line) => sum + line.amount + line.tax, 0);
+      if (input.plan.mode === "full") {
+        if (transaction.reversed) throw new Error("A full reversal is not allowed after a partial reversal");
+        for (const line of lines) Object.assign(line, { amount: 0, tax: 0 });
+      } else if (input.plan.mode === "flat") {
+        if (input.plan.totalCents > leftCents) throw new Error("The flat amount exceeds what the transaction has left");
+        // Stripe spreads a flat amount across the lines in proportion; the fake takes it off in line order.
+        let take = input.plan.totalCents;
+        for (const line of lines) {
+          for (const part of ["amount", "tax"] as const) {
+            const cut = Math.min(take, line[part]);
+            line[part] -= cut;
+            take -= cut;
+          }
+        }
+      } else {
+        for (const reversed of input.plan.lines) {
+          const line = transaction.left.get(reversed.reference);
+          if (!line || reversed.amountCents > line.amount || reversed.taxCents > line.tax) {
+            throw new Error(`The reversal of line '${reversed.reference}' exceeds what it has left`);
+          }
+        }
+        for (const reversed of input.plan.lines) {
+          const line = transaction.left.get(reversed.reference)!;
+          line.amount -= reversed.amountCents;
+          line.tax -= reversed.taxCents;
+        }
+      }
+      transaction.reversed = true;
+      const id = `tax_txn_fake_rev_${reversals.length + 1}`;
+      reversals.push({ id, transactionId: input.transactionId, reference: input.reference, plan: input.plan });
       return { id };
     },
   };
