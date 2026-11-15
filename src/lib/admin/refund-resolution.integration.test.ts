@@ -109,6 +109,8 @@ function asAdmin(cookies: string): void {
 describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => {
   const storeAId = crypto.randomUUID();
   const storeBId = crypto.randomUUID();
+  // Another file's leftovers: more stuck orders than the sweep's 50-row batch, all older than this file's orders (#676).
+  const churnStoreId = crypto.randomUUID();
   const emailAdmin = `admin-${RUN}@example.com`;
   const emailAdmin2 = `admin2-${RUN}@example.com`;
   const emailOwner = `owner-${RUN}@example.com`;
@@ -148,6 +150,13 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, timezone, updated_at) VALUES (${storeAId}, ${"Resolve A " + RUN}, ${"a-" + RUN}, 'active', 'America/Chicago', now())`;
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, timezone, updated_at) VALUES (${storeBId}, ${"Resolve B " + RUN}, ${"b-" + RUN}, 'active', 'America/New_York', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeAId}, ${ownerId}, 'owner', now())`;
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, timezone, updated_at) VALUES (${churnStoreId}, ${"Resolve churn " + RUN}, ${"c-" + RUN}, 'active', 'America/Chicago', now())`;
+      const churnCustomerId = crypto.randomUUID();
+      await tx.$executeRaw`INSERT INTO customers (id, store_id, name, updated_at) VALUES (${churnCustomerId}, ${churnStoreId}, 'Churn', now())`;
+      // Both sweep batches fill: in-flight (CAPTURING past five minutes) and refund recovery (REFUND_FAILED).
+      await tx.$executeRaw`INSERT INTO orders (id, store_id, number, customer_id, status, subtotal_cents, buffer_cents, total_authorized_cents, created_at, updated_at)
+        SELECT gen_random_uuid()::text, ${churnStoreId}, n, ${churnCustomerId}, CASE WHEN n % 2 = 0 THEN 'CAPTURING' ELSE 'REFUND_FAILED' END, 100, 0, 100, now() - interval '3 days', now() - interval '2 days'
+        FROM generate_series(1, 200) AS n`;
     });
 
     cookiesAdmin = await signInWithTotp(emailAdmin);
@@ -206,16 +215,17 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.auditLog.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.stockEvent.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.cartLine.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.cart.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.order.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.customer.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } });
-      await tx.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.storeMembership.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-      await tx.store.deleteMany({ where: { id: { in: [storeAId, storeBId] } } });
+      const ownStoreIds = [storeAId, storeBId, churnStoreId];
+      await tx.auditLog.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.stockEvent.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.cartLine.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.cart.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.order.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.customer.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: { in: ownStoreIds } } } });
+      await tx.listing.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.storeMembership.deleteMany({ where: { storeId: { in: ownStoreIds } } });
+      await tx.store.deleteMany({ where: { id: { in: ownStoreIds } } });
     });
     await authPrisma.user.deleteMany({
       where: { email: { in: [emailAdmin, emailAdmin2, emailOwner, emailBare] } },
@@ -1396,7 +1406,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       refundStatus: "failed",
     })).toEqual({ ok: true, action: "refund_failed" });
     await fakeStripeProvider.refundPayment(pi, 1000, "sweep-cover-ok");
-    const candidates = await findStuckTransitionalOrders();
+    const candidates = await findStuckTransitionalOrders({ storeIds: [storeAId] });
     const selected = candidates.filter((row) => row.id === order.id);
     expect(selected).toHaveLength(1);
     for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
@@ -1697,7 +1707,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     setNextRefundStatus(pi, "pending");
     const late = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: order.id });
     setRefundStatus(late.refundId, "succeeded");
-    const candidates = await findStuckTransitionalOrders();
+    const candidates = await findStuckTransitionalOrders({ storeIds: [storeAId] });
     const selected = candidates.filter((row) => row.id === order.id);
     expect(selected).toHaveLength(1);
     for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
@@ -1709,7 +1719,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const matched = await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } });
     expect(matched?.state).toBe("CREATED");
     expect(matched?.providerStatus).toBe("succeeded");
-    const again = await findStuckTransitionalOrders();
+    const again = await findStuckTransitionalOrders({ storeIds: [storeAId] });
     for (const candidate of again.filter((row) => row.id === order.id)) {
       await recordReconcileResult(candidate.storeId, candidate.id);
     }
@@ -1842,7 +1852,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundId: failed.refundId,
       },
     });
-    const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
+    const selected = (await findStuckTransitionalOrders({ storeIds: [storeAId] })).filter((row) => row.id === order.id);
     expect(selected).toHaveLength(1);
     for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
     expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("REFUND_FAILED");
@@ -1866,7 +1876,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         capturedAmountCents: 1000,
       },
     });
-    expect((await findStuckTransitionalOrders()).some((row) => row.id === order.id)).toBe(false);
+    expect((await findStuckTransitionalOrders({ storeIds: [storeAId] })).some((row) => row.id === order.id)).toBe(false);
   });
 
   it("a late pending refund on an abandoned request does not alert", async () => {
@@ -1907,7 +1917,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000)).toEqual({ ok: true });
     setNextRefundStatus(pi, "pending");
     const late = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: order.id });
-    const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
+    const selected = (await findStuckTransitionalOrders({ storeIds: [storeAId] })).filter((row) => row.id === order.id);
     expect(selected).toHaveLength(1);
     for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
     expect(await storeScoped(storeAId).auditLog.findFirst({
@@ -1957,7 +1967,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000)).toEqual({ ok: true });
     const sent = () => refundRequests.filter((request) => request.paymentIntentId === pi);
     expect(sent()).toHaveLength(0);
-    const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
+    const selected = (await findStuckTransitionalOrders({ storeIds: [storeAId] })).filter((row) => row.id === order.id);
     expect(selected).toHaveLength(1);
     for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
     expect(sent()).toHaveLength(0);
