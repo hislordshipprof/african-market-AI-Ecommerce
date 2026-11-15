@@ -35,7 +35,7 @@ _Avoid_: Platform team (only the customer-facing label on a platform admin's sup
 A plan a platform admin gives a store until a date, with a reason (for example, comped Pro). It decides the store's plan features while it runs, even over a Stripe downgrade, and never changes what Stripe bills. It always has an end date; after it, the store's Stripe plan applies again.
 
 **Store application**:
-A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted 12 months after the decision.
+A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted once the retention set by the platform admin (default 12 months) has passed since the decision.
 _Avoid_: Sign-up, lead, merchant application
 
 **Customer**:
@@ -142,6 +142,9 @@ _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 **Choice chips**:
 The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
 
+**Item handle**:
+A short name such as `i3` (listing), `v12` (variant) or `c2` (cart line) that the Shopper assistant's tools show the model in place of a long id, and take back as input (#597). Each conversation keeps its own handles, so one never resolves in another conversation or store; an unknown handle is refused, never guessed.
+
 **Shopper constraint**:
 An allergen to avoid, a dietary claim that must hold, or an ingredient to avoid, taken from the customer's words and saved on the conversation (#485). The Shopper assistant checks them on Product attributes only, never by matching product names: search leaves out an excluded listing, and add and swap refuse one with the reason. A constraint is hard: it gates search, recipes, add and swap. An ingredient term that names only a form of a known Ingredient, such as fresh tomato, triggers the clarify rule; one close to no known Ingredient is not saved, and the assistant says once that it can't check it. While any is saved, the store's own swap is not used: a may-be-unavailable line with no backup that passes gets Exact item only, a refund, including lines already in the cart (owner, 2026-11-12).
 
@@ -190,10 +193,10 @@ Order status messages a customer gets on WhatsApp from the Store WhatsApp number
 The store's own WhatsApp Business number, which customers message (ADR-0010). Linked by the owner or a platform admin through Meta's Embedded Signup (in test mode, ids typed into a form); "Live" once registered. By default the store keeps the WhatsApp Business app on it (coexistence). Not the Linked WhatsApp number, which is the owner's personal number.
 
 **Daily sample**:
-The AI conversations a platform admin reviews for one UTC day (#544): up to 5 random Shopper assistant chats and 5 random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. The same day always shows the same sample.
+The AI conversations a platform admin reviews for one UTC day (#544): up to N random Shopper assistant chats and N random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. N is an AI and onboarding setting, 5 by default; 0 shows only auto-flagged chats. The same day always shows the same sample.
 
 **Auto-flag**:
-A reason the platform marks an AI chat for review without a person: the grounder removed an amount, a tool refused a made-up id, a constraint or Cannot confirm refusal, `forward_to_store`, or a turn over the cost threshold ($0.02).
+A reason the platform marks an AI chat for review without a person: the grounder removed an amount, a tool refused a made-up id, a constraint or Cannot confirm refusal, `forward_to_store`, or a turn over the cost threshold (an AI and onboarding setting, 2 cents by default). A shopper turn is marked when it is saved, so a later threshold change applies from the next turn; copilot chats and transcript views use the threshold in force when viewed.
 
 **Review label**:
 A platform admin's verdict on one AI chat: wrong item, wrong price, unsafe, tone or other, with an optional note. Stored in `ai_review_flags`, owned by the chat's store, and deleted with the chat or after 90 days.
@@ -325,6 +328,9 @@ Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen
 
 **Courier settings**:
 The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+
+**AI and onboarding settings**:
+The platform-wide numbers a platform admin sets at `/admin/settings/ai-onboarding` (#561): the go-live listing floor (1 to 200, default 20), the Daily sample size per store (0 to 20, default 5), the Auto-flag cost threshold (1 to 100 cents, default 2) and how long a rejected store application is kept (1 to 24 months, default 12). Out of range is refused, never clamped; every save writes an audit row, and the page shows who changed them last and when.
 
 **Assignment timeout**:
 How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.

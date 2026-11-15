@@ -393,7 +393,7 @@ export const assistantRetention = inngest.createFunction(
     }),
 );
 
-/** Rejected store applications are deleted 12 months after the decision (#554). */
+/** Rejected store applications are deleted once the retention in AI and onboarding settings has passed (#554, #561). */
 export const storeApplicationRetention = inngest.createFunction(
   {
     id: "store-application/retention",

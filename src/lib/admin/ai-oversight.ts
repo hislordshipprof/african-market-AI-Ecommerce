@@ -1,20 +1,18 @@
 import { z } from "zod";
 import { Prisma, platformAdminTransaction, txQuery } from "../db";
 import { parseInput } from "../security/parse-input";
+import { readAiOnboardingSettings, turnCostFlagMicros } from "./ai-onboarding-settings";
 import { requirePlatformAdmin } from "./session";
 import {
   actionFlagReasons,
   copilotTranscript,
   FLAG_REASONS,
   shopperTranscript,
-  TURN_COST_FLAG_MICROS,
   type FlagReason,
   type ReviewLabel,
   type TranscriptMessage,
 } from "./ai-review";
 
-/** Random chats per store, per kind, per UTC day (#544). */
-export const SAMPLE_PER_STORE = 5;
 /** Rows shown per kind; a store filter narrows the rest. */
 export const LIST_CAP = 300;
 
@@ -38,6 +36,8 @@ export interface ConversationSample {
   shopper: SampleRow[];
   copilot: SampleRow[];
   hidden: { shopper: number; copilot: number };
+  /** Random chats per store per kind, from the platform setting (#561). */
+  samplePerStore: number;
   /** Every store, for the store filter. */
   stores: Array<{ id: string; name: string }>;
 }
@@ -90,9 +90,10 @@ function ordered(rows: SampleRow[]): SampleRow[] {
 }
 
 /**
- * The day's review list: up to 5 random shopper and 5 random copilot chats per store whose last message falls on the
+ * The day's review list: up to N random shopper and N random copilot chats per store whose last message falls on the
  * UTC day, plus every shopper chat with an auto-flagged action that day and every copilot chat on the day with a
- * turn over the cost threshold. The order inside a store is md5(id || day), so a reload shows the same sample.
+ * turn over the cost threshold. N and the threshold are platform settings (#561), read on each call. The order inside
+ * a store is md5(id || day), so a reload shows the same sample.
  */
 export async function listConversationSample(input: { day?: string; storeId?: string }): Promise<ConversationSample> {
   await requirePlatformAdmin();
@@ -104,6 +105,9 @@ export async function listConversationSample(input: { day?: string; storeId?: st
   const hi = `${nextDay(day)} 00:00:00`;
 
   return platformAdminTransaction(async (tx) => {
+    const settings = await readAiOnboardingSettings(tx);
+    const samplePerStore = settings.dailySamplePerStore;
+    const costFlagMicros = turnCostFlagMicros(settings);
     const inStore = (column: Prisma.Sql) => (storeId ? Prisma.sql`AND ${column} = ${storeId}` : Prisma.empty);
 
     const sampledIds = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
@@ -114,7 +118,7 @@ export async function listConversationSample(input: { day?: string; storeId?: st
           AND jsonb_typeof(c.messages) = 'array' AND jsonb_array_length(c.messages) > 0
           ${inStore(Prisma.sql`c.store_id`)}
       ) ranked
-      WHERE rn <= ${SAMPLE_PER_STORE}
+      WHERE rn <= ${samplePerStore}
     `);
     // A broad prefilter; actionFlagReasons decides.
     const candidates = await txQuery<Array<{ conversationId: string; tool: string; ok: boolean; output: unknown }>>(tx, Prisma.sql`
@@ -129,12 +133,12 @@ export async function listConversationSample(input: { day?: string; storeId?: st
           OR a.output -> 'excluded' IS NOT NULL
           OR (a.tool = 'add_to_cart' AND a.output -> 'items' IS NOT NULL)
           OR (a.tool = 'turn_cost' AND jsonb_typeof(a.output -> 'costMicros') = 'number'
-              AND (a.output ->> 'costMicros')::numeric > ${TURN_COST_FLAG_MICROS})
+              AND (a.output ->> 'costMicros')::numeric > ${costFlagMicros})
         )
     `);
     const reasonsOf = new Map<string, Set<FlagReason>>();
     for (const action of candidates) {
-      const reasons = actionFlagReasons(action);
+      const reasons = actionFlagReasons(action, costFlagMicros);
       if (reasons.length === 0) continue;
       const set = reasonsOf.get(action.conversationId) ?? new Set<FlagReason>();
       for (const reason of reasons) set.add(reason);
@@ -155,17 +159,17 @@ export async function listConversationSample(input: { day?: string; storeId?: st
 
     const copilotRows = await txQuery<Array<DbRow & { sampled: boolean; costly: boolean }>>(tx, Prisma.sql`
       SELECT ranked.id, ranked.store_id AS "storeId", s.name AS "storeName", ranked.last_message_at AS "lastMessageAt",
-             ranked.message_count AS "messageCount", ranked.rn <= ${SAMPLE_PER_STORE} AS sampled, ranked.costly
+             ranked.message_count AS "messageCount", ranked.rn <= ${samplePerStore} AS sampled, ranked.costly
       FROM (
         SELECT c.id, c.store_id, c.last_message_at, jsonb_array_length(c.messages)::int AS message_count,
                row_number() OVER (PARTITION BY c.store_id ORDER BY md5(c.id || ${day}), c.id) AS rn,
-               jsonb_path_exists(c.messages, '$[*] ? (@.costMicros > $t)', jsonb_build_object('t', ${TURN_COST_FLAG_MICROS}::int)) AS costly
+               jsonb_path_exists(c.messages, '$[*] ? (@.costMicros > $t)', jsonb_build_object('t', ${costFlagMicros}::int)) AS costly
         FROM copilot_conversations c
         WHERE c.last_message_at >= ${lo}::timestamp AND c.last_message_at < ${hi}::timestamp
           AND jsonb_typeof(c.messages) = 'array' AND jsonb_array_length(c.messages) > 0
           ${inStore(Prisma.sql`c.store_id`)}
       ) ranked JOIN stores s ON s.id = ranked.store_id
-      WHERE ranked.rn <= ${SAMPLE_PER_STORE} OR ranked.costly
+      WHERE ranked.rn <= ${samplePerStore} OR ranked.costly
     `);
     const copilot = ordered(copilotRows.map((row) => toRow("copilot", row, row.sampled, row.costly ? ["costly_turn"] : [])));
 
@@ -193,6 +197,7 @@ export async function listConversationSample(input: { day?: string; storeId?: st
       day,
       storeId,
       stores,
+      samplePerStore,
       ...shown,
       hidden: { shopper: shopper.length - shown.shopper.length, copilot: copilot.length - shown.copilot.length },
     };
@@ -274,6 +279,7 @@ export async function readTranscript(input: { kind: ConversationKind; id: string
   const { kind, id } = parsed.data;
 
   return platformAdminTransaction(async (tx) => {
+    const costFlagMicros = turnCostFlagMicros(await readAiOnboardingSettings(tx));
     const audit = (storeId: string, entityType: string) => tx.auditLog.create({
       data: {
         storeId,
@@ -321,7 +327,7 @@ export async function readTranscript(input: { kind: ConversationKind; id: string
           input: action.input,
           output: action.output,
           createdAt: action.createdAt.toISOString(),
-          reasons: actionFlagReasons(action),
+          reasons: actionFlagReasons(action, costFlagMicros),
         })),
         proposals: [],
         flags: flagRows(row.flags),

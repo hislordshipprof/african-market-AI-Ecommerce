@@ -24,6 +24,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createChatHandler } from "./chat-handler";
+import { itemHandles } from "./handles";
 import { ASSISTANT_CAP_MESSAGE } from "../billing/assistant-chats";
 import { setEmailSenderForTests, type EmailMessage } from "../email/send";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
@@ -32,6 +33,7 @@ import { createAssistantModel } from "./model";
 import { WEB_SEARCH_MICROS } from "./cost";
 import { createFakeAnthropicFetch, judgeMessagesRequest } from "./messages-api-double";
 import * as spend from "./spend";
+import { withAiOnboardingSettings } from "../admin/platform-settings-test-lock";
 
 process.env.ASSISTANT_CHAT_ENABLED = "1";
 
@@ -100,6 +102,37 @@ function strictModel(reply: (call: number) => Array<Record<string, unknown>>) {
     },
   });
   return { model, prompts, calls: () => calls };
+}
+
+type SeenIds = { listingId?: string; variantId?: string; lineId?: string };
+
+/** The handles a prompt shows for each named item, read from the tool results the model was given. */
+function seenInPrompt(prompt: unknown): Map<string, SeenIds> {
+  const found = new Map<string, SeenIds>();
+  const walk = (node: unknown) => {
+    if (typeof node === "string") {
+      if (!/^\s*[[{]/.test(node)) return;
+      try { walk(JSON.parse(node)); } catch { /* not JSON */ }
+      return;
+    }
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== "object") return;
+    const row = node as Record<string, unknown>;
+    if (typeof row.name === "string") {
+      const ids: SeenIds = {};
+      for (const key of ["listingId", "variantId", "lineId"] as const) if (typeof row[key] === "string") ids[key] = row[key];
+      if (Object.keys(ids).length) found.set(row.name, { ...found.get(row.name), ...ids });
+    }
+    Object.values(row).forEach(walk);
+  };
+  walk(prompt);
+  return found;
+}
+
+function handleSeen(prompt: unknown, name: string, key: keyof SeenIds): string {
+  const handle = seenInPrompt(prompt).get(name)?.[key];
+  if (!handle) throw new Error(`the model was never shown ${key} for ${name}`);
+  return handle;
 }
 
 function userBody(text: string, extra?: Record<string, unknown>, id = "m1") {
@@ -199,8 +232,19 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     });
   }
 
+  // A cart and conversation that already exist, with these items shown to the model, so a scripted model
+  // can send the handles a real one would have read from an earlier tool result. Handles come back in item order.
+  async function conversationShowing<T extends { listingId?: string; variantId?: string }>(items: T[], inStore = storeId) {
+    const cartId = (await storeScoped(inStore).cart.create({ data: { storeId: inStore, source: "manual" } })).id;
+    const conversationId = (await storeScoped(inStore).aiConversation.create({
+      data: { storeId: inStore, cartId, model: "claude-haiku-5-5", messages: [] },
+    })).id;
+    const handles = await itemHandles(inStore, conversationId).toModel(items) as T[];
+    return { cartId, conversationId, cookie: `cart_id=${encodeURIComponent(cartId)}`, handles };
+  }
+
   it("a guest turn creates the cart, sets the cookie and stores the conversation", async () => {
-    const { model } = strictModel((call) => {
+    const { model, prompts } = strictModel((call) => {
       if (call === 1) {
         return [
           { type: "stream-start", warnings: [] },
@@ -215,7 +259,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
             type: "tool-call",
             toolCallId: "call-add",
             toolName: "add_to_cart",
-            input: JSON.stringify({ items: [{ variant_id: variantId, qty: 2 }] }),
+            input: JSON.stringify({ items: [{ variant_id: handleSeen(prompts[1], "Egusi", "variantId"), qty: 2 }] }),
           },
           { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
         ];
@@ -899,11 +943,11 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   });
 
   // A cheap turn writes no turn_cost row: the first test counts exactly two actions.
-  it("records a turn over the oversight cost threshold for review", async () => {
-    const costly = {
-      inputTokens: { total: 300_000, noCache: 300_000, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 10, text: 10, reasoning: 0 },
-    };
+  const costly = {
+    inputTokens: { total: 300_000, noCache: 300_000, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 10, text: 10, reasoning: 0 },
+  };
+  async function costlyTurn(ip: string) {
     const { model } = strictModel(() => [
       { type: "stream-start", warnings: [] },
       { type: "text-start", id: "t" },
@@ -911,16 +955,27 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "text-end", id: "t" },
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage: costly },
     ]);
-    const response = await createChatHandler({ model })(request("long list", { ip: runIp("203.0.113.87") }));
+    const response = await createChatHandler({ model })(request("long list", { ip: runIp(ip) }));
     const cookie = response.headers.get("set-cookie") ?? "";
     await response.text();
     const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
     const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
     const rows = await storeScoped(storeId).aiAction.findMany({ where: { conversationId: conversation?.id ?? "", tool: "turn_cost" } });
+    return { conversation, rows };
+  }
+
+  it("records a turn over the oversight cost threshold for review", async () => {
+    const { conversation, rows } = await withAiOnboardingSettings({ aiTurnCostFlagCents: 2 }, () => costlyTurn("203.0.113.87"));
     expect(rows).toHaveLength(1);
     // Haiku 5.5 long-context rates: 300,000 input tokens at $0.50 per million and 10 output tokens at $2.50 per million.
     const userId = (conversation?.messages as Array<{ id: string; role: string }>).find((message) => message.role === "user")?.id;
     expect(rows[0]?.output).toEqual({ costMicros: 150_025, turn: userId });
+  });
+
+  it("AC3 (#561): reads the cost threshold from the platform setting, so a 15-cent turn is not flagged at 16 cents", async () => {
+    const { conversation, rows } = await withAiOnboardingSettings({ aiTurnCostFlagCents: 16 }, () => costlyTurn("203.0.113.161"));
+    expect(conversation).not.toBeNull();
+    expect(rows).toEqual([]);
   });
 
   it("stops at eight steps with the step-limit part", async () => {
@@ -966,6 +1021,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         variants[index] = variant.id;
       }));
     }
+    const open = await conversationShowing(variants.map((variantId) => ({ variantId })));
+    const handles = open.handles.map((item) => item.variantId);
     const batchOf = (ids: string[]) => ids.map((variantId) => ({ variant_id: variantId, qty: 1 }));
     const { model, calls } = strictModel((call) => {
       if (call === 1) {
@@ -975,7 +1032,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
             type: "tool-call",
             toolCallId: "call-add-20",
             toolName: "add_to_cart",
-            input: JSON.stringify({ items: batchOf(variants.slice(0, 20)) }),
+            input: JSON.stringify({ items: batchOf(handles.slice(0, 20)) }),
           },
           { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
         ];
@@ -987,7 +1044,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
             type: "tool-call",
             toolCallId: "call-add-10",
             toolName: "add_to_cart",
-            input: JSON.stringify({ items: batchOf(variants.slice(20)) }),
+            input: JSON.stringify({ items: batchOf(handles.slice(20)) }),
           },
           { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
         ];
@@ -1001,7 +1058,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       ];
     });
     const handler = createChatHandler({ model });
-    const response = await handler(request("add thirty distinct items", { ip: runIp("198.51.100.30") }));
+    const response = await handler(request("add thirty distinct items", { ip: runIp("198.51.100.30"), cookie: open.cookie }));
     expect(response.status).toBe(200);
     const body = await response.text();
     expect(calls()).toBe(3);
@@ -1023,9 +1080,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       });
     });
     expect(new Set(lineIds).size).toBe(30);
-    const cookie = response.headers.get("set-cookie") ?? "";
-    const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
-    const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId } });
+    const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId: open.cartId } });
     expect(lines).toHaveLength(30);
     expect(lines.map((line) => line.variantId).toSorted()).toEqual([...variants].toSorted());
     expect(lines.every((line) => line.qty === 1 && line.source === "ai")).toBe(true);
@@ -1529,6 +1584,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   });
 
   it("B6 a retry after a committed add and a lost stream does not add again", async () => {
+    const open = await conversationShowing([{ variantId }]);
     const seen = strictModel((call) => {
       if (call === 1) {
         return [
@@ -1537,7 +1593,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
             type: "tool-call",
             toolCallId: "call-retry-add",
             toolName: "add_to_cart",
-            input: JSON.stringify({ items: [{ variant_id: variantId, qty: 1 }] }),
+            input: JSON.stringify({ items: [{ variant_id: open.handles[0].variantId, qty: 1 }] }),
           },
           { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
         ];
@@ -1558,25 +1614,62 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       "x-store-slug": slug,
       "x-forwarded-for": runIp("203.0.113.150"),
     };
+    const cartId = open.cartId;
     const body = JSON.stringify({
       message: { id: "retry-b6-turn", role: "user", parts: [{ type: "text", text: "add one yam" }] },
     });
-    const first = await handler(new Request(`http://${host}/api/assistant/chat`, { method: "POST", headers, body }));
+    const first = await handler(new Request(`http://${host}/api/assistant/chat`, { method: "POST", headers: { ...headers, cookie: open.cookie }, body }));
     expect(first.status).toBe(200);
     await first.text();
-    const cookie = first.headers.get("set-cookie") ?? "";
-    const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
     const before = await storeScoped(storeId).cartLine.findFirst({ where: { cartId, variantId } });
     expect(before?.qty).toBe(1);
     const again = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, cookie: `cart_id=${encodeURIComponent(cartId)}` },
+      headers: { ...headers, cookie: open.cookie },
       body,
     }));
     expect(again.status).toBe(200);
     expect(await again.text()).toContain("Added one.");
     expect(seen.calls()).toBe(2);
     expect((await storeScoped(storeId).cartLine.findFirst({ where: { cartId, variantId } }))?.qty).toBe(1);
+  });
+
+  it("a tool call the schema refuses is saved with ids, not the handles the model sent (#597)", async () => {
+    const open = await conversationShowing([{ variantId }]);
+    const handle = open.handles[0].variantId!;
+    const { model } = strictModel((call) => {
+      if (call === 1) {
+        return [
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "call-bad-backup",
+            toolName: "add_to_cart",
+            input: JSON.stringify({ items: [{ variant_id: handle, qty: 1, backup_variant_id: null }] }),
+          },
+          { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+        ];
+      }
+      return [
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "text-1" },
+        { type: "text-delta", id: "text-1", delta: "That add failed." },
+        { type: "text-end", id: "text-1" },
+        { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+      ];
+    });
+    const response = await createChatHandler({ model })(request("add the egusi", { ip: "198.51.100.61", cookie: open.cookie }));
+    expect(response.status).toBe(200);
+    const streamed = await response.text();
+    const row = await storeScoped(storeId).aiConversation.findUniqueOrThrow({ where: { id: open.conversationId } });
+    const parts = (row.messages as Array<{ parts?: Array<{ type: string; state?: string; input?: unknown }> }>)
+      .flatMap((message) => message.parts ?? [])
+      .filter((part) => part.type === "tool-add_to_cart");
+    expect(parts.map((part) => part.state)).toEqual(["output-error"]);
+    expect(JSON.stringify(parts[0]?.input)).toContain(variantId);
+    expect(JSON.stringify(parts[0]?.input)).not.toContain(`"${handle}"`);
+    expect(streamed).not.toContain(`"variant_id":"${handle}"`);
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId: open.cartId } })).toBe(0);
   });
 
   it("a mid-stream retry reaches the script with the failed attempt in history", async () => {
@@ -1842,7 +1935,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         { kind: "tool", toolName: "search_catalog", toolInput: { query: "egusi" } },
         { kind: "tool", toolName: "search_catalog", toolInput: { query: "ugu leaves" } },
         { kind: "text", text: "From your list I found Egusi. Ugu leaves is not carried here. Want me to add these?" },
-        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: variantId, qty: 1 }] } },
+        { kind: "tool", toolName: "add_to_cart", get toolInput() { return { items: [{ variant_id: handleSeen(fake.requests.map((sent) => sent.body), "Egusi", "variantId"), qty: 1 }] }; } },
         { kind: "text", text: "Added 1 Egusi." },
       ],
     });
@@ -2814,10 +2907,16 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       expect(response.status).toBe(200);
       await response.text();
     }
-    expect(JSON.stringify(fake.requests[1]?.body)).toContain(variantId);
+    // The model sees the item's short handle, never the long id, in turn 1's result and in the later turn's prompt.
+    const conversation = await storeScoped(storeId).aiConversation.findFirstOrThrow({ where: { cartId: cart.id } });
+    const { variantId: handle } = await itemHandles(storeId, conversation.id).toModel({ variantId }) as { variantId: string };
+    expect(handle).toMatch(/^v\d+$/);
+    expect(handleSeen(fake.requests[1]?.body, "Egusi", "variantId")).toBe(handle);
+    expect(JSON.stringify(fake.requests[1]?.body)).not.toContain(variantId);
     const last = fake.requests.at(-1)?.body as { system?: Array<{ text?: string }> } | undefined;
     const system = (last?.system ?? []).map((block) => block.text ?? "").join("\n");
-    expect(system).toContain(`Egusi, Each: ${variantId}`);
+    expect(system).toContain(`Egusi, Each: ${handle}`);
+    expect(system).not.toContain(variantId);
   });
 
   it("does not send an earlier turn's thinking block back, because its signature is bound to that turn's prefix", async () => {
@@ -3097,10 +3196,12 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const tomatoVariant = (await storeScoped(storeId).listingVariant.create({
       data: { listingId: tomato.id, label: "Each", price: 250, weightG: 100 },
     })).id;
+    const open = await conversationShowing([{ variantId: ofadaVariant }, { variantId: tomatoVariant }]);
+    const [ofadaHandle, tomatoHandle] = open.handles.map((item) => item.variantId);
     const addBoth = {
       kind: "tool" as const,
       toolName: "add_to_cart",
-      toolInput: { items: [{ variant_id: ofadaVariant, qty: 2 }, { variant_id: tomatoVariant, qty: 1 }] },
+      toolInput: { items: [{ variant_id: ofadaHandle, qty: 2 }, { variant_id: tomatoHandle, qty: 1 }] },
     };
     vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
     const fake = createFakeAnthropicFetch({
@@ -3118,7 +3219,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       ],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    let cookie = "";
+    let cookie = open.cookie;
     const send = async (id: string, text: string) => {
       const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
         method: "POST",
@@ -3154,8 +3255,10 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(await lines()).toHaveLength(0);
     const received = JSON.stringify(fake.requests);
     expect(received).toContain("add_to_cart");
-    expect(received).toContain(ofadaVariant);
-    expect(received).toContain(tomatoVariant);
+    expect(received).toContain(ofadaHandle);
+    expect(received).toContain(tomatoHandle);
+    expect(received).not.toContain(ofadaVariant);
+    expect(received).not.toContain(tomatoVariant);
 
     const again = await send("shown-again", "show the list again");
     expect(again.status).toBe(200);
@@ -3203,6 +3306,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const tomatoVariant = (await storeScoped(storeId).listingVariant.create({
       data: { listingId: tomato.id, label: "Each", price: 250, weightG: 100 },
     })).id;
+    const open = await conversationShowing([{ variantId: ofadaVariant }, { variantId: tomatoVariant }]);
+    const [ofadaHandle, tomatoHandle] = open.handles.map((item) => item.variantId);
     vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
     const fake = createFakeAnthropicFetch({
       expectedKey: E2E_FAKE_ANTHROPIC_KEY,
@@ -3214,8 +3319,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
           toolName: "add_to_cart",
           toolInput: {
             items: [
-              { variant_id: ofadaVariant, qty: 1 },
-              { variant_id: tomatoVariant, qty: 1 },
+              { variant_id: ofadaHandle, qty: 1 },
+              { variant_id: tomatoHandle, qty: 1 },
             ],
           },
         },
@@ -3223,7 +3328,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       ],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    let cookie = "";
+    let cookie = open.cookie;
     const send = async (id: string, text: string) => {
       const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
         method: "POST",
@@ -3269,6 +3374,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       data: { listingId: cameroon.id, label: "4 oz", price: 280, weightG: 113 },
     })).id;
     vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const shownVariant = (name: string) => handleSeen(fake.requests.map((sent) => sent.body), name, "variantId");
     const fake = createFakeAnthropicFetch({
       expectedKey: E2E_FAKE_ANTHROPIC_KEY,
       steps: [
@@ -3283,11 +3389,11 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         {
           kind: "tool",
           toolName: "add_to_cart",
-          toolInput: {
-            items: [
-              { variant_id: scotchVariant, qty: 1 },
-              { variant_id: cameroonVariant, qty: 1 },
-            ],
+          get toolInput() {
+            return { items: [
+              { variant_id: shownVariant("Scotch Bonnet Pepper"), qty: 1 },
+              { variant_id: shownVariant("Cameroon Pepper"), qty: 1 },
+            ] };
           },
         },
         { kind: "text", text: "I could not add those." },
@@ -3402,21 +3508,24 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     };
     const peanut = await sell("Groundnut paste", { allergensStatus: "reviewed", allergens: ["peanuts"] });
     const mystery = await sell("Mystery paste", {});
+    // The excluded item was never shown, so the model is given its handle as if it remembered it; the refusal is what is tested.
+    const open = await conversationShowing([peanut, mystery].map(({ listingId, variantId }) => ({ listingId, variantId })));
+    const [peanutHandles, mysteryHandles] = open.handles;
     const add = (variant: string) => ({ kind: "tool" as const, toolName: "add_to_cart", toolInput: { items: [{ variant_id: variant, qty: 1 }] } });
     const fake = createFakeAnthropicFetch({
       steps: [
         { kind: "tool", toolName: "set_shopper_needs", toolInput: { avoid_allergens: ["peanuts"] } },
         { kind: "tool", toolName: "search_catalog", toolInput: { query: `paste ${tag}` } },
-        add(peanut.variantId),
-        add(mystery.variantId),
+        add(peanutHandles.variantId),
+        add(mysteryHandles.variantId),
         { kind: "text", text: `I can't confirm Mystery paste ${tag} is peanut-free. Add it anyway?` },
-        add(mystery.variantId),
+        add(mysteryHandles.variantId),
         { kind: "text", text: `Added Mystery paste ${tag}.` },
       ],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
     try {
-      const first = await handler(request(`I have a peanut allergy. Add 1 groundnut paste ${tag} and 1 Mystery paste ${tag}.`, { ip: runIp("198.51.100.85"), id: `needs-1-${tag}` }));
+      const first = await handler(request(`I have a peanut allergy. Add 1 groundnut paste ${tag} and 1 Mystery paste ${tag}.`, { ip: runIp("198.51.100.85"), cookie: open.cookie, id: `needs-1-${tag}` }));
       const firstBody = await first.text();
       const outputs = uiParts(firstBody).filter((part) => part.type === "tool-output-available").map((part) => part.output as Record<string, unknown>);
       const found = (outputs[1]?.items as Array<{ listingId: string; match: string }>) ?? [];
@@ -3424,8 +3533,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       expect(found.find((item) => item.listingId === mystery.listingId)?.match).toBe("cannot_confirm");
       expect(outputs[2]).toMatchObject({ ok: false, code: "excluded" });
       expect(outputs[3]).toMatchObject({ ok: false, code: "cannot_confirm" });
-      const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
-      const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
+      const { cookie, cartId } = open;
       expect(await storeScoped(storeId).cartLine.count({ where: { cartId } })).toBe(0);
 
       const second = await handler(request(`Yes, add the Mystery paste ${tag}.`, { ip: runIp("198.51.100.85"), cookie, id: `needs-2-${tag}` }));
