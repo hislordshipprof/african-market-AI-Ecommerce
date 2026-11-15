@@ -129,7 +129,7 @@ export type AdminChanges = {
   synonymIds: Set<string>;
 };
 
-function jsonObject(value: Prisma.JsonValue | null): Record<string, Prisma.JsonValue> {
+function jsonObject(value: Prisma.JsonValue | null): Prisma.JsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
