@@ -14,6 +14,10 @@ export type PayoutOrder = {
   deliveryFeeCents: number;
   /** Goods discount from a store coupon; the store funds it, and the captured amount is already net of it. */
   discountCents: number;
+  /** Sales tax in the captured amount (#65); 0 on orders placed before Stripe Tax. */
+  taxCents: number;
+  /** "platform" keeps the tax out of the store's payout (ADR-0008). */
+  taxLiableParty?: string;
 };
 
 export type PayoutOrderRow = {
@@ -57,10 +61,11 @@ export function payoutBreakdown(
       // A destination charge lands at its full captured amount, so it stands in when capture was never recorded.
       const captured = order.capturedAmountCents ?? txn.amountCents;
       const split = capturedPayout({ ...order, capturedAmountCents: captured });
-      // Orders carry no sales tax until Stripe Tax is on (ADR-0008); goods keep a store delivery fee.
+      // Sales tax is the order's own line (#65, ADR-0008); goods keep a store delivery fee.
       row.paidInPayout = true;
-      row.goodsCents = captured - order.serviceFeeCents - order.tipCents - courierFeeCents(order) + order.discountCents;
+      row.goodsCents = captured - order.serviceFeeCents - order.tipCents - order.taxCents - courierFeeCents(order) + order.discountCents;
       row.discountCents = order.discountCents;
+      row.taxCents = order.taxCents;
       row.tipCents = order.tipCents;
       row.cardFeeCents = split.storeCardFeeCents;
       row.netCents += split.storeReceivesCents;

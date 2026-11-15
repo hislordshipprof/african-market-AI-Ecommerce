@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ADR_0021_SERVICE_FEE, capturedApplicationFee, capturedPayout, captureSplit, maxGoodsWithin, NO_SERVICE_FEE, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
+import { ADR_0021_SERVICE_FEE, capturedApplicationFee, capturedPayout, captureSplit, maxGoodsWithin, NO_SERVICE_FEE, platformTaxCents, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
 
 describe("service fee (ADR-0021)", () => {
   it("is 3% of goods, held to the $0.99 minimum and the $2.99 maximum", () => {
@@ -88,5 +88,22 @@ describe("goods that fit a hold", () => {
     expect(maxGoodsWithin(5150, ADR_0021_SERVICE_FEE)).toBe(5000);
     expect(maxGoodsWithin(5149, ADR_0021_SERVICE_FEE)).toBe(4999);
     expect(maxGoodsWithin(0, ADR_0021_SERVICE_FEE)).toBe(0);
+  });
+});
+
+describe("sales tax in the split (#65, ADR-0008)", () => {
+  it("keeps platform-collected tax out of the store's transfer, and the platform bears its card fee", () => {
+    const base = captureSplit({ capturedCents: 10_000, serviceFeeCents: 299, courierFeeCents: 0 });
+    const taxed = captureSplit({ capturedCents: 10_825, serviceFeeCents: 299, courierFeeCents: 0, platformTaxCents: 825 });
+    expect(taxed.storeReceivesCents).toBe(base.storeReceivesCents);
+    expect(taxed.applicationFeeCents).toBe(base.applicationFeeCents + 825);
+    expect(taxed.platformCardFeeCents).toBe(base.platformCardFeeCents + 24);
+  });
+
+  it("passes store-liable tax to the store", () => {
+    expect(platformTaxCents({ taxCents: 825, taxLiableParty: "store" })).toBe(0);
+    expect(platformTaxCents({ taxCents: 825, taxLiableParty: "platform" })).toBe(825);
+    expect(capturedPayout({ capturedAmountCents: 10_825, platformFeeCents: 591, serviceFeeCents: 299, fulfillment: "pickup", deliveryFeeCents: 0, taxCents: 825, taxLiableParty: "platform" }).storeReceivesCents)
+      .toBe(10_825 - 591 - 825);
   });
 });

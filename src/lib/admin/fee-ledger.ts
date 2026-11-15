@@ -1,5 +1,5 @@
 import { csvDollars, toCsv } from "@/lib/analytics/csv";
-import { captureSplit, courierFeeCents } from "@/lib/order/platform-fee";
+import { captureSplit, courierFeeCents, platformTaxCents } from "@/lib/order/platform-fee";
 
 /**
  * Platform fee ledger (#546, ADR-0021): what the platform keeps per captured order, from our tables.
@@ -56,6 +56,8 @@ type OrderFacts = {
   platformFeeCents: number | null;
   serviceFeeCents: number;
   deliveryFeeCents: number;
+  taxCents?: number;
+  taxLiableParty?: string;
 };
 
 export type CaptureFacts = OrderFacts & { at: Date; refundFailed: boolean };
@@ -99,9 +101,10 @@ export type FeeLedger = { month: LedgerMonth; rows: LedgerRow[]; stores: StoreLe
 
 function orderMoney(order: OrderFacts, capturedCents: number) {
   const courier = courierFeeCents(order);
-  const split = captureSplit({ capturedCents, serviceFeeCents: order.serviceFeeCents, courierFeeCents: courier });
+  const platformTax = platformTaxCents(order);
+  const split = captureSplit({ capturedCents, serviceFeeCents: order.serviceFeeCents, courierFeeCents: courier, platformTaxCents: platformTax });
   const platformFee = order.platformFeeCents ?? split.platformFeeCents;
-  const applicationFee = Math.min(platformFee + courier, capturedCents);
+  const applicationFee = Math.min(platformFee + courier + platformTax, capturedCents);
   const storeCardFee = Math.max(0, platformFee - order.serviceFeeCents);
   return {
     capturedCents,

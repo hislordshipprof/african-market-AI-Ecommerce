@@ -47,7 +47,7 @@ export async function variantTaxCodes(db: ScopedTx, variantIds: string[]): Promi
 }
 
 /** Pickup is taxed where the shopper takes the goods, the store; delivery at the delivery address. */
-function taxAddress(
+export function taxAddress(
   fulfillment: Fulfillment,
   store: { addressLine1: string | null; addressLine2: string | null; city: string | null; state: string | null; zip: string | null },
   cart: { deliveryLine1: string | null; deliveryLine2: string | null; deliveryCity: string | null; deliveryState: string | null; deliveryZip: string | null },

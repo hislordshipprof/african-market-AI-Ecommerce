@@ -97,14 +97,17 @@ export function captureSplit(input: {
   capturedCents: number;
   serviceFeeCents: number;
   courierFeeCents: number;
+  /** Sales tax the platform collects as marketplace facilitator (ADR-0008, #65); it never reaches the store. */
+  platformTaxCents?: number;
 }): CaptureSplit {
   const captured = Math.max(0, input.capturedCents);
   const serviceFee = Math.max(0, input.serviceFeeCents);
   const courierFee = Math.max(0, input.courierFeeCents);
-  const storePart = Math.max(0, captured - serviceFee - courierFee);
+  const platformTax = Math.max(0, input.platformTaxCents ?? 0);
+  const storePart = Math.max(0, captured - serviceFee - courierFee - platformTax);
   const storeCardFeeCents = storePart > 0 ? percentOf(storePart, CARD_FEE_BPS) + CARD_FEE_FIXED_CENTS : 0;
-  const platformCardFeeCents = percentOf(serviceFee, CARD_FEE_BPS) + percentOf(courierFee, CARD_FEE_BPS);
-  const applicationFeeCents = Math.min(serviceFee + courierFee + storeCardFeeCents, captured);
+  const platformCardFeeCents = percentOf(serviceFee, CARD_FEE_BPS) + percentOf(courierFee, CARD_FEE_BPS) + percentOf(platformTax, CARD_FEE_BPS);
+  const applicationFeeCents = Math.min(serviceFee + courierFee + platformTax + storeCardFeeCents, captured);
   return {
     applicationFeeCents,
     platformFeeCents: Math.min(serviceFee + storeCardFeeCents, captured),
@@ -130,17 +133,25 @@ export function capturedPayout(order: {
   serviceFeeCents: number;
   fulfillment: string;
   deliveryFeeCents: number;
+  taxCents?: number;
+  taxLiableParty?: string;
 }): { storeCardFeeCents: number; storeReceivesCents: number } {
   const captured = Math.max(0, order.capturedAmountCents);
   const courierFee = courierFeeCents(order);
+  const platformTax = platformTaxCents(order);
   if (order.platformFeeCents == null) {
-    const split = captureSplit({ capturedCents: captured, serviceFeeCents: order.serviceFeeCents, courierFeeCents: courierFee });
+    const split = captureSplit({ capturedCents: captured, serviceFeeCents: order.serviceFeeCents, courierFeeCents: courierFee, platformTaxCents: platformTax });
     return { storeCardFeeCents: split.storeCardFeeCents, storeReceivesCents: split.storeReceivesCents };
   }
   return {
     storeCardFeeCents: Math.max(0, order.platformFeeCents - order.serviceFeeCents),
-    storeReceivesCents: captured - Math.min(order.platformFeeCents + courierFee, captured),
+    storeReceivesCents: captured - Math.min(order.platformFeeCents + courierFee + platformTax, captured),
   };
+}
+
+/** The order's tax that the platform keeps to remit; 0 when the store is the liable party. */
+export function platformTaxCents(order: { taxCents?: number; taxLiableParty?: string }): number {
+  return order.taxLiableParty === "store" ? 0 : Math.max(0, order.taxCents ?? 0);
 }
 
 /** The `application_fee_amount` Stripe took at capture; null before capture. */
@@ -150,6 +161,8 @@ export function capturedApplicationFee(order: {
   serviceFeeCents: number;
   fulfillment: string;
   deliveryFeeCents: number;
+  taxCents?: number;
+  taxLiableParty?: string;
 }): number | null {
   if (order.capturedAmountCents === null) return null;
   const captured = Math.max(0, order.capturedAmountCents);

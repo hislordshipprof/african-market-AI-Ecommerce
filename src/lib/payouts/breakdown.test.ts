@@ -8,6 +8,7 @@ const [second, first] = data.payouts;
 const orders: PayoutOrder[] = FAKE_PAYOUT_ORDERS.map((o, i) => ({
   ...o,
   discountCents: 0,
+  taxCents: 0,
   id: `order_${o.key}`,
   number: 101 + i,
   paymentIntentId: fakePayoutPaymentIntentId(o.key, ACCOUNT),
@@ -48,6 +49,14 @@ describe("payoutBreakdown", () => {
     // Store delivery: the store keeps its delivery fee, so it stays with the goods.
     expect(result.rows.find((r) => r.number === 103)).toMatchObject({ goodsCents: 4200 - 117 - 200, cardFeeCents: 148, netCents: 3935 });
     expect(result.otherCents).toBe(0);
+  });
+
+  it("shows a store-liable order's sales tax on its own, out of goods, and net does not move", () => {
+    // Order 101 captured $50.00 of which $3.30 is sales tax the store remits (#65): goods drop by it, the transfer is the same.
+    const taxed = orders.map((o) => (o.number === 101 ? { ...o, taxCents: 330, taxLiableParty: "store" } : o));
+    const result = payoutBreakdown(first.amountCents, data.transactions.get(first.id)!, taxed);
+    expect(result.rows[0]).toMatchObject({ goodsCents: 5000 - 150 - 300 - 330, taxCents: 330, netCents: 4679 - 1000 });
+    expect(result.rows.reduce((sum, r) => sum + r.netCents, 0)).toBe(first.amountCents);
   });
 
   it("takes the amount from Stripe's payment when the order never recorded its capture", () => {
