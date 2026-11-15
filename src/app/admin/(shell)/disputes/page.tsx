@@ -13,15 +13,19 @@ function amount(cents: number, currency: string): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
 }
 
+/** A deadline inside this window is marked in words and weight, not a new colour. */
+const DUE_SOON_MS = 24 * 3_600_000;
+
 function DueCell({ dueBy, now }: { dueBy: Date | null; now: number }) {
   if (!dueBy) return <span className="text-muted-foreground">No deadline</span>;
-  const overdue = dueBy.getTime() <= now;
+  const left = dueBy.getTime() - now;
+  let note = <span className="text-muted-foreground">{formatAge(new Date(now), dueBy.getTime())} left</span>;
+  if (left <= 0) note = <span className="font-medium text-destructive">Past due by {formatAge(dueBy, now)}</span>;
+  else if (left < DUE_SOON_MS) note = <span className="font-semibold text-foreground">Due in {formatAge(new Date(now), dueBy.getTime())}</span>;
   return (
-    <span className="grid">
-      <span className="tabular-nums text-foreground">{DUE_DATE.format(dueBy)} UTC</span>
-      <span className={`tabular-nums ${overdue ? "font-medium text-destructive" : "text-muted-foreground"}`}>
-        {overdue ? `Past due by ${formatAge(dueBy, now)}` : `${formatAge(new Date(now), dueBy.getTime())} left`}
-      </span>
+    <span className="grid tabular-nums">
+      <span className="text-foreground">{DUE_DATE.format(dueBy)} UTC</span>
+      {note}
     </span>
   );
 }
@@ -35,14 +39,13 @@ export default async function DisputesPage() {
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
       <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">Disputes</h1>
       <p className="mt-1 max-w-prose text-muted-foreground">
-        Card payments a customer disputed with their bank, still open. Stripe takes the disputed amount and its fee from
-        the platform balance, and the platform covers a lost dispute. Answer each one with evidence in the Stripe
-        Dashboard before its deadline.
+        Card payments a customer disputed with their bank, still open. Answer each one with evidence in the Stripe
+        Dashboard before its deadline; the platform covers a lost dispute and Stripe&rsquo;s fee.
       </p>
 
       <p className="mb-3 mt-8 text-sm text-muted-foreground" aria-live="polite" data-testid="dispute-count">
         {rows.length === 0
-          ? "No open disputes."
+          ? "No open disputes. A new one shows here as soon as Stripe reports it."
           : `${rows.length} open ${rows.length === 1 ? "dispute" : "disputes"}${more ? ` (the first ${DISPUTE_QUEUE_LIMIT})` : ""}, soonest deadline first.`}
       </p>
 
@@ -76,6 +79,7 @@ export default async function DisputesPage() {
                       <>
                         <span className="font-semibold text-foreground">No matching order</span>
                         <span className="block break-all font-mono text-xs text-muted-foreground">{row.stripeDisputeId}</span>
+                        <span className="block text-muted-foreground">Find the charge in Stripe by this id.</span>
                       </>
                     )}
                   </td>
@@ -94,7 +98,9 @@ export default async function DisputesPage() {
                       className={`inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-full px-1 font-medium text-primary underline-offset-4 hover:underline sm:min-h-0 ${FOCUS}`}
                     >
                       Open in Stripe <ExternalLink aria-hidden className="size-4" />
-                      <span className="sr-only"> (opens in a new tab)</span>
+                      <span className="sr-only">
+                        {row.orderNumber !== null ? ` for order #${row.orderNumber}` : ` for dispute ${row.stripeDisputeId}`} (opens in a new tab)
+                      </span>
                     </a>
                   </td>
                 </tr>

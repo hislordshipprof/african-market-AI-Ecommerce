@@ -546,7 +546,7 @@ export function OrderInbox({
                 )}
                 {selectedOrder.disputed && (
                   <p className="mt-2 text-sm text-foreground" data-testid="order-disputed">
-                    The customer disputed this card payment with their bank. The platform team answers the dispute and may ask you for proof of pickup or delivery.
+                    The customer disputed this card payment with their bank. The platform team answers the dispute and covers it if it is lost, so your payout is not changed. We may ask you for proof of pickup or delivery.
                   </p>
                 )}
               </CardHeader>

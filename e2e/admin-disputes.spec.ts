@@ -66,7 +66,7 @@ test("an open dispute is in the admin queue by deadline with a Stripe link, and 
   await removeDisputes();
   await insertInboxOrder({ number: NUMBER, status: "COMPLETED", capturedAmountCents: 4250 });
   const order = await asPlatformAdmin((tx) => tx.order.findFirstOrThrow({ where: { number: NUMBER, store: { slug: "mama-ngozi" } } }));
-  const soon = new Date(Date.now() + 3 * 86_400_000);
+  const soon = new Date(Date.now() + 5 * 3_600_000);
   await asPlatformAdmin((tx) => tx.paymentDispute.createMany({
     data: [
       {
@@ -76,7 +76,7 @@ test("an open dispute is in the admin queue by deadline with a Stripe link, and 
       },
       {
         stripeDisputeId: ORPHAN, chargeId: "ch_e2e_539_orphan", amountCents: 1999, currency: "usd", reason: "fraudulent",
-        status: "warning_needs_response", evidenceDueBy: new Date(soon.getTime() + 86_400_000), lastEventAt: new Date(), notifiedAt: new Date(),
+        status: "warning_needs_response", evidenceDueBy: new Date(soon.getTime() + 3 * 86_400_000), lastEventAt: new Date(), notifiedAt: new Date(),
       },
     ],
   }));
@@ -89,6 +89,7 @@ test("an open dispute is in the admin queue by deadline with a Stripe link, and 
   await expect(matched).toContainText(`#${NUMBER}`);
   await expect(matched).toContainText("$42.50");
   await expect(matched).toContainText("Order not received");
+  await expect(matched).toContainText(/Due in [45] h/);
   await expect(matched.getByRole("link", { name: /Open in Stripe/ })).toHaveAttribute("href", `https://dashboard.stripe.com/test/disputes/${MATCHED}`);
   await expect(admin.getByTestId(`dispute-row-${ORPHAN}`)).toContainText("No matching order");
   const ids = await admin.locator("[data-testid^='dispute-row-du_e2e_539']").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-testid")));
