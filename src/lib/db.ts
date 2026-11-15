@@ -305,6 +305,7 @@ export const platformAdmin = {
   attributeProposal: wrapPlatformAdminDelegate(prisma.attributeProposal),
   ingredient: wrapPlatformAdminDelegate(prisma.ingredient),
   storeSubscription: wrapPlatformAdminDelegate(prisma.storeSubscription),
+  storeApplication: wrapPlatformAdminDelegate(prisma.storeApplication),
 };
 
 /** A transaction as app_user, with the test session time zone applied when one is set. */
@@ -340,6 +341,7 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "refundRequest",
   "stockProposal",
   "store",
+  "storeApplication",
   "storeInvite",
   "storeMembership",
   "storeSubscription",
