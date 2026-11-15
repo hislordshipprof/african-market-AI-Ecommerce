@@ -450,6 +450,121 @@
   margin-bottom: 40px;
 }
 
+/* "Tell me when a store opens near me" (#455): a quiet panel; the button is the only colour. */
+.request {
+  display: flex;
+  gap: 14px;
+  max-width: 720px;
+  margin-bottom: 40px;
+  padding: 20px;
+  border: 1px solid var(--d-line);
+  border-radius: 16px;
+  background: var(--d-surface);
+}
+
+.requestIcon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--d-muted);
+}
+
+.requestBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.requestTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin: 0 0 4px;
+}
+
+.requestForm {
+  display: grid;
+  gap: 14px;
+}
+
+.requestFields {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.requestField {
+  display: grid;
+  gap: 6px;
+}
+
+.consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--d-muted);
+  cursor: pointer;
+}
+
+.consent input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--d-primary);
+}
+
+.consent input:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 2px;
+}
+
+.requestActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.requestError {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.requestError:empty {
+  display: none;
+}
+
+.requestDone {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .request {
+    padding: 16px;
+  }
+
+  .requestIcon {
+    display: none;
+  }
+
+  .requestFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .resultsTitle {
   font-family: var(--font-display), system-ui, sans-serif;
   font-size: 22px;

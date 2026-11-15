@@ -12,10 +12,8 @@ import { parseInput } from "../security/parse-input";
 import { directoryLink } from "./attribution";
 import { NEARBY_MILES } from "./distance";
 import { storefrontUrl } from "./links";
+import { STORE_REQUEST_CONSENT } from "./store-request-consent";
 
-/** Kept verbatim on each request as the record of what the shopper agreed to. */
-export const STORE_REQUEST_CONSENT =
-  "Send me one message, by email or text, when a store opens within 50 miles of this ZIP code. Then delete my contact. Message and data rates may apply to a text.";
 
 const HOUR_MS = 60 * 60_000;
 export const REQUEST_BROWSER_LIMIT = 5;
