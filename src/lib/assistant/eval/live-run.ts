@@ -7,10 +7,12 @@ import { assistantModelId } from "../model";
 import type { SeedRecipe } from "../recipe-base";
 import { TICKET_SPEND_PATH, loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
 import { fingerprintFromRequest } from "./fingerprint";
+import { formatUsdFromMicros } from "./money";
 import { assessOfficial } from "./gate";
 import { liveBudgetMicros, liveConcurrency } from "./preflight";
 import { buildReport, officialReport, publishEvalReport, readTicketSpend, summarize, verdictFor, type EvalReport } from "./report";
 import { runEval } from "./runner";
+import type { CatalogBinding } from "./score";
 import type { RunResult } from "./types";
 
 // Owner raised the #146 eval budget to $20 on 2026-11-11 (issue #146).
@@ -19,8 +21,8 @@ const TICKET_CAP_MICROS = BigInt(20000000);
 export async function runLiveEval(): Promise<void> {
   const fixture = validateFixture(loadFixture());
   const dataset = validateDataset(loadDataset(), fixture, { full: true });
-  const only = flag("--only");
-  const limitRaw = flag("--limit");
+  const only = flag("only");
+  const limitRaw = flag("limit");
   const limit = limitRaw == null ? null : Number(limitRaw);
   if (limit != null && (!Number.isInteger(limit) || limit < 1)) {
     console.error("ASSISTANT_EVAL --limit must be a positive integer.");
@@ -55,7 +57,7 @@ export async function runLiveEval(): Promise<void> {
   const traceRoot = process.env.ASSISTANT_EVAL_TRACE_DIR || null;
   // The official result is two full runs (owner, 2026-11-11); a partial or comparison run is one.
   const runCount = full && !compareDir ? 2 : 1;
-  const runs: Array<{ preview: EvalReport; result: RunResult; latency: Latency }> = [];
+  const runs: Array<{ preview: EvalReport; result: RunResult; latency: Latency; binding: CatalogBinding | null }> = [];
   for (let index = 1; index <= runCount; index += 1) {
     const prior = readTicketSpend();
     if (prior >= TICKET_CAP_MICROS) {
@@ -95,7 +97,7 @@ export async function runLiveEval(): Promise<void> {
       gateOk: false,
     });
     const latency = { turns: turnMs.length, medianMs: percentile(turnMs, 0.5), p90Ms: percentile(turnMs, 0.9) };
-    runs.push({ preview, result: run.result, latency });
+    runs.push({ preview, result: run.result, latency, binding: run.binding });
     if (!run.result.complete) break;
   }
   const ticketTotal = readTicketSpend();
@@ -103,7 +105,7 @@ export async function runLiveEval(): Promise<void> {
   const complete = runs.length === runCount && runs.every((run) => run.result.complete);
   const official = officialReport(runs.map((run) => run.preview));
   const gate = complete && full
-    ? assessOfficial(official, { fingerprint: first.preview.fingerprint, caseIds: dataset.map((item) => item.id), model })
+    ? assessOfficial(official, { fingerprint: first.preview.fingerprint, caseIds: dataset.map((item) => item.id), model, cases: dataset, binding: first.binding ?? undefined })
     : { ok: false, reasons: [runs.find((run) => !run.result.complete)?.result.incompleteReason ?? "partial run"] };
   const reports = runs.map((run) => {
     const verdict = verdictFor(run.preview.summary, gate.ok);
@@ -114,7 +116,7 @@ export async function runLiveEval(): Promise<void> {
     mkdirSync(compareDir, { recursive: true });
     const path = join(compareDir, `report-${model}-${effort ?? "default"}.json`);
     writeFileSync(path, `${JSON.stringify({ ...report, comparison: { model, effort: effort ?? "default", gateOk: gate.ok, latency: first.latency } }, null, 2)}\n`);
-    printRun(first.result.cases, report.summary, report.verdict, report.verdictReasons, first.result, ticketTotal, first.latency);
+    printRun(first.result.cases, report.summary, report.verdict, report.verdictReasons, first.result, ticketTotal, first.latency, model);
     console.log(JSON.stringify({ report: path, committed: false }));
     return;
   }
@@ -122,7 +124,7 @@ export async function runLiveEval(): Promise<void> {
   const published = publishEvalReport(officialReport(reports), full && gate.ok, cleanupError);
   runs.forEach((run, index) => {
     console.log(`--- run ${index + 1} ---`);
-    printRun(run.result.cases, reports[index]!.summary, reports[index]!.verdict, reports[index]!.verdictReasons, run.result, ticketTotal, run.latency);
+    printRun(run.result.cases, reports[index]!.summary, reports[index]!.verdict, reports[index]!.verdictReasons, run.result, ticketTotal, run.latency, model);
   });
   console.log(JSON.stringify({ average: official.average, gate, report: published.path, committed: published.committed }, null, 2));
   if (!published.committed) process.exit(1);
@@ -149,7 +151,7 @@ function percentile(values: number[], p: number): number | null {
   return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)] ?? 0);
 }
 
-function printRun(
+export function printRun(
   cases: Array<{ id: string; pass: boolean; reason: string; hallucinated: unknown[]; rejectedAttempts: unknown[] }>,
   summary: ReturnType<typeof summarize>,
   verdict: string,
@@ -157,6 +159,7 @@ function printRun(
   result: { spendMicros: bigint; inputTokens: number; outputTokens: number; ledgerDeltaMicros: bigint | null; conversationMicros: bigint; complete: boolean; incompleteReason: string | null },
   ticketTotal: bigint,
   latency: Latency,
+  model: string,
 ): void {
   for (const item of cases) {
     console.log(`${item.pass ? "PASS" : "FAIL"} ${item.id} ${item.reason}`);
@@ -164,26 +167,27 @@ function printRun(
     for (const rejected of item.rejectedAttempts) console.log(`  rejected attempt ${JSON.stringify(rejected)}`);
   }
   console.log(JSON.stringify({
+    model,
     complete: result.complete,
     incompleteReason: result.incompleteReason,
     summary,
     verdict,
     reasons,
+    spendUsd: formatUsdFromMicros(result.spendMicros),
     spendMicros: result.spendMicros.toString(),
     ledgerDeltaMicros: result.ledgerDeltaMicros?.toString() ?? null,
     conversationMicros: result.conversationMicros.toString(),
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
+    ticketUsd: formatUsdFromMicros(ticketTotal),
     ticketMicros: ticketTotal.toString(),
     latency,
   }, null, 2));
 }
 
-// vitest rejects unknown CLI flags, so ASSISTANT_EVAL_ONLY / ASSISTANT_EVAL_LIMIT carry them too.
-function flag(name: string): string | null {
-  const index = process.argv.indexOf(name);
-  if (index >= 0 && process.argv[index + 1]) return process.argv[index + 1] ?? null;
-  return process.env[`ASSISTANT_EVAL_${name.slice(2).toUpperCase()}`] || null;
+// vitest.eval.config.ts turns `--only` / `--limit` into these variables; they can also be set directly.
+function flag(name: "only" | "limit"): string | null {
+  return process.env[`ASSISTANT_EVAL_${name.toUpperCase()}`] || null;
 }
 
 function gitSha(): string {

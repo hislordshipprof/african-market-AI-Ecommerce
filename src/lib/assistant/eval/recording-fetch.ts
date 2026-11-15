@@ -148,7 +148,7 @@ async function readSse(stream: ReadableStream<Uint8Array>): Promise<{
   const decoder = new TextDecoder();
   let buffer = "";
   let sawStart = false;
-  let sawDelta = false;
+  let sawDeltaUsage = false;
   let sseError = false;
   let inputTokens = 0;
   let cacheWrite = 0;
@@ -174,7 +174,7 @@ async function readSse(stream: ReadableStream<Uint8Array>): Promise<{
         message?: { usage?: Record<string, unknown> };
         content_block?: { type?: string; name?: string };
         delta?: { type?: string; text?: string; partial_json?: string };
-        usage?: { output_tokens?: unknown };
+        usage?: Record<string, unknown>;
         error?: unknown;
       };
       if (event.type === "message_start") {
@@ -183,6 +183,7 @@ async function readSse(stream: ReadableStream<Uint8Array>): Promise<{
         inputTokens = numberOrZero(usage.input_tokens);
         cacheWrite = numberOrZero(usage.cache_creation_input_tokens);
         cacheRead = numberOrZero(usage.cache_read_input_tokens);
+        outputTokens = numberOrZero(usage.output_tokens);
       } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
         current = toolUses.length;
         toolUses.push({ name: event.content_block.name ?? "", input: {} });
@@ -196,8 +197,15 @@ async function readSse(stream: ReadableStream<Uint8Array>): Promise<{
           }
         }
       } else if (event.type === "message_delta") {
-        sawDelta = true;
-        if (typeof event.usage?.output_tokens === "number") outputTokens = event.usage.output_tokens;
+        // Delta counts are cumulative and may restate input and cache tokens, so they replace the start counts.
+        const usage = event.usage ?? {};
+        if (typeof usage.output_tokens === "number") {
+          sawDeltaUsage = true;
+          outputTokens = usage.output_tokens;
+        }
+        if (typeof usage.input_tokens === "number") inputTokens = usage.input_tokens;
+        if (typeof usage.cache_creation_input_tokens === "number") cacheWrite = usage.cache_creation_input_tokens;
+        if (typeof usage.cache_read_input_tokens === "number") cacheRead = usage.cache_read_input_tokens;
       } else if (event.type === "error") {
         sseError = true;
       }
@@ -212,7 +220,7 @@ async function readSse(stream: ReadableStream<Uint8Array>): Promise<{
   const usage = sawStart ? anthropicUsage(inputTokens, cacheRead, cacheWrite, outputTokens) : null;
   return {
     usage,
-    unresolvedUsage: !sawDelta,
+    unresolvedUsage: !sawDeltaUsage,
     sseError,
     text,
     toolUses,
