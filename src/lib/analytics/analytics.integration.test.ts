@@ -31,9 +31,11 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
   let storeB = "";
   let storeC = "";
   let storeD = "";
+  let storeE = "";
   let data: StoreAnalytics;
   let edges: StoreAnalytics;
   let promo: StoreAnalytics;
+  let serviceFee: StoreAnalytics;
 
   async function asStore<T>(storeId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return raw.$transaction(async (tx) => {
@@ -174,6 +176,21 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     });
   }
 
+  /**
+   * Service-fee orders (ADR-0021, captureSplit). The card fee is the store's 2.9% + 30¢ on what it keeps; the customer's service fee is not part of it.
+   * E1 pickup 11-02  goods 1500 + service fee 99 = captured 1599; card fee round(1500 x 2.9%) + 30 = 74; platform fee stored 99 + 74 = 173; net 1599 - 173 = 1426
+   * E2 courier 11-03 goods 2000 + service fee 99 + courier fee 500 = captured 2599; card fee 58 + 30 = 88; platform fee stored 99 + 88 = 187; net 2599 - 187 - 500 = 1912
+   * Card fee 74 + 88 = 162, courier 500, net 3338.
+   */
+  async function seedStoreE() {
+    await asStore(storeE, async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeE, name: "Femi" } });
+      const base = { storeId: storeE, customerId: customer.id, status: "COMPLETED" as const, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0 };
+      await tx.order.create({ data: { ...base, number: 1, fulfillment: "pickup", serviceFeeCents: 99, capturedAmountCents: 1599, platformFeeCents: 173, createdAt: at("2026-11-02T15:00:00Z") } });
+      await tx.order.create({ data: { ...base, number: 2, fulfillment: "courier", deliveryFeeCents: 500, serviceFeeCents: 99, capturedAmountCents: 2599, platformFeeCents: 187, createdAt: at("2026-11-03T15:00:00Z") } });
+    });
+  }
+
   beforeAll(async () => {
     raw = testPrismaClient();
     await raw.$connect();
@@ -185,9 +202,12 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     await seedStoreC();
     storeD = (await raw.store.create({ data: { slug: `an-d-${run}`, name: "Analytics D", timezone: TZ } })).id;
     await seedStoreD();
+    storeE = (await raw.store.create({ data: { slug: `an-e-${run}`, name: "Analytics E", timezone: TZ } })).id;
+    await seedStoreE();
     data = await storeAnalytics(storeA, TZ, RANGE);
     edges = await storeAnalytics(storeC, TZ, RANGE);
     promo = await storeAnalytics(storeD, TZ, RANGE);
+    serviceFee = await storeAnalytics(storeE, TZ, RANGE);
   });
 
   afterAll(async () => {
@@ -263,6 +283,14 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     expect(byDay["2026-11-02"]).toMatchObject({ orders: 0, refundsCents: 500, netCents: -471 });
     expect(byDay["2026-11-03"]).toMatchObject({ orders: 1, goodsCents: 1, cardFeeCents: 59, courierFeeCents: 941, netCents: 0 });
     expect(edges.sales.totals).toMatchObject({ refundsCents: 500, courierFeeCents: 941, netCents: -471 });
+  });
+
+  it("the card fee leaves out the customer's service fee, and net to store is unchanged by it", () => {
+    expect(serviceFee.sales.totals).toMatchObject({ orders: 2, cardFeeCents: 162, courierFeeCents: 500, netCents: 3338 });
+    const byDay = Object.fromEntries(serviceFee.sales.days.map((d) => [d.day, d]));
+    expect(byDay["2026-11-02"]).toMatchObject({ cardFeeCents: 74, courierFeeCents: 0, netCents: 1426 });
+    expect(byDay["2026-11-03"]).toMatchObject({ cardFeeCents: 88, courierFeeCents: 500, netCents: 1912 });
+    expect(analyticsCsv("sales", serviceFee, USAGE).split("\r\n")).toContain("2026-11-02,1,15.99,15.99,0.00,0.00,0.74,0.00,14.26");
   });
 
   it("exports a negative amount as a plain number a spreadsheet can sum", () => {
