@@ -42,6 +42,7 @@ import { authPrisma, storeScoped } from "../db";
 import { listMasterProducts } from "../listing/service";
 import { dismissDuplicatePair, listDuplicatePairs, mergeDuplicatePair, scanCatalogDuplicates } from "./catalog-duplicates";
 import { getMasterProductEditor, saveMasterProduct } from "./master-catalog";
+import { addProductSynonym } from "./product-synonyms";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `dp${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -408,6 +409,9 @@ describe("master catalog duplicates (real sessions, lane DB)", () => {
       unit: "", weightG: "", storage: "", status: "active",
     }));
     expect(save).toMatchObject({ ok: false, message: "This product was merged into another one and can no longer be edited." });
+    const synonym = await addProductSynonym({}, form({ productId: p["Garri white"]!, term: "garri merged", language: "", region: "" }));
+    expect(synonym).toMatchObject({ ok: false, message: "This product was merged into another one and can no longer be edited." });
+    expect(await authPrisma.productSynonym.count({ where: { productId: p["Garri white"]! } })).toBe(0);
     scriptVerdicts(new Map());
     await scanCatalogDuplicates();
     expect((await ourPairs()).filter((pair) => pair.a.id === p["Garri white"] || pair.b.id === p["Garri white"])).toEqual([]);
