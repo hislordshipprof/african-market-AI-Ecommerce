@@ -117,8 +117,10 @@ test("an admin finds an order by store and number and reads its detail, and the 
   await expect(page.getByTestId("order-lines")).toContainText("Ordered 2 · Picked 2");
   await expect(page.getByTestId("tracking-hint")).toHaveText("ends …7c2d");
   expect(await page.content()).not.toContain(TOKEN);
-  // Read only: the page itself has no buttons or forms; only the shell's menu does.
-  await expect(page.locator("#admin-main").locator("button, form")).toHaveCount(0);
+  // The refund form (#538) is the page's only form; nothing else on it acts.
+  await expect(page.locator("#admin-main form")).toHaveCount(1);
+  await expect(page.locator("#admin-main form")).toHaveAttribute("data-testid", "platform-refund-form");
+  await expect(page.locator("#admin-main button:not(form button)")).toHaveCount(0);
 
   const views = await asPlatformAdmin((tx, storeId) =>
     tx.auditLog.findMany({ where: { storeId, entityType: "order", entityId: orderId, action: "platform.order_view" } }),
