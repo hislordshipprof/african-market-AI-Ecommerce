@@ -16,7 +16,7 @@ vi.mock("./email/send", () => ({
 }));
 import { auth } from "./auth";
 import { authPrisma } from "./db";
-import { verifyUrlFromEmail } from "./test-magic-link";
+import { verifyUrlFromEmail } from "./test-auth";
 
 const stamp = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const slug = `rl-${stamp}`;
