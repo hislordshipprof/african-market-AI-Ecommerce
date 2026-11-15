@@ -5,6 +5,7 @@ import { platformAdminTransaction, storeScoped } from "../db";
 import { makeFakeStep } from "../inngest/fake-step";
 import { DoorDashDriveProvider } from "./doordash";
 import { fakeDoorDash } from "./doordash-fake";
+import { readCourierSettings } from "./courier-settings";
 import { UberDirectProvider } from "./uber-direct";
 import { fakeUberDirect } from "./uber-direct-fake";
 import {
@@ -173,7 +174,7 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     const dd = doordash(899);
     const ub = uber(749);
 
-    const result = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider, ub.provider], emit, now });
+    const result = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider, ub.provider], emit, now, settings: () => readCourierSettings() });
 
     const ready = new Date(T0.getTime() + 18 * MIN); // 12 items × 90 s, no history yet
     expect(result).toMatchObject({ ok: true, provider: "uber" });
@@ -183,7 +184,7 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     expect(await order(storeId, orderId)).toMatchObject({ status: "PICKING", readyEstimateAt: ready });
     expect(events.map((e) => e.name)).toEqual([COURIER_DELIVERY_CREATED]);
 
-    const again = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider, ub.provider], emit, now });
+    const again = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider, ub.provider], emit, now, settings: () => readCourierSettings() });
     expect(again).toMatchObject({ ok: true, existing: true });
     expect(await deliveries(storeId, orderId)).toHaveLength(1);
   });
@@ -203,7 +204,7 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
       });
     }
 
-    await dispatchPackingOrder(storeId, orderId, { providers: [doordash().provider], emit, now });
+    await dispatchPackingOrder(storeId, orderId, { providers: [doordash().provider], emit, now, settings: () => readCourierSettings() });
 
     // 120 s per item × 10 items.
     expect((await order(storeId, orderId)).readyEstimateAt).toEqual(new Date(T0.getTime() + 20 * MIN));
@@ -214,21 +215,21 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     const pickup = await packingOrder({ fulfillment: "pickup" });
     const starter = await packingOrder({ plan: "starter" });
     const dd = doordash();
-    expect(await dispatchPackingOrder(accepted.storeId, accepted.orderId, { providers: [dd.provider], emit, now })).toEqual({ ok: false, reason: "not_packing" });
-    expect(await dispatchPackingOrder(pickup.storeId, pickup.orderId, { providers: [dd.provider], emit, now })).toEqual({ ok: false, reason: "not_packing" });
-    expect(await dispatchPackingOrder(starter.storeId, starter.orderId, { providers: [dd.provider], emit, now })).toEqual({ ok: false, reason: "plan" });
+    expect(await dispatchPackingOrder(accepted.storeId, accepted.orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() })).toEqual({ ok: false, reason: "not_packing" });
+    expect(await dispatchPackingOrder(pickup.storeId, pickup.orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() })).toEqual({ ok: false, reason: "not_packing" });
+    expect(await dispatchPackingOrder(starter.storeId, starter.orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() })).toEqual({ ok: false, reason: "plan" });
     expect(dd.fake.calls).toEqual([]);
   });
 
   it("AC3: marking ready moves the order on to its courier's step with no second booking", async () => {
     const { storeId, orderId } = await packingOrder();
     const dd = doordash();
-    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now });
+    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
     if (!booked.ok) throw new Error("booking failed");
     await storeScoped(storeId).delivery.update({ where: { id: booked.deliveryId }, data: { status: "courier_assigned" } });
     await storeScoped(storeId).order.update({ where: { id: orderId }, data: { status: "READY", readyAt: T0 } });
 
-    expect(await dispatchReadyOrder(storeId, orderId, { providers: [dd.provider], emit, now })).toMatchObject({ ok: true, existing: true });
+    expect(await dispatchReadyOrder(storeId, orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() })).toMatchObject({ ok: true, existing: true });
 
     expect((await order(storeId, orderId)).status).toBe("COURIER_ASSIGNED");
     expect(dd.fake.calls.filter((c) => c.path === "/drive/v2/quotes")).toHaveLength(1);
@@ -237,24 +238,24 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
   it("AC2: the store pushes the ready time once; DoorDash moves the booked delivery", async () => {
     const { storeId, orderId } = await packingOrder();
     const dd = doordash();
-    await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now });
+    await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
     const later = () => new Date(T0.getTime() + 2 * MIN);
 
-    const pushed = await pushReadyTime(storeId, orderId, { providers: [dd.provider], emit, now: later });
+    const pushed = await pushReadyTime(storeId, orderId, { providers: [dd.provider], emit, now: later, settings: () => readCourierSettings() });
 
     const ready = new Date(T0.getTime() + 23 * MIN);
     expect(pushed).toEqual({ ok: true, readyEstimateAt: ready, courier: "moved" });
     expect(dd.fake.calls.at(-1)).toMatchObject({ method: "PATCH", body: { pickup_time: ready.toISOString() } });
     expect(await deliveries(storeId, orderId)).toMatchObject([{ status: "requested", pickupReadyAt: ready }]);
-    expect(await pushReadyTime(storeId, orderId, { providers: [dd.provider], emit, now: later })).toEqual({ ok: false, error: "The ready time was already pushed once" });
+    expect(await pushReadyTime(storeId, orderId, { providers: [dd.provider], emit, now: later, settings: () => readCourierSettings() })).toEqual({ ok: false, error: "The ready time was already pushed once" });
   });
 
   it("AC2: another store cannot push this order's ready time", async () => {
     const mine = await packingOrder();
     const other = await packingOrder();
     const dd = doordash();
-    await dispatchPackingOrder(mine.storeId, mine.orderId, { providers: [dd.provider], emit, now });
-    expect(await pushReadyTime(other.storeId, mine.orderId, { providers: [dd.provider], emit, now })).toEqual({ ok: false, error: "Order not found" });
+    await dispatchPackingOrder(mine.storeId, mine.orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
+    expect(await pushReadyTime(other.storeId, mine.orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() })).toEqual({ ok: false, error: "Order not found" });
     expect(await order(mine.storeId, mine.orderId)).toMatchObject({ readyPushedAt: null });
     expect(dd.fake.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
   });
@@ -262,9 +263,9 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
   it("AC2: a past-due ready time is pushed from now", async () => {
     const { storeId, orderId } = await packingOrder();
     const dd = doordash();
-    await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now });
+    await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
     const late = new Date(T0.getTime() + 30 * MIN);
-    const pushed = await pushReadyTime(storeId, orderId, { providers: [dd.provider], emit, now: () => late });
+    const pushed = await pushReadyTime(storeId, orderId, { providers: [dd.provider], emit, now: () => late, settings: () => readCourierSettings() });
     expect(pushed).toEqual({ ok: true, readyEstimateAt: new Date(late.getTime() + 5 * MIN), courier: "moved" });
   });
 
@@ -272,14 +273,14 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     const { storeId, orderId } = await packingOrder();
     const ub = uber(749);
     const dd = doordash(899);
-    await dispatchPackingOrder(storeId, orderId, { providers: [ub.provider, dd.provider], emit, now });
+    await dispatchPackingOrder(storeId, orderId, { providers: [ub.provider, dd.provider], emit, now, settings: () => readCourierSettings() });
     const refusing = Object.assign(Object.create(Object.getPrototypeOf(ub.provider)), ub.provider, {
       reschedule: async () => {
         throw new DeliveryProviderError("uber", 400, "invalid_params", "cannot update");
       },
     });
 
-    const pushed = await pushReadyTime(storeId, orderId, { providers: [refusing, dd.provider], emit, now });
+    const pushed = await pushReadyTime(storeId, orderId, { providers: [refusing, dd.provider], emit, now, settings: () => readCourierSettings() });
 
     const ready = new Date(T0.getTime() + 23 * MIN);
     expect(pushed).toEqual({ ok: true, readyEstimateAt: ready, courier: "rebooked" });
@@ -292,12 +293,12 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
   it("AC2: an assigned courier the provider will not move keeps its time", async () => {
     const { storeId, orderId } = await packingOrder();
     const dd = doordash();
-    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now });
+    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
     if (!booked.ok) throw new Error("booking failed");
     await storeScoped(storeId).delivery.update({ where: { id: booked.deliveryId }, data: { status: "courier_assigned" } });
     const refusing = { ...dd.provider, name: "doordash" as const, quote: dd.provider.quote.bind(dd.provider), create: dd.provider.create.bind(dd.provider), cancel: dd.provider.cancel.bind(dd.provider), handleWebhook: dd.provider.handleWebhook.bind(dd.provider), reschedule: async () => { throw new Error("refused"); } };
 
-    expect(await pushReadyTime(storeId, orderId, { providers: [refusing], emit, now })).toMatchObject({ ok: true, courier: "kept" });
+    expect(await pushReadyTime(storeId, orderId, { providers: [refusing], emit, now, settings: () => readCourierSettings() })).toMatchObject({ ok: true, courier: "kept" });
     expect((await deliveries(storeId, orderId)).map((r) => r.status)).toEqual(["courier_assigned"]);
   });
 
@@ -305,8 +306,8 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     const mine = await packingOrder();
     const other = await packingOrder();
     const dd = doordash();
-    await dispatchPackingOrder(mine.storeId, mine.orderId, { providers: [dd.provider], emit, now });
-    await dispatchPackingOrder(other.storeId, other.orderId, { providers: [dd.provider], emit, now });
+    await dispatchPackingOrder(mine.storeId, mine.orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
+    await dispatchPackingOrder(other.storeId, other.orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
 
     expect(await cancelOrderCouriers(mine.storeId, mine.orderId, { providers: [dd.provider] })).toEqual({ skipped: "order_not_cancelled" });
     await storeScoped(mine.storeId).order.update({ where: { id: mine.orderId }, data: { status: "CANCELLED" } });
@@ -324,7 +325,7 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
   it("AC4: a refused cancel keeps the delivery and is reported; a transient error restores it and throws for a retry", async () => {
     const refusedOrder = await packingOrder();
     const ub = uber();
-    await dispatchPackingOrder(refusedOrder.storeId, refusedOrder.orderId, { providers: [ub.provider], emit, now });
+    await dispatchPackingOrder(refusedOrder.storeId, refusedOrder.orderId, { providers: [ub.provider], emit, now, settings: () => readCourierSettings() });
     await storeScoped(refusedOrder.storeId).order.update({ where: { id: refusedOrder.orderId }, data: { status: "CANCELLED" } });
     const refusing = Object.assign(Object.create(Object.getPrototypeOf(ub.provider)), ub.provider, {
       cancel: async () => {
@@ -347,7 +348,7 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
   it("the assignment timer waits for the ready time, and again after a push", async () => {
     const { storeId, orderId } = await packingOrder({ qty: 30 }); // 45 min, the cap
     const dd = doordash();
-    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now });
+    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
     if (!booked.ok) throw new Error("booking failed");
     await storeScoped(storeId).delivery.update({ where: { id: booked.deliveryId }, data: { status: "courier_assigned" } });
     const ready = new Date(T0.getTime() + 45 * MIN);
@@ -358,7 +359,7 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
       },
     });
 
-    await runCourierFailover(step, { storeId, deliveryId: booked.deliveryId }, { providers: [dd.provider], emit, now });
+    await runCourierFailover(step, { storeId, deliveryId: booked.deliveryId }, { providers: [dd.provider], emit, now, settings: () => readCourierSettings() });
 
     expect(step.sleepUntils).toEqual([
       { name: "courier-assignment-timeout", until: ready.toISOString() },
@@ -370,11 +371,11 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     const { storeId, orderId } = await packingOrder();
     const ub = uber(749);
     const dd = doordash(899);
-    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [ub.provider, dd.provider], emit, now });
+    const booked = await dispatchPackingOrder(storeId, orderId, { providers: [ub.provider, dd.provider], emit, now, settings: () => readCourierSettings() });
     if (!booked.ok) throw new Error("booking failed");
     await storeScoped(storeId).order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
 
-    await runCourierFailover(makeFakeStep(), { storeId, deliveryId: booked.deliveryId }, { providers: [ub.provider, dd.provider], emit, now });
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId: booked.deliveryId }, { providers: [ub.provider, dd.provider], emit, now, settings: () => readCourierSettings() });
 
     expect((await deliveries(storeId, orderId)).map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"]]);
     expect(dd.fake.calls.filter((c) => c.path.endsWith("/accept"))).toHaveLength(0);
