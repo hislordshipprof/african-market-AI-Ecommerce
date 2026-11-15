@@ -1,4 +1,4 @@
-import { platform, platformAdminTransaction } from "../db";
+import { claimPaymentDisputeEvent, lockPaymentDispute, platform, platformAdminTransaction } from "../db";
 import { emailPlatformAdmins } from "../email/platform-admins";
 import { escapeHtml } from "../format";
 import { pushToStoreMembers } from "../push/store-members";
@@ -32,15 +32,11 @@ export async function applyDisputeEvent(event: WebhookEvent): Promise<DisputeEve
   const created = new Date((event.created ?? Math.floor(Date.now() / 1000)) * 1000);
 
   const outcome = await platformAdminTransaction(async (tx) => {
-    const claimed = await tx.$queryRaw<{ id: string }[]>`
-      INSERT INTO payment_dispute_events (id, stripe_dispute_id, type)
-      VALUES (${eventId}, ${d.id}, ${event.type})
-      ON CONFLICT (id) DO NOTHING
-      RETURNING id`;
-    await tx.$queryRaw`SELECT id FROM payment_disputes WHERE stripe_dispute_id = ${d.id} FOR UPDATE`;
+    const claimed = await claimPaymentDisputeEvent(tx, eventId, d.id, event.type);
+    await lockPaymentDispute(tx, d.id);
     const existing = await tx.paymentDispute.findUnique({ where: { stripeDisputeId: d.id } });
     // A replay still tells whoever a crashed run did not.
-    if (claimed.length === 0) return { result: "replayed" as const, row: existing };
+    if (!claimed) return { result: "replayed" as const, row: existing };
 
     const fields = {
       chargeId: d.chargeId,
