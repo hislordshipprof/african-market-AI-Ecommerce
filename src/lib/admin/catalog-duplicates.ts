@@ -4,7 +4,21 @@ import { z } from "zod";
 import { AssistantConfigError } from "../assistant/errors";
 import { assistantSpendState } from "../assistant/spend";
 import { judgeDuplicatePairs, type DuplicateVerdict, type JudgedProduct, type PairToJudge } from "../catalog/duplicate-judge";
-import { Prisma, lockMasterProductRow, platformAdminTransaction } from "../db";
+import {
+  Prisma,
+  copyMasterProductIngredients,
+  duplicateCandidates,
+  listingCountsByStore,
+  lockDuplicateScan,
+  lockMasterProductRow,
+  platformAdminTransaction,
+  replaceOpenDuplicatePairs,
+  repointListings,
+  repointPendingListingDrafts,
+  repointRecipeIngredients,
+  storesListingMasterProduct,
+  writeDuplicateVerdicts,
+} from "../db";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { requirePlatformAdmin } from "./session";
@@ -32,57 +46,9 @@ export async function scanCatalogDuplicates(): Promise<ScanResult> {
   await requirePlatformAdmin();
   const found = await platformAdminTransaction(async (tx) => {
     // One scan at a time; a second waits and then rebuilds the same list.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('catalog_duplicate_scan'))`;
-    const candidates = await tx.$queryRaw<Array<{ a_id: string; b_id: string; sim: number; shared: number; score: number }>>`
-      WITH live AS (
-        SELECT id, name, category_id FROM master_products
-        WHERE status IN ('active', 'needs_review') AND category_id IS NOT NULL
-      ),
-      terms AS (
-        SELECT l.id, LOWER(ps.term) AS t FROM live l JOIN product_synonyms ps ON ps.product_id = l.id
-        UNION SELECT id, LOWER(name) FROM live
-      ),
-      shared AS (
-        SELECT a.id AS a_id, b.id AS b_id, COUNT(DISTINCT ta.t)::int AS shared
-        FROM live a
-        JOIN live b ON b.category_id = a.category_id AND a.id < b.id
-        JOIN terms ta ON ta.id = a.id
-        JOIN terms tb ON tb.id = b.id AND tb.t = ta.t
-        GROUP BY a.id, b.id
-      ),
-      pairs AS (
-        SELECT a.id AS a_id, b.id AS b_id, search_similarity(LOWER(a.name), LOWER(b.name)) AS sim, COALESCE(s.shared, 0) AS shared
-        FROM live a
-        JOIN live b ON b.category_id = a.category_id AND a.id < b.id
-        LEFT JOIN shared s ON s.a_id = a.id AND s.b_id = b.id
-      )
-      SELECT p.a_id, p.b_id, p.sim, p.shared, (p.sim + 0.15 * LEAST(p.shared, 3))::real AS score
-      FROM pairs p
-      WHERE (p.sim >= ${NAME_SIMILARITY_MIN} OR p.shared > 0)
-        AND NOT EXISTS (
-          SELECT 1 FROM catalog_duplicate_pairs d
-          WHERE d.product_a_id = p.a_id AND d.product_b_id = p.b_id AND d.status <> 'open'
-        )
-      ORDER BY score DESC, p.a_id, p.b_id
-      LIMIT ${DUPLICATE_PAIRS_MAX}
-    `;
-    const aIds = candidates.map((row) => row.a_id);
-    const bIds = candidates.map((row) => row.b_id);
-    // An open pair that no longer qualifies is only a proposal: drop it.
-    await tx.$executeRaw`
-      DELETE FROM catalog_duplicate_pairs d
-      WHERE d.status = 'open'
-        AND NOT EXISTS (SELECT 1 FROM unnest(${aIds}::text[], ${bIds}::text[]) AS c(a, b) WHERE c.a = d.product_a_id AND c.b = d.product_b_id)
-    `;
-    // A pair already judged keeps its verdict, so a rescan spends nothing on it.
-    await tx.$executeRaw`
-      INSERT INTO catalog_duplicate_pairs (id, product_a_id, product_b_id, name_similarity, shared_terms, score, updated_at)
-      SELECT gen_random_uuid()::text, c.a, c.b, c.sim, c.shared, c.score, now()
-      FROM unnest(${aIds}::text[], ${bIds}::text[], ${candidates.map((row) => row.sim)}::real[],
-        ${candidates.map((row) => row.shared)}::int[], ${candidates.map((row) => row.score)}::real[]) AS c(a, b, sim, shared, score)
-      ON CONFLICT (product_a_id, product_b_id) DO UPDATE
-        SET name_similarity = EXCLUDED.name_similarity, shared_terms = EXCLUDED.shared_terms, score = EXCLUDED.score, updated_at = now()
-    `;
+    await lockDuplicateScan(tx);
+    const candidates = await duplicateCandidates(tx, NAME_SIMILARITY_MIN, DUPLICATE_PAIRS_MAX);
+    await replaceOpenDuplicatePairs(tx, candidates);
     return candidates.length;
   }, WRITE_TRANSACTION);
 
@@ -149,13 +115,7 @@ async function judgeTopPairs(): Promise<Omit<ScanResult, "found">> {
       break;
     }
     if (verdicts.size === 0) continue;
-    const ids = [...verdicts.keys()];
-    await platformAdminTransaction((tx) => tx.$executeRaw`
-      UPDATE catalog_duplicate_pairs d
-      SET verdict = v.verdict, verdict_reason = v.reason, judged_at = now(), updated_at = now()
-      FROM unnest(${ids}::text[], ${ids.map((id) => verdicts.get(id)!.verdict)}::text[], ${ids.map((id) => verdicts.get(id)!.reason)}::text[]) AS v(id, verdict, reason)
-      WHERE d.id = v.id AND d.status = 'open' AND d.verdict IS NULL
-    `);
+    await platformAdminTransaction((tx) => writeDuplicateVerdicts(tx, [...verdicts].map(([id, value]) => ({ id, ...value }))));
     judged += verdicts.size;
   }
   return { judged, unjudged: pending.length - judged, resting, judgeFailed };
@@ -210,13 +170,7 @@ export async function listDuplicatePairs(): Promise<DuplicatePairView[]> {
         ingredients: { select: { ingredient: { select: { name: true } } } },
       },
     });
-    const stores = await tx.$queryRaw<Array<{ product_id: string; store_id: string; store_name: string; listings: number }>>`
-      SELECT l.master_product_id AS product_id, s.id AS store_id, s.name AS store_name, COUNT(*)::int AS listings
-      FROM listings l JOIN stores s ON s.id = l.store_id
-      WHERE l.master_product_id = ANY(${ids}::text[])
-      GROUP BY l.master_product_id, s.id, s.name
-      ORDER BY s.name, s.id
-    `;
+    const stores = await listingCountsByStore(tx, ids);
     const byId = new Map(products.map((product): [string, PairProduct] => [product.id, {
       id: product.id,
       name: product.name,
@@ -379,11 +333,7 @@ export async function mergeDuplicatePair(_prev: DuplicateActionState, form: Form
       adopted.push("ingredients");
     }
     if (kept.ingredientsStatus !== "reviewed") {
-      await tx.$executeRaw`
-        INSERT INTO master_product_ingredients (product_id, ingredient_id)
-        SELECT ${survivorId}, ingredient_id FROM master_product_ingredients WHERE product_id = ${loserId}
-        ON CONFLICT DO NOTHING
-      `;
+      await copyMasterProductIngredients(tx, loserId, survivorId);
     }
     await tx.masterProductIngredient.deleteMany({ where: { productId: loserId } });
     if (kept.allergensStatus !== "reviewed" && merged.allergensStatus === "reviewed") {
@@ -398,11 +348,7 @@ export async function mergeDuplicatePair(_prev: DuplicateActionState, form: Form
     }
     if (Object.keys(attributeData).length > 0) await tx.masterProduct.update({ where: { id: survivorId }, data: attributeData });
 
-    const listings = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-      UPDATE listings SET master_product_id = ${survivorId}, updated_at = now()
-      WHERE master_product_id = ${loserId}
-      RETURNING id, store_id
-    `;
+    const listings = await repointListings(tx, loserId, survivorId);
 
     // Synonyms: the loser's name and terms the survivor lacks move over; repeats are dropped.
     const survivorSynonyms = await tx.productSynonym.findMany({ where: { productId: survivorId }, select: { term: true } });
@@ -425,17 +371,8 @@ export async function mergeDuplicatePair(_prev: DuplicateActionState, form: Form
     const addedName = !known.has(loserName);
     if (addedName) await tx.productSynonym.create({ data: { productId: survivorId, term: loser.name } });
 
-    const recipeIngredients = await tx.$queryRaw<Array<{ id: string }>>`
-      UPDATE recipe_ingredients SET master_product_id = ${survivorId} WHERE master_product_id = ${loserId} RETURNING id
-    `;
-    const drafts = await tx.$queryRaw<Array<{ id: string }>>`
-      UPDATE listing_drafts
-      SET master_product_id = CASE WHEN master_product_id = ${loserId} THEN ${survivorId} ELSE master_product_id END,
-        candidate_ids = ARRAY(SELECT DISTINCT unnest(array_replace(candidate_ids, ${loserId}, ${survivorId}))),
-        updated_at = now()
-      WHERE status = 'pending' AND (master_product_id = ${loserId} OR ${loserId} = ANY(candidate_ids))
-      RETURNING id
-    `;
+    const recipeIngredients = await repointRecipeIngredients(tx, loserId, survivorId);
+    const drafts = await repointPendingListingDrafts(tx, loserId, survivorId);
     const superseded = await tx.attributeProposal.updateMany({
       where: { productId: loserId, status: "pending" },
       data: { status: "superseded", reviewedAt: new Date(), reviewedBy: session.user.id },
@@ -480,17 +417,27 @@ export async function mergeDuplicatePair(_prev: DuplicateActionState, form: Form
       },
     });
 
-    const storeIds = await tx.$queryRaw<Array<{ store_id: string }>>`
-      SELECT DISTINCT store_id FROM listings WHERE master_product_id = ${survivorId}
-    `;
+    const storeIds = await storesListingMasterProduct(tx, survivorId);
     return {
       ok: true,
       message: `Merged ${loser.name} into ${survivor.name}. ${listings.length} listing${listings.length === 1 ? "" : "s"} moved.`,
-      storeIds: storeIds.map((row) => row.store_id),
+      storeIds,
     };
   }, WRITE_TRANSACTION);
 
   const { storeIds, ...state } = result;
   for (const storeId of storeIds ?? []) revalidateStorefront(storeId);
   return state;
+}
+
+export type ScanState = { ok?: boolean; message?: string };
+
+/** The page's "Find duplicates" button. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- a form action takes these
+export async function runDuplicateScan(_prev: ScanState, _form: FormData): Promise<ScanState> {
+  const result = await scanCatalogDuplicates();
+  const found = `${result.found} possible ${result.found === 1 ? "duplicate" : "duplicates"} found.`;
+  if (result.resting) return { ok: true, message: `${found} The AI spend limit is reached for today, so ${result.unjudged} ${result.unjudged === 1 ? "pair is" : "pairs are"} not judged yet.` };
+  if (result.judgeFailed) return { ok: true, message: `${found} Claude could not judge them right now; ${result.unjudged} ${result.unjudged === 1 ? "pair is" : "pairs are"} not judged yet.` };
+  return { ok: true, message: `${found} Claude judged ${result.judged} new ${result.judged === 1 ? "pair" : "pairs"}.` };
 }

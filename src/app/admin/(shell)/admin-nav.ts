@@ -1,6 +1,7 @@
 import {
   BellRing,
   Bot,
+  CopyCheck,
   ClipboardCheck,
   CreditCard,
   FileInput,
@@ -25,6 +26,7 @@ export const ADMIN_NAV = [
   { href: "/admin/store-requests", label: "Store requests", icon: BellRing },
   { href: "/admin/catalog/products", label: "Products", icon: Package },
   { href: "/admin/catalog/review", label: "Catalog review", icon: ClipboardCheck },
+  { href: "/admin/catalog/duplicates", label: "Duplicates", icon: CopyCheck },
   { href: "/admin/orders", label: "Refunds", icon: Undo2 },
   { href: "/admin/orders/check", label: "Orders to check", icon: PackageSearch },
   { href: "/admin/couriers/incidents", label: "Courier incidents", icon: Truck },
