@@ -20,19 +20,28 @@ vi.mock("next/cache", () => ({
   revalidatePath: () => {},
 }));
 
+// Storage boundary: lanes have no R2 keys, so the admin's photo upload is kept in memory.
+vi.mock("../r2", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../r2")>();
+  return { ...actual, uploadToR2: async (key: string) => actual.catalogImageUrl(key) };
+});
+
 vi.mock("next/navigation", () => ({
   redirect: (to: string) => {
     throw new Error(`REDIRECT:${to}`);
   },
 }));
 
+import sharp from "sharp";
 import type { PrismaClient } from "@prisma/client";
 import { authPrisma } from "../db";
 import { resolveDirectUrl } from "../env";
 import { authPost, collectCookies } from "../test-auth";
 import { testPrismaClient } from "../test-prisma";
 import { seedMasterCatalog } from "../../../prisma/seed-master-catalog";
-import { getMasterProductEditor, saveMasterProduct } from "./master-catalog";
+import { mergeDuplicatePair } from "./catalog-duplicates";
+import { getMasterProductEditor, saveMasterProduct, uploadMasterProductImage } from "./master-catalog";
+import { removeProductSynonym, updateProductSynonym } from "./product-synonyms";
 
 // #613: a re-seed of the master catalog keeps what a platform admin changed through the admin.
 const RUN = `sk${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -139,7 +148,7 @@ describe("master catalog seed keeps admin changes (lane DB)", () => {
       if (adminId) await tx.auditLog.deleteMany({ where: { actorId: adminId } });
       await tx.catalogDuplicatePair.deleteMany({ where: { OR: [{ productAId: { in: productIds } }, { productBId: { in: productIds } }] } });
       await tx.productSynonym.deleteMany({ where: { productId: { in: productIds } } });
-      await tx.masterProduct.updateMany({ where: { id: { in: productIds } }, data: { mergedIntoId: null } });
+      await tx.masterProduct.deleteMany({ where: { id: { in: productIds }, mergedIntoId: { not: null } } });
       await tx.masterProduct.deleteMany({ where: { id: { in: productIds } } });
       if (adminId) {
         await tx.$executeRaw`DELETE FROM two_factors WHERE user_id = ${adminId}`;
@@ -171,6 +180,80 @@ describe("master catalog seed keeps admin changes (lane DB)", () => {
     });
     expect(await readProduct(untouched)).toMatchObject({ name: `${RUN} Plantain v2`, description: "Seeded text v2", categoryId: "cat_tubers" });
     expect(await readProduct(added)).toMatchObject({ name: `${RUN} ${added}`, status: "active" });
+    expect(lines).toContain("Kept admin changes on 1 product (the fields, status and synonyms an admin changed)");
+  });
+  it("an archived or rejected product stays so on a re-seed that marks it active", async () => {
+    const archived = `${RUN}-egusi`;
+    const rejected = `${RUN}-ogbono`;
+    await seed([csvRow(archived), csvRow(rejected)]);
+    expect(await saveMasterProduct({}, await editorForm(archived, { status: "archived" }))).toMatchObject({ ok: true });
+    expect(await saveMasterProduct({}, await editorForm(rejected, { status: "rejected" }))).toMatchObject({ ok: true });
+
+    await seed([csvRow(archived, { description: "Seeded text v2" }), csvRow(rejected)]);
+
+    expect(await readProduct(archived)).toMatchObject({ status: "archived", description: "Seeded text v2" });
+    expect((await readProduct(rejected)).status).toBe("rejected");
+  });
+
+  it("a photo an admin uploaded survives a re-seed that brings its own image", async () => {
+    const id = `${RUN}-garri`;
+    await seed([csvRow(id, { image_url: "https://images.test/garri.jpg" })]);
+    for (const [name, value] of Object.entries({ R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "key", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "bucket", R2_PUBLIC_URL: "" })) {
+      vi.stubEnv(name, value);
+    }
+    const photo = new FormData();
+    photo.set("productId", id);
+    const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#a33" } }).png().toBuffer();
+    photo.set("image", new File([new Uint8Array(png)], "garri.png", { type: "image/png" }));
+    expect(await uploadMasterProductImage({}, photo)).toMatchObject({ ok: true });
+    vi.unstubAllEnvs();
+    const adminPhoto = (await readProduct(id)).imageUrl;
+    expect(adminPhoto).toMatch(new RegExp(`/catalog/${id}-[0-9a-f]{16}\\.webp$`));
+
+    await seed([csvRow(id, { image_url: "https://images.test/garri.jpg" })], {
+      uploadImage: async () => ({ ok: true, url: "https://cdn.test/catalog/seeded.webp", bytes: 10 }),
+    });
+
+    expect((await readProduct(id)).imageUrl).toBe(adminPhoto);
+  });
+
+  it("a seeded synonym an admin edited or removed stays edited or removed", async () => {
+    const id = `${RUN}-cocoyam`;
+    const synonyms = { local_names: "ede (ig, Nigeria)", search_synonyms: "coco yam|taro" };
+    await seed([csvRow(id, synonyms)]);
+    const seeded = (await readProduct(id)).synonyms;
+    const ede = seeded.find((synonym) => synonym.term === "ede")!;
+    const taro = seeded.find((synonym) => synonym.term === "taro")!;
+
+    const edit = new FormData();
+    for (const [key, value] of Object.entries({ productId: id, synonymId: ede.id, term: "ede ofe", language: "ig", region: "Nigeria" })) edit.set(key, value);
+    expect(await updateProductSynonym({}, edit)).toMatchObject({ ok: true });
+    const remove = new FormData();
+    remove.set("productId", id);
+    remove.set("synonymId", taro.id);
+    expect(await removeProductSynonym({}, remove)).toMatchObject({ ok: true });
+
+    await seed([csvRow(id, synonyms)]);
+
+    expect((await readProduct(id)).synonyms.map((synonym) => synonym.term).sort()).toEqual(["coco yam", "ede ofe"]);
+  });
+
+  it("a merged product stays merged into its survivor, with no synonyms back", async () => {
+    const [survivor, loser] = [`${RUN}-melon-a`, `${RUN}-melon-b`];
+    // The merge drops the loser's "egusi" (the survivor has it) and moves "agushi".
+    const rows = [csvRow(survivor, { search_synonyms: "egusi" }), csvRow(loser, { search_synonyms: "agushi|egusi" })];
+    await seed(rows);
+    const pair = await asPlatformAdmin((tx) =>
+      tx.catalogDuplicatePair.create({ data: { productAId: survivor, productBId: loser, nameSimilarity: 0.9, sharedTerms: 1, score: 0.9 } }));
+    const merge = new FormData();
+    merge.set("pairId", pair.id);
+    merge.set("survivorId", survivor);
+    expect(await mergeDuplicatePair({}, merge)).toMatchObject({ ok: true });
+
+    const lines = await seed(rows);
+
+    expect(await readProduct(loser)).toMatchObject({ status: "merged", mergedIntoId: survivor, synonyms: [] });
+    expect((await readProduct(survivor)).synonyms.map((synonym) => synonym.term).sort()).toEqual(["agushi", "egusi", `${RUN} ${loser}`]);
     expect(lines).toContain("Kept admin changes on 1 product (the fields, status and synonyms an admin changed)");
   });
 });
