@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { platform, platformAdminTransaction, storeScoped } from "../db";
 import { lineChargeCents, type ChargeLine } from "../order/substitution-pricing";
-import { getTaxCalculator, TaxUnavailableError, type LineTaxAmount, type TaxLine, type TaxLineInput } from "./calculator";
+import { getTaxCalculator, TaxUnavailableError, type LineTaxAmount, type TaxLine, type TaxLineInput, type TaxReversalPlan } from "./calculator";
 import { taxAddress, variantTaxCodes } from "./checkout-tax";
 
 /**
@@ -134,4 +134,59 @@ export async function recordPendingTaxTransactions(limit: number, opts?: { store
     if (await recordTaxTransaction(row.storeId, row.id)) recorded += 1;
   }
   return recorded;
+}
+
+/**
+ * Reverses the order's tax transaction for each succeeded refund that owes a reversal (#671), once per refund: the
+ * reference `refund_<request id>` is also the idempotency key. A failure leaves it pending for the sweep; so does a
+ * refund before the transaction is recorded. Returns how many were reversed.
+ */
+export async function reverseRefundTax(storeId: string, orderId: string): Promise<number> {
+  const db = storeScoped(storeId);
+  const order = await db.order.findUnique({ where: { id: orderId }, select: { taxTransactionId: true, taxLiableParty: true } });
+  if (!order?.taxTransactionId) return 0;
+  const due = await db.refundRequest.findMany({
+    where: { orderId, providerStatus: "succeeded", taxReversalId: null, taxReversal: { not: Prisma.DbNull } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  if (due.length === 0) return 0;
+  const store = await platform.store.findUniqueOrThrow({ where: { id: storeId }, select: { stripeAccountId: true } });
+  let reversed = 0;
+  for (const row of due) {
+    try {
+      const reversal = await getTaxCalculator().reverseTransaction({
+        transactionId: order.taxTransactionId,
+        reference: `refund_${row.id}`,
+        liableParty: order.taxLiableParty === "store" ? "store" : "platform",
+        stripeAccount: store.stripeAccountId,
+        plan: row.taxReversal as TaxReversalPlan,
+      });
+      await db.refundRequest.updateMany({ where: { id: row.id, taxReversalId: null }, data: { taxReversalId: reversal.id } });
+      reversed += 1;
+    } catch (error) {
+      console.error(`Tax reversal pending for refund ${row.id} of order ${orderId}:`, error);
+    }
+  }
+  return reversed;
+}
+
+/** Retries succeeded refunds whose tax reversal is still pending, on orders whose transaction is recorded. */
+export async function reversePendingTaxRefunds(limit: number, opts?: { storeIds?: readonly string[] }): Promise<number> {
+  if (opts?.storeIds && opts.storeIds.length === 0) return 0;
+  const pending = await platformAdminTransaction((tx) => tx.refundRequest.findMany({
+    where: {
+      providerStatus: "succeeded",
+      taxReversalId: null,
+      taxReversal: { not: Prisma.DbNull },
+      order: { taxTransactionId: { not: null } },
+      ...(opts?.storeIds ? { storeId: { in: [...opts.storeIds] } } : {}),
+    } satisfies Prisma.RefundRequestWhereInput,
+    select: { orderId: true, storeId: true },
+    distinct: ["orderId"],
+    orderBy: { orderId: "asc" },
+    take: limit,
+  }));
+  let reversed = 0;
+  for (const row of pending) reversed += await reverseRefundTax(row.storeId, row.orderId);
+  return reversed;
 }

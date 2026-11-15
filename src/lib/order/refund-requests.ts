@@ -11,7 +11,11 @@ import type { RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
 import { recordCapture } from "./capture-record";
-import { refundShares } from "./platform-fee";
+import { refundShares, type LineTax, type RefundOrder, type RefundShares } from "./platform-fee";
+import { lineChargeCents, type ChargeLine } from "./substitution-pricing";
+import { allocateLineDiscounts, lineDiscountShareCents } from "../coupon/discount";
+import type { TaxReversalPlan } from "../tax/calculator";
+import { reverseRefundTax } from "../tax/capture-tax";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
 
@@ -57,11 +61,75 @@ export async function findOpenRefundRequest(storeId: string, orderId: string): P
   return storeScopedTransaction(storeId, (tx) => openRefundRequest(tx, orderId));
 }
 
-/** The tax earlier refunds of the order took (#65), counting any not known to have failed, so tax shares never add up past the tax. */
+/** Earlier refunds of the order not known to have failed: what they took counts against what is left. */
+function counted<T extends { state: string; providerStatus: string | null }>(rows: T[]): T[] {
+  return rows.filter((row) => row.state !== "NOT_CREATED" && row.providerStatus !== "failed" && row.providerStatus !== "canceled");
+}
+
+/** The tax earlier refunds of the order took (#65), so tax shares never add up past the tax. */
 export function taxRefundedCents(rows: Array<{ state: string; providerStatus: string | null; taxShareCents: number }>): number {
-  return rows
-    .filter((row) => row.state !== "NOT_CREATED" && row.providerStatus !== "failed" && row.providerStatus !== "canceled")
-    .reduce((sum, row) => sum + row.taxShareCents, 0);
+  return counted(rows).reduce((sum, row) => sum + row.taxShareCents, 0);
+}
+
+export type RefundedLine = ChargeLine & { id: string; discountCents: number; taxCents: number };
+export type RefundedLines = { goodsCents: number; lineTax: LineTax | null; lines: Array<{ reference: string; amountCents: number; taxCents: number }> };
+
+/**
+ * The goods of the chosen line quantities, less their coupon share, and each one's exact tax: its share of the
+ * line's tax stored at capture (#671). `lineTax` is null for an order captured before lines kept their tax, which
+ * refunds tax in proportion. Null when a pick is not a line of the order or asks for more than was picked.
+ */
+export function refundedLines(order: { taxCents: number; lines: RefundedLine[] }, picks: Array<{ lineId: string; qty: number }>): RefundedLines | null {
+  if (picks.length === 0) return null;
+  const byId = new Map(order.lines.map((line) => [line.id, line]));
+  const seen = new Set<string>();
+  const lines: RefundedLines["lines"] = [];
+  for (const pick of picks) {
+    const line = byId.get(pick.lineId);
+    if (!line || seen.has(pick.lineId)) return null;
+    if (!Number.isInteger(pick.qty) || pick.qty < 1 || pick.qty > line.qtyPicked) return null;
+    seen.add(pick.lineId);
+    const charge = lineChargeCents(line);
+    const gross = pick.qty * line.unitPriceCents;
+    const goods = gross - lineDiscountShareCents({ discountCents: line.discountCents, chargeCents: charge }, gross);
+    const charged = charge - line.discountCents;
+    const tax = charged > 0 ? Math.min(line.taxCents, Math.round((line.taxCents * goods) / charged)) : 0;
+    lines.push({ reference: line.id, amountCents: goods, taxCents: tax });
+  }
+  const goodsCents = lines.reduce((sum, line) => sum + line.amountCents, 0);
+  const exact = order.taxCents === 0 || order.lines.some((line) => line.taxCents > 0);
+  return { goodsCents, lineTax: exact ? { goodsCents, taxCents: lines.reduce((sum, line) => sum + line.taxCents, 0) } : null, lines };
+}
+
+/**
+ * What this refund reverses of the order's Stripe Tax transaction (#671): a cancel the whole sale (or what is left of
+ * it), a refund of lines those lines' goods and tax, any other amount its goods and tax as a flat amount. Never more
+ * than earlier reversals left of the sale; null for an order with no calculation, so no transaction.
+ */
+function taxReversalPlan(
+  order: RefundOrder & { taxCalculationId: string | null },
+  earlier: Array<{ state: string; providerStatus: string | null; taxReversal: Prisma.JsonValue }>,
+  cancel: boolean,
+  shares: Pick<RefundShares, "goodsCents" | "taxCents">,
+  lines: RefundedLines | null,
+): TaxReversalPlan | null {
+  if (!order.taxCalculationId) return null;
+  const saleCents = (order.capturedAmountCents ?? 0) - order.serviceFeeCents - order.tipCents - order.deliveryFeeCents;
+  const before = counted(earlier).reduce((sum, row) => sum + ((row.taxReversal as TaxReversalPlan | null)?.totalCents ?? 0), 0);
+  const left = saleCents - before;
+  if (left <= 0) return null;
+  if (cancel) return before === 0 ? { mode: "full", totalCents: saleCents } : { mode: "flat", totalCents: left };
+  if (lines?.lineTax) {
+    const goods = allocateLineDiscounts(lines.lines.map((line) => line.amountCents), shares.goodsCents);
+    const tax = allocateLineDiscounts(lines.lines.map((line) => line.taxCents), shares.taxCents);
+    const reversed = lines.lines
+      .map((line, index) => ({ reference: line.reference, amountCents: goods[index], taxCents: tax[index] }))
+      .filter((line) => line.amountCents > 0 || line.taxCents > 0);
+    const totalCents = reversed.reduce((sum, line) => sum + line.amountCents + line.taxCents, 0);
+    return totalCents > 0 ? { mode: "lines", totalCents, lines: reversed } : null;
+  }
+  const totalCents = Math.min(left, shares.goodsCents + shares.taxCents);
+  return totalCents > 0 ? { mode: "flat", totalCents } : null;
 }
 
 function countedCents(listed: RefundResult[], statuses: string[]): number {
@@ -392,11 +460,20 @@ export async function submitRefund(
     const count = await tx.refundRequest.count({ where: { orderId } });
     const key = cause.cause === "platform" ? platformRefundKey(orderId, cause.submissionId) : `refund:${orderId}:${count + 1}`;
     const refundApplicationFee = refundsApplicationFee(cause, current.fulfillment);
-    const taxBefore = taxRefundedCents(await tx.refundRequest.findMany({ where: { orderId } }));
+    const earlier = await tx.refundRequest.findMany({ where: { orderId } });
+    const taxBefore = taxRefundedCents(earlier);
+    // A refund for an issue's lines returns their exact tax (#671); any other amount the tax in proportion.
+    const issue = cause.cause === "issue" && cause.issueReportId
+      ? await tx.issueReport.findUnique({ where: { id: cause.issueReportId }, select: { lines: true } })
+      : null;
+    const lines = issue
+      ? refundedLines({ taxCents: current.taxCents, lines: await tx.orderLine.findMany({ where: { orderId } }) }, issue.lines as Array<{ lineId: string; qty: number }>)
+      : null;
     // A cancel refunds everything left, so all the tax left; any other refund is split into goods, fee share and tax share.
     const shares = cause.cause === "cancel"
-      ? { serviceFeeCents: 0, taxCents: Math.max(0, current.taxCents - taxBefore) }
-      : refundShares(amount, current, taxBefore);
+      ? { goodsCents: 0, serviceFeeCents: 0, taxCents: Math.max(0, current.taxCents - taxBefore) }
+      : refundShares(amount, current, taxBefore, lines?.lineTax ?? null);
+    const taxReversal = taxReversalPlan(current, earlier, cause.cause === "cancel", shares, lines);
     const row = await tx.refundRequest.create({
       data: {
         storeId,
@@ -410,6 +487,7 @@ export async function submitRefund(
         serviceFeeShareCents: refundApplicationFee ? 0 : shares.serviceFeeCents,
         taxShareCents: shares.taxCents,
         platformTaxShareCents: refundApplicationFee || current.taxLiableParty === "store" ? 0 : shares.taxCents,
+        taxReversal: taxReversal ?? undefined,
         state: "RESERVED",
       },
     });
@@ -694,6 +772,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
     return fresh;
   }, { timeout: 20_000 });
   await returnServiceFeeShares(located.storeId, orderId);
+  await reverseRefundTax(located.storeId, orderId);
   if (notifyCancel) scheduleOrderNotification(located.storeId, orderId, "cancelled");
   if (notifyRefunded) scheduleOrderNotification(located.storeId, orderId, "refunded");
   if (issueFailure) {
