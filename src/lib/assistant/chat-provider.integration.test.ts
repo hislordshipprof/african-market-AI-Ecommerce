@@ -70,22 +70,6 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     vi.unstubAllEnvs();
   });
 
-  function post(slug: string, text: string, ip: string) {
-    return new Request("http://prov.test/api/assistant/chat", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        host: "prov.test",
-        origin: "http://prov.test",
-        "x-store-slug": slug,
-        "x-forwarded-for": ip,
-      },
-      body: JSON.stringify({
-        message: { id: "m", role: "user", parts: [{ type: "text", text }] },
-      }),
-    });
-  }
-
   it("sends exactly one cache breakpoint on the static system block", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", KEY);
     vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
@@ -254,6 +238,10 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     expect(textBody).not.toContain("\"type\":\"image\"");
     expect(textBody).not.toContain("\"type\":\"document\"");
   });
+
+  function post(slug: string, text: string, ip: string) {
+    return message("m", text, undefined, slug, ip);
+  }
 
   function message(id: string, text: string, cookie?: string, slug = slugA, ip = runIp("203.0.113.180")) {
     return new Request("http://prov.test/api/assistant/chat", {

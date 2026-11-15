@@ -958,17 +958,15 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
     }
     await tx.cartLine.update({ where: { id: line.id }, data: { qty: parsed.qty } });
     const money = await readCartMoney(tx, ctx.cartId);
-    const fresh = money.lines.find((row) => row.id === line.id);
-    if (!fresh) throw new Error("updated cart line missing from subtotal read");
-    const unitPriceCents = fresh.variant.price;
+    const { unitPriceCents, lineTotalCents } = withLineMoney({ ok: true as const, lineId: line.id, qty: parsed.qty, added: 0 }, money);
     return {
       ok: true,
       lineId: line.id,
       qty: parsed.qty,
       swapRule: line.swapRule,
-      variantId: fresh.variant.id,
+      variantId: line.variantId,
       unitPriceCents,
-      lineTotalCents: unitPriceCents * parsed.qty,
+      lineTotalCents,
       ...money.totals,
     };
   });
