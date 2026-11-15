@@ -3,6 +3,7 @@
 import { revalidateStore } from "../get-store";
 import { platformAdmin, platformAdminTransaction, lockStoreAddress } from "../db";
 import { requirePlatformAdmin } from "./session";
+import { addressStamp, coordinatesForStore, insertStore } from "./store-create";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
 import { isSlugRoutable } from "../slug";
 import type { ThemePreset } from "../theme";
@@ -11,7 +12,6 @@ import { z } from "zod";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
-import { getAddressProvider } from "../address/provider";
 import { setPilot } from "../billing/service";
 import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
 import { queueStoreRequestNotices } from "../directory/store-requests";
@@ -169,8 +169,9 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     errors.themePreset = "Invalid theme preset";
   }
 
-  if (!["active", "suspended"].includes(status)) {
-    errors.status = "Status must be active or suspended";
+  // `setup` is where an approved store application starts (#554); saving the form keeps it there.
+  if (!["active", "suspended", "setup"].includes(status)) {
+    errors.status = "Status must be active, suspended or setup";
   }
 
   if (!Number.isFinite(prepTimeMinutes) || prepTimeMinutes < 0 || prepTimeMinutes > 480) {
@@ -299,63 +300,10 @@ function boundStoreForm(data: FormData): boolean {
   return parseInput(storeFormSchema, readFormFields(data, STORE_FORM_FIELDS)).ok;
 }
 
-function addressStamp(row: {
-  addressLine1: string | null;
-  addressLine2: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
-}): string {
-  return [row.addressLine1, row.addressLine2, row.city, row.state, row.zip]
-    .map((part) => (part ?? "").trim().toLowerCase())
-    .join("|");
-}
-
 class StoreAddressChanged extends Error {
   constructor() {
     super("STORE_ADDRESS_CHANGED");
   }
-}
-
-async function coordinatesForStore(
-  values: {
-    addressLine1: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    addressLine2: string | null;
-    storeDeliveryEnabled: boolean;
-  },
-  previous: {
-    addressLine1: string | null;
-    addressLine2: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    lat: number | null;
-    lng: number | null;
-  } | null,
-): Promise<{ lat: number | null; lng: number | null } | { error: string }> {
-  if (
-    previous &&
-    previous.lat != null &&
-    previous.lng != null &&
-    addressStamp(values) === addressStamp(previous)
-  ) {
-    return { lat: previous.lat, lng: previous.lng };
-  }
-  if (!values.addressLine1) return { lat: null, lng: null };
-  const located = await getAddressProvider().locate({
-    line1: values.addressLine1,
-    city: values.city ?? "",
-    state: values.state ?? "",
-    zip: values.zip ?? "",
-  });
-  if (!located.ok) {
-    if (values.storeDeliveryEnabled) return { error: "We couldn't confirm that address" };
-    return { lat: null, lng: null };
-  }
-  return { lat: located.match.lat, lng: located.match.lng };
 }
 
 function deliveryAudit(row: {
@@ -439,68 +387,9 @@ export async function createStore(
     }
   }
 
-  const store = await platformAdminTransaction(async (tx) => {
-    const s = await tx.store.create({
-      data: {
-        slug: values.slug,
-        name: values.name,
-        logoUrl: values.logoUrl,
-        brandColor: finalBrandColor,
-        themePreset: values.themePreset,
-        status: values.status,
-        hours: values.hours !== null ? values.hours : Prisma.JsonNull,
-        prepTimeMinutes: values.prepTimeMinutes,
-        deliveryRadiusMi: values.deliveryRadiusMi,
-        minimumOrderCents: values.minimumOrderCents,
-        pickupEnabled: values.pickupEnabled,
-        autoRefundLimitCents: values.autoRefundLimitCents,
-        supportSlaMinutes: values.supportSlaMinutes,
-        timezone: values.timezone,
-        addressLine1: values.addressLine1,
-        addressLine2: values.addressLine2,
-        city: values.city,
-        state: values.state,
-        zip: values.zip,
-        phone: values.phone,
-        lat: coords.lat,
-        lng: coords.lng,
-        storeDeliveryEnabled: values.storeDeliveryEnabled,
-        storeDeliveryFeeCents: values.storeDeliveryFeeCents,
-        pickupSlotSettings: values.pickupSlotSettings ?? Prisma.JsonNull,
-        storeDeliverySlotSettings: values.storeDeliverySlotSettings ?? Prisma.JsonNull,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        storeId: s.id,
-        actorId: session.user.id,
-        actorEmail: session.user.email,
-        action: "store.create",
-        entityType: "store",
-        entityId: s.id,
-        after: {
-          slug: s.slug,
-          name: s.name,
-          logoUrl: s.logoUrl,
-          brandColor: s.brandColor,
-          themePreset: s.themePreset,
-          status: s.status,
-          hours: s.hours,
-          prepTimeMinutes: s.prepTimeMinutes,
-          deliveryRadiusMi: Number(s.deliveryRadiusMi),
-          minimumOrderCents: s.minimumOrderCents,
-          pickupEnabled: s.pickupEnabled,
-          autoRefundLimitCents: s.autoRefundLimitCents,
-          supportSlaMinutes: s.supportSlaMinutes,
-          timezone: s.timezone,
-          ...deliveryAudit(s),
-        },
-      },
-    });
-
-    return s;
-  });
+  const store = await platformAdminTransaction((tx) =>
+    insertStore(tx, { ...values, brandColor: finalBrandColor, lat: coords.lat, lng: coords.lng }, session.user),
+  );
 
   revalidateStore(store);
   await queueCourierRegistration(store);
