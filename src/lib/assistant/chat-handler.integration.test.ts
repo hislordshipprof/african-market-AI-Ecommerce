@@ -36,6 +36,10 @@ import * as spend from "./spend";
 process.env.ASSISTANT_CHAT_ENABLED = "1";
 
 const hasDb = !!process.env.DATABASE_URL;
+// Rate rows live in the database, and several windows are an hour long, so a fixed ip keeps its count
+// from earlier runs and other files. Every ip this file sends is made unique to this run.
+const runTag = randomUUID().slice(0, 8);
+const runIp = (ip: string) => `${ip}-${runTag}`;
 const usage = {
   inputTokens: { total: 8, noCache: 8, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 4, text: 4, reasoning: 0 },
@@ -187,7 +191,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: init?.origin ?? `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": init?.ip ?? "203.0.113.10",
+        "x-forwarded-for": init?.ip ?? runIp("203.0.113.10"),
         ...(init?.cookie ? { cookie: init.cookie } : {}),
         ...(init?.proto ? { "x-forwarded-proto": init.proto } : {}),
       },
@@ -225,7 +229,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       ];
     });
     const handler = createChatHandler({ model });
-    const response = await handler(request("add two egusi", { ip: "203.0.113.20" }));
+    const response = await handler(request("add two egusi", { ip: runIp("203.0.113.20") }));
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     const cookie = response.headers.get("set-cookie") ?? "";
@@ -281,7 +285,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       return cookie;
     }
 
-    const http = await guestCookie("", "http", "203.0.113.31");
+    const http = await guestCookie("", "http", runIp("203.0.113.31"));
     expect(http).not.toMatch(secure);
     expect(http).toMatch(/;\s*HttpOnly\s*(;|$)/i);
     expect(http).toMatch(/;\s*SameSite=Lax\s*(;|$)/i);
@@ -289,8 +293,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(http).toMatch(/;\s*Max-Age=2592000\s*(;|$)/i);
     expect(http).not.toMatch(/Domain=/i);
 
-    expect(await guestCookie("", "https", "203.0.113.32")).toMatch(secure);
-    expect(await guestCookie("1", "http", "203.0.113.33")).toMatch(secure);
+    expect(await guestCookie("", "https", runIp("203.0.113.32"))).toMatch(secure);
+    expect(await guestCookie("1", "http", runIp("203.0.113.33"))).toMatch(secure);
   });
 
   it("a second turn reuses the conversation and sends prior messages", async () => {
@@ -302,10 +306,10 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model });
-    const first = await handler(request("first turn", { ip: "203.0.113.21" }));
+    const first = await handler(request("first turn", { ip: runIp("203.0.113.21") }));
     const cookie = first.headers.get("set-cookie") ?? "";
     await first.text();
-    const second = await handler(request("second turn", { ip: "203.0.113.21", cookie: cookie.split(";")[0] }));
+    const second = await handler(request("second turn", { ip: runIp("203.0.113.21"), cookie: cookie.split(";")[0] }));
     await second.text();
     expect(prompts.length).toBe(2);
     expect(JSON.stringify(prompts[1])).toContain("first turn");
@@ -330,7 +334,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       body: "{",
     }));
     expect(bad.status).toBe(400);
-    const long = await handler(request("x".repeat(2001), { ip: "203.0.113.22" }));
+    const long = await handler(request("x".repeat(2001), { ip: runIp("203.0.113.22") }));
     expect(long.status).toBe(400);
     const role = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
@@ -347,7 +351,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       expect(malformed.status, JSON.stringify(text)).toBe(400);
       expect((await malformed.json()).error.code).toBe("invalid_request");
     }
-    const foreign = await handler(request("hello", { origin: "http://evil.test", ip: "203.0.113.23" }));
+    const foreign = await handler(request("hello", { origin: "http://evil.test", ip: runIp("203.0.113.23") }));
     expect(foreign.status).toBe(403);
     const missingOrigin = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
@@ -362,7 +366,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     }));
     expect(unknown.status).toBe(404);
     await raw.store.update({ where: { id: storeId }, data: { status: "suspended" } });
-    const suspended = await handler(request("hello", { ip: "203.0.113.24" }));
+    const suspended = await handler(request("hello", { ip: runIp("203.0.113.24") }));
     expect(suspended.status).toBe(403);
     await raw.store.update({ where: { id: storeId }, data: { status: "active" } });
     expect(seen.calls()).toBe(0);
@@ -384,7 +388,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.180",
+        "x-forwarded-for": runIp("203.0.113.180"),
       },
       body: userBody("hello"),
     }));
@@ -398,7 +402,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host: mixedHost,
         origin: `http://${mixedHost}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.181",
+        "x-forwarded-for": runIp("203.0.113.181"),
       },
       body: userBody("hello"),
     }));
@@ -415,7 +419,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.182",
+        "x-forwarded-for": runIp("203.0.113.182"),
       },
       body: raw,
     }));
@@ -471,16 +475,16 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
-    const missing = await createChatHandler()(request("hello", { ip: "203.0.113.40" }));
+    const missing = await createChatHandler()(request("hello", { ip: runIp("203.0.113.40") }));
     expect(missing.status).toBe(503);
     expect((await missing.json()).error.code).toBe("assistant_unavailable");
     vi.stubEnv("ANTHROPIC_API_KEY", "   ");
-    const blank = await createChatHandler()(request("blank key", { ip: "203.0.113.140" }));
+    const blank = await createChatHandler()(request("blank key", { ip: runIp("203.0.113.140") }));
     expect(blank.status).toBe(503);
     expect((await blank.json()).error.code).toBe("assistant_unavailable");
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     vi.stubEnv("ASSISTANT_MODEL", "gpt-4o");
-    const unknown = await createChatHandler()(request("hello", { ip: "203.0.113.41" }));
+    const unknown = await createChatHandler()(request("hello", { ip: runIp("203.0.113.41") }));
     expect(unknown.status).toBe(503);
     expect((await unknown.json()).error.code).toBe("assistant_unavailable");
   });
@@ -527,10 +531,10 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model, now: () => clock });
-    const first = await handler(request("hello", { ip: "203.0.113.50" }));
+    const first = await handler(request("hello", { ip: runIp("203.0.113.50") }));
     expect(first.status).toBe(503);
     expect((await first.json()).error.code).toBe("assistant_resting");
-    const second = await handler(request("hello again", { ip: "203.0.113.51" }));
+    const second = await handler(request("hello again", { ip: runIp("203.0.113.51") }));
     expect(second.status).toBe(503);
     await second.json();
     expect(calls()).toBe(0);
@@ -556,7 +560,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       ];
       const { model, calls } = strictModel(reply);
       const handler = createChatHandler({ model, now: () => clock });
-      const eightHundredth = await handler(request("chat 800", { ip: "203.0.113.60" }));
+      const eightHundredth = await handler(request("chat 800", { ip: runIp("203.0.113.60") }));
       expect(eightHundredth.status).toBe(200);
       await eightHundredth.text();
       const warnings = sent.filter((m) => m.to === `${ownerId}@example.test`);
@@ -568,7 +572,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         data: { chats: 1000 },
       });
       const before = calls();
-      const capped = await handler(request("chat 1001", { ip: "203.0.113.61" }));
+      const capped = await handler(request("chat 1001", { ip: runIp("203.0.113.61") }));
       expect(capped.status).toBe(503);
       const body = await capped.json();
       expect(body.error.code).toBe("assistant_unavailable");
@@ -601,14 +605,14 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model });
-    const opened = await handler(request("open", { ip: "203.0.113.59" }));
+    const opened = await handler(request("open", { ip: runIp("203.0.113.59") }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     entered = 0;
     hold = true;
-    const first = handler(request("one", { ip: "203.0.113.60", cookie }));
+    const first = handler(request("one", { ip: runIp("203.0.113.60"), cookie }));
     await vi.waitFor(() => expect(entered).toBe(1));
-    const second = await handler(request("two", { ip: "203.0.113.61", cookie }));
+    const second = await handler(request("two", { ip: runIp("203.0.113.61"), cookie }));
     expect(second.status).toBe(409);
     expect((await second.json()).error.code).toBe("assistant_busy");
     release();
@@ -681,8 +685,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     );
     const pending = [
-      watch(handler(request("first", { ip: "203.0.113.170", cookie, id: "turn-a" }))),
-      watch(handler(request("second", { ip: "203.0.113.171", cookie, id: "turn-b" }))),
+      watch(handler(request("first", { ip: runIp("203.0.113.170"), cookie, id: "turn-a" }))),
+      watch(handler(request("second", { ip: runIp("203.0.113.171"), cookie, id: "turn-b" }))),
     ];
     try {
       const settled = await Promise.race([Promise.all(pending), failed]);
@@ -728,7 +732,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model });
-    const response = await handler(request("my card is 4242 4242 4242 4242, add rice", { ip: "203.0.113.70" }));
+    const response = await handler(request("my card is 4242 4242 4242 4242, add rice", { ip: runIp("203.0.113.70") }));
     await response.text();
     expect(JSON.stringify(prompts)).not.toContain("4242");
     const rows = await storeScopedTransaction(storeId, (tx) =>
@@ -760,7 +764,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.71",
+        "x-forwarded-for": runIp("203.0.113.71"),
       },
       body: JSON.stringify({
         message: {
@@ -797,7 +801,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "text-end", id: "split" },
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
-    const splitResponse = await createChatHandler({ model: split.model })(request("plain rice", { ip: "203.0.113.72" }));
+    const splitResponse = await createChatHandler({ model: split.model })(request("plain rice", { ip: runIp("203.0.113.72") }));
     const splitBody = await splitResponse.text();
     expect(splitBody).not.toContain("4242");
     expect(splitBody).toContain("[card number removed]");
@@ -817,18 +821,18 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model, now: () => new Date(clock) });
-    const opened = await handler(request("open", { ip: "203.0.113.80" }));
+    const opened = await handler(request("open", { ip: runIp("203.0.113.80") }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     hold = true;
-    const stuck = handler(request("stuck", { ip: "203.0.113.81", cookie }));
+    const stuck = handler(request("stuck", { ip: runIp("203.0.113.81"), cookie }));
     await vi.waitFor(async () => {
       const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
       const row = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
       expect(row?.inFlightUntil).not.toBeNull();
     });
     clock += 91_000;
-    const next = await handler(request("next", { ip: "203.0.113.82", cookie }));
+    const next = await handler(request("next", { ip: runIp("203.0.113.82"), cookie }));
     expect(next.status).toBe(200);
     release();
     await stuck;
@@ -845,7 +849,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       }),
     });
     const handler = createChatHandler({ model });
-    const response = await handler(request("save me", { ip: "203.0.113.83" }));
+    const response = await handler(request("save me", { ip: runIp("203.0.113.83") }));
     const body = await response.text();
     expect(body).toContain("Sorry, something went wrong");
     expect(body).not.toContain("Overloaded");
@@ -863,12 +867,12 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model });
-    const opened = await handler(request("mine", { ip: "203.0.113.84" }));
+    const opened = await handler(request("mine", { ip: runIp("203.0.113.84") }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
     const response = await handler(request("again", {
-      ip: "203.0.113.85",
+      ip: runIp("203.0.113.85"),
       cookie,
       extra: { cartId: "cart-from-another-store", storeId: "store-from-another-store" },
     }));
@@ -887,7 +891,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model });
-    const response = await handler(request("price?", { ip: "203.0.113.86" }));
+    const response = await handler(request("price?", { ip: runIp("203.0.113.86") }));
     const body = await response.text();
     expect(body).toContain("I couldn't confirm that price.");
     expect(body).not.toContain("3.00");
@@ -907,7 +911,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "text-end", id: "t" },
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage: costly },
     ]);
-    const response = await createChatHandler({ model })(request("long list", { ip: "203.0.113.87" }));
+    const response = await createChatHandler({ model })(request("long list", { ip: runIp("203.0.113.87") }));
     const cookie = response.headers.get("set-cookie") ?? "";
     await response.text();
     const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
@@ -934,7 +938,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model });
-    const response = await handler(request("keep going", { ip: "203.0.113.87" }));
+    const response = await handler(request("keep going", { ip: runIp("203.0.113.87") }));
     const body = await response.text();
     expect(n).toBe(8);
     expect(body).toContain("data-step-limit");
@@ -997,7 +1001,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       ];
     });
     const handler = createChatHandler({ model });
-    const response = await handler(request("add thirty distinct items", { ip: "198.51.100.30" }));
+    const response = await handler(request("add thirty distinct items", { ip: runIp("198.51.100.30") }));
     expect(response.status).toBe(200);
     const body = await response.text();
     expect(calls()).toBe(3);
@@ -1049,7 +1053,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model });
-    const response = await handler(request("show me 30 items", { ip: `203.0.113.${randomInt(1, 200)}.${randomInt(1, 200)}` }));
+    const response = await handler(request("show me 30 items", { ip: runIp(`203.0.113.${randomInt(1, 200)}.${randomInt(1, 200)}`) }));
     const body = await response.text();
     expect(n).toBe(8);
     expect(body).toContain("data-step-limit");
@@ -1074,7 +1078,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model });
-    const response = await handler(request("do not drop this", { ip: "203.0.113.88" }));
+    const response = await handler(request("do not drop this", { ip: runIp("203.0.113.88") }));
     const reader = response.body?.getReader();
     await reader?.cancel();
     release();
@@ -1100,7 +1104,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model, now: () => wednesdayMorning });
-    const response = await handler(request("are you open", { ip: "203.0.113.89" }));
+    const response = await handler(request("are you open", { ip: runIp("203.0.113.89") }));
     await response.text();
     const prompt = JSON.stringify(prompts[0]);
     expect(prompt).toContain("Open now: yes");
@@ -1109,7 +1113,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       where: { id: storeId },
       data: { hours: { wed: "not-hours" } },
     });
-    const again = await handler(request("still open", { ip: "203.0.113.90" }));
+    const again = await handler(request("still open", { ip: runIp("203.0.113.90") }));
     await again.text();
     expect(JSON.stringify(prompts[1])).toContain("Open now: yes");
   });
@@ -1139,12 +1143,12 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model });
-    const guest = await handler(request("guest hello", { ip: "203.0.113.110" }));
+    const guest = await handler(request("guest hello", { ip: runIp("203.0.113.110") }));
     const cartCookie = (guest.headers.get("set-cookie") ?? "").split(";")[0];
     await guest.text();
     const cartId = decodeURIComponent(cartCookie.slice("cart_id=".length));
     const signed = await handler(request("signed hello", {
-      ip: "203.0.113.111",
+      ip: runIp("203.0.113.111"),
       cookie: `${cartCookie}; ${session}`,
     }));
     expect(signed.status).toBe(200);
@@ -1168,7 +1172,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "text-end", id: "t" },
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
-    const opened = await createChatHandler({ model: opener })(request("open the cart", { ip: "203.0.113.120" }));
+    const opened = await createChatHandler({ model: opener })(request("open the cart", { ip: runIp("203.0.113.120") }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
@@ -1189,14 +1193,14 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         return fake.fetch(input, init);
       },
     });
-    const response = await createChatHandler({ model })(request("save will fail", { ip: "203.0.113.121", cookie }));
+    const response = await createChatHandler({ model })(request("save will fail", { ip: runIp("203.0.113.121"), cookie }));
     const body = await response.text();
     expect(response.status).toBe(200);
     expect(body).toContain("kept reply");
     expect(errors.some((line) => line.includes("transcript not saved"))).toBe(true);
     const after = await raw.assistantSpendDay.aggregate({ _sum: { costMicros: true } });
     expect(after._sum.costMicros ?? BigInt(0)).toBeGreaterThan(before._sum.costMicros ?? BigInt(0));
-    const again = await createChatHandler({ model: opener })(request("cart is free", { ip: "203.0.113.122", cookie }));
+    const again = await createChatHandler({ model: opener })(request("cart is free", { ip: runIp("203.0.113.122"), cookie }));
     expect(again.status).toBe(200);
     await again.text();
   });
@@ -1222,7 +1226,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const response = await createChatHandler({ model })(request("guest on someone else's cart", {
-      ip: "203.0.113.123",
+      ip: runIp("203.0.113.123"),
       cookie: `cart_id=${encodeURIComponent(owned.id)}`,
     }));
     expect(response.status).toBe(200);
@@ -1276,7 +1280,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const response = await createChatHandler({ model })(request("hello here", {
-      ip: "203.0.113.124",
+      ip: runIp("203.0.113.124"),
       cookie: `cart_id=${encodeURIComponent(otherCart.id)}`,
     }));
     expect(response.status).toBe(200);
@@ -1300,14 +1304,14 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model: seen.model });
-    const empty = await handler(request("", { ip: "203.0.113.125" }));
+    const empty = await handler(request("", { ip: runIp("203.0.113.125") }));
     expect(empty.status).toBe(400);
-    const blank = await handler(request("   \n\t  ", { ip: "203.0.113.126" }));
+    const blank = await handler(request("   \n\t  ", { ip: runIp("203.0.113.126") }));
     expect(blank.status).toBe(400);
-    const exact = await handler(request("y".repeat(2000), { ip: "203.0.113.127" }));
+    const exact = await handler(request("y".repeat(2000), { ip: runIp("203.0.113.127") }));
     expect(exact.status).toBe(200);
     await exact.text();
-    const over = await handler(request("z".repeat(2001), { ip: "203.0.113.128" }));
+    const over = await handler(request("z".repeat(2001), { ip: runIp("203.0.113.128") }));
     expect(over.status).toBe(400);
     expect(seen.calls()).toBe(1);
   });
@@ -1321,7 +1325,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model });
-    const opened = await handler(request("seed history", { ip: "203.0.113.129" }));
+    const opened = await handler(request("seed history", { ip: runIp("203.0.113.129") }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
@@ -1335,7 +1339,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       data: { messages: history },
     });
     prompts.length = 0;
-    const response = await handler(request("the newest line", { ip: "203.0.113.130", cookie }));
+    const response = await handler(request("the newest line", { ip: runIp("203.0.113.130"), cookie }));
     expect(response.status).toBe(200);
     await response.text();
     const prompt = JSON.stringify(prompts[0]);
@@ -1358,7 +1362,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model });
-    const opened = await handler(request("seed tools", { ip: "203.0.113.131" }));
+    const opened = await handler(request("seed tools", { ip: runIp("203.0.113.131") }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
@@ -1380,7 +1384,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         }],
       },
     });
-    const response = await handler(request("continue", { ip: "203.0.113.132", cookie }));
+    const response = await handler(request("continue", { ip: runIp("203.0.113.132"), cookie }));
     expect(response.status).toBe(200);
     await response.text();
     const prompt = JSON.stringify(prompts.at(-1));
@@ -1416,7 +1420,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     vi.spyOn(spend, "assistantSpendState").mockRejectedValue(new Error("ledger down"));
-    const response = await createChatHandler({ model: seen.model })(request("hello", { ip: "203.0.113.133" }));
+    const response = await createChatHandler({ model: seen.model })(request("hello", { ip: runIp("203.0.113.133") }));
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe("assistant_resting");
     expect(seen.calls()).toBe(0);
@@ -1437,16 +1441,16 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       },
     });
     const handler = createChatHandler({ model });
-    const opened = await handler(request("open", { ip: "203.0.113.134" }));
+    const opened = await handler(request("open", { ip: runIp("203.0.113.134") }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     await opened.text();
     entered = 0;
     hold = true;
-    const first = await handler(request("in flight", { ip: "203.0.113.135", cookie }));
+    const first = await handler(request("in flight", { ip: runIp("203.0.113.135"), cookie }));
     await vi.waitFor(() => expect(entered).toBe(1));
     const reader = first.body?.getReader();
     const cancelled = reader?.cancel();
-    const busy = await handler(request("retry too soon", { ip: "203.0.113.136", cookie }));
+    const busy = await handler(request("retry too soon", { ip: runIp("203.0.113.136"), cookie }));
     expect(busy.status).toBe(409);
     expect((await busy.json()).error.code).toBe("assistant_busy");
     release();
@@ -1456,7 +1460,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       const row = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
       expect(row?.inFlightUntil).toBeNull();
     });
-    const again = await handler(request("after it ends", { ip: "203.0.113.137", cookie }));
+    const again = await handler(request("after it ends", { ip: runIp("203.0.113.137"), cookie }));
     expect(again.status).toBe(200);
     await again.text();
   });
@@ -1477,7 +1481,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     ]);
     await raw.store.update({ where: { id: storeId }, data: { status: "suspended" } });
     const response = await createChatHandler({ model: seen.model })(request("still there?", {
-      ip: "203.0.113.138",
+      ip: runIp("203.0.113.138"),
       cookie: `cart_id=${encodeURIComponent(cart.id)}`,
     }));
     expect(response.status).toBe(403);
@@ -1548,7 +1552,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       host,
       origin: `http://${host}`,
       "x-store-slug": slug,
-      "x-forwarded-for": "203.0.113.150",
+      "x-forwarded-for": runIp("203.0.113.150"),
     };
     const body = JSON.stringify({
       message: { id: "retry-b6-turn", role: "user", parts: [{ type: "text", text: "add one yam" }] },
@@ -1586,7 +1590,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       host,
       origin: `http://${host}`,
       "x-store-slug": slug,
-      "x-forwarded-for": "203.0.113.151",
+      "x-forwarded-for": runIp("203.0.113.151"),
     };
     const body = JSON.stringify({
       message: { id: "midstream1", role: "user", parts: [{ type: "text", text: "mid-stream" }] },
@@ -1639,7 +1643,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       model: createAssistantModel({ fetch: fetchImpl }),
       now: () => clock,
     });
-    const ip = `198.51.100.${randomInt(20, 250)}`;
+    // A fixed or small-range ip reuses rate rows left by earlier runs: the 2041 clock keeps them live.
+    const ip = `198.51.100.${randomUUID().slice(0, 8)}`;
     let cookie = "";
     let sent = 0;
     const turn = async (id: string, text: string) => {
@@ -1687,10 +1692,10 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model });
-    const short = await handler(request("a", { ip: "203.0.113.210", extra: { id: "sdk", trigger: "submit-message" } }));
+    const short = await handler(request("a", { ip: runIp("203.0.113.210"), extra: { id: "sdk", trigger: "submit-message" } }));
     expect(short.status).toBe(200);
     await short.text();
-    const full = await handler(request("b".repeat(2000), { ip: "203.0.113.211" }));
+    const full = await handler(request("b".repeat(2000), { ip: runIp("203.0.113.211") }));
     expect(full.status).toBe(200);
     await full.text();
     const raw = JSON.stringify({ message: { role: "user", parts: [{ type: "text", text: "é".repeat(9000) }] } });
@@ -1702,7 +1707,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.212",
+        "x-forwarded-for": runIp("203.0.113.212"),
       },
       body: raw,
     }));
@@ -1711,6 +1716,13 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   });
 
   it("a file turn offers no cart tools and a scripted add_to_cart writes nothing", async () => {
+    // Every scripted tool id holds a Luhn-valid 16-digit run (4111111111111111), as a random hex id does now
+    // and then. The card scrubber must not rewrite an id into something the API rejects. The counter keeps ids unique.
+    let idCount = 0;
+    vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation((() => {
+      idCount += 1;
+      return `41111111-1111-1111-1111-${String(idCount).padStart(12, "0")}`;
+    }) as typeof globalThis.crypto.randomUUID);
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
     await storeScoped(storeId).cartLine.create({
@@ -1735,7 +1747,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.180",
+        "x-forwarded-for": runIp("203.0.113.180"),
         cookie: `cart_id=${encodeURIComponent(cart.id)}`,
       },
       body: JSON.stringify({
@@ -1778,7 +1790,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     const fake = createFakeAnthropicFetch({ steps: [{ kind: "text", text: "ok" }] });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    const response = await handler(request("jollof for 10", { ip: "203.0.113.190" }));
+    const response = await handler(request("jollof for 10", { ip: runIp("203.0.113.190") }));
     expect(response.status).toBe(200);
     await response.text();
     const body = fake.requests[0]?.body as { tools?: Array<{ name: string }>; system?: Array<{ text: string }> };
@@ -1802,7 +1814,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       ],
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    const response = await handler(request(`${dish} for 2`, { ip: "203.0.113.191" }));
+    const response = await handler(request(`${dish} for 2`, { ip: runIp("203.0.113.191") }));
     expect(response.status).toBe(200);
     await response.text();
     expect(fake.requests).toHaveLength(3);
@@ -1838,7 +1850,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.181",
+        "x-forwarded-for": runIp("203.0.113.181"),
         cookie,
       },
       body: JSON.stringify({ message: { id, role: "user", parts } }),
@@ -1876,7 +1888,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.182",
+        "x-forwarded-for": runIp("203.0.113.182"),
         cookie: `cart_id=${encodeURIComponent(cart.id)}`,
       },
       body: JSON.stringify({
@@ -1921,7 +1933,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       host,
       origin: `http://${host}`,
       "x-store-slug": slug,
-      "x-forwarded-for": "203.0.113.181",
+      "x-forwarded-for": runIp("203.0.113.181"),
       cookie,
     };
     const fileTurn = await handler(new Request(`http://${host}/api/assistant/chat`, {
@@ -1955,7 +1967,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     }
     const textTurn = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.182" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.182") },
       body: JSON.stringify({
         message: { id: "file-store-02", role: "user", parts: [{ type: "text", text: "what about plantain" }] },
       }),
@@ -1984,7 +1996,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const beforeFailed = requests.length;
     const failed = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.183" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.183") },
       body: JSON.stringify({
         message: {
           id: "file-store-03",
@@ -2040,7 +2052,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
           host,
           origin: `http://${host}`,
           "x-store-slug": slug,
-          "x-forwarded-for": `203.0.113.${ip++}`,
+          "x-forwarded-for": runIp(`203.0.113.${ip++}`),
           cookie,
           ...(extra?.length ? { "content-length": extra.length } : {}),
         },
@@ -2149,13 +2161,13 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       return Number(rows[0]?.count ?? 0);
     }
     for (let i = 0; i < 9; i += 1) {
-      const ok = await send(`quota-ok-${i}-abcd`, [photo("list.jpg")], `198.51.100.${i + 1}`);
+      const ok = await send(`quota-ok-${i}-abcd`, [photo("list.jpg")], runIp(`198.51.100.${i + 1}`));
       expect(ok.status, `turn ${i}`).toBe(200);
       await ok.text();
     }
     const parallel = await Promise.all([
-      send("quota-race-a-abcd", [photo("list.jpg")], "198.51.100.21"),
-      send("quota-race-b-abcd", [photo("list.jpg")], "198.51.100.22"),
+      send("quota-race-a-abcd", [photo("list.jpg")], runIp("198.51.100.21")),
+      send("quota-race-b-abcd", [photo("list.jpg")], runIp("198.51.100.22")),
     ]);
     const statuses = (await Promise.all(parallel.map(async (response) => response.status))).sort((a, b) => a - b);
     for (const response of parallel) {
@@ -2216,26 +2228,26 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     await raw.rateLimit.deleteMany({ where: { key: { in: [authKey, staleKey] } } });
     const callsAtCap = calls;
     clock = new Date(clock.getTime() + 30 * 60 * 1000);
-    const blocked = await send("quota-blocked-abcd", [photo("list.jpg")], "198.51.100.23");
+    const blocked = await send("quota-blocked-abcd", [photo("list.jpg")], runIp("198.51.100.23"));
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("retry-after")).toBeTruthy();
     expect((await blocked.json()).error.code).toBe("attachment_rate_limited");
     expect(calls).toBe(callsAtCap);
-    const typed = await send("quota-typed-abcd", [{ type: "text", text: "rice please" }], "198.51.100.24");
+    const typed = await send("quota-typed-abcd", [{ type: "text", text: "rice please" }], runIp("198.51.100.24"));
     expect(typed.status).toBe(200);
     await typed.text();
     const beforeCheap = await countRows();
-    const fourth = await send("quota-cheap-abcd", [photo("a.jpg"), photo("b.jpg"), photo("c.jpg"), photo("d.jpg")], "198.51.100.25");
+    const fourth = await send("quota-cheap-abcd", [photo("a.jpg"), photo("b.jpg"), photo("c.jpg"), photo("d.jpg")], runIp("198.51.100.25"));
     expect((await fourth.json()).error.code).toBe("attachment_too_many");
     expect(await countRows()).toBe(beforeCheap);
     const callsBeforeReplay = calls;
-    const replay = await send("quota-ok-0-abcd", [photo("list.jpg")], "198.51.100.26");
+    const replay = await send("quota-ok-0-abcd", [photo("list.jpg")], runIp("198.51.100.26"));
     expect(replay.status).toBe(200);
     await replay.text();
     expect(calls).toBe(callsBeforeReplay);
     expect(await countRows()).toBe(beforeCheap);
     clock = new Date("2032-06-01T01:00:01.000Z");
-    const later = await send("quota-later-abcd", [photo("list.jpg")], "198.51.100.27");
+    const later = await send("quota-later-abcd", [photo("list.jpg")], runIp("198.51.100.27"));
     expect(later.status).toBe(200);
     await later.text();
 
@@ -2252,23 +2264,23 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     }
     clock = new Date("2032-07-01T00:00:00.000Z");
     for (let i = 0; i < 6; i += 1) {
-      const ok = await rollingSend(`roll-early-${i}-abcd`, `198.51.100.${30 + i}`);
+      const ok = await rollingSend(`roll-early-${i}-abcd`, runIp(`198.51.100.${30 + i}`));
       expect(ok.status, `early ${i}`).toBe(200);
       await ok.text();
     }
     clock = new Date("2032-07-01T00:50:00.000Z");
     for (let i = 0; i < 4; i += 1) {
-      const ok = await rollingSend(`roll-late-${i}-abcd`, `198.51.100.${40 + i}`);
+      const ok = await rollingSend(`roll-late-${i}-abcd`, runIp(`198.51.100.${40 + i}`));
       expect(ok.status, `late ${i}`).toBe(200);
       await ok.text();
     }
     clock = new Date("2032-07-01T01:01:00.000Z");
     for (let i = 0; i < 6; i += 1) {
-      const ok = await rollingSend(`roll-next-${i}-abcd`, `198.51.100.${50 + i}`);
+      const ok = await rollingSend(`roll-next-${i}-abcd`, runIp(`198.51.100.${50 + i}`));
       expect(ok.status, `next ${i}`).toBe(200);
       await ok.text();
     }
-    const still = await rollingSend("roll-over-limit-abcd", "198.51.100.60");
+    const still = await rollingSend("roll-over-limit-abcd", runIp("198.51.100.60"));
     expect(still.status).toBe(429);
     expect((await still.json()).error.code).toBe("attachment_rate_limited");
     const rollingRows = await raw.$queryRaw<Array<{ count: number }>>`
@@ -2306,7 +2318,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const id = "failed-file-read-01";
     const failed = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.240" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.240") },
       body: JSON.stringify({ message: { id, role: "user", parts: [photo] } }),
     }));
     expect(failed.status).toBe(200);
@@ -2316,7 +2328,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const callsAfterFailure = fake.requests.length;
     const missing = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.241" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.241") },
       body: JSON.stringify({ message: { id, role: "user", parts: [] } }),
     }));
     expect(missing.status).toBe(400);
@@ -2324,7 +2336,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(fake.requests.length).toBe(callsAfterFailure);
     const again = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.242" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.242") },
       body: JSON.stringify({ message: { id, role: "user", parts: [photo] } }),
     }));
     expect(again.status).toBe(200);
@@ -2356,7 +2368,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const id = "text-then-file-01";
     const first = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.230" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.230") },
       body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text: "hello" }] } }),
     }));
     expect(first.status).toBe(200);
@@ -2365,7 +2377,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const afterFirst = calls;
     const changed = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.231" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.231") },
       body: JSON.stringify({
         message: {
           id,
@@ -2387,7 +2399,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(calls).toBe(afterFirst);
     const replay = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.232" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.232") },
       body: JSON.stringify({ message: { id, role: "user", parts: [] } }),
     }));
     expect(replay.status).toBe(200);
@@ -2436,7 +2448,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.230",
+        "x-forwarded-for": runIp("203.0.113.230"),
         cookie: `cart_id=${encodeURIComponent(cart.id)}`,
       },
       body: JSON.stringify({
@@ -2500,7 +2512,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     };
     const failed = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.210" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.210") },
       body: JSON.stringify({
         message: { id: "retry-file-a1", role: "user", parts: [{ type: "text", text: "file overload" }, photo] },
       }),
@@ -2519,7 +2531,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     });
     const later = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.211" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.211") },
       body: JSON.stringify({
         message: { id: "later-text-b2", role: "user", parts: [{ type: "text", text: "plantain on the side" }] },
       }),
@@ -2529,7 +2541,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const beforeRetry = requests.length;
     const retry = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.212" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.212") },
       body: JSON.stringify({
         message: { id: "retry-file-a1", role: "user", parts: [{ type: "text", text: "rice from the photo" }, photo] },
       }),
@@ -2549,7 +2561,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const callsBeforeReplay = requests.length;
     const replay = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.213" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.213") },
       body: JSON.stringify({ message: { id: "later-text-b2", role: "user", parts: [] } }),
     }));
     expect(replay.status).toBe(200);
@@ -2586,7 +2598,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     };
     const done = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.214" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.214") },
       body: JSON.stringify({ message: { id: "files-only-done", role: "user", parts: [photo] } }),
     }));
     expect(done.status).toBe(200);
@@ -2594,7 +2606,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const callsAfter = calls;
     const replay = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.215" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.215") },
       body: JSON.stringify({ message: { id: "files-only-done", role: "user", parts: [] } }),
     }));
     expect(replay.status).toBe(200);
@@ -2634,7 +2646,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     };
     const textOnly = handlerB(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.230" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.230") },
       body: JSON.stringify({
         message: { id: "race-same-id1", role: "user", parts: [{ type: "text", text: "add two egusi" }] },
       }),
@@ -2642,7 +2654,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     await vi.waitFor(() => expect(seenSnapshot).toBe(true));
     const fileFail = await handlerA(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.231" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.231") },
       body: JSON.stringify({
         message: {
           id: "race-same-id1",
@@ -2698,14 +2710,14 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     };
     const waiting = handlerB(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.231" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.231") },
       body: JSON.stringify({ message: { id: "race-done-file", role: "user", parts: [] } }),
     }));
     await vi.waitFor(() => expect(seenSnapshot).toBe(true));
     const callsBefore = calls;
     const done = await handlerA(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.232" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.232") },
       body: JSON.stringify({
         message: {
           id: "race-done-file",
@@ -2747,7 +2759,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host: `${other.slug}.localhost`,
         origin: `http://${other.slug}.localhost`,
         "x-store-slug": other.slug,
-        "x-forwarded-for": "203.0.113.236",
+        "x-forwarded-for": runIp("203.0.113.236"),
         cookie: `cart_id=${encodeURIComponent(otherCart.id)}`,
       },
       body: JSON.stringify({
@@ -2792,7 +2804,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     for (const [index, text] of ["egusi please", "the small one", "add it"].entries()) {
       const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
         method: "POST",
-        headers: { ...headers, "x-forwarded-for": `203.0.113.${240 + index}` },
+        headers: { ...headers, "x-forwarded-for": runIp(`203.0.113.${240 + index}`) },
         body: JSON.stringify({ message: { id: `ids-kept-${cart.id}-${index}`, role: "user", parts: [{ type: "text", text }] } }),
       }));
       expect(response.status).toBe(200);
@@ -2841,7 +2853,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
           host,
           origin: `http://${host}`,
           "x-store-slug": slug,
-          "x-forwarded-for": `203.0.113.${230 + index}`,
+          "x-forwarded-for": runIp(`203.0.113.${230 + index}`),
           cookie: `cart_id=${encodeURIComponent(cart.id)}`,
         },
         body: JSON.stringify({ message: { id: `thinking-${cart.id}-${index}`, role: "user", parts: [{ type: "text", text }] } }),
@@ -2878,14 +2890,14 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     };
     const first = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.233" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.233") },
       body: JSON.stringify({ message: { id: "tool-history-1", role: "user", parts: [{ type: "text", text: "rice please" }] } }),
     }));
     expect(first.status).toBe(200);
     await first.text();
     const second = await handler(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.234" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.234") },
       body: JSON.stringify({ message: { id: "tool-history-2", role: "user", parts: [{ type: "text", text: "more like that" }] } }),
     }));
     expect(second.status).toBe(200);
@@ -2905,7 +2917,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       model: createAssistantModel({ fetch: auditFake.fetch }),
     })(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
-      headers: { ...headers, "x-forwarded-for": "203.0.113.235" },
+      headers: { ...headers, "x-forwarded-for": runIp("203.0.113.235") },
       body: JSON.stringify({
         message: {
           id: "audit-card-id",
@@ -2945,7 +2957,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.241",
+        "x-forwarded-for": runIp("203.0.113.241"),
         cookie: `cart_id=${encodeURIComponent(cart.id)}`,
       },
       body: JSON.stringify({
@@ -2989,7 +3001,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.242",
+        "x-forwarded-for": runIp("203.0.113.242"),
         cookie: `cart_id=${encodeURIComponent(cart.id)}`,
       },
       body: JSON.stringify({
@@ -3042,7 +3054,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         host,
         origin: `http://${host}`,
         "x-store-slug": slug,
-        "x-forwarded-for": "203.0.113.243",
+        "x-forwarded-for": runIp("203.0.113.243"),
         cookie: `cart_id=${encodeURIComponent(cart.id)}`,
       },
       body: JSON.stringify({
@@ -3111,7 +3123,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
           host,
           origin: `http://${host}`,
           "x-store-slug": slug,
-          "x-forwarded-for": "198.51.100.54",
+          "x-forwarded-for": runIp("198.51.100.54"),
           ...(cookie ? { cookie } : {}),
         },
         body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
@@ -3216,7 +3228,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
           host,
           origin: `http://${host}`,
           "x-store-slug": slug,
-          "x-forwarded-for": "198.51.100.56",
+          "x-forwarded-for": runIp("198.51.100.56"),
           ...(cookie ? { cookie } : {}),
         },
         body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
@@ -3287,7 +3299,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
           host,
           origin: `http://${host}`,
           "x-store-slug": slug,
-          "x-forwarded-for": "198.51.100.55",
+          "x-forwarded-for": runIp("198.51.100.55"),
           ...(cookie ? { cookie } : {}),
         },
         body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
@@ -3400,7 +3412,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     });
     const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
     try {
-      const first = await handler(request(`I have a peanut allergy. Add 1 groundnut paste ${tag} and 1 Mystery paste ${tag}.`, { ip: "198.51.100.85", id: `needs-1-${tag}` }));
+      const first = await handler(request(`I have a peanut allergy. Add 1 groundnut paste ${tag} and 1 Mystery paste ${tag}.`, { ip: runIp("198.51.100.85"), id: `needs-1-${tag}` }));
       const firstBody = await first.text();
       const outputs = uiParts(firstBody).filter((part) => part.type === "tool-output-available").map((part) => part.output as Record<string, unknown>);
       const found = (outputs[1]?.items as Array<{ listingId: string; match: string }>) ?? [];
@@ -3412,7 +3424,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
       expect(await storeScoped(storeId).cartLine.count({ where: { cartId } })).toBe(0);
 
-      const second = await handler(request(`Yes, add the Mystery paste ${tag}.`, { ip: "198.51.100.85", cookie, id: `needs-2-${tag}` }));
+      const second = await handler(request(`Yes, add the Mystery paste ${tag}.`, { ip: runIp("198.51.100.85"), cookie, id: `needs-2-${tag}` }));
       await second.text();
       const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId } });
       expect(lines.map((line) => line.variantId)).toEqual([mystery.variantId]);
