@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "./use-reduced-motion";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import type { StorefrontListing, StorefrontListingDetail } from "@/lib/storefront/service";
 import { Sheet } from "./sheet";
 import { ProductImage } from "./product-image";
@@ -112,7 +113,7 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
           <QuickAddStepper disabled={selection.addDisabled} item={selection.cartItem} />
         </div>
         <Link className="sf-text-link" href={`/listings/${listing.id}`} onClick={onClose}>
-          See full product details →
+          See full product details <ArrowRight size={16} aria-hidden />
         </Link>
       </div>
     </Sheet>

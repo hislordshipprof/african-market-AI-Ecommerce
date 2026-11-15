@@ -143,9 +143,24 @@
 }
 .progress {
   width: 100%;
-  height: 7px;
-  accent-color: var(--color-primary);
-  margin-top: 18px;
+  height: 8px;
+  margin-top: 16px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-raised);
+}
+.progress::-webkit-progress-bar {
+  background: var(--color-raised);
+}
+.progress::-webkit-progress-value {
+  background: var(--color-primary);
+  border-radius: 999px;
+}
+.progress::-moz-progress-bar {
+  background: var(--color-primary);
+  border-radius: 999px;
 }
 .related {
   display: grid;
@@ -227,7 +242,8 @@
   min-height: 46px;
   padding: 11px 12px;
   width: 100%;
-  font-size: 15px;
+  /* 16px, like the shared flow fields: phones do not zoom the page on focus. */
+  font-size: 16px;
   font-weight: 400;
   min-width: 0;
 }
@@ -407,6 +423,19 @@
   background: var(--color-soft);
   color: var(--color-ink);
 }
+/* Phones: the four stages scroll in one row instead of orphaning the last. */
+@media (max-width: 767px) {
+  .stages {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+  .stages a {
+    flex-shrink: 0;
+  }
+}
 .anchor {
   scroll-margin-top: 168px;
 }
@@ -418,11 +447,19 @@
 }
 @media (max-width: 767px) {
   .page {
-    /* Fixed stack above the viewport bottom: nav (12px offset + 68px bar)
-       + 8px gap, then the 74px checkout bar, then a 12px scroll margin. */
-    --cart-bar-bottom: calc(88px + env(safe-area-inset-bottom));
+    /* Fixed stack above the viewport bottom: nav (12px offset + 73px bar)
+       + 11px gap, then the 74px checkout bar, then a 12px scroll margin. */
+    --cart-bar-bottom: calc(96px + env(safe-area-inset-bottom));
     --cart-bar-height: 74px;
     padding-bottom: calc(var(--cart-bar-bottom) + var(--cart-bar-height) + 12px);
+  }
+  /* Keyboard focus scrolls clear of the nav and the checkout bar (96 + 120 + 12). */
+  :global(html):has(.mobileAction) {
+    scroll-padding-bottom: calc(228px + env(safe-area-inset-bottom));
+  }
+  /* The bar names why Checkout is off, on up to two more lines. */
+  .page:has(.mobileAction[data-blocked]) {
+    --cart-bar-height: 120px;
   }
   .mobileAction {
     position: fixed;
