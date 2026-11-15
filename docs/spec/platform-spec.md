@@ -169,6 +169,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 
 ## 7. Platform admin console
 - Tenants: approve or reject store applications (§6.1 step 0), create, suspend, plan/billing, settings override.
+  - Built (#547): `/admin/billing/subscriptions` (`requirePlatformAdmin`) lists every store with its plan, Stripe status, pilot flag, trial end, period end, cancel at period end and payment failed date, filtered by status and plan, with MRR (Stripe's definition, ADR-0021) and counts by status. A plan override is set on the store's admin page (plan, end date, reason; time-boxed, audited, Stripe untouched) and the owner's plan page reads "Pro, courtesy of the platform team until …".
 - Master catalog: products, synonyms (by language), images, recipes, category tree; merge duplicates proposed by AI.
   - Built (#540): the product list (`/admin/catalog/products`: catalog search, filters, paging) and editor (fields, status, photo upload to WebP). A product is archived, never deleted; every save is audited and refreshes the storefronts that list it. A save from an editor opened before someone else's save is refused with a reload message.
 - Orders & disputes across tenants; manual refund; courier incident log.

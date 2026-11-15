@@ -31,6 +31,9 @@ _Avoid_: Picker (a picker is staff doing a pick, not a separate role)
 A member of our team who approves store applications, sets up stores and supports them.
 _Avoid_: Platform team (only the customer-facing label on a platform admin's support reply)
 
+**Plan override**:
+A plan a platform admin gives a store until a date, with a reason (for example, comped Pro). It decides the store's plan features while it runs, even over a Stripe downgrade, and never changes what Stripe bills. It always has an end date; after it, the store's Stripe plan applies again.
+
 **Store application**:
 A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted 12 months after the decision.
 _Avoid_: Sign-up, lead, merchant application
