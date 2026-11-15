@@ -2295,30 +2295,36 @@ export async function markDirectoryRequestNotified(id: string, storeId: string):
   return rows.length > 0;
 }
 
-export interface DirectoryRequestArea {
+export interface DirectoryRequestCount {
   zip: string;
-  place: string | null;
-  state: string | null;
   waiting: number;
   notified: number;
   latest: Date;
 }
 
-/** Request counts per ZIP, named by the nearest Gazetteer place (#455). Never returns a contact. */
-export function directoryRequestAreas(): Promise<DirectoryRequestArea[]> {
-  return platformAdminRawQuery<DirectoryRequestArea>(Prisma.sql`
-    SELECT r.zip, p.name AS place, p.state,
+/** Request counts per ZIP (#455). Never returns a contact. */
+export function directoryRequestCounts(): Promise<DirectoryRequestCount[]> {
+  return platformAdminRawQuery<DirectoryRequestCount>(Prisma.sql`
+    SELECT r.zip,
       count(*) FILTER (WHERE r.notified_at IS NULL)::int AS waiting,
       count(*) FILTER (WHERE r.notified_at IS NOT NULL)::int AS notified,
       max(r.created_at) AS latest
     FROM directory_store_requests r
-    JOIN gazetteer_zips z ON z.zip = r.zip
-    LEFT JOIN LATERAL (
-      SELECT g.name, g.state FROM gazetteer_places g
-      WHERE g.lat BETWEEN z.lat - 1 AND z.lat + 1
+    GROUP BY r.zip`);
+}
+
+/** For each ZIP, the nearest Gazetteer place in the given state (a nearest place anywhere can be across a state line). */
+export async function nearestPlacesInState(zips: { zip: string; state: string }[]): Promise<Map<string, string>> {
+  if (zips.length === 0) return new Map();
+  const rows = await appUserQuery((tx) => tx.$queryRaw<{ zip: string; name: string }[]>`
+    SELECT q.zip, p.name
+    FROM unnest(${zips.map((z) => z.zip)}::text[], ${zips.map((z) => z.state)}::text[]) AS q(zip, state)
+    JOIN gazetteer_zips z ON z.zip = q.zip
+    JOIN LATERAL (
+      SELECT g.name FROM gazetteer_places g
+      WHERE g.state = q.state
       ORDER BY power(g.lat - z.lat, 2) + power((g.lng - z.lng) * cos(radians(z.lat)), 2)
       LIMIT 1
-    ) p ON true
-    GROUP BY r.zip, p.name, p.state
-    ORDER BY p.state NULLS LAST, waiting DESC, r.zip`);
+    ) p ON true`);
+  return new Map(rows.map((row) => [row.zip, row.name]));
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import { directoryRequestAreas, findDirectoryRequestMatches, insertDirectoryStoreRequest, markDirectoryRequestNotified, platform, type DirectoryRequestArea, type DirectoryRequestMatch } from "../db";
+import { directoryRequestCounts, findDirectoryRequestMatches, insertDirectoryStoreRequest, markDirectoryRequestNotified, nearestPlacesInState, platform, type DirectoryRequestCount, type DirectoryRequestMatch } from "../db";
 import { normalizeEmail } from "../email";
 import { sendEmail } from "../email/send";
 import { escapeHtml } from "../format";
@@ -13,6 +13,8 @@ import { directoryLink } from "./attribution";
 import { NEARBY_MILES } from "./distance";
 import { storefrontUrl } from "./links";
 import { STORE_REQUEST_CONSENT } from "./store-request-consent";
+import { STATE_NAMES, type StateCode } from "./us-states";
+import { zipState } from "./zip-state";
 
 
 const HOUR_MS = 60 * 60_000;
@@ -154,15 +156,23 @@ export async function notifyWaitingRequests(): Promise<NotifyResult> {
   }
 }
 
-export type RequestArea = { state: string | null; zips: Omit<DirectoryRequestArea, "state">[] };
+export type RequestArea = { state: StateCode; zips: (DirectoryRequestCount & { place: string | null })[] };
 
-/** Platform admin view: request counts by state, then ZIP. */
+/** Platform admin view: request counts by state (from the ZIP prefix), then ZIP with its nearest place in that state. */
 export async function requestsByArea(): Promise<RequestArea[]> {
-  const areas: RequestArea[] = [];
-  for (const { state, ...zip } of await directoryRequestAreas()) {
-    const last = areas[areas.length - 1];
-    if (last && last.state === state) last.zips.push(zip);
-    else areas.push({ state, zips: [zip] });
+  const counts = await directoryRequestCounts();
+  const located = counts.flatMap((count) => {
+    const state = zipState(count.zip);
+    return state ? [{ ...count, state }] : [];
+  });
+  const places = await nearestPlacesInState(located);
+  const byState = new Map<StateCode, RequestArea>();
+  for (const { state, ...count } of located) {
+    const area = byState.get(state) ?? { state, zips: [] };
+    area.zips.push({ ...count, place: places.get(count.zip) ?? null });
+    byState.set(state, area);
   }
+  const areas = [...byState.values()].sort((a, b) => STATE_NAMES[a.state].localeCompare(STATE_NAMES[b.state]));
+  for (const area of areas) area.zips.sort((a, b) => b.waiting - a.waiting || a.zip.localeCompare(b.zip));
   return areas;
 }

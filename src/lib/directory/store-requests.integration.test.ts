@@ -161,5 +161,6 @@ describe.skipIf(!hasDb)("store requests (#455)", () => {
       expect.objectContaining({ state: "AK", zip: FAR_ZIP, waiting: 1, notified: 0 }),
     ]));
     expect(JSON.stringify(areas)).not.toContain("@example.com");
+    expect(areas.find((a) => a.state === "AK")!.zips.find((z) => z.zip === FAR_ZIP)!.place).toBe("Atqasuk");
   });
 });

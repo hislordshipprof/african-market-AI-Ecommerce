@@ -1,5 +1,5 @@
 import { listStoreRequestAreas } from "@/lib/admin/store-requests";
-import { STATE_NAMES, isStateCode } from "@/lib/directory/us-states";
+import { STATE_NAMES } from "@/lib/directory/us-states";
 
 export const metadata = { title: "Store requests — Platform Admin" };
 
@@ -14,7 +14,7 @@ export default async function StoreRequestsPage() {
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:py-12">
       <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">Store requests</h1>
       <p className="mt-1 max-w-prose text-muted-foreground">
-        Shoppers who found no store within 50 miles and asked to hear when one opens. Each gets one message when a listed store is within 50 miles of their ZIP, and their contact is then deleted. Places are the nearest Census place to the ZIP.
+        Shoppers who found no store within 50 miles and asked to hear when one opens. Each gets one message when a listed store is within 50 miles of their ZIP, and their contact is then deleted. The state comes from the ZIP; the place is the nearest Census place in that state.
       </p>
 
       {areas.length === 0 ? (
@@ -27,9 +27,9 @@ export default async function StoreRequestsPage() {
             {waiting === 1 ? "1 shopper waiting" : `${waiting} shoppers waiting`}
           </p>
           {areas.map((area) => (
-            <section key={area.state ?? "unknown"} aria-labelledby={`state-${area.state ?? "unknown"}`} className="mt-6">
-              <h2 id={`state-${area.state ?? "unknown"}`} className="mb-2 text-lg font-semibold text-foreground">
-                {stateName(area.state)}
+            <section key={area.state} aria-labelledby={`state-${area.state}`} className="mt-6">
+              <h2 id={`state-${area.state}`} className="mb-2 text-lg font-semibold text-foreground">
+                {STATE_NAMES[area.state]}
               </h2>
               <div className="overflow-x-auto rounded-lg border border-border bg-card">
                 <table className="w-full min-w-[32rem] text-left text-sm">
@@ -61,8 +61,4 @@ export default async function StoreRequestsPage() {
       )}
     </div>
   );
-}
-
-function stateName(code: string | null): string {
-  return code && isStateCode(code) ? STATE_NAMES[code] : "Unknown state";
 }
