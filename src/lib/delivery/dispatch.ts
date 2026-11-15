@@ -430,6 +430,11 @@ export async function pushReadyTime(storeId: string, orderId: string, deps: Disp
     await scoped.delivery.updateMany({ where: { id: delivery.id, status: "cancelled" }, data: { status: "requested" } });
     return { ok: true, readyEstimateAt, courier: "kept" };
   }
+  // The platform's own cancel, so the incident log does not read the provider's echo of it as a courier cancel (#536).
+  await scoped.deliveryEvent.createMany({
+    data: [{ storeId, orderId, deliveryId: delivery.id, externalEventId: "platform_cancelled", type: "cancelled", payload: { by: "platform", reason: "ready_time_pushed" } }],
+    skipDuplicates: true,
+  });
   const result = await selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId, readyEstimateAt)) }, deps);
   return { ok: true, readyEstimateAt, courier: result.ok ? "rebooked" : "none" };
 }

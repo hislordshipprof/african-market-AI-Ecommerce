@@ -101,7 +101,7 @@ export async function findCourierIncidents(
 
 const REDACTED = "[redacted]";
 /** Keys that hold a phone, or the customer's name, address or contact, in DoorDash and Uber webhooks. */
-const CONTACT_KEY = /phone|email|given_name|family_name|contact|address|instructions|location|notes|^lat$|^lng$/i;
+const CONTACT_KEY = /phone|email|given_name|family_name|first_name|last_name|full_name|customer|recipient|contact|address|instructions|location|notes|^lat$|^lng$/i;
 /** Uber nests the customer's whole drop-off (name, phone, address, location) under one key. */
 const CONTACT_OBJECT_KEY = /^dropoff$/i;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;

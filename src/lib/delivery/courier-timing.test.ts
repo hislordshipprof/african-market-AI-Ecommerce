@@ -20,6 +20,8 @@ import {
 import { DEFAULT_SECONDS_PER_ITEM, READY_CAP_MINUTES, READY_FLOOR_MINUTES, readyMinutes } from "./ready-estimate";
 import { DeliveryProviderError } from "./provider";
 import { courierLine } from "../order/staff-copy";
+import { findCourierIncidents } from "../admin/courier-incidents-query";
+import { applyCourierWebhook } from "./webhook";
 
 const hasDb = !!process.env.DATABASE_URL;
 const MIN = 60_000;
@@ -288,6 +290,14 @@ describe.skipIf(!hasDb)("courier booked when packing starts (#562)", () => {
     expect(rows.map((r) => r.status)).toEqual(["cancelled", "requested"]);
     expect(rows[1]).toMatchObject({ pickupReadyAt: ready });
     expect([...ub.fake.deliveries.values()].map((d) => d.status)).toContain("canceled");
+
+    // #536: the provider's webhook for the platform's own cancel is not a "courier cancelled" incident.
+    await applyCourierWebhook({
+      provider: "uber", externalDeliveryId: rows[0].externalId, externalEventId: `cancel-${rows[0].id}`, type: "cancelled", occurredAt: now(),
+      trackingUrl: null, actualFeeCents: null, courier: null, proof: { photoUrl: null, pinEntered: null }, payload: { status: "canceled" },
+    });
+    const { rows: incidents } = await platformAdminTransaction((tx) => findCourierIncidents(tx, { storeId }));
+    expect(incidents).toEqual([]);
   });
 
   it("AC2: an assigned courier the provider will not move keeps its time", async () => {

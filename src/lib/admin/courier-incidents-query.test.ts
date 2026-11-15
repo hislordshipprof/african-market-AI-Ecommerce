@@ -66,6 +66,15 @@ describe("redactCourierPayload (#536 AC3)", () => {
     });
   });
 
+  it("the customer's or recipient's name under any key outside the drop-off is redacted; the courier's name stays", () => {
+    const payload = {
+      customer_name: "Ada Obi",
+      recipient: { first_name: "Ada", last_name: "Obi" },
+      data: { customer: { full_name: "Ada Obi" }, recipient_name: "Ada Obi", courier: { name: "Sam" } },
+    };
+    expect(redactCourierPayload(payload)).toEqual({ customer_name: R, recipient: R, data: { customer: R, recipient_name: R, courier: { name: "Sam" } } });
+  });
+
   it("dates, ids and amounts are not mistaken for phone numbers", () => {
     const payload = { created_at: "2026-11-14 15:10:00", support_reference: 1234567, fee: 1234567890, id: "del_2026111415" };
     expect(redactCourierPayload(payload)).toEqual(payload);

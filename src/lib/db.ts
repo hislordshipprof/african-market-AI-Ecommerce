@@ -2346,10 +2346,12 @@ export async function findCourierIncidentRows(
           WHEN e.type = 'returned'
             OR (e.type = 'cancelled' AND COALESCE(e.payload->>'cancellation_reason', e.payload->>'reason') = 'failed_to_return')
             THEN 'returned'
-          -- A cancel the platform made itself (failover replaced the delivery, or the order was cancelled) is not the provider's.
+          -- A cancel the platform made itself (failover replaced the delivery, a pushed ready time rebooked it, or the
+          -- order was cancelled) is not the provider's.
           WHEN e.type = 'cancelled' AND o.status <> 'CANCELLED' AND NOT EXISTS (
               SELECT 1 FROM delivery_events f
-              WHERE f.store_id = e.store_id AND f.order_id = e.order_id AND f.delivery_id = e.delivery_id AND f.type = 'failover_triggered'
+              WHERE f.store_id = e.store_id AND f.order_id = e.order_id AND f.delivery_id = e.delivery_id
+                AND (f.type = 'failover_triggered' OR (f.type = 'cancelled' AND f.payload->>'by' = 'platform'))
             ) THEN 'provider_cancelled'
           -- The deadline the assignment timer uses: the later of the timeout after booking and the ready time.
           WHEN e.type = 'courier_assigned'
