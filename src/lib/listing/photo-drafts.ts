@@ -8,7 +8,8 @@ import { copilotGate } from "../copilot/turn";
 import { FIXED_ERROR, MODEL_TIMEOUT_MS, UNAVAILABLE_MESSAGE } from "../copilot/types";
 import { Prisma, lockStoreRow, platform, storeScoped, storeScopedRawQuery, storeScopedTransaction } from "../db";
 import { prepareProofPhoto } from "../order/delivery-proof";
-import { deleteListingPhoto, deliveryProofBucket, listingPhotoKey, uploadListingPhoto } from "../r2";
+import { cropShelfPhoto, type ProposalInput } from "../catalog/product-proposals";
+import { deleteListingPhoto, deleteProductProposalPhoto, deliveryProofBucket, listingPhotoKey, uploadListingPhoto } from "../r2";
 import { listingRelevanceJoin } from "../storefront/search-relevance";
 import { normalizedSearchQuery } from "../storefront/search-query";
 import { matchToMasterProducts, parsePriceToCents } from "./csv-import";
@@ -316,6 +317,8 @@ export interface PublishPick {
   priceConfirmed: boolean;
   /** For a `several` draft: the master product picked, or null to list it as a new item. */
   masterProductId?: string | null;
+  /** Also suggest the item for the master catalog (#553). Used only when it lists as a custom listing. */
+  proposal?: ProposalInput;
 }
 
 export type PublishRefusal = "price_not_confirmed" | "price_invalid" | "pick_needed" | "already_listed" | "not_found";
@@ -323,6 +326,8 @@ export type PublishRefusal = "price_not_confirmed" | "price_invalid" | "pick_nee
 export interface PublishResult {
   listingIds: string[];
   refused: Array<{ draftId: string; reason: PublishRefusal }>;
+  /** Product proposals sent to the platform's catalog review. */
+  proposed: number;
 }
 
 /**
@@ -339,12 +344,12 @@ export async function publishDrafts(storeId: string, actor: Actor, picks: Publis
       refused.push({ draftId: pick.draftId, reason: "price_invalid" });
     } else valid.push(pick);
   }
-  if (valid.length === 0) return { listingIds: [], refused };
+  if (valid.length === 0) return { listingIds: [], refused, proposed: 0 };
 
   const pickedMasterIds = valid.flatMap((pick) => (pick.masterProductId ? [pick.masterProductId] : []));
   const drafts = await storeScoped(storeId).listingDraft.findMany({
     where: { id: { in: valid.map((pick) => pick.draftId) }, status: "pending" },
-    select: { masterProductId: true },
+    select: { id: true, match: true, photoKey: true, masterProductId: true },
   });
   const masterIds = [...new Set([...pickedMasterIds, ...drafts.flatMap((draft) => (draft.masterProductId ? [draft.masterProductId] : []))])];
   const masters = masterIds.length === 0
@@ -355,12 +360,31 @@ export async function publishDrafts(storeId: string, actor: Actor, picks: Publis
     });
   const masterById = new Map(masters.map((master) => [master.id, master]));
 
-  const listingIds = await storeScopedTransaction(storeId, async (tx) => {
+  // A suggestion's category must exist; its photo is cropped from the shelf photo before the transaction.
+  const proposing = valid.filter((pick) => {
+    const draft = drafts.find((row) => row.id === pick.draftId);
+    return pick.proposal && draft && (draft.match === "none" || (draft.match === "several" && pick.masterProductId === null));
+  });
+  const categoryIds = [...new Set(proposing.flatMap((pick) => (pick.proposal?.categoryId ? [pick.proposal.categoryId] : [])))];
+  const knownCategories = new Set(categoryIds.length === 0
+    ? []
+    : (await platform.category.findMany({ where: { id: { in: categoryIds } }, select: { id: true } })).map((row) => row.id));
+  const cropKeys = new Map<string, string>();
+  for (const pick of proposing) {
+    const shelfKey = drafts.find((row) => row.id === pick.draftId)!.photoKey;
+    if (!pick.proposal?.crop || !deliveryProofBucket()) continue;
+    const key = await cropShelfPhoto(storeId, shelfKey, pick.proposal.crop);
+    if (key) cropKeys.set(pick.draftId, key);
+  }
+  const usedCrops = new Set<string>();
+
+  const { created: listingIds, proposed } = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const listings = await tx.listing.findMany({ select: { masterProductId: true, customName: true } });
     const listedMasters = new Set(listings.flatMap((listing) => (listing.masterProductId ? [listing.masterProductId] : [])));
     const listedNames = new Set(listings.flatMap((listing) => (!listing.masterProductId && listing.customName ? [foldName(listing.customName)] : [])));
     const created: string[] = [];
+    let proposed = 0;
     const now = new Date();
 
     for (const pick of valid) {
@@ -409,6 +433,25 @@ export async function publishDrafts(storeId: string, actor: Actor, picks: Publis
       });
       if (master) listedMasters.add(master.id);
       else listedNames.add(foldName(customName!));
+      if (!master && pick.proposal) {
+        const photoKey = cropKeys.get(draft.id) ?? null;
+        const categoryId = pick.proposal.categoryId ?? null;
+        await tx.productProposal.create({
+          data: {
+            storeId,
+            listingId: listing.id,
+            draftId: draft.id,
+            proposedById: actor.id,
+            name: pick.proposal.name,
+            localName: pick.proposal.localName || null,
+            size: pick.proposal.size || null,
+            categoryId: categoryId && knownCategories.has(categoryId) ? categoryId : null,
+            photoKey,
+          },
+        });
+        if (photoKey) usedCrops.add(photoKey);
+        proposed += 1;
+      }
       await tx.listingDraft.update({
         where: { id: draft.id },
         data: {
@@ -422,9 +465,19 @@ export async function publishDrafts(storeId: string, actor: Actor, picks: Publis
       });
       created.push(listing.id);
     }
-    return created;
-  }, WRITE_TRANSACTION);
-  return { listingIds, refused };
+    return { created, proposed };
+  }, WRITE_TRANSACTION).catch((error: unknown) => {
+    usedCrops.clear();
+    throw error;
+  }).finally(() => deleteUnusedCrops(storeId, [...cropKeys.values()].filter((key) => !usedCrops.has(key))));
+  return { listingIds, refused, proposed };
+}
+
+/** Crops no committed proposal points at: the draft was refused or the transaction failed. */
+async function deleteUnusedCrops(storeId: string, keys: string[]): Promise<void> {
+  for (const key of keys) {
+    await deleteProductProposalPhoto(key).catch(() => console.error("[photo-drafts] orphaned proposal photo not deleted", { storeId }));
+  }
 }
 
 /** The owner drops drafts they will not list. Writes no listing. */
