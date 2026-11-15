@@ -1329,11 +1329,6 @@ export async function storeScopedRawQuery<T>(
   });
 }
 
-/** A read across stores for a platform admin report. Callers check the platform admin first. */
-export async function platformAdminRawQuery<T>(sql: Prisma.Sql): Promise<T[]> {
-  return platformAdminTransaction((tx) => tx.$queryRaw<T[]>(sql));
-}
-
 export { Prisma };
 
 export { prisma as authPrisma };
