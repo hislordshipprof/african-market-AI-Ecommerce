@@ -54,9 +54,14 @@ import {
 } from "./service";
 import { fakeCheckoutCallCount, getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
+import { fakeTaxCalculator, setTaxCalculatorForTests } from "../tax/calculator";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "ada@t236-orch.test" };
+
+// The NODE_ENV=production cases below would otherwise reach the Stripe Tax adapter.
+beforeAll(() => setTaxCalculatorForTests(fakeTaxCalculator()));
+afterAll(() => setTaxCalculatorForTests(null));
 
 describe("strict Stripe retrieve double", () => {
   afterEach(() => {

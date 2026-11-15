@@ -20,7 +20,8 @@ import { readServiceFeeSettings } from "../order/service-fee-settings";
 import { reserveOrderStock } from "../order/stock-ledger";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
-import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
+import { pinnedCheckoutTax, quoteCheckoutTax, TaxLocationError, TaxUnavailableError, type CheckoutTax } from "../tax/checkout-tax";
+import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, PIN_ABOVE_TOTAL_CENTS, quoteCourier } from "../delivery/dispatch";
 import { checkCourierEligibility } from "../delivery/eligibility";
@@ -179,6 +180,31 @@ async function cartCoupon(storeId: string, cartId: string, email: string | null,
 }
 
 export async function quoteCheckout(
+  storeId: string,
+  minimumOrderCents: number,
+  cartId: string,
+  contact: Contact,
+  fulfillment: Fulfillment,
+  request?: DeliveryRequest | null,
+  options: QuoteCheckoutOptions = {},
+): Promise<CheckoutQuote> {
+  const quote = await untaxedQuote(storeId, minimumOrderCents, cartId, contact, fulfillment, request, options);
+  const cart = await getCartWithLines(storeId, cartId);
+  const lines = (cart?.lines ?? []).map((line) => ({ variantId: line.variant.id, qty: line.qty, price: line.variant.price }));
+  if (!cart || lines.length === 0) return quote;
+  try {
+    const tax = await quoteCheckoutTax(storeId, cartId, lines, quote.discountCents, fulfillment);
+    return withTax(quote, tax.taxCents);
+  } catch (error) {
+    if (error instanceof TaxLocationError || error instanceof TaxUnavailableError) {
+      if (error instanceof TaxLocationError) console.error(JSON.stringify({ event: "tax_location_invalid", storeId }));
+      return { ...quote, problems: [...quote.problems, { code: "ineligible", message: error.message }] };
+    }
+    throw error;
+  }
+}
+
+async function untaxedQuote(
   storeId: string,
   minimumOrderCents: number,
   cartId: string,
@@ -524,7 +550,11 @@ export interface RecordAuthorizedOrderInput {
   /** The checkout's WhatsApp updates tick (#560); kept only when the store has a registered number. */
   whatsappUpdates?: boolean;
   acquisitionSource?: AcquisitionSource | null;
+  /** The calculation the hold was sized on (#65); placeOrder always passes it. */
+  tax?: CheckoutTax;
 }
+
+const UNTAXED: CheckoutTax = { calculationId: null, taxCents: 0, lines: [], liableParty: "platform", key: "" };
 
 function paymentIntentTaken(err: unknown): boolean {
   if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") {
@@ -632,7 +662,7 @@ export async function recordAuthorizedOrder(
         : null;
       const refused = customerRefusal(coupon);
       if (refused) throw new CouponRefusedError(refused);
-      const currentQuote = computeQuote(
+      const untaxedQuote = computeQuote(
         input.minimumOrderCents ?? 0,
         current,
         input.contact,
@@ -642,6 +672,12 @@ export async function recordAuthorizedOrder(
         courier,
         coupon,
       );
+      const tax = input.tax ?? UNTAXED;
+      if (input.tax) {
+        const pinned = await pinnedCheckoutTax(tx, storeId, input.cartId, current, untaxedQuote.discountCents, input.fulfillment);
+        if (pinned?.key !== input.tax.key) throw new BasketChangedError();
+      }
+      const currentQuote = withTax(untaxedQuote, tax.taxCents);
       const couponId = appliedCouponId(coupon, currentQuote);
       if (
         currentQuote.problems.length > 0
@@ -723,6 +759,10 @@ export async function recordAuthorizedOrder(
           couponCustomerKey: couponId ? couponCustomerKey(couponUserId, input.contact.email) : null,
           acquisitionSource: input.acquisitionSource ?? null,
           serviceFeeCents: currentQuote.serviceFeeCents,
+          taxCents: tax.taxCents,
+          taxLines: tax.lines as unknown as Prisma.InputJsonValue,
+          taxLiableParty: tax.liableParty,
+          taxCalculationId: tax.calculationId,
           serviceFeeBps: serviceFee.rateBps,
           serviceFeeMinCents: serviceFee.minCents,
           serviceFeeMaxCents: serviceFee.maxCents,
@@ -778,6 +818,11 @@ export async function recordAuthorizedOrder(
           paymentAttemptToken: null,
           purchaseEpoch: { increment: 1 },
           couponCode: null,
+          taxCents: null,
+          taxLines: Prisma.DbNull,
+          taxLiableParty: null,
+          taxCalculationId: null,
+          taxQuoteKey: null,
         },
       });
       const notify = await recordOrderNotification(tx, storeId, order.id, "placed");
@@ -1149,7 +1194,20 @@ export async function placeOrder(
         cart.delivery.leaveAtDoor || leaveAtDoor,
       )
     : null;
-  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier, coupon);
+  const untaxed = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier, coupon);
+  let quote = untaxed;
+  let tax: CheckoutTax;
+  try {
+    // The quote pinned this calculation; Stripe is called again only when the basket changed since.
+    const taxedLines = orderLineData.map((line) => ({ variantId: line.variantId, qty: line.qty, price: line.price }));
+    tax = await quoteCheckoutTax(storeId, cartId, taxedLines, untaxed.discountCents, fulfillment);
+    quote = withTax(untaxed, tax.taxCents);
+  } catch (error) {
+    if (error instanceof TaxLocationError || error instanceof TaxUnavailableError) {
+      await releaseLosingHold(storeId, cartId, paymentIntentId);
+    }
+    throw error;
+  }
 
   const contactOnly = quote.problems.length > 0
     && quote.problems.every((problem) => problem.code === "invalid-contact");
@@ -1203,6 +1261,7 @@ export async function placeOrder(
       leaveAtDoor,
       whatsappUpdates,
       acquisitionSource,
+      tax,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
         qty: line.qty,
