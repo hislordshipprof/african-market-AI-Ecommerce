@@ -316,8 +316,8 @@ The platform admin's monthly report of what the platform keeps (#546), at `/admi
 _Avoid_: Commission report
 
 **Sales tax**:
-The tax Stripe Tax works out for an order (#65, ADR-0008), shown as its own line before Pay and kept on the order with its lines and the **tax liable party**: `platform` (the default; the platform collects and remits as marketplace facilitator, so the tax is kept out of the store's payout) or `store`. Pickup is taxed at the store's address, delivery at the delivery address. Worked out again on the picked goods at Ready, and recorded as a Stripe tax transaction after capture.
-_Avoid_: VAT, estimated tax
+The tax Stripe Tax works out for an order (#65, ADR-0008), shown before Pay as "Estimated tax" (Ready works it out again on the picked goods) and kept on the order with its lines and the **tax liable party**: `platform` (the default; the platform collects and remits as marketplace facilitator, so the tax is kept out of the store's payout) or `store`. Pickup is taxed at the store's address, delivery at the delivery address. Worked out again on the picked goods at Ready, and recorded as a Stripe tax transaction after capture.
+_Avoid_: VAT
 
 **Open request**:
 A RefundRequest that is still unanswered: reserved, unknown, or created at the provider but not yet succeeded, failed or canceled. Manual repayment waits until no request is open.
