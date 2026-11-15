@@ -388,6 +388,7 @@ const STORE_SCOPED_TX_MODELS = [
   "copilotClientMessage",
   "copilotConversation",
   "copilotDigest",
+  "copilotWeeklyReport",
   "customer",
   "delivery",
   "deliveryEvent",
