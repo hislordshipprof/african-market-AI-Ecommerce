@@ -45,7 +45,7 @@ export default async function CatalogReviewPage(props: {
       </div>
 
       {/* Status tabs */}
-      <div className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-border bg-muted p-1">
+      <div className="mb-6 flex flex-wrap gap-1 rounded-xl border border-border bg-muted p-1">
         {tabs.map((tab) => (
           <Link
             key={tab.key}

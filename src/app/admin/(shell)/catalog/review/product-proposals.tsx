@@ -10,12 +10,14 @@ type Mode = "create" | "link" | "reject";
 
 const MODES: Array<{ key: Mode; label: string }> = [
   { key: "create", label: "Add as new" },
-  { key: "link", label: "Same as a catalog product" },
+  { key: "link", label: "Existing product" },
   { key: "reject", label: "Reject" },
 ];
 
-const FIELD = "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground";
+const FIELD = "h-11 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground";
 const LABEL = "grid gap-1 text-xs font-medium text-muted-foreground";
+
+const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 function dollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
@@ -104,30 +106,35 @@ function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; 
           <p className="text-sm text-muted-foreground">
             {proposal.storeName} sells it as “{proposal.listingName ?? proposal.name}” at {dollars(proposal.listingPriceCents)}
             {" · "}
-            <time dateTime={new Date(proposal.createdAt).toISOString()}>{new Date(proposal.createdAt).toLocaleDateString()}</time>
+            <time dateTime={new Date(proposal.createdAt).toISOString()}>{DAY.format(new Date(proposal.createdAt))}</time>
           </p>
         </div>
       </div>
 
-      <div role="radiogroup" aria-label={`Decision for ${proposal.name}`} className="mt-4 flex flex-wrap gap-1 rounded-xl bg-muted p-1">
+      <fieldset className="mt-4 flex gap-1 rounded-xl bg-muted p-1">
+        <legend className="sr-only">Decision for {proposal.name}</legend>
         {MODES.map((option) => (
-          <button
+          <label
             key={option.key}
-            type="button"
-            role="radio"
-            aria-checked={mode === option.key}
-            onClick={() => {
-              setMode(option.key);
-              setError(null);
-            }}
-            className={`min-h-10 flex-1 rounded-lg px-3 text-sm font-medium transition-colors ${
-              mode === option.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            className={`flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-lg px-2 text-center text-sm font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${
+              mode === option.key ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:text-foreground"
             }`}
           >
+            <input
+              type="radio"
+              name={id("mode")}
+              value={option.key}
+              checked={mode === option.key}
+              onChange={() => {
+                setMode(option.key);
+                setError(null);
+              }}
+              className="sr-only"
+            />
             {option.label}
-          </button>
+          </label>
         ))}
-      </div>
+      </fieldset>
 
       {error && (
         <p role="alert" className="mt-3 flex gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -173,14 +180,14 @@ function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; 
               ))}
             </select>
           </label>
-          <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
-            {proposal.hasPhoto ? (
-              <label className="flex min-h-10 items-center gap-2 text-sm text-foreground">
+          <div className="flex flex-wrap items-center justify-end gap-3 sm:col-span-2">
+            {proposal.hasPhoto && (
+              <label className="mr-auto flex min-h-11 items-center gap-2 text-sm text-foreground">
                 <input type="checkbox" className="size-4 accent-primary" checked={fields.usePhoto} onChange={(event) => setFields({ ...fields, usePhoto: event.target.checked })} />
                 Use the store’s photo
               </label>
-            ) : <span />}
-            <button type="submit" disabled={isPending} className="min-h-10 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            )}
+            <button type="submit" disabled={isPending} className="min-h-11 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
               Approve and add to catalog
             </button>
           </div>
@@ -192,7 +199,7 @@ function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; 
           <form role="search" onSubmit={search} className="flex gap-2">
             <label htmlFor={id("search")} className="sr-only">Search active catalog products</label>
             <input id={id("search")} className={FIELD} value={query} maxLength={200} onChange={(event) => setQuery(event.target.value)} />
-            <button type="submit" disabled={isPending || !query.trim()} className="inline-flex min-h-10 shrink-0 items-center gap-1 rounded-full border border-border px-4 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50">
+            <button type="submit" disabled={isPending || !query.trim()} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border border-border px-4 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50">
               <Search aria-hidden="true" className="size-4" /> Search
             </button>
           </form>
@@ -216,7 +223,7 @@ function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; 
                 ))}
               </fieldset>
               <div className="flex justify-end">
-                <button type="submit" disabled={isPending || !linkId} className="min-h-10 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                <button type="submit" disabled={isPending || !linkId} className="min-h-11 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                   Approve and link the store’s listing
                 </button>
               </div>
@@ -239,7 +246,7 @@ function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; 
           </label>
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">The store’s listing keeps selling as it is.</p>
-            <button type="submit" disabled={isPending} className="min-h-10 rounded-full border border-destructive/40 px-4 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50">
+            <button type="submit" disabled={isPending} className="min-h-11 rounded-full border border-destructive/40 px-4 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50">
               Reject suggestion
             </button>
           </div>

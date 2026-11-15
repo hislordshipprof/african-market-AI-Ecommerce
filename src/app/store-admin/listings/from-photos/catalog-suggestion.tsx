@@ -24,7 +24,9 @@ export interface SuggestionState {
   crop: FrameCrop | null;
 }
 
-const FIELD = "h-11 w-full rounded-lg border border-[var(--color-line-strong,var(--color-line))] bg-[var(--color-surface)] px-3 text-sm";
+const FIELD = "h-11 w-full rounded-lg border border-[var(--color-line-strong,var(--color-line))] bg-[var(--color-surface)] px-3 text-sm font-normal text-[var(--color-ink)]";
+/** Inputs sit on the raised panel: surface ground, regular ink, so a filled field never reads as disabled. */
+const INPUT = "h-11 bg-[var(--color-surface)] text-sm font-normal text-[var(--color-ink)]";
 
 /** The fields an owner fills to suggest an unmatched item for the shared catalog. */
 export function SuggestionFields({
@@ -49,15 +51,15 @@ export function SuggestionFields({
       <legend className="sr-only">Catalog suggestion for {itemName}</legend>
       <label htmlFor={id("name")} className="grid gap-1 text-xs font-semibold text-[var(--color-muted)]">
         Product name
-        <Input id={id("name")} className="h-11" value={value.name} maxLength={200} required onChange={(event) => onChange({ name: event.target.value })} />
+        <Input id={id("name")} className={INPUT} value={value.name} maxLength={200} required onChange={(event) => onChange({ name: event.target.value })} />
       </label>
       <label htmlFor={id("local")} className="grid gap-1 text-xs font-semibold text-[var(--color-muted)]">
         Local name <span className="font-normal">(optional)</span>
-        <Input id={id("local")} className="h-11" value={value.localName} maxLength={100} placeholder="e.g. ogiri igbo" onChange={(event) => onChange({ localName: event.target.value })} />
+        <Input id={id("local")} className={INPUT} value={value.localName} maxLength={100} placeholder="e.g. ogiri igbo" onChange={(event) => onChange({ localName: event.target.value })} />
       </label>
       <label htmlFor={id("size")} className="grid gap-1 text-xs font-semibold text-[var(--color-muted)]">
         Size or pack
-        <Input id={id("size")} className="h-11" value={value.size} maxLength={40} placeholder="e.g. 500g" onChange={(event) => onChange({ size: event.target.value })} />
+        <Input id={id("size")} className={INPUT} value={value.size} maxLength={40} placeholder="e.g. 500g" onChange={(event) => onChange({ size: event.target.value })} />
       </label>
       <label htmlFor={id("category")} className="grid gap-1 text-xs font-semibold text-[var(--color-muted)]">
         Category
@@ -271,10 +273,10 @@ export function SuggestionList({ proposals }: { proposals: StoreProposalRow[] })
           const status = STATUS[row.status];
           const Icon = status.icon;
           return (
-            <li key={row.id} className="flex flex-col gap-1 px-4 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
-              <span className="flex-1 font-medium">{row.name}</span>
-              <span className="flex items-center gap-2 text-[var(--color-muted)]">
-                <Icon className="size-4 shrink-0" aria-hidden />
+            <li key={row.id} className="flex flex-col gap-1 px-4 py-3 text-sm sm:flex-row sm:items-start sm:gap-3">
+              <span className="font-medium sm:flex-1">{row.name}</span>
+              <span className="flex items-start gap-2 text-[var(--color-muted)] sm:max-w-[60%]">
+                <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
                 {status.label(row)}
               </span>
             </li>
