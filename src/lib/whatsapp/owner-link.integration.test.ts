@@ -44,7 +44,7 @@ import { startWhatsAppLinkAction } from "./actions";
 import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "./fake";
 import { WhatsAppApiError } from "./errors";
 import { NOT_LINKED_REPLY, WRONG_CODE_REPLY } from "./inbound";
-import { ownerMessageReply } from "./owner-handler";
+import { UNAVAILABLE_MESSAGE } from "../copilot/types";
 import { setWhatsAppProvider } from "./index";
 import { getOwnerLink, NOT_SET_UP_ERROR, resolveOwnerByPhone, SEND_FAILED_ERROR } from "./owner-link";
 import { signWhatsAppBody } from "./signature";
@@ -213,6 +213,8 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
 
   beforeEach(() => {
     vi.stubEnv("WHATSAPP_APP_SECRET", SECRET);
+    // An owner's message runs the Store copilot (#144); with no model key it answers that it is unavailable.
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("WHATSAPP_VERIFY_TOKEN", "owner-link-verify");
     vi.stubEnv("WHATSAPP_PHONE_NUMBER_ID", PHONE_NUMBER_ID);
     setWhatsAppProvider(fakeWhatsAppProvider);
@@ -380,7 +382,7 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     const other = codeB === "123456" ? "654321" : "123456";
     for (let i = 0; i < 6; i++) expect((await deliverText(phone.digits, other)).status).toBe(200);
     const texts = textsTo(phone.digits);
-    expect(texts.slice(1)).toEqual(Array(6).fill(ownerMessageReply({ storeName: storeNameA })));
+    expect(texts.slice(1)).toEqual(Array(6).fill(UNAVAILABLE_MESSAGE));
     const pendingB = await storeScoped(storeB).ownerWhatsAppLink.findUnique({ where: whereB });
     expect(pendingB).toMatchObject({ verified: false, verificationAttempts: 0 });
     expect(pendingB?.verificationCodeHash).not.toBeNull();
@@ -504,7 +506,7 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     // The owner adopts a username: Meta now sends only the BSUID.
     expect((await deliverFrom({ digits: null, bsuid }, { type: "text", text: { body: "how are sales?" } })).status).toBe(200);
     const toBsuid = getFakeOutbox().filter((entry) => entry.message.to === bsuid).map((entry) => entry.message);
-    expect(toBsuid).toEqual([{ type: "text", to: bsuid, body: ownerMessageReply({ storeName: store.name }) }]);
+    expect(toBsuid).toEqual([{ type: "text", to: bsuid, body: UNAVAILABLE_MESSAGE }]);
 
     // Another store's data never answers this BSUID.
     expect(await storeScoped(storeB).ownerWhatsAppLink.count({ where: { bsuid } })).toBe(0);
@@ -593,7 +595,7 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     }
     expect(textsTo(phone.digits)).toHaveLength(before);
     expect((await deliverText(phone.digits, "hello")).status).toBe(200);
-    expect(textsTo(phone.digits).at(-1)).toBe(ownerMessageReply({ storeName: store.name }));
+    expect(textsTo(phone.digits).at(-1)).toBe(UNAVAILABLE_MESSAGE);
   });
 
   it("a reply rate-limit failure after the claim commits answers 200 and sends nothing (F5)", async () => {

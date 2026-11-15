@@ -1,5 +1,8 @@
 import { Prisma, claimCopilotAlertsForPush, findStoreIdsAfter, lockCopilotPush, platform, storeScoped, storeScopedTransaction, txQuery } from "../db";
+import { resolveAuthBaseUrl } from "../auth";
 import { pushToStoreMembers } from "../push/store-members";
+import { optedInOwners, sendOwnerNotice } from "../whatsapp/owner-notify";
+import { COPILOT_TEMPLATES } from "../whatsapp/templates";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
 import { isValidTimezone } from "../order/store-hours";
@@ -34,12 +37,12 @@ export async function storeDay(storeId: string, now = new Date()): Promise<strin
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
-function isSoldOut(listing: AlertListing): boolean {
+export function isSoldOut(listing: Pick<AlertListing, "stockMode" | "qty" | "status">): boolean {
   return (listing.stockMode === "counted" && listing.qty === 0)
     || (listing.stockMode === "status" && listing.status === "out_of_stock");
 }
 
-function isRunningLow(listing: AlertListing): boolean {
+export function isRunningLow(listing: Pick<AlertListing, "stockMode" | "qty" | "status">): boolean {
   if (isSoldOut(listing)) return false;
   if (listing.stockMode === "counted") return listing.qty != null && listing.qty <= LOW_STOCK_THRESHOLD;
   return listing.status === "low";
@@ -171,6 +174,7 @@ export async function describeAlerts(
  * One push to the store's owners summarising every open alert not yet pushed, unless the
  * store already had its pushes this hour. Capped alerts keep `pushed_at` null and go out
  * with the next allowed push or the digest. Never throws for a push failure.
+ * The same summary goes on WhatsApp to each owner who opted in to alerts (#144).
  */
 export async function pushCopilotAlerts(
   storeId: string,
@@ -187,7 +191,7 @@ export async function pushCopilotAlerts(
   });
   if (claimed.length === 0) return;
 
-  const store = await platform.store.findUnique({ where: { id: storeId }, select: { slug: true } });
+  const store = await platform.store.findUnique({ where: { id: storeId }, select: { slug: true, name: true } });
   if (!store) return;
   const views = await describeAlerts(storeId, claimed
     .sort((a, b) => a.created_at.getTime() - b.created_at.getTime())
@@ -198,12 +202,25 @@ export async function pushCopilotAlerts(
     ? (shown[0] ?? "1 alert")
     : `${claimed.length} alerts: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
 
+  const path = `/store-admin/copilot?store=${encodeURIComponent(store.slug)}`;
   await pushToStoreMembers(storeId, {
     title: claimed.length === 1 ? "Stock alert" : "Stock alerts",
     body,
-    url: `/store-admin/copilot?store=${encodeURIComponent(store.slug)}`,
+    url: path,
     tag: "copilot-alerts",
   }, env, { roles: ["owner"] });
+
+  const recipients = await optedInOwners(storeId, "alerts", new Date(now));
+  if (recipients.length === 0) return;
+  const text = [
+    `${store.name}: ${claimed.length === 1 ? "stock alert" : "stock alerts"}`,
+    ...views.map((view) => `• ${view.text}`),
+    "",
+    `Reply here with a stock report, or open the stock copilot: ${resolveAuthBaseUrl(env).replace(/\/$/, "")}${path}`,
+  ].join("\n");
+  for (const recipient of recipients) {
+    await sendOwnerNotice(storeId, recipient, { text, template: COPILOT_TEMPLATES.alert, values: [store.name, body] });
+  }
 }
 
 const STORES_PER_BATCH = 100;

@@ -2445,27 +2445,54 @@ export async function verifyOwnerLinkByCode(
 export async function findVerifiedOwnerLink(
   tx: RawTx,
   sender: WhatsAppSenderIds,
-): Promise<{ linkId: string; storeId: string; userId: string; role: string; storeName: string; bsuid: string | null } | null> {
+): Promise<{
+  linkId: string;
+  storeId: string;
+  userId: string;
+  email: string;
+  role: string;
+  storeName: string;
+  bsuid: string | null;
+} | null> {
   const { waId, bsuid } = sender;
   const rows = await tx.$queryRaw<Array<{
     id: string;
     store_id: string;
     user_id: string;
+    email: string;
     role: string;
     name: string;
     bsuid: string | null;
   }>>`
-    SELECT l.id, l.store_id, l.user_id, m.role, s.name, l.bsuid
+    SELECT l.id, l.store_id, l.user_id, u.email, m.role, s.name, l.bsuid
     FROM owner_whatsapp_links l
     JOIN store_memberships m ON m.store_id = l.store_id AND m.user_id = l.user_id
     JOIN stores s ON s.id = l.store_id
+    JOIN users u ON u.id = l.user_id
     WHERE l.verified AND (l.wa_id = ${waId} OR l.bsuid = ${bsuid}) AND m.role = 'owner'
     ORDER BY (l.wa_id = ${waId}) IS TRUE DESC, l.verified_at DESC
     LIMIT 1
   `;
   const row = rows[0];
   if (!row) return null;
-  return { linkId: row.id, storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name, bsuid: row.bsuid };
+  return {
+    linkId: row.id,
+    storeId: row.store_id,
+    userId: row.user_id,
+    email: row.email,
+    role: row.role,
+    storeName: row.name,
+    bsuid: row.bsuid,
+  };
+}
+
+/** Moves the owner's last inbound time forward to Meta's send time of this message (#144); never back. */
+export async function recordOwnerInbound(tx: RawTx, linkId: string, sentAt: Date): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE owner_whatsapp_links
+    SET last_inbound_at = GREATEST(COALESCE(last_inbound_at, ${sentAt}), ${sentAt})
+    WHERE id = ${linkId} AND verified
+  `;
 }
 
 /**
