@@ -12,6 +12,7 @@ import { assessOfficial } from "./gate";
 import { liveBudgetMicros, liveConcurrency } from "./preflight";
 import { buildReport, officialReport, publishEvalReport, readTicketSpend, summarize, verdictFor, type EvalReport } from "./report";
 import { runEval } from "./runner";
+import type { CatalogBinding } from "./score";
 import type { RunResult } from "./types";
 
 // Owner raised the #146 eval budget to $20 on 2026-11-11 (issue #146).
@@ -56,7 +57,7 @@ export async function runLiveEval(): Promise<void> {
   const traceRoot = process.env.ASSISTANT_EVAL_TRACE_DIR || null;
   // The official result is two full runs (owner, 2026-11-11); a partial or comparison run is one.
   const runCount = full && !compareDir ? 2 : 1;
-  const runs: Array<{ preview: EvalReport; result: RunResult; latency: Latency }> = [];
+  const runs: Array<{ preview: EvalReport; result: RunResult; latency: Latency; binding: CatalogBinding | null }> = [];
   for (let index = 1; index <= runCount; index += 1) {
     const prior = readTicketSpend();
     if (prior >= TICKET_CAP_MICROS) {
@@ -96,7 +97,7 @@ export async function runLiveEval(): Promise<void> {
       gateOk: false,
     });
     const latency = { turns: turnMs.length, medianMs: percentile(turnMs, 0.5), p90Ms: percentile(turnMs, 0.9) };
-    runs.push({ preview, result: run.result, latency });
+    runs.push({ preview, result: run.result, latency, binding: run.binding });
     if (!run.result.complete) break;
   }
   const ticketTotal = readTicketSpend();
@@ -104,7 +105,7 @@ export async function runLiveEval(): Promise<void> {
   const complete = runs.length === runCount && runs.every((run) => run.result.complete);
   const official = officialReport(runs.map((run) => run.preview));
   const gate = complete && full
-    ? assessOfficial(official, { fingerprint: first.preview.fingerprint, caseIds: dataset.map((item) => item.id), model })
+    ? assessOfficial(official, { fingerprint: first.preview.fingerprint, caseIds: dataset.map((item) => item.id), model, cases: dataset, binding: first.binding ?? undefined })
     : { ok: false, reasons: [runs.find((run) => !run.result.complete)?.result.incompleteReason ?? "partial run"] };
   const reports = runs.map((run) => {
     const verdict = verdictFor(run.preview.summary, gate.ok);
