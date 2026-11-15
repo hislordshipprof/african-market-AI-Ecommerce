@@ -67,17 +67,25 @@ describe.skipIf(!hasDb)("platform manual refund (#538)", () => {
     await raw.$disconnect();
   });
 
-  /** A captured order: goods plus a service fee, and a courier fee when the order went by courier. */
-  async function capturedOrder(opts: { goods: number; serviceFee?: number; courierFee?: number; status?: "COMPLETED" | "DELIVERED" | "READY"; storeId?: string }) {
+  /** A captured order: goods plus a service fee and sales tax, and a courier fee when the order went by courier. */
+  async function capturedOrder(opts: {
+    goods: number; serviceFee?: number; courierFee?: number; tax?: number; taxLiableParty?: "platform" | "store";
+    status?: "COMPLETED" | "DELIVERED" | "READY"; storeId?: string;
+  }) {
     number += 1;
     const storeId = opts.storeId ?? stores[0];
     const serviceFeeCents = opts.serviceFee ?? 0;
     const courierFeeCents = opts.courierFee ?? 0;
+    const taxCents = opts.tax ?? 0;
+    const taxLiableParty = opts.taxLiableParty ?? "platform";
     const customer = await storeScoped(storeId).customer.create({ data: { storeId, name: `Refund ${number}`, email: `c${number}@${run}.test` } });
-    const captured = opts.goods + serviceFeeCents + courierFeeCents;
+    const captured = opts.goods + serviceFeeCents + courierFeeCents + taxCents;
     const pi = `pi_pr538_${number}_${run}`;
     setAuthorizedAmount(pi, captured);
-    const fee = courierFeeCents > 0 ? captureSplit({ capturedCents: captured, serviceFeeCents, courierFeeCents }).applicationFeeCents : undefined;
+    const platformTaxCents = taxLiableParty === "platform" ? taxCents : 0;
+    const fee = courierFeeCents > 0 || platformTaxCents > 0
+      ? captureSplit({ capturedCents: captured, serviceFeeCents, courierFeeCents, platformTaxCents }).applicationFeeCents
+      : undefined;
     await fakeStripeProvider.capturePaymentIntent(pi, captured, `cap-pr538-${number}`, fee);
     const order = await storeScoped(storeId).order.create({
       data: {
@@ -93,6 +101,8 @@ describe.skipIf(!hasDb)("platform manual refund (#538)", () => {
         totalCents: captured,
         capturedAmountCents: captured,
         serviceFeeCents,
+        taxCents,
+        taxLiableParty,
         paymentIntentId: pi,
         completedAt: new Date("2026-11-01T12:00:00Z"),
       },
@@ -147,6 +157,32 @@ describe.skipIf(!hasDb)("platform manual refund (#538)", () => {
     expect(request).toMatchObject({ amountCents: 1050, refundApplicationFee: false, serviceFeeShareCents: 50 });
     expect(request.feeRefundId).toMatch(/^fr_fake_/);
     expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(1000);
+  });
+
+  it("#65 B5: a courier refund of a platform-taxed order returns the tax from the platform fee, so the store funds the goods only", async () => {
+    // $20 goods + 60¢ service fee + $1.65 tax the platform collects + $8.99 courier fee; all the goods back is $22.25.
+    const order = await capturedOrder({ goods: 2000, serviceFee: 60, courierFee: 899, tax: 165 });
+    expect(await platformRefundAction(null, form(order.id, "22.25"))).toMatchObject({ ok: true, amountCents: 2225 });
+    const [request] = (await written(stores[0], order.id)).requests;
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2000);
+    expect(request).toMatchObject({ amountCents: 2225, refundApplicationFee: false, serviceFeeShareCents: 60, taxShareCents: 165, platformTaxShareCents: 165 });
+  });
+
+  it("#65 B5: a partial courier refund of a platform-taxed order takes no tax from the store", async () => {
+    // Half the goods: $10 + 30¢ fee share + 82.5¢ → 83¢ tax share.
+    const order = await capturedOrder({ goods: 2000, serviceFee: 60, courierFee: 899, tax: 165 });
+    expect(await platformRefundAction(null, form(order.id, "11.13"))).toMatchObject({ ok: true, amountCents: 1113 });
+    const [request] = (await written(stores[0], order.id)).requests;
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(1000);
+    expect(request).toMatchObject({ serviceFeeShareCents: 30, taxShareCents: 83, platformTaxShareCents: 83 });
+  });
+
+  it("#65 B5: when the store collects the tax, a courier refund reverses the tax with the store's transfer", async () => {
+    const order = await capturedOrder({ goods: 2000, serviceFee: 60, courierFee: 899, tax: 165, taxLiableParty: "store" });
+    expect(await platformRefundAction(null, form(order.id, "22.25"))).toMatchObject({ ok: true, amountCents: 2225 });
+    const [request] = (await written(stores[0], order.id)).requests;
+    expect(request).toMatchObject({ serviceFeeShareCents: 60, taxShareCents: 165, platformTaxShareCents: 0 });
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2165);
   });
 
   it("a double submit and a concurrent submit of one form refund once", async () => {

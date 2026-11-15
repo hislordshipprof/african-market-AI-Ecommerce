@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ADR_0021_SERVICE_FEE, capturedApplicationFee, capturedPayout, captureSplit, maxGoodsWithin, NO_SERVICE_FEE, platformTaxCents, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
+import { ADR_0021_SERVICE_FEE, capturedApplicationFee, capturedPayout, captureSplit, maxGoodsWithin, NO_SERVICE_FEE, platformTaxCents, refundOfGoodsCents, refundShares, serviceFeeCents, serviceFeeRefundCents, taxRefundCents } from "./platform-fee";
 
 describe("service fee (ADR-0021)", () => {
   it("is 3% of goods, held to the $0.99 minimum and the $2.99 maximum", () => {
@@ -15,15 +15,47 @@ describe("service fee (ADR-0021)", () => {
 
 describe("service fee part of an issue refund", () => {
   // $66 of goods with a $1.98 fee and $8.99 courier.
-  const order = { serviceFeeCents: 198, capturedAmountCents: 6600 + 198 + 899, tipCents: 0, deliveryFeeCents: 899 };
+  const order = { serviceFeeCents: 198, capturedAmountCents: 6600 + 198 + 899, tipCents: 0, deliveryFeeCents: 899, taxCents: 0 };
 
   it("is the fee share of the goods the refund covers, also for an amount the store lowered", () => {
     expect(serviceFeeRefundCents(2100, order)).toBe(63);
-    expect(serviceFeeShareOfRefund(2163, order)).toBe(63);
+    expect(refundShares(2163, order).serviceFeeCents).toBe(63);
     // $10 approved by the store: $9.71 of goods plus their 29¢ share.
-    expect(serviceFeeShareOfRefund(1000, order)).toBe(29);
-    expect(serviceFeeShareOfRefund(6600 + 198, order)).toBe(198);
-    expect(serviceFeeShareOfRefund(2163, { ...order, serviceFeeCents: 0, capturedAmountCents: 7499 })).toBe(0);
+    expect(refundShares(1000, order).serviceFeeCents).toBe(29);
+    expect(refundShares(6600 + 198, order).serviceFeeCents).toBe(198);
+    expect(refundShares(2163, { ...order, serviceFeeCents: 0, capturedAmountCents: 7499 }).serviceFeeCents).toBe(0);
+  });
+});
+
+describe("tax part of a refund (#65, decision 2026-11-15-06)", () => {
+  // $20 goods, 60¢ fee, $1.65 tax, $8.99 courier, $5 tip: only the goods carry the tax.
+  const order = { serviceFeeCents: 60, capturedAmountCents: 2000 + 60 + 165 + 899 + 500, tipCents: 500, deliveryFeeCents: 899, taxCents: 165 };
+
+  it("a goods refund adds the tax paid on those goods, in proportion, and tip, delivery and tax are not goods", () => {
+    expect(refundOfGoodsCents(2000, order)).toBe(2000 + 60 + 165);
+    expect(refundOfGoodsCents(1000, order)).toBe(1000 + 30 + 83);
+    expect(serviceFeeRefundCents(1000, order)).toBe(30);
+    expect(taxRefundCents(1000, order)).toBe(83);
+  });
+
+  it("an amount splits back into goods, fee share and tax share", () => {
+    expect(refundShares(2225, order)).toEqual({ goodsCents: 2000, serviceFeeCents: 60, taxCents: 165 });
+    expect(refundShares(1113, order)).toEqual({ goodsCents: 1000, serviceFeeCents: 30, taxCents: 83 });
+    expect(refundShares(0, order)).toEqual({ goodsCents: 0, serviceFeeCents: 0, taxCents: 0 });
+  });
+
+  it("the tax shares of several refunds never add up to more than the order's tax", () => {
+    // 1¢ of tax on $2 of goods: each $1 half rounds up to 1¢, but only one cent was paid.
+    const odd = { serviceFeeCents: 0, capturedAmountCents: 201, tipCents: 0, deliveryFeeCents: 0, taxCents: 1 };
+    expect(taxRefundCents(100, odd)).toBe(1);
+    expect(taxRefundCents(100, odd, 1)).toBe(0);
+    expect(refundShares(100, odd, 1)).toEqual({ goodsCents: 100, serviceFeeCents: 0, taxCents: 0 });
+    // Once the whole tax is back, a later refund of goods carries only their fee share.
+    expect(refundOfGoodsCents(100, order, 165)).toBe(100 + 3);
+  });
+
+  it("an order placed before tax refunds no tax", () => {
+    expect(taxRefundCents(1000, { ...order, taxCents: 0, capturedAmountCents: 2000 + 60 + 899 + 500 })).toBe(0);
   });
 });
 

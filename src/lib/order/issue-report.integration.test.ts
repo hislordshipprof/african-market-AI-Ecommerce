@@ -94,16 +94,32 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     await raw.$disconnect();
   });
 
-  /** A completed order (pickup unless a courier fee is given): three lines, captured at the picked total. */
-  async function completedOrder(lines: Array<{ qtyPicked: number; unitPriceCents: number; discountCents?: number }>, hoursAgo: number, serviceFeeCents = 0, courierFeeCents = 0) {
+  type IssueLine = { qtyPicked: number; unitPriceCents: number; discountCents?: number; swap?: { qtyOrdered: number; unitPriceCents: number } };
+
+  /**
+   * A completed order (pickup unless a courier fee is given), captured at the picked total plus the sales tax
+   * the final calculation gave (#65). A swapped line charges its substitute units too.
+   */
+  async function completedOrder(
+    lines: IssueLine[],
+    hoursAgo: number,
+    serviceFeeCents = 0,
+    courierFeeCents = 0,
+    tax: { cents: number; liable?: "platform" | "store" } = { cents: 0 },
+  ) {
     number += 1;
     const customer = await storeScoped(store.id).customer.create({ data: { storeId: store.id, name: `Issue ${number}` } });
-    const goods = lines.reduce((sum, line) => sum + line.qtyPicked * line.unitPriceCents, 0);
+    const goods = lines.reduce((sum, line) => sum + line.qtyPicked * line.unitPriceCents
+      + (line.swap ? (line.swap.qtyOrdered - line.qtyPicked) * line.swap.unitPriceCents : 0), 0);
     const discountCents = lines.reduce((sum, line) => sum + (line.discountCents ?? 0), 0);
-    const captured = goods - discountCents + serviceFeeCents + courierFeeCents;
+    const taxLiableParty = tax.liable ?? "platform";
+    const captured = goods - discountCents + serviceFeeCents + courierFeeCents + tax.cents;
     const pi = `pi_issue_${number}_${run}`;
     setAuthorizedAmount(pi, captured);
-    const fee = courierFeeCents > 0 ? captureSplit({ capturedCents: captured, serviceFeeCents, courierFeeCents }).applicationFeeCents : undefined;
+    const platformTaxCents = taxLiableParty === "platform" ? tax.cents : 0;
+    const fee = courierFeeCents > 0 || platformTaxCents > 0
+      ? captureSplit({ capturedCents: captured, serviceFeeCents, courierFeeCents, platformTaxCents }).applicationFeeCents
+      : undefined;
     await fakeStripeProvider.capturePaymentIntent(pi, captured, `cap-issue-${number}`, fee);
     const order = await storeScoped(store.id).order.create({
       data: {
@@ -119,6 +135,8 @@ describe.skipIf(!hasDb)("customer issue report", () => {
         totalCents: captured,
         capturedAmountCents: captured,
         serviceFeeCents,
+        taxCents: tax.cents,
+        taxLiableParty,
         discountCents,
         couponId: discountCents > 0 ? couponId : null,
         paymentIntentId: pi,
@@ -131,11 +149,12 @@ describe.skipIf(!hasDb)("customer issue report", () => {
         storeId: store.id,
         orderId: order.id,
         listingVariantId: variantId,
-        qtyOrdered: line.qtyPicked,
+        qtyOrdered: line.swap?.qtyOrdered ?? line.qtyPicked,
         qtyPicked: line.qtyPicked,
         unitPriceCents: line.unitPriceCents,
+        substitutedUnitPriceCents: line.swap?.unitPriceCents ?? null,
         discountCents: line.discountCents ?? 0,
-        status: "picked",
+        status: line.swap ? "substituted" : "picked",
       })),
     });
     const withLines = await storeScoped(store.id).order.findUniqueOrThrow({
@@ -238,6 +257,70 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     expect(feeRefundParts.get(request.key)).toMatchObject({ amountCents: 63 });
     expect(request.feeRefundId).toBe(feeRefundParts.get(request.key)!.feeRefundId);
     expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2100);
+  });
+
+  const THREE_LINES: IssueLine[] = [
+    { qtyPicked: 2, unitPriceCents: 450 },
+    { qtyPicked: 1, unitPriceCents: 1200 },
+    { qtyPicked: 3, unitPriceCents: 1500 },
+  ];
+
+  it("#65 B6: an issue refund gives back the tax paid on the refunded goods", async () => {
+    // $66 of goods, $1.98 fee, $5.45 tax. $21 of goods reported: 63¢ fee share + 545 × 2100 / 6600 = 173.4 → $1.73 tax.
+    const { order, token } = await completedOrder(THREE_LINES, 1, 198, 0, { cents: 545 });
+    const [cheap, middle] = order.lines;
+    const result = await submitIssueReport(store, token, {
+      type: "damaged", lines: [{ lineId: cheap.id, qty: 2 }, { lineId: middle.id, qty: 1 }], note: "", photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2100 + 63 + 173 });
+    expect((await written(order.id)).requests[0]).toMatchObject({ amountCents: 2336, refundApplicationFee: true, taxShareCents: 173, platformTaxShareCents: 0 });
+  });
+
+  it("#65 B5/B6: a courier issue refund of a platform-taxed order gives the tax back from the platform fee, so the store funds the goods only", async () => {
+    const { order, token } = await completedOrder(THREE_LINES, 1, 198, 899, { cents: 545 });
+    const [cheap, middle] = order.lines;
+    const result = await submitIssueReport(store, token, {
+      type: "damaged", lines: [{ lineId: cheap.id, qty: 2 }, { lineId: middle.id, qty: 1 }], note: "", photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2336 });
+    const [request] = (await written(order.id)).requests;
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2100);
+    expect(request).toMatchObject({ refundApplicationFee: false, serviceFeeShareCents: 63, taxShareCents: 173, platformTaxShareCents: 173 });
+    expect(feeRefundParts.get(request.key)).toMatchObject({ amountCents: 63 + 173 });
+  });
+
+  it("#65 B5/B6: when the store collects the tax, a courier issue refund reverses the tax with the store's transfer", async () => {
+    const { order, token } = await completedOrder(THREE_LINES, 1, 198, 899, { cents: 545, liable: "store" });
+    const [cheap, middle] = order.lines;
+    const result = await submitIssueReport(store, token, {
+      type: "damaged", lines: [{ lineId: cheap.id, qty: 2 }, { lineId: middle.id, qty: 1 }], note: "", photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2336 });
+    const [request] = (await written(order.id)).requests;
+    expect(request).toMatchObject({ serviceFeeShareCents: 63, taxShareCents: 173, platformTaxShareCents: 0 });
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2100 + 173);
+  });
+
+  it("#65 B6: with a coupon, the tax share follows the discounted goods and an odd half cent rounds up", async () => {
+    // $59.40 charged for goods after 10% off, $1.78 fee, $4.90 tax. Goods 1485: fee 44.5 → 45, tax 490 × 1485 / 5940 = 122.5 → 123.
+    const { order, token } = await completedOrder([
+      { qtyPicked: 2, unitPriceCents: 450, discountCents: 90 },
+      { qtyPicked: 1, unitPriceCents: 1200, discountCents: 120 },
+      { qtyPicked: 3, unitPriceCents: 1500, discountCents: 450 },
+    ], 1, 178, 0, { cents: 490 });
+    const [cheap, middle] = order.lines;
+    const result = await submitIssueReport(store, token, {
+      type: "damaged", lines: [{ lineId: cheap.id, qty: 1 }, { lineId: middle.id, qty: 1 }], note: "", photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 1485 + 45 + 123 });
+  });
+
+  it("#65 B6: after a swap, the tax share comes from the final tax on the goods actually charged", async () => {
+    // 1 of 2 found at $12 and 1 swapped at $8: $20 charged, 60¢ fee, $1.65 final tax. The found unit: 36¢ + 99¢.
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 1200, swap: { qtyOrdered: 2, unitPriceCents: 800 } }], 1, 60, 899, { cents: 165 });
+    const result = await submitIssueReport(store, token, { type: "missing", lines: [{ lineId: order.lines[0].id, qty: 1 }], note: "", photo: JPEG });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 1200 + 36 + 99 });
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(1200);
   });
 
   it("#495: a courier fee share refund that errors is retried by the stuck-order sweep", async () => {

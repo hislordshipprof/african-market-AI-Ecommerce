@@ -63,28 +63,53 @@ export function maxGoodsWithin(
   return low;
 }
 
-/** An issue refund returns the service fee in proportion to the goods it refunds. */
-export function serviceFeeRefundCents(
-  goodsRefundedCents: number,
-  order: { serviceFeeCents: number; capturedAmountCents: number | null; tipCents: number; deliveryFeeCents: number },
-): number {
-  const goodsCharged = (order.capturedAmountCents ?? 0) - order.serviceFeeCents - order.tipCents - order.deliveryFeeCents;
+/** What a refund needs from its order: the captured amount and its non-goods parts (#65: tax is not goods). */
+export type RefundOrder = { serviceFeeCents: number; capturedAmountCents: number | null; tipCents: number; deliveryFeeCents: number; taxCents: number };
+
+/** The goods the order charged for, after the coupon: the capture less fee, tip, delivery and tax. */
+function goodsChargedCents(order: RefundOrder): number {
+  return (order.capturedAmountCents ?? 0) - order.serviceFeeCents - order.tipCents - order.deliveryFeeCents - order.taxCents;
+}
+
+/** A refund of goods returns the service fee in proportion to them. */
+export function serviceFeeRefundCents(goodsRefundedCents: number, order: RefundOrder): number {
+  const goodsCharged = goodsChargedCents(order);
   if (order.serviceFeeCents <= 0 || goodsCharged <= 0) return 0;
   return Math.min(order.serviceFeeCents, Math.round((order.serviceFeeCents * goodsRefundedCents) / goodsCharged));
 }
 
-type FeeRefundOrder = Parameters<typeof serviceFeeRefundCents>[1];
+/**
+ * A refund of goods returns the tax paid on them (decision 2026-11-15-06): the order's tax in proportion to
+ * the goods, never more than what earlier refunds left of it. The stored tax lines are by rate, not by line.
+ */
+export function taxRefundCents(goodsRefundedCents: number, order: RefundOrder, taxRefundedBeforeCents = 0): number {
+  const goodsCharged = goodsChargedCents(order);
+  const left = order.taxCents - taxRefundedBeforeCents;
+  if (left <= 0 || goodsCharged <= 0) return 0;
+  return Math.max(0, Math.min(left, Math.round((order.taxCents * goodsRefundedCents) / goodsCharged)));
+}
 
-/** The service fee part of an issue refund of `refundCents` (goods plus their fee share): the share of the most goods it covers. */
-export function serviceFeeShareOfRefund(refundCents: number, order: FeeRefundOrder): number {
+/** What the customer gets back for `goodsCents` of goods: the goods, their service fee share and their tax. */
+export function refundOfGoodsCents(goodsCents: number, order: RefundOrder, taxRefundedBeforeCents = 0): number {
+  return goodsCents + serviceFeeRefundCents(goodsCents, order) + taxRefundCents(goodsCents, order, taxRefundedBeforeCents);
+}
+
+export type RefundShares = { goodsCents: number; serviceFeeCents: number; taxCents: number };
+
+/** A refund of `refundCents` split into the most goods it covers, their service fee share and their tax share. */
+export function refundShares(refundCents: number, order: RefundOrder, taxRefundedBeforeCents = 0): RefundShares {
   let low = 0;
   let high = Math.max(0, refundCents);
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (mid + serviceFeeRefundCents(mid, order) <= refundCents) low = mid;
+    if (refundOfGoodsCents(mid, order, taxRefundedBeforeCents) <= refundCents) low = mid;
     else high = mid - 1;
   }
-  return serviceFeeRefundCents(low, order);
+  return {
+    goodsCents: low,
+    serviceFeeCents: serviceFeeRefundCents(low, order),
+    taxCents: taxRefundCents(low, order, taxRefundedBeforeCents),
+  };
 }
 
 export type CaptureSplit = {
