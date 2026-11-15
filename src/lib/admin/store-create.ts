@@ -9,7 +9,6 @@ export type NewStoreValues = {
   logoUrl: string | null;
   brandColor: string | null;
   themePreset: string;
-  status: string;
   hours: unknown;
   prepTimeMinutes: number;
   deliveryRadiusMi: number;
@@ -32,7 +31,10 @@ export type NewStoreValues = {
   storeDeliverySlotSettings: SlotSchedule | null;
 };
 
-/** Creates the store and its `store.create` audit row inside the caller's platform-admin transaction. */
+/**
+ * Creates the store and its `store.create` audit row inside the caller's platform-admin transaction. Every new store
+ * starts in `setup` and opens through the go-live checklist (#555); stores from before #555 kept `active`.
+ */
 export async function insertStore(
   tx: Pick<PrismaClient, "store" | "auditLog">,
   values: NewStoreValues,
@@ -45,7 +47,7 @@ export async function insertStore(
       logoUrl: values.logoUrl,
       brandColor: values.brandColor,
       themePreset: values.themePreset,
-      status: values.status,
+      status: "setup",
       hours: values.hours !== null ? (values.hours as Prisma.InputJsonValue) : Prisma.JsonNull,
       prepTimeMinutes: values.prepTimeMinutes,
       deliveryRadiusMi: values.deliveryRadiusMi,

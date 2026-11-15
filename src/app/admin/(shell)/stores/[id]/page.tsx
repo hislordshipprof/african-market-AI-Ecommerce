@@ -7,6 +7,7 @@ import { getStoreNumber, storeNumberLinkMode } from "@/lib/whatsapp/store-number
 import { StoreForm } from "../store-form";
 import { InviteOwnerForm } from "./invite-owner-form";
 import { WhatsAppNumberSection } from "./whatsapp-number-section";
+import { GoLiveSection } from "./go-live-section";
 
 function courierState(id: string | null, error: string | null): string {
   if (id) return `Registered · ${id}`;
@@ -19,11 +20,11 @@ export default async function EditStorePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ pilotError?: string; courierRetry?: string; override?: string; overrideError?: string }>;
+  searchParams: Promise<{ pilotError?: string; courierRetry?: string; override?: string; overrideError?: string; goLive?: string; goLiveError?: string }>;
 }) {
   await requirePlatformAdmin();
   const { id } = await params;
-  const { pilotError, courierRetry, override, overrideError } = await searchParams;
+  const { pilotError, courierRetry, override, overrideError, goLive, goLiveError } = await searchParams;
   const store = await getStoreById(id);
   if (!store) notFound();
   const [subscription, storeNumber] = await Promise.all([getStoreSubscription(store.id), getStoreNumber(store.id)]);
@@ -34,6 +35,7 @@ export default async function EditStorePage({
       <h1 className="mb-6 text-2xl font-bold text-foreground">
         Edit: {store.name}
       </h1>
+      <GoLiveSection storeId={store.id} forced={goLive === "forced"} error={goLiveError} />
       <section aria-labelledby="billing" className="mb-8 rounded-lg border border-border bg-card p-5">
         <h2 id="billing" className="text-base font-semibold text-foreground">Plan and billing</h2>
         <p className="mt-1 text-sm text-muted-foreground">

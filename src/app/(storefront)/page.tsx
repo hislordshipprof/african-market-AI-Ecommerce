@@ -44,7 +44,7 @@ export default async function StorefrontPage() {
     return <DirectoryHome stores={stores} states={states} />;
   }
   const { store, suspended } = await getStoreWithStatus();
-  const checkout = checkCheckoutReady(store.stripeOnboardingStatus);
+  const checkout = checkCheckoutReady(store);
   if (suspended)
     return (
       <main className="sf-storefront sf-section sf-container">
@@ -52,6 +52,17 @@ export default async function StorefrontPage() {
         <EmptyState
           title="We'll be back soon"
           description="This store is temporarily offline. Please check back later."
+        />
+      </main>
+    );
+  // A store in setup is not open yet (#555): no shelves, no cart, no checkout until it goes live.
+  if (store.status === "setup")
+    return (
+      <main className="sf-storefront sf-section sf-container">
+        <h1 className="sf-page-title">{store.name}</h1>
+        <EmptyState
+          title="Opening soon"
+          description="We're getting the shelves ready. Online ordering opens soon."
         />
       </main>
     );
