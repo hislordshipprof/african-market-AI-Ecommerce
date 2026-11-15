@@ -369,7 +369,7 @@ export async function getStoreOrders(storeId: string) {
     });
     return rows.map((row) => ({
       ...row,
-      refundedByPlatform: platformRefundedIds.includes(row.id) && PLATFORM_REFUNDED_STATUSES.includes(row.status),
+      refundedByPlatform: platformRefundedIds.includes(row.id) && (PLATFORM_REFUNDED_STATUSES as string[]).includes(row.status),
     }));
   });
   // This payload reaches a client component. A user id is the same at every store, so it
