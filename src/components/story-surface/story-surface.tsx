@@ -7,7 +7,8 @@ import { Card } from "@/components/ui/card";
 import { DepthSceneGate } from "./depth-scene-gate";
 import { BODIJA_MARKET, type StoryScene } from "./scenes";
 
-const WIDE_MEDIA = "(min-width: 768px)";
+const WIDE_MEDIA = "(min-width: 1280px)";
+const MID_MEDIA = "(min-width: 768px) and (max-width: 1279.98px)";
 const TALL_MEDIA = "(max-width: 767.98px)";
 
 /** The panel every story surface form sits on. Solid, so AA holds over any part of the photo. */
@@ -33,6 +34,13 @@ export function StorySurface({
         as="image"
         href={scene.posterWide.src}
         media={WIDE_MEDIA}
+        fetchPriority="high"
+      />
+      <link
+        rel="preload"
+        as="image"
+        href={scene.posterMid.src}
+        media={MID_MEDIA}
         fetchPriority="high"
       />
       <link
@@ -64,6 +72,7 @@ export function StorySurface({
           >
             <picture>
               <source media={WIDE_MEDIA} srcSet={scene.posterWide.src} />
+              <source media={MID_MEDIA} srcSet={scene.posterMid.src} />
               <img
                 src={scene.posterTall.src}
                 alt=""
