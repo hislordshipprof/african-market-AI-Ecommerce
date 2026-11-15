@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { chromium, expect, test } from "@playwright/test";
 import { readCartLines } from "./listing-db";
-import { storeUrl } from "./urls";
+import { E2E_PORT, storeUrl } from "./urls";
 
 test("store carts remain separate during pending recovery and navigation", async ({ page }) => {
   test.setTimeout(90_000);
@@ -150,4 +150,32 @@ test("same-document store switch keeps both carts and drops the other store's pe
   const mamaLines = await readCartLines("mama-ngozi", mamaCart);
   expect(mamaLines.find((line) => line.listingId === "mn_garri_yellow")?.qty).toBeGreaterThanOrEqual(1);
   await expect(tanteCard.getByTestId("stepper-qty")).toHaveText("1");
+});
+
+test("an http custom host keeps the cart after add and reload", async () => {
+  test.setTimeout(90_000);
+  const host = "mama-ngozi.example.test";
+  const browser = await chromium.launch({ args: [`--host-resolver-rules=MAP ${host} 127.0.0.1`] });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://${host}:${E2E_PORT}/categories/grains-and-flours`);
+    const card = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
+    await card.getByTestId("quick-add-btn").click();
+    await expect(card.getByTestId("stepper-qty")).toHaveText("1");
+    const header = page.getByTestId("storefront-header");
+    await expect(header.locator("[data-cart-pending]")).toBeHidden({ timeout: 20_000 });
+
+    const cookie = (await page.context().cookies()).find((c) => c.name === "cart_id");
+    expect(cookie).toBeDefined();
+    expect(cookie!.secure).toBe(false);
+    expect(cookie!.domain).toBe(host);
+    await expect(header.getByTestId("cart-count")).toHaveText("1");
+
+    await page.reload();
+    await expect(header.getByTestId("cart-count")).toHaveText("1");
+    await header.getByRole("button", { name: "Shopping cart" }).click();
+    await expect(page.getByRole("button", { name: /^Remove .*Garri.* from cart$/ })).toBeVisible();
+  } finally {
+    await browser.close();
+  }
 });

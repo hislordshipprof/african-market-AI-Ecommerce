@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { healthQueryRaw, storeScoped, storeScopedTransaction } from "../db";
 import { customerRlsErrorText, isCustomerRlsRejection } from "../customer-rls-error";
 import { catalogFor } from "../storefront/catalog";
@@ -58,8 +58,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
   const storeBSlug = `${storeSlug}-b`;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const store = await rawPrisma.store.upsert({

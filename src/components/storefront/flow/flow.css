@@ -22,14 +22,6 @@
   line-height: 1.6;
   max-width: 60ch;
 }
-.flow-eyebrow {
-  color: var(--color-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 11px;
-  font-weight: 750;
-  margin-top: 16px;
-}
 .flow-layout {
   display: grid;
   gap: 24px;
@@ -46,6 +38,10 @@
   border-radius: var(--radius-lg);
   padding: 24px;
   min-width: 0;
+}
+/* Inside a card a rail stops at the card edge instead of bleeding to the viewport. */
+.flow-card .sf-rail-scroll {
+  width: 100%;
 }
 .flow-card > h2 {
   font: 700 22px/1.2 var(--font-display);
@@ -64,7 +60,7 @@
   gap: 12px;
   padding: 14px 16px;
   border-radius: var(--radius-md);
-  background: var(--color-soft);
+  background: var(--color-raised);
   color: var(--color-ink);
   margin-bottom: 24px;
   font-size: 13px;
@@ -105,7 +101,7 @@
   width: 100%;
   min-height: 48px;
   padding: 12px 14px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-md);
   color: var(--color-ink);
   background: var(--color-bg);
@@ -146,7 +142,7 @@
   height: 72px;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--color-soft);
+  background: var(--color-photo-well);
 }
 .flow-fee {
   display: flex;
@@ -164,7 +160,7 @@
 .flow-fee small {
   display: block;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
   margin-top: 4px;
   max-width: 26ch;
 }
@@ -205,7 +201,7 @@
   margin-top: 4px;
 }
 .flow-map {
-  background: var(--color-soft);
+  background: var(--color-raised);
   position: relative;
   min-height: 120px;
   height: 100%;
@@ -239,7 +235,7 @@
 .flow-map small {
   position: absolute;
   bottom: 5px;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--color-ink);
   background: var(--color-surface);
   border-radius: 4px;
@@ -281,10 +277,28 @@
   font: 700 30px/1.2 var(--font-display);
   margin: 24px 0 12px;
 }
+.flow-closed h1 {
+  font: 700 30px/1.2 var(--font-display);
+  margin: 0 0 12px;
+  text-wrap: balance;
+}
 .flow-closed p {
   color: var(--color-muted);
   line-height: 1.6;
   margin-bottom: 24px;
+}
+.flow-closed h1 + p {
+  text-wrap: balance;
+}
+.flow-closed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 20px;
+}
+.flow-closed-actions .sf-text-link {
+  min-height: 44px;
 }
 .flow-success-mark {
   display: inline-grid;
@@ -293,7 +307,7 @@
   height: 80px;
   border-radius: 50%;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .flow-toast {
   position: fixed;
@@ -307,7 +321,7 @@
   gap: 12px;
   padding: 12px 16px;
   border-radius: var(--radius-md);
-  background: #15201a;
+  background: rgb(var(--sf-scrim, 8 10 9));
   color: #fff;
   font-size: 14px;
   box-shadow: 0 12px 32px #0003;

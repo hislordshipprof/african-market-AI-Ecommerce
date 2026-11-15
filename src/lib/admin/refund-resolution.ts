@@ -2,11 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { lockStoreRow, platformAdminTransaction, storeScopedTransaction } from "../db";
+import { z } from "zod";
 import { requirePlatformAdmin } from "./session";
+import { parseRepaidDollars } from "./repaid-dollars";
+import { parseInput, readFormFields } from "../security/parse-input";
 import { getStripeProvider } from "../stripe";
-import { findOpenRefundRequest, reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
-import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { evaluateOrderRefundStateAfterCommit, reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
+import { releaseOrderStock } from "../order/stock-ledger";
+import { recordCapture } from "../order/capture-record";
+import { systemAuditData } from "../system-actor";
 import { failedAtLabel } from "./failed-at";
+import { recordOrderNotification } from "../notifications/record";
+import { scheduleOrderNotification } from "../inngest/notify";
 
 export type RefundFailedRow = {
   orderId: string;
@@ -87,6 +94,21 @@ async function refundBalance(paymentIntentId: string | null): Promise<RefundObse
   }
 }
 
+const QUEUE_PROVIDER_CONCURRENCY = 4;
+
+async function mapBounded<T, R>(items: T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await run(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
   await requirePlatformAdmin();
   const orders = await platformAdminTransaction((tx) =>
@@ -108,20 +130,35 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
   for (const failure of failures) {
     if (!failureByOrder.has(failure.entityId)) failureByOrder.set(failure.entityId, failure);
   }
-  const rows: RefundFailedRow[] = [];
-  for (const order of orders) {
+  const openRequests = orders.length
+    ? await platformAdminTransaction((tx) =>
+        tx.refundRequest.findMany({
+          where: { orderId: { in: orders.map((order) => order.id) } },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        }),
+      )
+    : [];
+  const reservationByOrder = new Map<string, (typeof openRequests)[number]>();
+  for (const request of openRequests) {
+    if (requestIsOpen(request) && !reservationByOrder.has(request.orderId)) {
+      reservationByOrder.set(request.orderId, request);
+    }
+  }
+  return mapBounded(orders, QUEUE_PROVIDER_CONCURRENCY, async (order): Promise<RefundFailedRow> => {
     const failureRows = failures.filter(
       (row) => row.entityId === order.id && recordedRefundId(row.after) === order.refundId,
     );
     const failure = failureRows[failureRows.length - 1] ?? failureByOrder.get(order.id);
-    const capturedCents = await capturedCentsFor(order);
-    const balance = await refundBalance(order.paymentIntentId);
-    const reservation = await findOpenRefundRequest(order.storeId, order.id);
+    const [capturedCents, balance] = await Promise.all([
+      capturedCentsFor(order),
+      refundBalance(order.paymentIntentId),
+    ]);
+    const reservation = reservationByOrder.get(order.id);
     const matched = reservation?.providerRefundId
       ? balance.listed.find((refund) => refund.refundId === reservation.providerRefundId)
       : undefined;
     const reservationOpen = !!reservation && (reservation.state !== "CREATED" || !matched || refundStillOpen(matched.status));
-    rows.push({
+    return {
       orderId: order.id,
       storeName: order.store.name,
       orderNumber: order.number,
@@ -131,9 +168,8 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
       failedRefundId: order.refundId ?? "",
       failedAtLabel: failedAtLabel(failure?.createdAt ?? order.updatedAt, order.store.timezone),
       bankRefundPending: balance.bankRefundPending || reservationOpen,
-    });
-  }
-  return rows;
+    };
+  });
 }
 
 export type ResolveResult =
@@ -142,14 +178,6 @@ export type ResolveResult =
 
 const BALANCE_CHANGED = "The balance changed since you loaded this page. An alert was recorded.";
 
-/** Dollars as typed, to cents. "10.5" is 1050. Anything that is not a dollar amount is rejected. */
-export async function parseRepaidDollars(raw: string): Promise<number | null> {
-  const trimmed = raw.trim();
-  const match = /^(\d{1,8})(?:\.(\d{1,2}))?$/.exec(trimmed);
-  if (!match) return null;
-  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
-}
-
 export async function resolveRefundFailed(
   orderId: string,
   note: string,
@@ -157,7 +185,20 @@ export async function resolveRefundFailed(
   displayedOwedCents: number,
 ): Promise<ResolveResult> {
   const session = await requirePlatformAdmin();
-  const trimmed = note.trim();
+  const parsed = parseInput(z.strictObject({
+    orderId: z.string().max(200),
+    note: z.string().max(2_000),
+    repaidCents: z.number().int(),
+    displayedOwedCents: z.number().int(),
+  }), { orderId, note, repaidCents, displayedOwedCents });
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+      fieldError: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+    };
+  }
+  const trimmed = parsed.data.note.trim();
   if (trimmed.length < 1 || trimmed.length > 500) {
     return { ok: false, error: "Note must be 1–500 characters.", fieldError: "Note must be 1–500 characters." };
   }
@@ -189,21 +230,24 @@ export async function resolveRefundFailed(
     .filter((row) => requestIsOpen(row))
     .map((row) => row.id)
     .sort();
+  // Read Stripe before taking the store lock (ADR-0014); the lock re-checks the order and its requests.
+  let fresh = observeRefunds([]);
+  if (order.paymentIntentId) {
+    try {
+      fresh = observeRefunds(await getStripeProvider().listRefunds(order.paymentIntentId));
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code !== "resource_missing") throw err;
+    }
+  }
 
+  let notifyCancel = false;
   return storeScopedTransaction(order.storeId, async (tx) => {
+    notifyCancel = false;
     await lockStoreRow(tx, order.storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status !== "REFUND_FAILED") {
       return { ok: false as const, error: "already resolved" };
-    }
-    let fresh = observeRefunds([]);
-    if (current.paymentIntentId) {
-      try {
-        fresh = observeRefunds(await getStripeProvider().listRefunds(current.paymentIntentId));
-      } catch (err) {
-        const code = (err as { code?: string }).code;
-        if (code !== "resource_missing") throw err;
-      }
     }
     const openNow = (await tx.refundRequest.findMany({ where: { orderId } }))
       .filter((row) => requestIsOpen(row))
@@ -217,12 +261,14 @@ export async function resolveRefundFailed(
     }
     const existing = current.notes?.trim();
     const notes = existing ? `${existing}\n${trimmed}` : trimmed;
+    const gap = fresh.refundedCents + repaidCents - capturedCents;
     const updated = await tx.order.updateMany({
       where: { id: orderId, status: "REFUND_FAILED" },
-      data: { status: "CANCELLED", cancelledAt: new Date(), notes },
+      data: { status: "CANCELLED", cancelledAt: new Date(), notes, capturedAmountCents: null },
     });
     if (updated.count !== 1) return { ok: false as const, error: "already resolved" };
-    const gap = fresh.refundedCents + repaidCents - capturedCents;
+    await recordCapture(tx, orderId, capturedCents, null);
+    await releaseOrderStock(tx, order.storeId, orderId);
     await tx.auditLog.create({
       data: {
         storeId: order.storeId,
@@ -244,30 +290,19 @@ export async function resolveRefundFailed(
       },
     });
     await tx.auditLog.create({
-      data: {
-        storeId: order.storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action: "refund_resolution_baseline",
-        entityType: "order",
-        entityId: orderId,
-        after: {
-          refundedCents: fresh.refundedCents,
-          countedRefundIds: fresh.countedRefundIds,
-        },
-      },
+      data: systemAuditData(order.storeId, orderId, "refund_resolution_baseline", {
+        refundedCents: fresh.refundedCents,
+        countedRefundIds: fresh.countedRefundIds,
+      }),
     });
     if (gap !== 0) {
       console.error(`Manual repayment for order ${orderId} does not match the capture. Store and platform alerted.`);
       await tx.auditLog.create({
-        data: {
-          storeId: order.storeId,
-          actorId: SYSTEM_ACTOR_ID,
-          actorEmail: SYSTEM_ACTOR_EMAIL,
-          action: gap > 0 ? "refund_after_manual_resolution" : "refund_reversed_after_resolution",
-          entityType: "order",
-          entityId: orderId,
-          after: gap > 0
+        data: systemAuditData(
+          order.storeId,
+          orderId,
+          gap > 0 ? "refund_after_manual_resolution" : "refund_reversed_after_resolution",
+          gap > 0
             ? {
                 refundId: fresh.countedRefundIds[0] ?? order.refundId ?? "",
                 overpaidCents: gap,
@@ -278,18 +313,22 @@ export async function resolveRefundFailed(
                 underpaidCents: -gap,
                 alert: "store_and_platform",
               },
-        },
+        ),
       });
     }
     const displayedStale = displayedOwedCents !== capturedCents - fresh.refundedCents;
+    notifyCancel = await recordOrderNotification(tx, order.storeId, orderId, "cancelled");
     return {
       ok: true as const,
       ...(displayedStale
         ? { message: gap !== 0 ? BALANCE_CHANGED : "The balance changed since you loaded this page." }
         : {}),
     };
-  }, { timeout: 20_000 }).then((result) => {
+  }, { timeout: 20_000 }).then(async (result) => {
+    if (notifyCancel) scheduleOrderNotification(order.storeId, orderId, "cancelled");
     if (result.ok && !result.message) revalidatePath("/admin/orders");
+    // Stripe was read before the lock; re-read it against the baseline so a refund that moved since alerts.
+    if (result.ok) await evaluateOrderRefundStateAfterCommit(orderId);
     return result;
   });
 }
@@ -298,8 +337,22 @@ export async function resolveRefundFailedAction(
   _prev: ResolveResult | null,
   formData: FormData,
 ): Promise<ResolveResult> {
-  const repaidCents = await parseRepaidDollars(String(formData.get("repaidDollars") ?? ""));
-  const displayedRaw = String(formData.get("displayedOwedCents") ?? "");
+  await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({
+    orderId: z.string().max(200).nullable(),
+    note: z.string().max(2_000).nullable(),
+    repaidDollars: z.string().max(40).nullable(),
+    displayedOwedCents: z.string().max(20).nullable(),
+  }), readFormFields(formData, ["orderId", "note", "repaidDollars", "displayedOwedCents"]));
+  if (!fields.ok) {
+    return {
+      ok: false,
+      error: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+      fieldError: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+    };
+  }
+  const repaidCents = parseRepaidDollars(fields.data.repaidDollars ?? "");
+  const displayedRaw = fields.data.displayedOwedCents ?? "";
   const displayedOwedCents = /^-?\d+$/.test(displayedRaw) ? Number(displayedRaw) : Number.NaN;
   if (repaidCents == null || !Number.isInteger(displayedOwedCents)) {
     return {
@@ -309,8 +362,8 @@ export async function resolveRefundFailedAction(
     };
   }
   return resolveRefundFailed(
-    String(formData.get("orderId") ?? ""),
-    String(formData.get("note") ?? ""),
+    fields.data.orderId ?? "",
+    fields.data.note ?? "",
     repaidCents,
     displayedOwedCents,
   );

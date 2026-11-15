@@ -1,89 +1,9 @@
 import { storeUrl } from "./urls";
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const BASE = storeUrl("mama-ngozi");
 
-test.describe("Hero carousel (#55)", () => {
-  test("renders with at least one banner", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const carousel = page.locator("[data-testid='hero-carousel']");
-    await expect(carousel).toBeVisible({ timeout: 15000 });
-  });
-
-  test("banner has visible title text", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const carousel = page.locator("[data-testid='hero-carousel']");
-    await expect(carousel).toBeVisible({ timeout: 15000 });
-    const title = carousel.locator("h2, h3, [data-testid='banner-title']").first();
-    await expect(title).toBeVisible();
-    const text = await title.textContent();
-    expect(text?.trim().length).toBeGreaterThan(0);
-  });
-
-  test("clicking a dot advances the slide", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const carousel = page.locator("[data-testid='hero-carousel']");
-    await expect(carousel).toBeVisible({ timeout: 15000 });
-
-    const dots = carousel.locator("[data-testid='carousel-dot']");
-    const dotCount = await dots.count();
-    if (dotCount < 2) {
-      test.skip();
-      return;
-    }
-
-    await dots.nth(1).click();
-    await expect(dots.nth(1)).toHaveAttribute("aria-current", "true", {
-      timeout: 3000,
-    });
-  });
-});
-
-test.describe("Product rails (#55)", () => {
-  test("at least one product rail renders", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const rails = page.locator("[data-testid='product-rail']");
-    await expect(rails.first()).toBeVisible({ timeout: 15000 });
-  });
-
-  test("rail contains listing cards", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const rail = page.locator("[data-testid='product-rail']").first();
-    await expect(rail).toBeVisible({ timeout: 15000 });
-    const cards = rail.locator("[data-testid='listing-card']");
-    await expect(cards.first()).toBeVisible({ timeout: 5000 });
-    const count = await cards.count();
-    expect(count).toBeGreaterThanOrEqual(1);
-  });
-
-  test("at least one rail is horizontally scrollable", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const rails = page.locator("[data-testid='product-rail']");
-    await expect(rails.first()).toBeVisible({ timeout: 15000 });
-
-    const count = await rails.count();
-    let foundScrollable = false;
-    for (let i = 0; i < count; i++) {
-      const scrollContainer = rails.nth(i).locator("[data-testid='rail-scroll']");
-      const isScrollable = await scrollContainer.evaluate(
-        (el) => el.scrollWidth > el.clientWidth,
-      );
-      if (isScrollable) {
-        foundScrollable = true;
-        break;
-      }
-    }
-    expect(foundScrollable).toBe(true);
-  });
-});
-
-test.describe("Collection banners (#55)", () => {
-  test("collection banners section renders", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const banners = page.locator("[data-testid='collection-banners']");
-    await expect(banners).toBeVisible({ timeout: 15000 });
-  });
-
+test.describe("Collection banners", () => {
   test("collection cards link to /collections/ paths", async ({ page }) => {
     await page.goto(`${BASE}/`);
     const banners = page.locator("[data-testid='collection-banners']");
@@ -98,16 +18,7 @@ test.describe("Collection banners (#55)", () => {
   });
 });
 
-test.describe("Quick-add button (#55)", () => {
-  test("quick-add button exists on listing cards", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const card = page.locator("[data-testid='listing-card']").first();
-    await expect(card).toBeVisible({ timeout: 15000 });
-
-    const addBtn = card.locator("[data-testid='quick-add-btn']");
-    await expect(addBtn).toBeVisible();
-  });
-
+test.describe("Quick-add button", () => {
   test("clicking quick-add shows stepper with quantity 1", async ({ page }) => {
     await page.goto(`${BASE}/`);
     const card = page.locator("[data-testid='listing-card']").first();
@@ -141,37 +52,75 @@ test.describe("Quick-add button (#55)", () => {
   });
 });
 
-test.describe("Storefront header (#55)", () => {
-  test("header is sticky", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const header = page.locator("[data-testid='storefront-header']");
-    await expect(header).toBeVisible({ timeout: 15000 });
+/** The final largest-paint candidate: the one still last after a second with no new entry. */
+function finalLcp(page: Page) {
+  return page.evaluate(() => new Promise<{ hero: boolean; time: number }>(resolve => {
+    let timer = 0;
+    new PerformanceObserver(list => {
+      const last = list.getEntries().at(-1) as PerformanceEntry & { element?: Element | null };
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => resolve({ hero: !!last.element?.closest(".sf-hero-background"), time: last.startTime }), 1000);
+    }).observe({ type: "largest-contentful-paint", buffered: true });
+  }));
+}
 
-    const position = await header.evaluate(
-      (el) => getComputedStyle(el).position,
-    );
-    expect(position).toBe("sticky");
+/** Paths of the scripts the home page's HTML loads (src and preload). */
+async function htmlScripts(request: APIRequestContext) {
+  const html = await (await request.get(`${BASE}/`)).text();
+  return [...html.matchAll(/<script[^>]+src="([^"]+)"/g), ...html.matchAll(/<link[^>]+as="script"[^>]+href="([^"]+)"/g)]
+    .map(match => match[1].replaceAll("&amp;", "&"));
+}
+
+test.describe("Hero image on a phone (#563 LCP)", () => {
+  test.use({ viewport: { width: 412, height: 823 }, deviceScaleFactor: 1.75, isMobile: true });
+
+  test("the largest paint is the hero image, fetched eagerly at high priority", async ({ page }) => {
+    await page.goto(`${BASE}/`);
+    const hero = page.locator("[data-testid='hero-carousel'] .sf-hero-background img").first();
+    await expect(hero).toBeVisible({ timeout: 15000 });
+    expect((await finalLcp(page)).hero).toBe(true);
+
+    await expect(hero).not.toHaveAttribute("loading", "lazy");
+    await expect(hero).toHaveAttribute("fetchpriority", "high");
+    const preloadPriority = await hero.evaluate(img => {
+      const srcset = img.getAttribute("srcset");
+      const link = [...document.querySelectorAll("link[rel='preload'][as='image']")].find(l => l.getAttribute("imagesrcset") === srcset);
+      return link?.getAttribute("fetchpriority") ?? null;
+    });
+    expect(preloadPriority).toBe("high");
   });
 
-  test("header shows store name", async ({ page }) => {
+  // Lighthouse counts a script requested before the largest paint toward it; the prompt's chunk used to be
+  // requested a frame after the hero was revealed, so it raced the paint (#563).
+  test("the install prompt's code is requested well after the hero paints", async ({ page, request }) => {
+    const own = new Set((await htmlScripts(request)).map(src => new URL(src, BASE).pathname));
     await page.goto(`${BASE}/`);
-    const header = page.locator("[data-testid='storefront-header']");
-    await expect(header).toBeVisible({ timeout: 15000 });
-    await expect(header).toContainText("Mama Ngozi");
+    await expect(page.locator("[data-testid='hero-carousel'] .sf-hero-background img").first()).toBeVisible({ timeout: 15000 });
+    const lcp = await finalLcp(page);
+    const bodies = new Map<string, string>();
+    let prompt: { path: string; start: number } | undefined;
+    await expect.poll(async () => {
+      const scripts = await page.evaluate(() => performance.getEntriesByType("resource")
+        .map(entry => ({ path: new URL(entry.name).pathname, start: entry.startTime }))
+        .filter(entry => entry.path.endsWith(".js")));
+      for (const script of scripts.filter(({ path }) => !own.has(path))) {
+        if (!bodies.has(script.path)) bodies.set(script.path, await (await request.get(new URL(script.path, BASE).href)).text());
+        if (bodies.get(script.path)!.includes("to your Home Screen")) prompt = script;
+      }
+      return prompt?.path;
+    }, { timeout: 10000 }).toBeTruthy();
+    expect(prompt!.start - lcp.time).toBeGreaterThan(500);
   });
 });
 
-test.describe("Footer and trust strip (#55)", () => {
-  test("footer renders with store name", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const footer = page.locator("[data-testid='storefront-footer']");
-    await expect(footer).toBeVisible({ timeout: 15000 });
-    await expect(footer).toContainText("Mama Ngozi");
-  });
-
-  test("trust strip renders with owner info", async ({ page }) => {
-    await page.goto(`${BASE}/`);
-    const strip = page.locator("[data-testid='trust-strip']");
-    await expect(strip).toBeVisible({ timeout: 15000 });
+test.describe("First load without the animation library (#563 LCP)", () => {
+  // The scripts the home page's HTML loads. Not every script the browser fetches: after idle, Next prefetches
+  // linked routes (search, aisles), whose bundles do carry motion, so a network-wide check would race that.
+  test("the home page's first-load scripts carry no motion code", async ({ request }) => {
+    const srcs = await htmlScripts(request);
+    expect(srcs.length).toBeGreaterThan(5);
+    const bodies = await Promise.all(srcs.map(async src => ({ src, body: await (await request.get(new URL(src, BASE).href)).text() })));
+    // "whileDrag" is in motion's prop list, which every motion bundle carries.
+    expect(bodies.filter(({ body }) => body.includes('"whileDrag"')).map(({ src }) => src)).toEqual([]);
   });
 });

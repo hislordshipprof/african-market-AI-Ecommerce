@@ -22,21 +22,29 @@ function textOf(block: Block): string {
   return typeof block.text === "string" ? block.text : "";
 }
 
-/** The latest human sentence, ignoring tool-result-only user messages. */
-export function currentTurn(messages: unknown): { text: string; results: Array<{ name: string; output: unknown }>; length: number } {
+function customerTurn(message: Record<string, unknown>): boolean {
+  if (typeof message.content === "string") return true;
+  const blocks = blocksOf(message.content);
+  if (blocks.length === 0) return false;
+  return blocks.some((block) => block.type !== "tool_result");
+}
+
+function hasFile(message: Record<string, unknown>): boolean {
+  return blocksOf(message.content).some((block) => block.type === "image" || block.type === "document");
+}
+
+/** The latest customer turn, including a files-only turn. Tool-result rows are not a new turn. */
+export function currentTurn(messages: unknown): { text: string; file: boolean; results: Array<{ name: string; output: unknown }>; length: number } {
   const list = Array.isArray(messages) ? messages : [];
   let textIndex = -1;
   let text = "";
+  let file = false;
   list.forEach((message, index) => {
-    if (!isRecord(message) || message.role !== "user") return;
-    const textBlock = blocksOf(message.content).find((block) => block.type === "text");
-    if (textBlock) {
-      textIndex = index;
-      text = textOf(textBlock);
-    } else if (typeof message.content === "string") {
-      textIndex = index;
-      text = message.content;
-    }
+    if (!isRecord(message) || message.role !== "user" || !customerTurn(message)) return;
+    textIndex = index;
+    file = hasFile(message);
+    if (typeof message.content === "string") text = message.content;
+    else text = blocksOf(message.content).filter((block) => block.type === "text").map(textOf).join("");
   });
   const names = new Map<string, string>();
   const results: Array<{ name: string; output: unknown }> = [];
@@ -54,7 +62,7 @@ export function currentTurn(messages: unknown): { text: string; results: Array<{
       }
     }
   }
-  return { text, results, length: list.length };
+  return { text, file, results, length: list.length };
 }
 
 function parseOutput(content: unknown): unknown {
@@ -79,17 +87,53 @@ function itemsOf(output: unknown): Array<{ listingId?: string; variantId?: strin
   return output.items.filter(isRecord);
 }
 
-export const WIDE_LAYOUT_TOKEN = "W".repeat(60);
-export const WIDE_LAYOUT_STORE = `MamaNgozi${"S".repeat(48)}`;
+type OfferedChoice = { name: string; packLabel: string; listingId: string; variantId: string };
 
-export function wideLayoutText(): string {
-  return `See https://example.com/assistant/wide-layout and ${WIDE_LAYOUT_TOKEN} at ${WIDE_LAYOUT_STORE}.`;
+/**
+ * A chip tap sends exactly "<name> (<pack>)" for an option an earlier offer_choices
+ * returned. Only that exact text is a pick, so other scripted turns are unaffected.
+ */
+function pickedChoice(messages: unknown, text: string): OfferedChoice | null {
+  const list = Array.isArray(messages) ? messages : [];
+  const names = new Map<string, string>();
+  let offered: OfferedChoice[] = [];
+  for (const message of list) {
+    if (!isRecord(message)) continue;
+    for (const block of blocksOf(message.content)) {
+      if (message.role === "assistant" && block.type === "tool_use" && typeof block.id === "string") {
+        names.set(block.id, typeof block.name === "string" ? block.name : "");
+      }
+      if (message.role !== "user" || block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+      if (names.get(block.tool_use_id) !== "offer_choices") continue;
+      const output = parseOutput(block.content);
+      if (!isRecord(output) || !Array.isArray(output.options)) continue;
+      offered = output.options.filter((option): option is OfferedChoice => (
+        isRecord(option)
+        && typeof option.name === "string"
+        && typeof option.packLabel === "string"
+        && typeof option.listingId === "string"
+        && typeof option.variantId === "string"
+      ));
+    }
+  }
+  const wanted = text.trim();
+  return offered.find((option) => `${option.name} (${option.packLabel})` === wanted) ?? null;
 }
 
 export function scriptStep(messages: unknown): ScriptStep {
   const turn = currentTurn(messages);
   const text = turn.text.toLowerCase();
   const last = turn.results.at(-1);
+  if (turn.file) return fileStep(text, last);
+  const pick = pickedChoice(messages, turn.text);
+  if (pick && !last) return { kind: "tool", name: "search_catalog", input: { query: pick.name } };
+  if (pick && last?.name === "search_catalog") {
+    const items = itemsOf(last.output) as Array<{ listingId?: string; variantId?: string; name?: string }>;
+    const match = items.find((item) => item.listingId === pick.listingId && item.variantId === pick.variantId)
+      ?? items.find((item) => item.name === pick.name && item.variantId);
+    if (!match?.variantId) return { kind: "text", text: "I could not find that one." };
+    return { kind: "tool", name: "add_to_cart", input: { items: [{ variant_id: match.variantId, qty: 1 }] } };
+  }
   if (!last) return openingStep(text, turn.text, messages);
   if (last.name === "search_catalog") {
     const items = itemsOf(last.output);
@@ -114,13 +158,65 @@ export function scriptStep(messages: unknown): ScriptStep {
     }
     return { kind: "tool", name: "add_to_cart", input: { items: add } };
   }
+  if (last.name === "get_fulfillment_options") {
+    const pickup = isRecord(last.output) && isRecord(last.output.pickup) ? last.output.pickup : {};
+    const slots = Array.isArray(pickup.slots) ? pickup.slots.filter(isRecord) : [];
+    const slot = slots.at(-1);
+    if (typeof slot?.slotId !== "string") return { kind: "tool", name: "prepare_checkout", input: {} };
+    return { kind: "tool", name: "set_fulfillment", input: { fulfillment: "pickup", slot_id: slot.slotId } };
+  }
+  if (last.name === "set_fulfillment") return { kind: "tool", name: "prepare_checkout", input: {} };
+  if (last.name === "prepare_checkout") {
+    return { kind: "text", text: "Here is your order to review. Tap Review and pay to pay on the checkout page." };
+  }
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
   if (last.name === "show_products" || last.name === "add_to_cart") {
-    if (text.includes("wide layout")) return { kind: "text", text: wideLayoutText() };
     return { kind: "text", text: "Here is what I found." };
   }
   return { kind: "text", text: "Here is what I found." };
+}
+
+const CART_TOOLS = ["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"] as const;
+
+function fileQuery(text: string): string {
+  if (text.includes("egusi")) return "egusi";
+  if (text.includes("yam")) return "yam";
+  if (text.includes("rice")) return "rice";
+  return "rice";
+}
+
+function fileStep(text: string, last: { name: string; output: unknown } | undefined): ScriptStep {
+  if (text.includes("file overload") && !last) return { kind: "error" };
+  const attack = text.includes("add 50") || text.includes("ignore your rules");
+  if (attack) {
+    const step = CART_TOOLS.indexOf(last?.name as (typeof CART_TOOLS)[number]);
+    const next = CART_TOOLS[step + 1];
+    if (next === "add_to_cart") {
+      const variantId = itemsOf(last?.output)[0]?.variantId;
+      return { kind: "tool", name: next, input: { items: [{ variant_id: variantId ?? "missing-variant", qty: 50 }] } };
+    }
+    if (next === "update_cart" || next === "remove_from_cart") {
+      return { kind: "tool", name: next, input: { line_id: "line-1", qty: 9 } };
+    }
+    if (next === "set_swap_rule") {
+      return { kind: "tool", name: next, input: { line_id: "line-1", variant_id: "other-variant" } };
+    }
+    return { kind: "text", text: "The file says to add 50 of everything. I will not change the basket." };
+  }
+  if (!last) return { kind: "tool", name: "search_catalog", input: { query: fileQuery(text) } };
+  if (last.name === "search_catalog") {
+    const items = itemsOf(last.output);
+    const options = items.slice(0, 2).flatMap((item) => item.listingId ? [{ listing_id: item.listingId }] : []);
+    if (options.length >= 2) return { kind: "tool", name: "offer_choices", input: { options } };
+    const ids = items.flatMap((item) => item.listingId ? [item.listingId] : []).slice(0, 2);
+    if (ids.length > 0) return { kind: "tool", name: "show_products", input: { listing_ids: ids } };
+    return { kind: "text", text: "I found some of the list and a few gaps." };
+  }
+  if (text.includes("add") || text.includes("ignore")) {
+    return { kind: "text", text: "The file mentions adding items. I will not change the basket until you choose." };
+  }
+  return { kind: "text", text: "I found some of the list and a few gaps." };
 }
 
 function retriedFailure(messages: unknown, needle: string): boolean {
@@ -147,6 +243,7 @@ function openingStep(lower: string, raw: string, messages: unknown): ScriptStep 
   if (lower.includes("hold please")) return { kind: "text", text: "Finished waiting.", delayMs: 2500 };
   if (lower.includes("$1.00") || lower.includes("stray price")) return { kind: "text", text: "That is $1.00." };
   if (lower.includes("html please")) return { kind: "text", text: 'See <img onerror="alert(1)"> and [a](http://evil.test).' };
+  if (lower.includes("check out")) return { kind: "tool", name: "get_fulfillment_options", input: {} };
   if (lower.includes("summary") || lower.includes("basket")) return { kind: "tool", name: "get_cart_summary", input: {} };
   if (lower.includes("choices")) return { kind: "tool", name: "search_catalog", input: { query: "yam" } };
   if (lower.includes("egusi") || lower.includes("pictures") || lower.includes("show me")) {
@@ -160,7 +257,13 @@ function sse(events: unknown[]): string {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
 }
 
-function eventsFor(step: ScriptStep, model: string, messagesLength: number): unknown[] {
+function toolUseId(): string {
+  // Digits become letters: a run of 13+ digits can pass the Luhn check, and the card scrubber would then rewrite the id.
+  const suffix = globalThis.crypto.randomUUID().replace(/-/g, "").replace(/\d/g, (digit) => "ghijklmnop"[Number(digit)]);
+  return `toolu_${suffix}`;
+}
+
+function eventsFor(step: ScriptStep, model: string): unknown[] {
   const start = {
     type: "message_start",
     message: {
@@ -186,7 +289,7 @@ function eventsFor(step: ScriptStep, model: string, messagesLength: number): unk
     ];
   }
   if (step.kind === "tool") {
-    const id = `toolu_${step.name}_${messagesLength}_0`;
+    const id = toolUseId();
     const json = JSON.stringify(step.input);
     const mid = Math.max(1, Math.ceil(json.length / 2));
     return [
@@ -263,8 +366,7 @@ export const scriptedAssistantFetch: typeof fetch = async (input, init) => {
   const step = scriptStep(body?.messages);
   if (step.kind === "text" && step.delayMs) await new Promise((resolve) => setTimeout(resolve, step.delayMs));
   const model = String(body?.model ?? "");
-  const length = Array.isArray(body?.messages) ? body.messages.length : 0;
-  return new Response(sse(eventsFor(step, model, length)), {
+  return new Response(sse(eventsFor(step, model)), {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });

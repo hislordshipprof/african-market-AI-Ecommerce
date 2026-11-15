@@ -24,32 +24,15 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { serializeVariants } from "../../app/store-admin/listings/variant-form";
-import { auth } from "../auth";
 import { addLine, getCartWithLines, getOrCreateCart } from "../cart/service";
 import { authPrisma, storeScoped } from "../db";
 import { createListingAction, updateListingAction } from "./actions";
 import { commitImport, generatePreview } from "./csv-import";
+import { authPost, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `w216-act-${Date.now().toString(36)}`;
 const password = "Placeholder-123!";
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
 
 async function signUp(email: string, name: string): Promise<void> {
   const res = await authPost("/sign-up/email", { email, password, name });
@@ -201,7 +184,7 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
     const result = await updateListingAction(saveForm(row.listingId, `Clear ${RUN}`, [
       { id: row.variantId, label: row.label, price: 800, weightG: 22680 },
     ]));
-    expect(result).toEqual({ success: true, id: row.listingId });
+    expect(result).toMatchObject({ success: true, id: row.listingId });
     const saved = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: row.variantId } });
     expect(saved.id).toBe(row.variantId);
     expect(saved.weightG).toBe(22680);
@@ -214,7 +197,7 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
     const typedResult = await updateListingAction(saveForm(typed.listingId, `Typed Hundred ${RUN}`, [
       { id: typed.variantId, label: typed.label, price: 800, weightG: 100 },
     ]));
-    expect(typedResult).toEqual({ success: true, id: typed.listingId });
+    expect(typedResult).toMatchObject({ success: true, id: typed.listingId });
     const typedRow = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: typed.variantId } });
     expect(typedRow.weightG).toBe(100);
     expect(typedRow.weightPlaceholder).toBe(false);
@@ -229,7 +212,7 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
     const result = await updateListingAction(saveForm(row.listingId, `Carted ${RUN}`, [
       { id: row.variantId, label: row.label, price: 800, weightG: 907 },
     ]));
-    expect(result).toEqual({ success: true, id: row.listingId });
+    expect(result).toMatchObject({ success: true, id: row.listingId });
     const saved = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: row.variantId } });
     expect(saved.id).toBe(row.variantId);
     expect(saved.weightG).toBe(907);
@@ -264,15 +247,16 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
       { id: row.variantId, label: "   ", price: "8.00", weightG: "" },
     ]));
     const result = await updateListingAction(fd);
-    expect(result).toEqual({ error: "At least one variant is required" });
+    expect(result).toEqual({ error: "Variant 1: label is required" });
     const saved = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: row.variantId } });
     expect(saved.weightG).toBe(100);
     expect(saved.weightPlaceholder).toBe(true);
     expect(saved.label).toBe(row.label);
   });
 
-  it("a forged weightPlaceholder in the variants JSON is stored false", async () => {
+  it("a forged weightPlaceholder in the variants JSON is rejected and the rows stay unchanged", async () => {
     asStore(storeASlug, ownerCookies);
+    const before = await storeScoped(storeAId).listing.count();
     const fd = new FormData();
     fd.set("customName", `Forged Create ${RUN}`);
     fd.set("price", "650");
@@ -284,26 +268,20 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
       { label: "Bag", price: 650, weightG: 500, weightPlaceholder: true },
     ]));
     const created = await createListingAction(fd);
-    expect(created).toEqual({ success: true, id: expect.any(String) });
-    const listingId = (created as { id: string }).id;
-    const createdRow = await storeScoped(storeAId).listingVariant.findFirstOrThrow({
-      where: { listingId },
-    });
-    expect(createdRow.weightPlaceholder).toBe(false);
-    expect(createdRow.weightG).toBe(500);
-    expect(createdRow.price).toBe(650);
+    expect(created).toEqual({ error: "Variant 1: unknown field" });
+    expect(await storeScoped(storeAId).listing.count()).toBe(before);
 
-    const updated = await updateListingAction(saveForm(listingId, `Forged Create ${RUN}`, [
-      { id: createdRow.id, label: "Bag", price: 650, weightG: 500, weightPlaceholder: true },
-    ], 650));
-    expect(updated).toEqual({ success: true, id: listingId });
-    const updatedRow = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({
-      where: { id: createdRow.id },
-    });
-    expect(updatedRow.id).toBe(createdRow.id);
-    expect(updatedRow.weightPlaceholder).toBe(false);
-    expect(updatedRow.weightG).toBe(500);
-    expect(updatedRow.price).toBe(650);
+    const row = await importPlaceholder(`Forged Update ${RUN}`);
+    const updated = await updateListingAction(saveForm(row.listingId, `Forged Update ${RUN}`, [
+      { id: row.variantId, label: row.label, price: 800, weightG: 100, weightPlaceholder: true },
+    ]));
+    expect(updated).toEqual({ error: "Variant 1: unknown field" });
+    const saved = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: row.variantId } });
+    expect(saved.weightPlaceholder).toBe(true);
+    expect(saved.weightG).toBe(100);
+    expect(saved.price).toBe(800);
+    const listing = await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: row.listingId } });
+    expect(listing.price).toBe(800);
   });
 
   it("a store B owner cannot save store A's listing", async () => {

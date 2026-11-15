@@ -1,9 +1,9 @@
 import { Prisma } from "@prisma/client";
-import { storeScoped, storeScopedTransaction, lockListingRow, lockListingVariantRows } from "../db";
+import { storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lockListingVariantRows } from "../db";
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
-export type StockEventType = "sale" | "recount" | "restock" | "short" | "adjust";
+export type StockEventType = "sale" | "recount" | "restock" | "short" | "adjust" | "counter_sale";
 
 export interface ResolvedStock {
   stockMode: StockMode;
@@ -17,23 +17,26 @@ export function resolveStockMode(input: {
   qty?: number;
   status?: string;
 }): ResolvedStock {
-  const mode: StockMode =
-    input.stockMode === "counted" || input.stockMode === "status"
-      ? input.stockMode
-      : input.hasQtyColumn
-        ? "counted"
-        : "status";
+  const explicit =
+    input.stockMode !== undefined && isStockMode(input.stockMode) ? input.stockMode : undefined;
+  // A cell the owner filled wins over the file-level fallback. Qty 0 is filled in.
+  const mode: StockMode = explicit
+    ? explicit
+    : input.qty !== undefined
+      ? "counted"
+      : input.status
+        ? "status"
+        : input.hasQtyColumn
+          ? "counted"
+          : "status";
 
   if (mode === "counted") {
     return { stockMode: "counted", qty: input.qty ?? 0, status: null };
   }
-  const status = input.status as StockStatus | undefined;
   return {
     stockMode: "status",
     qty: null,
-    status: status === "in_stock" || status === "low" || status === "out_of_stock"
-      ? status
-      : "in_stock",
+    status: input.status !== undefined && isStockStatus(input.status) ? input.status : "in_stock",
   };
 }
 
@@ -43,6 +46,8 @@ export interface CreateVariantInput {
   weightG: number;
   sku?: string | null;
   barcode?: string | null;
+  /** The weight is a stand-in the owner still has to set (no known weight). */
+  weightPlaceholder?: boolean;
 }
 
 /** A variant row on a save. `id` is set when the row already belongs to this listing. */
@@ -54,6 +59,24 @@ export interface SaveVariantInput extends CreateVariantInput {
 export interface Actor {
   id: string;
   email: string;
+}
+
+/** The only stock modes a listing form or a CSV `stock_mode` cell may name. */
+export const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
+
+/** The only status cells a CSV `status` column or `resolveStockMode()` may keep. */
+export const VALID_STOCK_STATUSES = new Set<string>(["in_stock", "low", "out_of_stock"]);
+
+export function isStockMode(value: string): value is StockMode {
+  return VALID_STOCK_MODES.has(value);
+}
+
+export function isStockStatus(value: string): value is StockStatus {
+  return VALID_STOCK_STATUSES.has(value);
+}
+
+export function toActor(user: { id: string; email: string }): Actor {
+  return { id: user.id, email: user.email };
 }
 
 type ListingTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
@@ -72,7 +95,7 @@ async function createVariantRows(
           label: v.label,
           price: v.price,
           weightG: v.weightG,
-          weightPlaceholder: false,
+          weightPlaceholder: v.weightPlaceholder ?? false,
           sku: v.sku ?? null,
           barcode: v.barcode ?? null,
         },
@@ -109,9 +132,16 @@ export interface CreateListingInput {
   maxPerOrder?: number | null;
   variants: CreateVariantInput[];
   actor: Actor;
+  /** Where the listing came from, recorded on its audit row (e.g. `photo_draft`). */
+  source?: string;
 }
 
 export async function createListing(input: CreateListingInput) {
+  return storeScopedTransaction(input.storeId, (tx) => createListingInTransaction(tx, input));
+}
+
+/** The listing, its variants, a recount event and one `listing.create` audit row, inside the caller's transaction. */
+export async function createListingInTransaction(tx: ListingTx, input: CreateListingInput) {
   const stock = resolveStockMode({
     stockMode: input.stockMode,
     hasQtyColumn: input.stockMode === "counted",
@@ -119,59 +149,58 @@ export async function createListing(input: CreateListingInput) {
     status: input.status ?? undefined,
   });
 
-  return storeScopedTransaction(input.storeId, async (tx) => {
-    const listing = await tx.listing.create({
-      data: {
-        storeId: input.storeId,
-        masterProductId: input.masterProductId ?? null,
-        customName: input.customName ?? null,
-        price: input.price,
-        stockMode: stock.stockMode,
-        qty: stock.qty,
-        status: stock.status,
-        frozen: input.frozen,
-        perishable: input.perishable,
-        maxPerOrder: input.maxPerOrder ?? null,
-      },
-    });
-
-    const variants = await createVariantRows(tx, listing.id, input.variants);
-
-    if (stock.stockMode === "counted" && (stock.qty ?? 0) > 0) {
-      await tx.stockEvent.create({
-        data: {
-          storeId: input.storeId,
-          listingId: listing.id,
-          type: "recount",
-          delta: stock.qty!,
-          actorId: input.actor.id,
-        },
-      });
-    }
-
-    await tx.auditLog.create({
-      data: {
-        storeId: input.storeId,
-        actorId: input.actor.id,
-        actorEmail: input.actor.email,
-        action: "listing.create",
-        entityType: "listing",
-        entityId: listing.id,
-        after: {
-          customName: listing.customName,
-          masterProductId: listing.masterProductId,
-          price: listing.price,
-          stockMode: listing.stockMode,
-          qty: listing.qty,
-          status: listing.status,
-          frozen: listing.frozen,
-          perishable: listing.perishable,
-        },
-      },
-    });
-
-    return { ...listing, variants };
+  const listing = await tx.listing.create({
+    data: {
+      storeId: input.storeId,
+      masterProductId: input.masterProductId ?? null,
+      customName: input.customName ?? null,
+      price: input.price,
+      stockMode: stock.stockMode,
+      qty: stock.qty,
+      status: stock.status,
+      frozen: input.frozen,
+      perishable: input.perishable,
+      maxPerOrder: input.maxPerOrder ?? null,
+    },
   });
+
+  const variants = await createVariantRows(tx, listing.id, input.variants);
+
+  if (stock.stockMode === "counted" && (stock.qty ?? 0) > 0) {
+    await tx.stockEvent.create({
+      data: {
+        storeId: input.storeId,
+        listingId: listing.id,
+        type: "recount",
+        delta: stock.qty!,
+        actorId: input.actor.id,
+      },
+    });
+  }
+
+  await tx.auditLog.create({
+    data: {
+      storeId: input.storeId,
+      actorId: input.actor.id,
+      actorEmail: input.actor.email,
+      action: "listing.create",
+      entityType: "listing",
+      entityId: listing.id,
+      after: {
+        customName: listing.customName,
+        masterProductId: listing.masterProductId,
+        price: listing.price,
+        stockMode: listing.stockMode,
+        qty: listing.qty,
+        status: listing.status,
+        frozen: listing.frozen,
+        perishable: listing.perishable,
+        ...(input.source ? { source: input.source } : {}),
+      },
+    },
+  });
+
+  return { ...listing, variants };
 }
 
 export interface UpdateListingInput {
@@ -182,6 +211,8 @@ export interface UpdateListingInput {
   price?: number;
   stockMode?: StockMode;
   qty?: number | null;
+  /** The qty the edit form loaded. `qty` equal to it means the owner did not change the number. */
+  qtyLoaded?: number;
   status?: StockStatus | null;
   frozen?: boolean;
   perishable?: boolean;
@@ -190,14 +221,22 @@ export interface UpdateListingInput {
   variants?: SaveVariantInput[];
 }
 
+/** These queue behind checkout and CSV commit on the store lock, so Prisma's 5-second default is too short. */
+const LISTING_WRITE_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
+
 export async function updateListing(input: UpdateListingInput) {
   return storeScopedTransaction(input.storeId, async (tx) => {
+    await lockStoreRow(tx, input.storeId);
     await lockListingRow(tx, input.listingId);
 
     const existing = await tx.listing.findUnique({
       where: { id: input.listingId },
     });
     if (!existing) throw new Error("Listing not found");
+
+    const modeChanged = input.stockMode !== undefined && input.stockMode !== existing.stockMode;
+    // The number this form loaded coming back is not a count: an order may have moved qty since.
+    const requestedQty = !modeChanged && input.qty === input.qtyLoaded ? undefined : input.qty;
 
     const data: Record<string, unknown> = {};
     if (input.customName !== undefined) data.customName = input.customName;
@@ -209,10 +248,9 @@ export async function updateListing(input: UpdateListingInput) {
     if (input.maxPerOrder !== undefined) data.maxPerOrder = input.maxPerOrder;
 
     const resolvedStockMode = input.stockMode ?? existing.stockMode;
-    const modeChanged = input.stockMode !== undefined && input.stockMode !== existing.stockMode;
 
     if (resolvedStockMode === "counted") {
-      if (input.qty !== undefined) data.qty = input.qty;
+      if (requestedQty !== undefined) data.qty = requestedQty;
       if (modeChanged) data.status = null;
     }
     if (resolvedStockMode === "status") {
@@ -220,10 +258,27 @@ export async function updateListing(input: UpdateListingInput) {
       if (modeChanged) data.qty = null;
     }
 
-    const updated = await tx.listing.update({
+    const stockChanged =
+      (resolvedStockMode === "counted" && requestedQty !== undefined && requestedQty !== existing.qty) ||
+      (resolvedStockMode === "status" && input.status !== undefined && input.status !== existing.status);
+
+    // Read after the store lock, so a count taken while an order waits is newer than that order's reservation.
+    const now = new Date();
+    if (stockChanged) {
+      data.confidence = 1.0;
+      data.confidenceUpdatedAt = now;
+    }
+
+    const listing = await tx.listing.update({
       where: { id: input.listingId },
       data,
     });
+    // Orders moved the count after the form loaded it. The owner is told, whichever number won.
+    const stockMoved = resolvedStockMode === "counted" && !modeChanged && input.qtyLoaded !== undefined
+      && existing.qty !== null && existing.qty !== input.qtyLoaded
+      ? { from: input.qtyLoaded, to: existing.qty }
+      : null;
+    const updated = { ...listing, stockMoved };
 
     if (input.price !== undefined && input.price !== existing.price) {
       await tx.auditLog.create({
@@ -239,10 +294,6 @@ export async function updateListing(input: UpdateListingInput) {
         },
       });
     }
-
-    const stockChanged =
-      (resolvedStockMode === "counted" && input.qty !== undefined && input.qty !== existing.qty) ||
-      (resolvedStockMode === "status" && input.status !== undefined && input.status !== existing.status);
 
     if (stockChanged) {
       const beforeStock = existing.stockMode === "counted"
@@ -265,8 +316,8 @@ export async function updateListing(input: UpdateListingInput) {
         },
       });
 
-      if (resolvedStockMode === "counted" && input.qty !== undefined) {
-        const delta = (input.qty ?? 0) - (existing.qty ?? 0);
+      if (resolvedStockMode === "counted" && requestedQty !== undefined) {
+        const delta = (requestedQty ?? 0) - (existing.qty ?? 0);
         await tx.stockEvent.create({
           data: {
             storeId: input.storeId,
@@ -274,6 +325,7 @@ export async function updateListing(input: UpdateListingInput) {
             type: "adjust",
             delta,
             actorId: input.actor.id,
+            createdAt: now,
           },
         });
       }
@@ -286,6 +338,7 @@ export async function updateListing(input: UpdateListingInput) {
             type: "adjust",
             delta: 0,
             actorId: input.actor.id,
+            createdAt: now,
           },
         });
       }
@@ -301,7 +354,7 @@ export async function updateListing(input: UpdateListingInput) {
     }
 
     return updated;
-  });
+  }, LISTING_WRITE_TRANSACTION);
 }
 
 async function setListingActive(
@@ -311,6 +364,7 @@ async function setListingActive(
   actor: Actor,
 ) {
   return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
     const existing = await tx.listing.findUniqueOrThrow({ where: { id: listingId } });
 
     const updated = await tx.listing.update({
@@ -332,7 +386,7 @@ async function setListingActive(
     });
 
     return updated;
-  });
+  }, LISTING_WRITE_TRANSACTION);
 }
 
 export async function deactivateListing(storeId: string, listingId: string, actor: Actor) {
@@ -371,7 +425,8 @@ export async function listMasterProducts(query?: string, take = MASTER_PRODUCT_P
   const { masterProduct } = await import("../db").then((m) => m.platformAdmin);
   const term = query?.trim();
   return masterProduct.findMany({
-    where: term ? { name: { contains: escapeLike(term), mode: "insensitive" } } : undefined,
+    // An archived master product keeps its listings but takes no new ones; a merged one has none left.
+    where: { status: { notIn: ["archived", "merged"] }, ...(term ? { name: { contains: escapeLike(term), mode: "insensitive" } } : {}) },
     orderBy: { name: "asc" },
     take: Math.min(Math.max(1, Math.floor(take)), MASTER_PRODUCT_PAGE_SIZE),
   });
@@ -387,7 +442,7 @@ export interface UpdateVariantsInput {
 export async function updateVariants(input: UpdateVariantsInput) {
   return storeScopedTransaction(input.storeId, async (tx) => {
     return saveVariantsInPlace(tx, input);
-  });
+  }, LISTING_WRITE_TRANSACTION);
 }
 
 const CANT_REMOVE = (label: string) =>
@@ -399,9 +454,9 @@ function isForeignKeyViolation(err: unknown): boolean {
 
 /**
  * Updates, creates and deletes variants inside the caller's transaction.
- * The caller already holds the listing row lock when this runs from updateListing;
- * updateVariants enters here with no lock yet, so the lock is taken again (same
- * transaction: a no-op if already held).
+ * The caller already holds the store and listing locks when this runs from
+ * updateListing; updateVariants enters here with neither, so both are taken again
+ * (same transaction: a no-op if already held).
  */
 async function saveVariantsInPlace(
   tx: ListingTx,
@@ -416,6 +471,7 @@ async function saveVariantsInPlace(
     throw new Error("At least one variant is required");
   }
 
+  await lockStoreRow(tx, input.storeId);
   await lockListingRow(tx, input.listingId);
   const listing = await tx.listing.findUnique({ where: { id: input.listingId } });
   if (!listing) throw new Error("Listing not found");

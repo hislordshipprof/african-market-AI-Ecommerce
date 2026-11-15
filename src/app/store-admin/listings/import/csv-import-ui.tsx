@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import Link from "next/link";
 import { toast } from "sonner";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
@@ -20,6 +21,7 @@ import {
   type PreviewActionResult,
 } from "@/lib/listing/csv-import-actions";
 import { needsWeightSentence } from "../needs-weight";
+import { CSV_FILE_CAP_BYTES, CSV_FILE_TOO_LARGE_MESSAGE } from "@/lib/listing/csv-file-cap";
 import type {
   CsvPreviewResult,
   CsvPreviewMatch,
@@ -68,6 +70,29 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   const [selectedNew, setSelectedNew] = useState<Set<number>>(new Set());
   const [ambiguousResolutions, setAmbiguousResolutions] = useState<Map<number, string>>(new Map());
 
+  function clearSelections() {
+    setSelectedMatches(new Set());
+    setSelectedNew(new Set());
+    setAmbiguousResolutions(new Map());
+  }
+
+  function applyPreviewDefaults(next: CsvPreviewResult) {
+    setPreview(next);
+    setSelectedMatches(new Set(next.matches.map((match) => match.row)));
+    setSelectedNew(new Set(next.newItems.map((item) => item.row)));
+    setAmbiguousResolutions(new Map());
+  }
+
+  function resetImport() {
+    setStep("upload");
+    setPreview(null);
+    setSelectedFile(null);
+    setCreatedCount(0);
+    setNeedsWeightCount(0);
+    clearSelections();
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
   function handleFileChange(file: File | null) {
     if (!file) return;
     setSelectedFile(file);
@@ -76,9 +101,8 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   function handleUpload() {
     if (!selectedFile) return;
 
-    const MAX_FILE_BYTES = 2 * 1024 * 1024;
-    if (selectedFile.size > MAX_FILE_BYTES) {
-      toast.error("File exceeds the maximum size of 2 MB.");
+    if (selectedFile.size > CSV_FILE_CAP_BYTES) {
+      toast.error(CSV_FILE_TOO_LARGE_MESSAGE);
       return;
     }
 
@@ -100,9 +124,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
       }
 
       if (res.preview) {
-        setPreview(res.preview);
-        setSelectedMatches(new Set(res.preview.matches.map((m) => m.row)));
-        setSelectedNew(new Set(res.preview.newItems.map((n) => n.row)));
+        applyPreviewDefaults(res.preview);
         setStep("preview");
       }
     });
@@ -118,6 +140,9 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
         row,
         masterProductId,
       })),
+      matchedIdentities: preview.matches
+        .filter((match) => selectedMatches.has(match.row))
+        .map((match) => ({ row: match.row, masterProductId: match.masterProductId })),
     };
 
     if (
@@ -130,7 +155,14 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
     }
 
     startTransition(async () => {
-      const res = await csvCommitAction(preview.importToken, selection);
+      let res: Awaited<ReturnType<typeof csvCommitAction>>;
+      try {
+        res = await csvCommitAction(preview.importToken, selection);
+      } catch (error) {
+        if (isRedirectError(error)) throw error;
+        toast.error("We couldn't confirm the import. Press Import again. Nothing will be imported twice.");
+        return;
+      }
 
       if (res.error) {
         toast.error(res.error);
@@ -255,12 +287,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
                   });
                 }}
                 onCommit={handleCommit}
-                onBack={() => {
-                  setStep("upload");
-                  setPreview(null);
-                  setSelectedFile(null);
-                  setAmbiguousResolutions(new Map());
-                }}
+                onBack={resetImport}
                 isPending={isPending}
               />
             </motion.div>
@@ -279,13 +306,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
                 onGoToProducts={() =>
                   router.push(`/store-admin/listings?store=${storeSlug}`)
                 }
-                onImportMore={() => {
-                  setStep("upload");
-                  setPreview(null);
-                  setSelectedFile(null);
-                  setCreatedCount(0);
-                  setNeedsWeightCount(0);
-                }}
+                onImportMore={resetImport}
               />
             </motion.div>
           )}

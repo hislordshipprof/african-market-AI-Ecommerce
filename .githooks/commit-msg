@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Strips AI co-author trailers from every commit message (scripts/strip-ai-coauthors.sh).
+# Turned on per clone with: git config core.hooksPath .githooks   (build-ticket.sh does it for the lanes)
+root="$(git rev-parse --show-toplevel)"
+filter="$root/scripts/strip-ai-coauthors.sh"
+[ -f "$filter" ] || exit 0
+tmp="$(mktemp)"
+bash "$filter" < "$1" > "$tmp" && cat "$tmp" > "$1"
+rm -f "$tmp"

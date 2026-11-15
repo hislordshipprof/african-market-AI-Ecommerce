@@ -35,6 +35,7 @@ import {
   resolveAuthTrustedOrigins,
   validateAuthSecret,
 } from "./auth";
+import { magicLinkMessage } from "./magic-link-mail";
 
 describe("auth config", () => {
   it("has session cookie cache disabled globally", () => {
@@ -44,18 +45,29 @@ describe("auth config", () => {
     expect(cookieCache.enabled).toBe(false);
   });
 
-  it("uses dynamic baseURL with allowedHosts", () => {
+  it("baseURL is built from the resolvers, with a fallback so unknown hosts do not 500", () => {
     const opts = auth.options as Record<string, unknown>;
-    const baseURL = opts.baseURL as Record<string, unknown>;
-    expect(baseURL).toHaveProperty("allowedHosts");
-    expect(Array.isArray(baseURL.allowedHosts)).toBe(true);
+    expect(opts.baseURL).toEqual({
+      allowedHosts: resolveAuthAllowedHosts(),
+      protocol: "auto",
+      fallback: resolveAuthBaseUrl(),
+    });
   });
+});
 
-  it("baseURL has fallback so unknown hosts do not 500", () => {
-    const opts = auth.options as Record<string, unknown>;
-    const baseURL = opts.baseURL as Record<string, unknown>;
-    expect(baseURL).toHaveProperty("fallback");
-    expect(typeof baseURL.fallback).toBe("string");
+describe("magicLinkMessage", () => {
+  it("a hostile store name cannot inject markup, headers or a second sender", () => {
+    const message = magicLinkMessage({
+      to: "ada@example.com",
+      url: "https://shop.example/api/auth/magic-link/verify?token=t&callbackURL=/account",
+      storeName: 'Evil</p><script>alert(1)</script>, "Shop"\r\nBcc: x@evil.example',
+      fromAddress: "Markets <signin@markets.example>",
+    });
+    expect(message.html).not.toMatch(/<script|<\/p><script/i);
+    expect(message.html).toContain("token=t&amp;callbackURL=/account");
+    expect(message.subject).not.toMatch(/[\r\n]/);
+    expect(message.from).not.toMatch(/[\r\n]/);
+    expect(message.from).toMatch(/^"[^"]*" <signin@markets\.example>$/);
   });
 });
 

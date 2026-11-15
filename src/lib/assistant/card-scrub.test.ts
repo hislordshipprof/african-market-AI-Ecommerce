@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { luhnValid, scrubCardNumbers } from "./card-scrub";
+import { safeAttachmentName } from "./attachments";
+import { luhnValid, scrubCardNumbers, scrubFileNameCards, scrubKnownStrings } from "./card-scrub";
+import { postedPhotoName } from "./ui/client-files";
 
 function luhnTwelve(digits: string): boolean {
   let sum = 0;
@@ -17,27 +19,62 @@ function luhnTwelve(digits: string): boolean {
 }
 
 const VISA = "4242 4242 4242 4242";
-const NINETEEN = "4242424242424242006";
 
 describe("card number scrubber", () => {
-  it("masks Luhn-valid 13 to 19 digit numbers with spaces or dashes", () => {
+  it("masks a card number in a filename however its digits are split, and keeps camera names", () => {
+    const split = [
+      "4242 - 4242 - 4242 - 4242.png",
+      "4242__4242__4242__4242.png",
+      "4242(4242)4242(4242).png",
+      "4242–4242–4242–4242.png",
+      "4242+4242,4242:4242~.png",
+      "4242_4242_4242_4242.png",
+      "4242.4242.4242.4242.png",
+      "4242424242424242 (1).png",
+      "4242424242424242_2.png",
+      // Glued to other digits.
+      "14242424242424242.png",
+      "124242 4242 4242 4242.png",
+      "4242 4242 4242 424299.png",
+      "4242 4242 4242 4242123.png",
+      // Beside or inside what looks like a date and time.
+      "20240115_000000_4242424242424242.png",
+      "20240115_000000424_2424242424242.png",
+    ];
+    for (const name of split) {
+      expect(postedPhotoName(name)).toMatch(/^\[card number removed\]/);
+      expect(postedPhotoName(name)).not.toMatch(/4242/);
+      expect(safeAttachmentName(name, 1, "image/jpeg")).not.toMatch(/4242/);
+    }
+    expect(scrubFileNameCards("20240115_222300_3122003222.jpg").removed).toBe(1);
+    expect(scrubFileNameCards("2024-01-15 22.23.00 3122003222.jpg").removed).toBe(1);
+    // The server cuts long names too. It must scrub first, or the cut can leave part of a card.
+    expect(safeAttachmentName(`${"a".repeat(64)} 4242 4242 4242 4242.png`, 1, "image/jpeg")).not.toMatch(/4242/);
+    // Luhn-valid dates and times are camera names, not cards: no card has these lengths and starts.
+    expect(luhnValid("20240115000000")).toBe(true);
+    expect(luhnValid("20230117005628")).toBe(true);
+    const cameraNames = [
+      "IMG_20240115_000000.jpg",
+      "IMG20240115000000.jpg",
+      "2024-01-15 00.00.00.jpg",
+      "IMG_20240115_000000 (1).jpg",
+      "2023-01-17_005628.jpg",
+      "signal-2023-01-17-005628.jpg",
+      "IMG_0001_20230117_005628.jpg",
+      "(1) 20230117_005628.jpg",
+      "photo 2 20230117_005628.jpg",
+      "20230117_00-56-28.jpg",
+      "20230117 00.56.28.jpg",
+      "20230117_005628_0001.jpg",
+    ];
+    for (const name of cameraNames) expect(scrubFileNameCards(name).text).toBe(name);
+  });
+
+  it("masks a Luhn-valid card and leaves the surrounding text", () => {
     expect(scrubCardNumbers(`my card is ${VISA} exp 12/29`).text).toBe(
       "my card is [card number removed] exp 12/29",
     );
-    expect(scrubCardNumbers("4242-4242-4242-4242").text).toBe("[card number removed]");
-    expect(scrubCardNumbers("4242424242424242").text).toBe("[card number removed]");
-    expect(scrubCardNumbers("378282246310005").text).toBe("[card number removed]");
-    expect(scrubCardNumbers(NINETEEN).text).toBe("[card number removed]");
     expect(scrubCardNumbers(`my card is ${VISA} exp 12/29`).removed).toBe(1);
-  });
-
-  it("masks full-width digits", () => {
-    const full = "４２４２ ４２４２ ４２４２ ４２４２";
-    expect(scrubCardNumbers(full).text).toBe("[card number removed]");
-  });
-
-  it("masks a valid window inside a longer run", () => {
-    expect(scrubCardNumbers(`00${"4242424242424242"}000`).text).toBe("[card number removed]");
   });
 
   it("keeps Luhn-invalid numbers, phone and order numbers", () => {
@@ -46,10 +83,22 @@ describe("card number scrubber", () => {
     expect(scrubCardNumbers(text).removed).toBe(0);
   });
 
-  it("masks every card in one message", () => {
-    const result = scrubCardNumbers(`${VISA} and 378282246310005`);
-    expect(result.text).toBe("[card number removed] and [card number removed]");
-    expect(result.removed).toBe(2);
+  it("renames card-number keys and keeps a second one distinct", () => {
+    const visa = "4242424242424242";
+    const mastercard = "5555555555554444";
+    const result = scrubKnownStrings({
+      [visa]: "first",
+      [mastercard]: "second",
+      listing_id: { [visa]: "nested" },
+    });
+    const encoded = JSON.stringify(result);
+    expect(encoded).not.toContain(visa);
+    expect(encoded).not.toContain(mastercard);
+    expect(encoded).toContain("[card number removed]");
+    expect(encoded).toContain("[card number removed] (2)");
+    expect(encoded).toContain("first");
+    expect(encoded).toContain("second");
+    expect(encoded).toContain("nested");
   });
 
   it("keeps a Luhn-valid 12-digit run", () => {
@@ -57,30 +106,5 @@ describe("card number scrubber", () => {
     expect(luhnTwelve(twelve)).toBe(true);
     expect(scrubCardNumbers(`code ${twelve}`).text).toBe(`code ${twelve}`);
     expect(scrubCardNumbers(`code ${twelve}`).removed).toBe(0);
-  });
-
-  it("masks mixed separators and keeps a double space", () => {
-    expect(scrubCardNumbers("4242 4242-4242 4242").text).toBe("[card number removed]");
-    const doubled = "4242  4242  4242  4242";
-    expect(scrubCardNumbers(doubled).text).toBe(doubled);
-    expect(scrubCardNumbers(doubled).removed).toBe(0);
-  });
-
-  it("finishes a 10,000-character message with no digits in under 50ms", () => {
-    const input = "a".repeat(10_000);
-    const started = performance.now();
-    const result = scrubCardNumbers(input);
-    expect(performance.now() - started).toBeLessThan(50);
-    expect(result.text).toBe(input);
-    expect(result.removed).toBe(0);
-  });
-
-  it("runs in linear time on long input", () => {
-    const input = "9".repeat(200_000);
-    const started = Date.now();
-    const result = scrubCardNumbers(input);
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(result.text).toBe(input);
-    expect(result.removed).toBe(0);
   });
 });

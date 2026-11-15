@@ -1,44 +1,15 @@
-import { test, expect, type Page } from "@playwright/test";
-import { generateTOTP } from "./totp";
-import { deleteInboxOrder, insertInboxOrder, seedCaptureLabel, setInboxOrderStatus } from "./order-fixture";
+import { test, expect } from "@playwright/test";
+import { deleteInboxOrder, insertCourierPackingOrder, insertInboxOrder, seedCaptureLabel, setInboxOrderStatus } from "./order-fixture";
+import { storeOwnerSignIn } from "./store-owner-auth";
 
-const OWNER_EMAIL = "owner@mama-ngozi.test";
-const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
-const SEED_TOTP_SECRET = process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP";
 const ORDERS_URL = "/store-admin/orders?store=mama-ngozi";
-
-async function storeOwnerSignIn(page: Page) {
-  await page.goto("/store-admin/sign-in?store=mama-ngozi");
-  await page.getByLabel("Email").fill(OWNER_EMAIL);
-  await page.getByLabel("Password").fill(OWNER_PASSWORD);
-  await page.click("button[type='submit']");
-
-  await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
-
-  const code = generateTOTP(SEED_TOTP_SECRET);
-  await page.getByLabel("Verification code").fill(code);
-  await page.click("button[type='submit']");
-
-  try {
-    await page.waitForURL(
-      (url) => url.pathname.startsWith("/store-admin") && !url.pathname.includes("sign-in"),
-      { timeout: 15000 },
-    );
-  } catch {
-    const url = page.url();
-    const bodySnippet = await page.locator("body").textContent().catch(() => "");
-    throw new Error(
-      `Store owner sign-in failed | url: ${url} | body: ${bodySnippet?.slice(0, 300)}`,
-    );
-  }
-}
 
 test.describe("Order inbox", () => {
   test("dashboard shows Orders card that navigates to /store-admin/orders", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto("/store-admin?store=mama-ngozi");
 
-    const ordersCard = page.locator("a", { hasText: "Orders" });
+    const ordersCard = page.getByRole("link", { name: /^Orders\b/ });
     await expect(ordersCard).toBeVisible();
     await ordersCard.click();
     await page.waitForURL((url) => url.pathname.includes("/store-admin/orders"));
@@ -172,6 +143,19 @@ test.describe("Order inbox", () => {
     }
   });
 
+  test("#557: the order shows the promo discount the store funds, only when there is one", async ({ page }) => {
+    const number = 18603;
+    await insertInboxOrder({ number, status: "AWAITING_PICKUP", capturedAmountCents: 1800, discountCents: 200 });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByTestId("order-discount")).toHaveText("−$2.00");
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
   test("a refund-failed order tells staff the platform is resolving it", async ({ page }) => {
     const number = 18602;
     await insertInboxOrder({ number, status: "REFUND_FAILED", capturedAmountCents: 1800 });
@@ -203,6 +187,42 @@ test.describe("Order inbox", () => {
       await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
       await expect(page.getByText("Paid customer by Zelle 11/05")).toBeVisible();
       await expect(page.getByText("The platform resolved this refund.")).toBeVisible();
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("#562: a packing courier order shows its ready time, the courier's ETA and one 5-minute push", async ({ page }, testInfo) => {
+    const number = 18791 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    const readyAt = new Date(Math.ceil((Date.now() + 15 * 60_000) / 60_000) * 60_000);
+    await insertCourierPackingOrder(number, readyAt);
+    const proofDir = process.env.PROOF_DIR;
+    try {
+      await storeOwnerSignIn(page);
+      if (proofDir) {
+        for (const scheme of ["light", "dark"] as const) {
+          for (const width of [390, 1280]) {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(ORDERS_URL);
+            await page.locator("button", { hasText: `#${number}` }).click();
+            await expect(page.getByLabel("Courier timing")).toBeVisible();
+            await page.screenshot({ path: `${proofDir}/inbox-courier-${width}-${scheme}.png`, fullPage: false });
+          }
+        }
+        await page.emulateMedia({ colorScheme: "light" });
+      }
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      const block = page.getByLabel("Courier timing");
+      await expect(block.getByText(/^Ready by /)).toBeVisible();
+      await expect(block.getByText(/^Courier Sam arriving about /)).toBeVisible();
+      await block.getByRole("button", { name: "5 more minutes" }).click();
+      // No DoorDash keys here, so the assigned courier keeps its time; the ready time still moves once.
+      await expect(page.getByText(/The courier already on the way keeps the first time/)).toBeVisible();
+      await expect(block.getByText("Pushed once")).toBeVisible();
+      await expect(block.getByRole("button", { name: "5 more minutes" })).toHaveCount(0);
+      if (proofDir) await page.screenshot({ path: `${proofDir}/inbox-courier-pushed-1280-light.png` });
     } finally {
       await deleteInboxOrder(number);
     }

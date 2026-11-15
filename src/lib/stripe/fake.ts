@@ -10,6 +10,10 @@ import type {
 } from "./types";
 import { ProviderStateError } from "./types";
 import { OverRefundError } from "./errors";
+import { billingObjects } from "../billing/webhook-objects";
+import { disputeObject } from "../disputes/webhook-object";
+import { fakeCheckoutHoldCents } from "./checkout-payments";
+import { defaultFakePayouts, type FakePayoutData } from "./fake-payouts";
 
 const lateRefundKeys = new Set<string>();
 
@@ -48,7 +52,6 @@ type IdemRecord = {
   fingerprint: string;
   error?: unknown;
   value?: unknown;
-  refundId?: string;
 };
 
 function stripeApiError(message: string): FakeStripeError {
@@ -83,6 +86,8 @@ function countsTowardBalance(status: string): boolean {
 const accounts = new Map<string, ConnectAccount>();
 const capturedPayments = new Map<string, number>();
 const capturedFees = new Map<string, number>();
+/** Metadata sent with each capture (#557: the coupon id). */
+const capturedMetadata = new Map<string, Record<string, string>>();
 const captureKeys = new Map<string, string>();
 const cancelledPayments = new Set<string>();
 const cancelKeys = new Map<string, string>();
@@ -91,6 +96,8 @@ const refundedPayments = new Map<string, number>();
 const refunds = new Map<string, RefundEntry>();
 const nextRefundStatus = new Map<string, string>();
 const feeRefunded = new Map<string, number>();
+/** Application fee parts returned to the connected account, by the refund's reservation key. */
+const feeRefundParts = new Map<string, { paymentIntentId: string; amountCents: number; feeRefundId: string }>();
 const refundRequests: Array<{
   paymentIntentId: string;
   amountCents: number;
@@ -105,11 +112,34 @@ const cancelUnexpected = new Set<string>();
 const refundErrorBudget = new Map<string, number>();
 const retrieveScript = new Map<string, string[]>();
 const idempotency = new Map<string, IdemRecord>();
+const inFlightKeys = new Set<string>();
 const captureCalls: string[] = [];
 let captureHold: Promise<void> | null = null;
 let releaseCaptureHold: (() => void) | null = null;
 let notifyCaptureEntered: (() => void) | null = null;
 let refundSeq = 0;
+const payoutData = new Map<string, FakePayoutData>();
+const loginLinksCreated: string[] = [];
+let nextPayoutsFailure: string | null = null;
+
+/** Every account has the default fixture. */
+function payoutsOf(accountId: string): FakePayoutData {
+  if (nextPayoutsFailure) {
+    const message = nextPayoutsFailure;
+    nextPayoutsFailure = null;
+    throw stripeApiError(message);
+  }
+  let data = payoutData.get(accountId);
+  if (!data) {
+    data = defaultFakePayouts(accountId);
+    payoutData.set(accountId, data);
+  }
+  return data;
+}
+
+function setNextPayoutsFailure(message: string) {
+  nextPayoutsFailure = message;
+}
 
 function holdNextCapture(): Promise<void> {
   const entered = new Promise<void>((resolve) => {
@@ -131,6 +161,7 @@ function reset() {
   accounts.clear();
   capturedPayments.clear();
   capturedFees.clear();
+  capturedMetadata.clear();
   captureKeys.clear();
   cancelledPayments.clear();
   cancelKeys.clear();
@@ -139,6 +170,7 @@ function reset() {
   refunds.clear();
   nextRefundStatus.clear();
   feeRefunded.clear();
+  feeRefundParts.clear();
   refundRequests.length = 0;
   captureErrorBudget.clear();
   captureConflicts.clear();
@@ -148,12 +180,16 @@ function reset() {
   refundErrorBudget.clear();
   retrieveScript.clear();
   idempotency.clear();
+  inFlightKeys.clear();
   lateRefundKeys.clear();
   captureCalls.length = 0;
   captureHold = null;
   releaseCaptureHold = null;
   notifyCaptureEntered = null;
   refundSeq = 0;
+  payoutData.clear();
+  loginLinksCreated.length = 0;
+  nextPayoutsFailure = null;
 }
 
 function syncRefundBalance(paymentIntentId: string) {
@@ -183,10 +219,6 @@ function refundView(refundId: string): RefundResult {
   };
 }
 
-function isRefundResult(value: unknown): value is RefundResult {
-  return !!value && typeof value === "object" && "refundId" in value && "amountRefunded" in value;
-}
-
 async function withIdempotency<T>(
   key: string | undefined,
   fingerprint: string,
@@ -201,20 +233,22 @@ async function withIdempotency<T>(
         lateRefundKeys.delete(key);
       } else {
         if (existing.error) throw existing.error;
-        if (existing.refundId) return refundView(existing.refundId) as T;
-        return existing.value as T;
+        // Stripe replays the saved first response, not the object's current state.
+        return structuredClone(existing.value) as T;
       }
     }
+    if (inFlightKeys.has(key)) {
+      throw new FakeStripeError(
+        "idempotency_key_in_use",
+        "There is currently another in-progress request using this Idempotent Key",
+        409,
+      );
+    }
+    inFlightKeys.add(key);
   }
   try {
     const value = await run();
-    if (key) {
-      idempotency.set(key, {
-        fingerprint,
-        value,
-        refundId: isRefundResult(value) ? value.refundId : undefined,
-      });
-    }
+    if (key) idempotency.set(key, { fingerprint, value: structuredClone(value) });
     return value;
   } catch (error) {
     const statusCode = (error as { statusCode?: number }).statusCode;
@@ -222,6 +256,8 @@ async function withIdempotency<T>(
       idempotency.set(key, { fingerprint, error });
     }
     throw error;
+  } finally {
+    if (key) inFlightKeys.delete(key);
   }
 }
 
@@ -278,7 +314,9 @@ const fakeStripeProvider: StripeProvider = {
       );
     }
     const parsed = JSON.parse(payload) as {
+      id?: string;
       type?: string;
+      created?: number;
       accountId?: string;
       data?: {
         object?: {
@@ -286,6 +324,7 @@ const fakeStripeProvider: StripeProvider = {
           object?: string;
           status?: string;
           payment_intent?: string | { id?: string };
+          cancellation_reason?: string | null;
           metadata?: { reservation?: string };
         };
       };
@@ -303,15 +342,25 @@ const fakeStripeProvider: StripeProvider = {
             ...(reservationKey ? { reservationKey } : {}),
           }
         : undefined;
+    const paymentIntent =
+      obj?.object === "payment_intent" && obj.id && obj.status
+        ? { id: obj.id, status: obj.status, cancellationReason: obj.cancellation_reason ?? null }
+        : undefined;
     return {
       type: parsed.type as string,
       accountId: (parsed.accountId ?? obj?.id ?? "") as string,
+      ...(parsed.id ? { eventId: parsed.id } : {}),
+      ...(typeof parsed.created === "number" ? { created: parsed.created } : {}),
       ...(refund ? { refund } : {}),
+      ...(paymentIntent ? { paymentIntent } : {}),
+      ...billingObjects(obj),
+      ...disputeObject(obj),
     } satisfies WebhookEvent;
   },
 
-  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
+  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount, metadata) {
     captureCalls.push(idempotencyKey ?? "");
+    if (metadata) capturedMetadata.set(paymentIntentId, metadata);
     if (captureConflicts.delete(paymentIntentId)) {
       throw new FakeStripeError(
         "idempotency_key_in_use",
@@ -337,6 +386,8 @@ const fakeStripeProvider: StripeProvider = {
           status: "succeeded",
         } satisfies CaptureResult;
       }
+      const checkoutHold = fakeCheckoutHoldCents(paymentIntentId);
+      if (checkoutHold !== null) ensureAuthorizedAmount(paymentIntentId, checkoutHold);
       if (!authorizedAmounts.has(paymentIntentId)) {
         throw resourceMissing("payment_intent", paymentIntentId);
       }
@@ -489,6 +540,21 @@ const fakeStripeProvider: StripeProvider = {
     });
   },
 
+  async refundApplicationFeePart(paymentIntentId, amountCents, reservationKey) {
+    const prior = feeRefundParts.get(reservationKey);
+    if (prior) return { feeRefundId: prior.feeRefundId };
+    const chargedFee = capturedFees.get(paymentIntentId) ?? 0;
+    const returned = (feeRefunded.get(paymentIntentId) ?? 0) + [...feeRefundParts.values()]
+      .filter((part) => part.paymentIntentId === paymentIntentId)
+      .reduce((sum, part) => sum + part.amountCents, 0);
+    if (!Number.isInteger(amountCents) || amountCents < 1 || amountCents > chargedFee - returned) {
+      throw new FakeStripeError("amount_too_large", "Refund amount is greater than the unrefunded application fee.");
+    }
+    const feeRefundId = `fr_fake_${reservationKey}`;
+    feeRefundParts.set(reservationKey, { paymentIntentId, amountCents, feeRefundId });
+    return { feeRefundId };
+  },
+
   async listRefunds(paymentIntentId) {
     const known =
       authorizedAmounts.has(paymentIntentId) ||
@@ -504,6 +570,27 @@ const fakeStripeProvider: StripeProvider = {
 
   async retrieveRefund(refundId) {
     return refundView(refundId);
+  },
+
+  async listPayouts(accountId, limit) {
+    return [...payoutsOf(accountId).payouts].sort((a, b) => b.arrivalDate - a.arrivalDate).slice(0, limit);
+  },
+
+  async retrievePayout(accountId, payoutId) {
+    const payout = payoutsOf(accountId).payouts.find((p) => p.id === payoutId);
+    if (!payout) throw resourceMissing("payout", payoutId);
+    return payout;
+  },
+
+  async listPayoutTransactions(accountId, payoutId) {
+    const transactions = payoutsOf(accountId).transactions.get(payoutId);
+    if (!transactions) throw resourceMissing("payout", payoutId);
+    return transactions;
+  },
+
+  async createLoginLink(accountId) {
+    loginLinksCreated.push(accountId);
+    return { url: `https://connect.stripe.com/express/fake-login/${accountId}` };
   },
 
   async retrievePaymentIntent(paymentIntentId) {
@@ -602,4 +689,15 @@ function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+/**
+ * What the connected account paid back for refunds on this payment. With `reverse_transfer` the
+ * transfer is reversed by each refund; fee refunds return part of that to the account.
+ */
+function storeFundedRefundCents(paymentIntentId: string): number {
+  const parts = [...feeRefundParts.values()]
+    .filter((part) => part.paymentIntentId === paymentIntentId)
+    .reduce((sum, part) => sum + part.amountCents, 0);
+  return (refundedPayments.get(paymentIntentId) ?? 0) - (feeRefunded.get(paymentIntentId) ?? 0) - parts;
+}
+
+export { setNextPayoutsFailure, loginLinksCreated, FakeStripeError, feeRefundParts, storeFundedRefundCents, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, capturedMetadata, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };

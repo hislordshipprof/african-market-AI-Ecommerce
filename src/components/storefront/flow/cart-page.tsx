@@ -1,8 +1,16 @@
 "use client";
 
+import { minimumOrderGate } from "@/lib/storefront/minimum-order";
 import Link from "next/link";
-import { useState, useTransition, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  useSyncExternalStore,
+} from "react";
 import { Trash2, ArrowRight } from "lucide-react";
+import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 import { QuickAddStepper } from "../quick-add-stepper";
 import { useCart } from "../cart-provider";
 import { Button, Chip, EmptyState } from "../primitives";
@@ -10,13 +18,18 @@ import { ProductImage } from "../product-image";
 import { ListingCard } from "../listing-card";
 import { RailScroller } from "../rail-scroller";
 import { Sheet } from "../sheet";
+import { AssistantSlot } from "../assistant/assistant-slot";
 import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
 import type {
+  CheckoutQuote,
   FlowCatalogItem,
   FlowStore,
   SwapRule,
 } from "@/lib/customer-flow/contracts";
 import { setSwapRule as serverSetSwapRule } from "@/lib/cart/actions";
+import { applyCouponAction, quoteCheckoutAction, removeCouponAction } from "@/lib/checkout/actions";
+import { basketQuoteView, type BasketQuoteResponse } from "@/lib/checkout/summary";
+import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import type { SwapRuleValue } from "@/lib/cart/service";
 import { toast } from "sonner";
 import {
@@ -25,8 +38,10 @@ import {
   FlowCard,
   FlowHeading,
   FlowLoading,
+  QuoteLines,
 } from "./common";
 import styles from "./cart-checkout.module.css";
+import { CouponField } from "./coupon-field";
 
 import { money } from "@/lib/format";
 export { money };
@@ -70,12 +85,89 @@ function clientRuleToServer(rule: SwapRule): {
   return { swapRule: "exact_only", substituteVariantId: null };
 }
 
-export function CartPage({ settings, catalog }: ShoppingFlowProps) {
-  const { lines, subtotal, count, store, refreshCart } = useCart();
+const NO_CONTACT = { name: "", phone: "", email: "" };
+const QUOTE_TIMEOUT_MS = 10_000;
+
+/** The quote checkout will show for a pickup order of this basket, so both pages show the same money. */
+function useBasketQuote(
+  lines: readonly CartLine[],
+  subtotal: number,
+  syncing: boolean,
+  realCheckout: boolean,
+  demo: ReturnType<typeof createDemoServices>,
+  couponRev = 0,
+) {
+  const [response, setResponse] = useState<BasketQuoteResponse | null>(null);
+  // The coupon revision is part of the key: a new or removed code is a new quote (#557).
+  const basketKey = lines
+    .map((line) => `${cartItemKey(line)}:${line.quantity}`)
+    .join("|") + (couponRev ? `#${couponRev}` : "");
+  useEffect(() => {
+    if (!basketKey) return;
+    let active = true;
+    const settle = (next: BasketQuoteResponse) => {
+      if (!active) return;
+      active = false;
+      setResponse(next);
+    };
+    // Armed before the syncing check, so a cart sync that never settles still ends in the fallback.
+    const timeout = setTimeout(() => settle({ key: basketKey, outcome: "timeout" }), QUOTE_TIMEOUT_MS);
+    if (syncing) {
+      return () => {
+        active = false;
+        clearTimeout(timeout);
+      };
+    }
+    const timer = setTimeout(() => {
+      // Same quote source as checkout: the server quote when checkout takes payment, else the demo one.
+      const request: Promise<CheckoutQuote | null> = realCheckout
+        ? quoteCheckoutAction(NO_CONTACT, "pickup").then((result) => (result.ok ? result.quote : null))
+        : demo.checkout.quote({
+            lines,
+            fulfillment: "pickup",
+            contact: NO_CONTACT,
+            notes: "",
+            leaveAtDoor: false,
+            slot: "asap",
+            promoCode: "",
+            tipCents: 0,
+          });
+      request
+        .then((quote) =>
+          settle(quote ? { key: basketKey, outcome: "ok", quote } : { key: basketKey, outcome: "error" }),
+        )
+        .catch(() => settle({ key: basketKey, outcome: "error" }));
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      clearTimeout(timeout);
+    };
+    // basketKey covers the lines this quote is for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basketKey, syncing, realCheckout, demo]);
+  return basketQuoteView(response, basketKey, subtotal);
+}
+
+export function CartPage({
+  settings,
+  catalog,
+  enabled,
+  realCheckout,
+}: ShoppingFlowProps & { realCheckout: boolean }) {
+  const { lines, subtotal, count, store, refreshCart, syncing } = useCart();
   const ready = useCartReady();
+  const demo = useMemo(
+    () => createDemoServices(settings, catalog, enabled),
+    [settings, catalog, enabled],
+  );
+  const [couponRev, setCouponRev] = useState(0);
+  const summary = useBasketQuote(lines, subtotal, syncing, realCheckout, demo, couponRev);
+  const quote = summary.kind === "quote" ? summary.quote : null;
+  const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
   const [, startTransition] = useTransition();
-  const remaining = Math.max(0, settings.minimumOrderCents - subtotal);
+  const minimum = minimumOrderGate(subtotal, settings.minimumOrderCents);
   const invalid = lines.some((line) => {
     const item = catalog.find(
       (item) => cartItemKey(item) === cartItemKey(line),
@@ -112,13 +204,14 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
     )
     .slice(0, 4);
   return (
-    <div className={`${styles.page} ${styles.withAssistant}`}>
+    <div className={styles.page}>
       <FlowHeading
         title="Your basket"
         description={`${count} ${count === 1 ? "item" : "items"} from ${settings.name}`}
         backHref="/"
         backLabel="Keep shopping"
       />
+      <AssistantSlot label="Shop with AI" />
       <DemoNotice />
       {!lines.length ? (
         <EmptyState
@@ -130,8 +223,13 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
           <div className={styles.stack}>
             <FlowCard title={settings.name}>
               <p className={styles.muted}>
-                Prepared with care · About {settings.prepTimeMinutes} minutes{" "}
-                {settings.closed && `after opening at ${settings.opensAt}`}
+                {settings.takingOrders ? (
+                  settings.closed
+                    ? `Closed now · opens ${settings.opensAt} · ready about ${settings.readyAt}`
+                    : `Prepared with care · About ${settings.prepTimeMinutes} minutes`
+                ) : (
+                  STORE_NOT_TAKING_ORDERS
+                )}
               </p>
               <ul className={styles.lines}>
                 {lines.map((line) => {
@@ -223,31 +321,38 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
           </div>
           <aside className={styles.sticky}>
             <FlowCard title="Basket summary">
-              <FeeLine label="Subtotal" cents={subtotal} />
-              <FeeLine
-                label="Estimated pickup tax"
-                cents={Math.round(subtotal * 0.06)}
-              />
-              <FeeLine label="Pickup fee" cents={0} />
-              <FeeLine
-                label="Default tip · 15%, editable"
-                cents={Math.round(subtotal * 0.15)}
-              />
+              {realCheckout && (
+                <CouponField
+                  applied={quote?.coupon ?? null}
+                  apply={async (code) => {
+                    const result = await applyCouponAction(code);
+                    if (result.ok) setCouponRev((rev) => rev + 1);
+                    return result;
+                  }}
+                  remove={async () => {
+                    await removeCouponAction();
+                    setCouponRev((rev) => rev + 1);
+                  }}
+                />
+              )}
+              {quote ? (
+                <QuoteLines quote={quote} fulfillment="pickup" />
+              ) : (
+                <>
+                  <FeeLine label="Subtotal" cents={subtotal} />
+                  <p className={styles.muted} role="status">
+                    {quoteFailed
+                      ? "Fees and the card hold are shown at checkout."
+                      : "Estimating your order…"}
+                  </p>
+                </>
+              )}
               <p className={styles.muted}>
-                Delivery starts at {money(settings.storeDeliveryFeeCents)} with
-                the store, or a simulated {money(699)} courier quote. Tip
-                defaults to 15% at checkout and is editable. Final fees depend
-                on your choices.
+                Estimated for pickup. Delivery starts at{" "}
+                {money(settings.storeDeliveryFeeCents)} with the store, or a
+                simulated {money(699)} courier quote. Final fees depend on your
+                choices.
               </p>
-              <FeeLine
-                label="Estimated pickup total"
-                cents={
-                  subtotal +
-                  Math.round(subtotal * 0.06) +
-                  Math.round(subtotal * 0.15)
-                }
-                strong
-              />
               {settings.minimumOrderCents > 0 && (
                 <>
                   <progress
@@ -257,9 +362,8 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
                     aria-label="Minimum order progress"
                   />
                   <p className={styles.muted}>
-                    {remaining
-                      ? `${money(remaining)} more to reach the ${money(settings.minimumOrderCents)} minimum.`
-                      : "You've reached the minimum order."}
+                    {minimum.message ??
+                      "You've reached the minimum order."}
                   </p>
                 </>
               )}
@@ -268,7 +372,7 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
                   Review unavailable items and quantities above.
                 </p>
               )}
-              {remaining || invalid ? (
+              {!minimum.met || invalid || !settings.takingOrders ? (
                 <Button disabled className={styles.full}>
                   Continue to checkout
                 </Button>
@@ -285,12 +389,13 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
         </div>
       )}
       {!!lines.length && (
-        <div className={styles.mobileAction}>
+        <div className={styles.mobileAction} data-blocked={minimum.message ? "" : undefined}>
           <div>
             <small>Subtotal</small>
             <strong>{money(subtotal)}</strong>
+            {minimum.message && <small>{minimum.message}</small>}
           </div>
-          {remaining || invalid ? (
+          {!minimum.met || invalid || !settings.takingOrders ? (
             <Button disabled>Checkout</Button>
           ) : (
             <Link className="sf-button" href="/checkout">

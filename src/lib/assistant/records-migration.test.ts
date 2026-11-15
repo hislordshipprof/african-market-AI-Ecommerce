@@ -109,12 +109,114 @@ describe.skipIf(!connectionString)("assistant records migration", () => {
   });
 
   it("records the unique cart index, foreign-key actions, and app_user cascade behavior", async () => {
-    const unique = await client.query(
-      `SELECT indexname FROM pg_indexes
-       WHERE schemaname = $1 AND indexname = 'ai_conversations_store_id_cart_id_key'`,
+    const indexes = await client.query<{
+      schemaname: string;
+      tablename: string;
+      indexname: string;
+      amname: string;
+      indisunique: boolean;
+      indnkeyatts: number;
+      indnatts: number;
+      indisvalid: boolean;
+      indisready: boolean;
+      indislive: boolean;
+      predicate_is_null: boolean;
+      expressions_are_null: boolean;
+      key_atts: string[];
+    }>(
+      `SELECT n.nspname AS schemaname,
+              t.relname AS tablename,
+              i.relname AS indexname,
+              am.amname,
+              ix.indisunique,
+              ix.indnkeyatts,
+              ix.indnatts,
+              ix.indisvalid,
+              ix.indisready,
+              ix.indislive,
+              ix.indpred IS NULL AS predicate_is_null,
+              ix.indexprs IS NULL AS expressions_are_null,
+              (
+                SELECT array_agg(a.attname ORDER BY cols.ord)::text[]
+                FROM unnest(ix.indkey::smallint[]) WITH ORDINALITY AS cols(attnum, ord)
+                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = cols.attnum
+                WHERE cols.ord <= ix.indnkeyatts
+              ) AS key_atts
+       FROM pg_index ix
+       JOIN pg_class i ON i.oid = ix.indexrelid
+       JOIN pg_class t ON t.oid = ix.indrelid
+       JOIN pg_namespace n ON n.oid = t.relnamespace
+       JOIN pg_namespace ni ON ni.oid = i.relnamespace
+       JOIN pg_am am ON am.oid = i.relam
+       WHERE n.nspname = $1
+         AND ni.nspname = $1
+         AND t.relname = 'ai_conversations'
+         AND i.relname IN (
+           'ai_conversations_cart_id_idx',
+           'ai_conversations_store_id_cart_id_key',
+           'ai_conversations_store_id_idx',
+           'ai_conversations_created_at_idx',
+           'ai_conversations_customer_id_idx'
+         )
+       ORDER BY i.relname`,
       [SCHEMA],
     );
-    expect(unique.rows).toHaveLength(1);
+    const plain = {
+      amname: "btree",
+      indisunique: false,
+      indnkeyatts: 1,
+      indnatts: 1,
+      indisvalid: true,
+      indisready: true,
+      indislive: true,
+      predicate_is_null: true,
+      expressions_are_null: true,
+    };
+    expect(indexes.rows).toEqual([
+      {
+        schemaname: "tmp_ai145_apply",
+        tablename: "ai_conversations",
+        indexname: "ai_conversations_cart_id_idx",
+        ...plain,
+        key_atts: ["cart_id"],
+      },
+      {
+        schemaname: "tmp_ai145_apply",
+        tablename: "ai_conversations",
+        indexname: "ai_conversations_created_at_idx",
+        ...plain,
+        key_atts: ["created_at"],
+      },
+      {
+        schemaname: "tmp_ai145_apply",
+        tablename: "ai_conversations",
+        indexname: "ai_conversations_customer_id_idx",
+        ...plain,
+        key_atts: ["customer_id"],
+      },
+      {
+        schemaname: "tmp_ai145_apply",
+        tablename: "ai_conversations",
+        indexname: "ai_conversations_store_id_cart_id_key",
+        amname: "btree",
+        indisunique: true,
+        indnkeyatts: 2,
+        indnatts: 2,
+        indisvalid: true,
+        indisready: true,
+        indislive: true,
+        predicate_is_null: true,
+        expressions_are_null: true,
+        key_atts: ["store_id", "cart_id"],
+      },
+      {
+        schemaname: "tmp_ai145_apply",
+        tablename: "ai_conversations",
+        indexname: "ai_conversations_store_id_idx",
+        ...plain,
+        key_atts: ["store_id"],
+      },
+    ]);
     const keys = await client.query<{ conname: string; confdeltype: string }>(
       `SELECT con.conname, con.confdeltype
        FROM pg_constraint con

@@ -1,8 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { editorial } from "@/lib/storefront/editorial";
+import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { authClient } from "@/lib/auth-client";
@@ -13,7 +12,7 @@ import type {
   FlowOrder,
   FlowStore,
 } from "@/lib/customer-flow/contracts";
-import type { CustomerProfile as RealCustomerProfile } from "@/lib/customer-auth";
+import type { StoreCustomer } from "@/lib/customer-auth";
 import { Button, EmptyState } from "../primitives";
 import {
   AddressCard,
@@ -26,12 +25,18 @@ import {
 } from "./common";
 import { OrderFlow, statusLabel } from "./order-flow";
 import { FlowToast } from "./feedback";
+import { RealAccountBook } from "./account-book";
+import { saveNameAction, savePhoneAction } from "@/lib/customer-account/actions";
+import type { AccountBookSnapshot } from "@/lib/customer-account/checkout-profile";
+import { ACCOUNT_ORDER_LIMIT, type AccountOrderRow } from "@/lib/customer-account/order-history-view";
 import "./account.css";
 type Props = {
   settings: FlowStore;
   catalog: FlowCatalogItem[];
   enabled: boolean;
-  customer?: RealCustomerProfile | null;
+  customer?: StoreCustomer | null;
+  accountBook?: AccountBookSnapshot | null;
+  accountOrders?: AccountOrderRow[] | null;
 };
 const message = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong. Please try again.";
@@ -41,149 +46,17 @@ function useServices({ settings, catalog, enabled }: Props) {
     [settings, catalog, enabled],
   );
 }
-export function AccountSignIn(props: Props) {
-  const router = useRouter();
-  const services = useServices(props);
-  const [channel, setChannel] = useState<"sms" | "email">("sms");
-  const [destination, setDestination] = useState("");
-  const [challenge, setChallenge] = useState("");
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!services) return;
-    setBusy(true);
-    setError("");
-    try {
-      if (challenge) {
-        await services.auth.verify(challenge, code);
-        router.push("/account");
-      } else {
-        const c = await services.auth.requestCode(channel, destination);
-        setChallenge(c.challengeId);
-      }
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  if (!services) return <ClosedFlow />;
-  return (
-    <div className="sf-account">
-      <FlowHeading
-        title="Welcome back"
-        description="Your markets. Your familiar favorites."
-        backHref="/account"
-        backLabel="Account"
-      />
-      <DemoNotice />
-      <div className="sf-account-signin">
-        <div className="sf-account-story">
-          <Image
-            src={editorial.market}
-            alt="Fresh produce at a neighborhood market"
-            fill
-            sizes="(max-width:700px) 100vw, 480px"
-          />
-          <div>
-            <span>Your neighborhood, your table</span>
-            <h2>
-              A taste of home.
-              <br />A market that knows you.
-            </h2>
-            <p>Good food brings us back together.</p>
-          </div>
-        </div>
-        <FlowCard
-          title={challenge ? "Check your demo code" : "Sign in to your account"}
-        >
-          <p>
-            Your demo profile is shared across markets in this browser. Messages
-            are simulated.
-          </p>
-          {error && <FlowError message={error} />}
-          <form onSubmit={submit} className="sf-account-form">
-            {!challenge ? (
-              <>
-                <label>
-                  Sign-in method
-                  <select
-                    value={channel}
-                    onChange={(e) =>
-                      setChannel(e.target.value as "sms" | "email")
-                    }
-                  >
-                    <option value="sms">Phone / SMS</option>
-                    <option value="email">Email magic link</option>
-                  </select>
-                </label>
-                <label>
-                  {channel === "sms" ? "Phone number" : "Email address"}
-                  <input
-                    required
-                    type={channel === "sms" ? "tel" : "email"}
-                    autoComplete={channel === "sms" ? "tel" : "email"}
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                  />
-                </label>
-              </>
-            ) : (
-              <>
-                <p>
-                  No message was sent. Use demo code <strong>123456</strong> for{" "}
-                  {destination}. This code expires in ten minutes.
-                </p>
-                <label>
-                  Verification code
-                  <input
-                    required
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    pattern="[0-9]{6}"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="sf-text-link"
-                  onClick={() => {
-                    setChallenge("");
-                    setCode("");
-                  }}
-                >
-                  Use a different phone or email
-                </button>
-              </>
-            )}
-            <Button disabled={busy}>
-              {busy
-                ? "Please wait..."
-                : challenge
-                  ? "Verify and continue"
-                  : channel === "sms"
-                    ? "Get demo code"
-                    : "Simulate email magic link"}
-            </Button>
-          </form>
-        </FlowCard>
-      </div>
-    </div>
-  );
-}
 export function AccountFlow(props: Props) {
   const router = useRouter();
   const services = useServices(props);
-  const { customer } = props;
+  const { customer, accountBook } = props;
+  const accountOrders = props.accountOrders ?? [];
   const realProfile: CustomerProfile | null = customer
     ? {
         id: customer.id,
-        name: customer.name,
-        phone: customer.phone ?? "",
-        email: customer.email ?? "",
+        name: accountBook?.name || customer.name,
+        phone: accountBook?.phone ?? "",
+        email: accountBook?.email || customer.email || "",
         addresses: [],
       }
     : null;
@@ -273,7 +146,27 @@ export function AccountFlow(props: Props) {
                   className="sf-account-form"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    if (!customer) void save(profile);
+                    if (customer) {
+                      setBusy(true);
+                      setError("");
+                      const renamed = profile.name.trim() !== (realProfile?.name ?? "").trim();
+                      void (async () => {
+                        const named = renamed ? await saveNameAction(profile.name) : null;
+                        return named && !named.ok ? named : savePhoneAction(profile.phone);
+                      })().then((result) => {
+                        if (result.ok) {
+                          setSaved(renamed ? "Details saved." : "Phone saved.");
+                          // Back restores the router's cached page: without this it brings back the
+                          // old phone, and pressing Save on that overwrites the new one.
+                          router.refresh();
+                        } else {
+                          setError(result.error);
+                        }
+                        setBusy(false);
+                      });
+                      return;
+                    }
+                    void save(profile);
                   }}
                 >
                   <label>
@@ -282,7 +175,6 @@ export function AccountFlow(props: Props) {
                       required
                       autoComplete="name"
                       value={profile.name}
-                      readOnly={!!customer}
                       onChange={(e) =>
                         setProfile({ ...profile, name: e.target.value })
                       }
@@ -294,7 +186,6 @@ export function AccountFlow(props: Props) {
                       type="tel"
                       autoComplete="tel"
                       value={profile.phone}
-                      readOnly={!!customer}
                       onChange={(e) =>
                         setProfile({ ...profile, phone: e.target.value })
                       }
@@ -312,14 +203,17 @@ export function AccountFlow(props: Props) {
                       }
                     />
                   </label>
-                  {!customer && <Button disabled={busy}>Save details</Button>}
+                  <Button disabled={busy}>{customer ? "Save phone" : "Save details"}</Button>
                   <button
                     type="button"
                     className="sf-text-link"
                     onClick={async () => {
                       if (customer) {
                         await authClient.signOut();
-                        router.push("/account/sign-in");
+                        // A full load drops the router's cache, or Back shows this account
+                        // to whoever uses the device next.
+                        // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- the full load is the point
+                        window.location.assign("/account/sign-in");
                         return;
                       }
                       await services?.auth.signOut();
@@ -331,6 +225,9 @@ export function AccountFlow(props: Props) {
                   </button>
                 </form>
               </FlowCard>
+              {customer && accountBook ? (
+                <RealAccountBook initial={accountBook} />
+              ) : (
               <FlowCard title="Saved addresses">
                 <div className="sf-account-list">
                   {profile.addresses.map((a) => (
@@ -413,14 +310,39 @@ export function AccountFlow(props: Props) {
                   </button>
                 ))}
               </FlowCard>
+              )}
             </div>
           )}
           <FlowCard title={`Orders from ${props.settings.name}`}>
-            <p>
-              Order history is limited to this market and browser. Your demo
-              profile is shared across markets.
+            <p className="sf-account-orders-intro">
+              {customer
+                ? `Orders placed at this market with ${profile?.email || "your email"} appear here, including any from before you had an account.`
+                : "Order history is limited to this market and browser. Your demo profile is shared across markets."}
             </p>
-            {orders.length ? (
+            {customer && accountOrders.length ? (
+              <div className="sf-account-list">
+                {accountOrders.map((o) => (
+                  <Link className="sf-account-order sf-account-order--real" href={o.href} key={o.id}>
+                    <span className="sf-account-order-main">
+                      <strong>Order #{o.number}</strong>
+                      <small>
+                        {o.dateLabel} · {o.itemsLabel}
+                      </small>
+                    </span>
+                    <span className="sf-account-order-end">
+                      <strong>{o.amountLabel}</strong>
+                      <small>{o.statusLabel}</small>
+                    </span>
+                    <ChevronRight aria-hidden="true" className="sf-account-order-chevron" />
+                  </Link>
+                ))}
+                {accountOrders.length >= ACCOUNT_ORDER_LIMIT && (
+                  <p className="sf-account-order-cap">
+                    Showing your {ACCOUNT_ORDER_LIMIT} most recent orders.
+                  </p>
+                )}
+              </div>
+            ) : orders.length ? (
               <div className="sf-account-list">
                 {orders.map((o) => (
                   <Link
@@ -451,7 +373,11 @@ export function AccountFlow(props: Props) {
             ) : (
               <EmptyState
                 title="Your first market haul awaits"
-                description="Your demo orders from this market will appear here."
+                description={
+                  customer
+                    ? "Orders placed with your email will appear here."
+                    : "Your demo orders from this market will appear here."
+                }
               >
                 <Link href="/" className="sf-button">
                   Explore the market

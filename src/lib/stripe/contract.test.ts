@@ -6,9 +6,11 @@ import {
   setAuthorizedAmount,
   setNextRefundStatus,
   setRefundStatus,
+  feeRefunded,
 } from "./fake";
 import { stripeProvider } from "./provider";
 import type { StripeProvider } from "./types";
+import { sandboxConnectedAccountId } from "./test-sandbox-account";
 
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 
@@ -23,10 +25,9 @@ type World = {
   provider: StripeProvider;
   authorize(amountCents: number, paymentMethod?: string): Promise<string>;
   armPending(paymentIntentId: string): void;
-  settleFailed(refundId: string, paymentIntentId: string): Promise<{
-    status: string;
-    amountRefunded: number;
-  }>;
+  /** Fake: marks the refund failed. Sandbox: no-op, so its replay is read before or after a real change. */
+  failRefund(refundId: string): void;
+  feeRefundedCents(paymentIntentId: string): Promise<number>;
 };
 
 const cleanup: string[] = [];
@@ -46,11 +47,11 @@ function fakeWorld(): World {
     armPending(paymentIntentId) {
       setNextRefundStatus(paymentIntentId, "pending");
     },
-    async settleFailed(refundId, paymentIntentId) {
+    failRefund(refundId) {
       setRefundStatus(refundId, "failed");
-      const refund = await fakeStripeProvider.retrieveRefund(refundId);
-      const pi = await fakeStripeProvider.retrievePaymentIntent(paymentIntentId);
-      return { status: refund.status, amountRefunded: pi.amountRefunded ?? 0 };
+    },
+    async feeRefundedCents(paymentIntentId) {
+      return feeRefunded.get(paymentIntentId) ?? 0;
     },
   };
 }
@@ -76,19 +77,11 @@ function liveWorld(): World {
       return pi.id;
     },
     armPending() {},
-    async settleFailed(refundId, paymentIntentId) {
-      const start = Date.now();
-      let last = "missing";
-      while (Date.now() - start < 170_000) {
-        const refund = await stripeProvider.retrieveRefund(refundId);
-        last = refund.status;
-        if (refund.status === "failed") {
-          const pi = await stripeProvider.retrievePaymentIntent(paymentIntentId);
-          return { status: refund.status, amountRefunded: pi.amountRefunded ?? 0 };
-        }
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-      }
-      throw new Error(`refund stayed ${last}`);
+    failRefund() {},
+    async feeRefundedCents(paymentIntentId) {
+      const pi = await stripe!.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge.application_fee"] });
+      const fee = (pi.latest_charge as Stripe.Charge).application_fee as Stripe.ApplicationFee | null;
+      return fee?.amount_refunded ?? 0;
     },
   };
 }
@@ -121,14 +114,8 @@ describe("Stripe contract: fake and sandbox", () => {
   beforeAll(async () => {
     if (!hasKey) return;
     stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-    for await (const account of stripe.accounts.list({ limit: 100 })) {
-      if (account.capabilities?.transfers === "active") {
-        accountId = account.id;
-        break;
-      }
-    }
-    if (!accountId) throw new Error("Need a transfers-capable sandbox account");
-  }, 60_000);
+    accountId = await sandboxConnectedAccountId(stripe);
+  }, 120_000);
 
   afterAll(async () => {
     if (!stripe) return;
@@ -213,15 +200,22 @@ describe("Stripe contract: fake and sandbox", () => {
     });
   }, 90_000);
 
-  it("an asynchronously failing refund behaves the same on the fake and the sandbox", async () => {
-    const observed = await compare(async (world) => {
-      const pi = await world.authorize(400, "pm_card_refundFail");
-      await world.provider.capturePaymentIntent(pi, 400, `cap-fail-${pi}`);
-      const refund = await world.provider.refundPayment(pi, 400, `refund-fail-${pi}`);
-      return world.settleFailed(refund.refundId, pi);
-    });
+  // Fake only. The sandbox side of the same claim (the provider reads status
+  // "failed" and amountRefunded 0) is pinned in pi-sandbox.test.ts, "a failed
+  // destination-charge refund leaves its funds on the platform, reads failed
+  // through the provider...", so a run waits on one pm_card_refundFail refund.
+  it("an asynchronously failing refund ends failed with nothing refunded on the fake (sandbox side pinned in pi-sandbox.test.ts)", async () => {
+    reset();
+    const world = fakeWorld();
+    const pi = await world.authorize(400, "pm_card_refundFail");
+    await world.provider.capturePaymentIntent(pi, 400, `cap-fail-${pi}`);
+    const refund = await world.provider.refundPayment(pi, 400, `refund-fail-${pi}`);
+    setRefundStatus(refund.refundId, "failed");
+    const settled = await world.provider.retrieveRefund(refund.refundId);
+    const after = await world.provider.retrievePaymentIntent(pi);
+    const observed = { status: settled.status, amountRefunded: after.amountRefunded ?? 0 };
     expect(observed).toEqual({ status: "failed", amountRefunded: 0 });
-  }, 200_000);
+  });
 
   it("a pending refund behaves the same on the fake and the sandbox", async () => {
     const observed = await compare(async (world) => {
@@ -327,6 +321,63 @@ describe("Stripe contract: fake and sandbox", () => {
       refund: { status: "succeeded", amountRefunded: 100 },
     });
   }, 60_000);
+
+  it("a refund key replays its saved first response after the refund changes", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(500);
+      await world.provider.capturePaymentIntent(pi, 500, `cap-snap-${pi}`);
+      const key = `refund-snap-${pi}`;
+      const first = await world.provider.refundPayment(pi, 200, key);
+      world.failRefund(first.refundId);
+      const replay = await world.provider.refundPayment(pi, 200, key);
+      return {
+        first: { status: first.status, amount: first.amountRefunded },
+        replay: { status: replay.status, amount: replay.amountRefunded, sameId: replay.refundId === first.refundId },
+      };
+    });
+    expect(observed).toEqual({
+      first: { status: "succeeded", amount: 200 },
+      replay: { status: "succeeded", amount: 200, sameId: true },
+    });
+  }, 60_000);
+
+  it("a cancel key reused on another PaymentIntent is an idempotency error", async () => {
+    const observed = await compare(async (world) => {
+      const first = await world.authorize(500);
+      const second = await world.authorize(500);
+      const key = `cancel-mismatch-${first}`;
+      await world.provider.cancelPaymentIntent(first, key);
+      const error = await errorOf(() => world.provider.cancelPaymentIntent(second, key));
+      return { type: error.type, code: error.code, statusCode: error.statusCode };
+    });
+    expect(observed).toEqual({ type: "StripeIdempotencyError", code: null, statusCode: 400 });
+  }, 60_000);
+
+  it("a refund key reused with a different fee flag is an idempotency error", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(1000);
+      await world.provider.capturePaymentIntent(pi, 1000, `cap-feeflag-${pi}`, 100);
+      const key = `refund-feeflag-${pi}`;
+      await world.provider.refundPayment(pi, 200, key, { refundApplicationFee: true });
+      const error = await errorOf(() => world.provider.refundPayment(pi, 200, key));
+      return { type: error.type, statusCode: error.statusCode };
+    });
+    expect(observed).toEqual({ type: "StripeIdempotencyError", statusCode: 400 });
+  }, 60_000);
+
+  it("partial refunds return the application fee proportionally with the same rounding", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(1000);
+      await world.provider.capturePaymentIntent(pi, 1000, `cap-round-${pi}`, 100);
+      const steps: number[] = [];
+      for (const [n, amount] of [5, 15, 333].entries()) {
+        await world.provider.refundPayment(pi, amount, `refund-round-${n}-${pi}`, { refundApplicationFee: true });
+        steps.push(await world.feeRefundedCents(pi));
+      }
+      return steps;
+    });
+    expect(observed).toEqual([1, 3, 36]);
+  }, 90_000);
 
   it("listing refunds for an unknown PaymentIntent is resource_missing on the fake and the sandbox", async () => {
     const observed = await compare(async (world) => {

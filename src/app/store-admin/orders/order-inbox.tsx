@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
   Bell,
@@ -32,21 +33,36 @@ import {
   HandMetal,
   Package,
   RefreshCw,
+  ShieldAlert,
+  Truck,
   ShoppingBag,
+  UserCheck,
+  XCircle,
 } from "lucide-react";
 import {
   fetchOrdersAction,
   acceptOrderAction,
   autoAcceptOrderAction,
   markLinePickedAction,
+  markLineShortAction,
   markReadyAction,
   completePickupAction,
+  markOutForDeliveryAction,
+  markDeliveredAction,
+  cancelOrderAction,
+  pushReadyTimeAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
-import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
+import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
-import { REFUND_FAILED_STAFF_COPY, showCapturedLine } from "@/lib/order/staff-copy";
+import { jpegBlob } from "@/lib/image/client-jpeg";
+import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
+import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
+import { OrderAlertsToggle } from "./order-alerts-toggle";
+import { CourierTiming } from "./courier-timing";
+import { BatchPicking, packingHref } from "./batch-picking";
 
 const STATUS_CONFIG: Record<
   string,
@@ -55,28 +71,77 @@ const STATUS_CONFIG: Record<
   AUTHORIZED: { label: "New", variant: "destructive", icon: Bell },
   ACCEPTED: { label: "Accepted", variant: "default", icon: Check },
   PICKING: { label: "Picking", variant: "secondary", icon: Package },
+  SUBSTITUTION_PENDING: { label: "Waiting on customer", variant: "secondary", icon: Clock },
   CAPTURING: { label: "Capturing…", variant: "secondary", icon: RefreshCw },
   CANCELLING: { label: "Cancelling…", variant: "destructive", icon: RefreshCw },
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
   AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
+  COURIER_REQUESTED: { label: "Finding courier", variant: "secondary", icon: Truck },
+  COURIER_ASSIGNED: { label: "Courier assigned", variant: "secondary", icon: Truck },
+  PICKED_UP: { label: "Courier picked up", variant: "secondary", icon: Truck },
+  OUT_FOR_DELIVERY: { label: "Out for delivery", variant: "secondary", icon: Truck },
+  DELIVERED: { label: "Delivered", variant: "outline", icon: CheckCircle2 },
+  COMPLETED: { label: "Completed", variant: "outline", icon: CheckCircle2 },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
+  PARTIALLY_REFUNDED: { label: "Partly refunded", variant: "outline", icon: RefreshCw },
+  REFUNDED: { label: "Refunded", variant: "outline", icon: CheckCircle2 },
   CANCELLED: { label: "Cancelled", variant: "outline", icon: CheckCircle2 },
 };
+
+const STORE_CANCEL_REASON_LABELS: Record<StoreCancelReason, string> = {
+  out_of_stock: "Out of stock",
+  store_closed: "Store closed",
+  too_busy: "Too busy",
+  other: "Other",
+};
+
+const STORE_CANCELLABLE: readonly string[] = CANCELLABLE_BEFORE_CAPTURE;
+
+function orderCustomerLabel(name: string, phone: string | null): string {
+  const trimmed = phone?.trim() ?? "";
+  if (!trimmed) return name;
+  return `${name} · ${trimmed}`;
+}
+
+/** Not a status, so it does not look like one. */
+function AccountBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+      <UserCheck className="size-3" aria-hidden="true" />
+      <span className="sr-only">Linked to a customer </span>
+      Account
+    </span>
+  );
+}
+
+/** An open card dispute (#539), next to the order's status. */
+function DisputedBadge() {
+  return (
+    <Badge variant="destructive" data-testid="disputed-badge">
+      <ShieldAlert data-icon="inline-start" aria-hidden="true" />
+      Disputed
+    </Badge>
+  );
+}
 
 interface Props {
   initialOrders: StoreOrderRow[];
   storeName: string;
   storeSlug: string;
+  vapidPublicKey: string | null;
   autoAcceptOrders: boolean;
   defaultPrepMinutes: number;
+  problems?: React.ReactNode;
 }
 
 export function OrderInbox({
   initialOrders,
   storeName,
   storeSlug,
+  vapidPublicKey,
   autoAcceptOrders,
   defaultPrepMinutes,
+  problems,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -87,6 +152,12 @@ export function OrderInbox({
   const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
   const [acceptingOrderId, setAcceptingOrderId] = useState<string | null>(null);
   const [prepMinutes, setPrepMinutes] = useState(String(defaultPrepMinutes));
+  const [proofPhoto, setProofPhoto] = useState<{ orderId: string; file: File } | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [shortLine, setShortLine] = useState<{ id: string; name: string; qtyOrdered: number } | null>(null);
+  const [qtyFound, setQtyFound] = useState("0");
+  const [cancelReason, setCancelReason] = useState<StoreCancelReason | null>(null);
+  const [cancelNote, setCancelNote] = useState("");
   const prevOrderIdsRef = useRef(new Set(initialOrders.map((o) => o.id)));
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -145,6 +216,12 @@ export function OrderInbox({
   }, [pollOrders]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
+
+  /** Every selection change drops the picked photo, so it can never ride along to another visit. */
+  function selectOrder(orderId: string | null) {
+    setProofPhoto(null);
+    setSelectedOrderId(orderId);
+  }
   const allLinesResolved =
     selectedOrder?.status === "PICKING"
       ? selectedOrder.lines.every((l) =>
@@ -177,11 +254,64 @@ export function OrderInbox({
     });
   }
 
+  function handleCancelClick(orderId: string) {
+    setCancellingOrderId(orderId);
+    setCancelReason(null);
+    setCancelNote("");
+  }
+
+  function handleCancelConfirm() {
+    if (!cancellingOrderId || !cancelReason) return;
+    startTransition(async () => {
+      const result = await cancelOrderAction(cancellingOrderId, { reason: cancelReason, note: cancelNote });
+      if (result.ok) {
+        toast.success("Order cancelled");
+        setCancellingOrderId(null);
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleShortConfirm() {
+    if (!shortLine) return;
+    const found = Number(qtyFound);
+    if (!Number.isInteger(found) || found < 0 || found >= shortLine.qtyOrdered) {
+      toast.error(`Enter a whole number from 0 to ${shortLine.qtyOrdered - 1}`);
+      return;
+    }
+    startTransition(async () => {
+      const result = await markLineShortAction(shortLine.id, found);
+      if (result.ok) {
+        toast.success("Customer asked to choose a swap or refund");
+        setShortLine(null);
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
   function handleMarkPicked(lineId: string) {
     startTransition(async () => {
       const result = await markLinePickedAction(lineId);
       if (result.ok) {
         toast.success("Line picked");
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handlePushReady(orderId: string) {
+    startTransition(async () => {
+      const result = await pushReadyTimeAction(orderId);
+      if (result.ok) {
+        const when = new Date(result.readyEstimateAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The courier already on the way keeps the first time.", none: "" }[result.courier];
+        toast.success(`Ready by ${when}.${courier}`);
         pollOrders();
       } else {
         toast.error(result.error);
@@ -210,12 +340,89 @@ export function OrderInbox({
       const result = await completePickupAction(orderId);
       if (result.ok) {
         toast.success("Pickup completed");
-        setSelectedOrderId(null);
+        selectOrder(null);
         pollOrders();
       } else {
         toast.error(result.error);
       }
     });
+  }
+
+  function handleOutForDelivery(orderId: string) {
+    startTransition(async () => {
+      let result: Awaited<ReturnType<typeof markOutForDeliveryAction>>;
+      try {
+        result = await markOutForDeliveryAction(orderId);
+      } catch {
+        toast.error(STAFF_GENERIC_ERROR);
+        return;
+      }
+      if (result.ok) {
+        toast.success("Out for delivery");
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleMarkDelivered(orderId: string) {
+    const photo = proofPhoto?.orderId === orderId ? proofPhoto.file : null;
+    if (!photo) {
+      toast.error("Add a photo of the delivered order");
+      return;
+    }
+    startTransition(async () => {
+      let jpeg: Blob;
+      try {
+        jpeg = await jpegBlob(photo, PHOTO_UPLOAD_MAX_BYTES);
+      } catch {
+        toast.error("This browser can't read that photo. Take it again or choose another one");
+        return;
+      }
+      if (jpeg.size > PHOTO_UPLOAD_MAX_BYTES) {
+        toast.error("The delivery photo is too large. Take it again or choose a smaller one");
+        return;
+      }
+      const form = new FormData();
+      form.set("orderId", orderId);
+      form.set("photo", new File([jpeg], "delivery.jpg", { type: "image/jpeg" }));
+      let result: Awaited<ReturnType<typeof markDeliveredAction>>;
+      try {
+        result = await markDeliveredAction(form);
+      } catch {
+        toast.error(STAFF_GENERIC_ERROR);
+        return;
+      }
+      if (result.ok) {
+        toast.success("Order delivered");
+        selectOrder(null);
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  /** What the customer's answer or the timer did with a short line; the 10 s poll keeps it current. */
+  function substitutionNote(line: StoreOrderRow["lines"][number]): string | null {
+    const request = line.substitutionRequest;
+    if (!request) return null;
+    const missing = line.qtyOrdered - line.qtyPicked;
+    if (request.status === "pending") {
+      const due = new Date(request.expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const offer = request.proposedVariant ? `swap offered: ${variantName(request.proposedVariant)}` : "refund only";
+      return `Found ${line.qtyPicked} of ${line.qtyOrdered} · waiting for customer (${offer}) · rule applies at ${due}`;
+    }
+    const by = request.status === "timed_out" ? " (timed out, rule applied)" : "";
+    if (line.status === "substituted" && line.substitutedVariant) {
+      return `Found ${line.qtyPicked} of ${line.qtyOrdered} · swap ${missing} for ${variantName(line.substitutedVariant)}${by}`;
+    }
+    return `Found ${line.qtyPicked} of ${line.qtyOrdered} · ${missing} refunded${by}`;
+  }
+
+  function variantName(variant: { label: string; listing: { customName: string | null; masterProduct: { name: string } | null } }) {
+    return variant.listing.customName ?? variant.listing.masterProduct?.name ?? variant.label;
   }
 
   function lineProductName(line: StoreOrderRow["lines"][number]) {
@@ -239,7 +446,7 @@ export function OrderInbox({
   return (
     <div className="min-h-dvh bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3">
           <div className="flex items-center gap-3">
             <Link
               href={`/store-admin?store=${storeParam}`}
@@ -254,7 +461,8 @@ export function OrderInbox({
               <p className="text-xs text-muted-foreground">{storeName}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <OrderAlertsToggle publicKey={vapidPublicKey} />
             <Button
               variant="ghost"
               size="sm"
@@ -278,7 +486,7 @@ export function OrderInbox({
         {selectedOrder ? (
           <div>
             <button
-              onClick={() => setSelectedOrderId(null)}
+              onClick={() => selectOrder(null)}
               className="mb-4 flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="size-4" /> Back to orders
@@ -290,22 +498,39 @@ export function OrderInbox({
                   <CardTitle className="text-lg font-bold tabular-nums">
                     Order #{selectedOrder.number}
                   </CardTitle>
-                  <Badge
-                    variant={
-                      STATUS_CONFIG[selectedOrder.status]?.variant ?? "outline"
-                    }
-                  >
-                    {STATUS_CONFIG[selectedOrder.status]?.label ??
-                      selectedOrder.status}
-                  </Badge>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    {selectedOrder.disputed && <DisputedBadge />}
+                    <Badge
+                      variant={
+                        STATUS_CONFIG[selectedOrder.status]?.variant ?? "outline"
+                      }
+                    >
+                      {STATUS_CONFIG[selectedOrder.status]?.label ??
+                        selectedOrder.status}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  {selectedOrder.customer.name} &middot;{" "}
-                  {selectedOrder.customer.phone}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                  <span>
+                    {orderCustomerLabel(
+                      selectedOrder.customer.name,
+                      selectedOrder.customer.phone,
+                    )}
+                  </span>
+                  {selectedOrder.hasAccount && <AccountBadge />}
                 </div>
                 {selectedOrder.notes && (
                   <p className="mt-1 whitespace-pre-line text-sm italic text-muted-foreground">
                     {selectedOrder.notes}
+                  </p>
+                )}
+                {selectedOrder.fulfillment === "store-delivery" && selectedOrder.deliveryLine1 && (
+                  <p className="mt-2 text-sm text-foreground">
+                    {selectedOrder.deliveryLine1}
+                    {selectedOrder.deliveryLine2 ? `, ${selectedOrder.deliveryLine2}` : ""}
+                    {", "}
+                    {selectedOrder.deliveryCity}, {selectedOrder.deliveryState} {selectedOrder.deliveryZip}
+                    {selectedOrder.leaveAtDoor ? " · Leave at door" : ""}
                   </p>
                 )}
                 {selectedOrder.status === "REFUND_FAILED" && (
@@ -316,8 +541,26 @@ export function OrderInbox({
                 {selectedOrder.status === "CANCELLED" && selectedOrder.notes ? (
                   <p className="mt-2 text-sm text-foreground">The platform resolved this refund.</p>
                 ) : null}
+                {selectedOrder.refundedByPlatform && (
+                  <p className="mt-2 text-sm text-foreground" data-testid="refunded-by-platform">Refunded by the platform team</p>
+                )}
+                {selectedOrder.disputed && (
+                  <p className="mt-2 text-sm text-foreground" data-testid="order-disputed">
+                    The customer disputed this card payment with their bank. The platform team answers the dispute and covers it if it is lost, so your payout is not changed. We may ask you for proof of pickup or delivery.
+                  </p>
+                )}
               </CardHeader>
               <CardContent>
+                {selectedOrder.fulfillment === "courier" && (
+                  <CourierTiming
+                    status={selectedOrder.status}
+                    readyEstimateAt={selectedOrder.readyEstimateAt}
+                    readyPushedAt={selectedOrder.readyPushedAt}
+                    courier={selectedOrder.deliveries[0] ?? null}
+                    disabled={isPending}
+                    onPush={() => handlePushReady(selectedOrder.id)}
+                  />
+                )}
                 {selectedOrder.status === "AUTHORIZED" && (
                   <Button
                     className="mb-4 w-full rounded-full"
@@ -329,17 +572,29 @@ export function OrderInbox({
                 )}
 
                 {(selectedOrder.status === "ACCEPTED" ||
-                  selectedOrder.status === "PICKING") && (
+                  selectedOrder.status === "PICKING" ||
+                  selectedOrder.status === "SUBSTITUTION_PENDING") && (
                   <div className="mb-4">
                     <h3 className="mb-2 text-sm font-semibold text-foreground">
                       Pick list
                     </h3>
+                    {selectedOrder.pickBatchId && (
+                      <p className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm text-foreground">
+                        This order is in a batch. Pick it from the packing screen.
+                        <Link
+                          href={packingHref(selectedOrder.pickBatchId, storeParam)}
+                          className="min-h-11 content-center font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          Open packing screen
+                        </Link>
+                      </p>
+                    )}
                     <div className="space-y-2">
                       {sortedPickLines.map((line) => (
                         <div
                           key={line.id}
                           className={`flex items-center justify-between rounded-xl border p-3 transition-colors ${
-                            line.status === "picked"
+                            line.status !== "pending" && line.status !== "short"
                               ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950"
                               : "border-border bg-card"
                           }`}
@@ -364,19 +619,40 @@ export function OrderInbox({
                               {line.listingVariant.label} &middot; Qty:{" "}
                               {line.qtyOrdered}
                             </div>
+                            {substitutionNote(line) && (
+                              <div className="mt-1 text-xs font-medium text-foreground" role="status">
+                                {substitutionNote(line)}
+                              </div>
+                            )}
                           </div>
-                          {line.status === "picked" ? (
-                            <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
+                          {line.status === "pending" && selectedOrder.pickBatchId ? null : line.status === "pending" ? (
+                            <div className="flex shrink-0 gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="rounded-full"
+                                onClick={() => {
+                                  setQtyFound("0");
+                                  setShortLine({ id: line.id, name: lineProductName(line), qtyOrdered: line.qtyOrdered });
+                                }}
+                                disabled={isPending}
+                              >
+                                Short
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-full"
+                                onClick={() => handleMarkPicked(line.id)}
+                                disabled={isPending}
+                              >
+                                Pick
+                              </Button>
+                            </div>
+                          ) : line.status === "short" ? (
+                            <Clock className="size-5 shrink-0 text-muted-foreground" aria-label="Waiting for customer" />
                           ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="shrink-0 rounded-full"
-                              onClick={() => handleMarkPicked(line.id)}
-                              disabled={isPending}
-                            >
-                              Pick
-                            </Button>
+                            <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
                           )}
                         </div>
                       ))}
@@ -391,6 +667,17 @@ export function OrderInbox({
                     disabled={isPending || !allLinesResolved}
                   >
                     <CheckCircle2 className="mr-2 size-4" /> Mark ready
+                  </Button>
+                )}
+
+                {STORE_CANCELLABLE.includes(selectedOrder.status) && (
+                  <Button
+                    className="mb-4 w-full rounded-full"
+                    variant="destructive"
+                    onClick={() => handleCancelClick(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <XCircle className="mr-2 size-4" /> Cancel order
                   </Button>
                 )}
 
@@ -415,11 +702,59 @@ export function OrderInbox({
                   </Button>
                 )}
 
+                {selectedOrder.status === "READY" && selectedOrder.fulfillment === "store-delivery" && (
+                  <Button
+                    className="w-full rounded-full"
+                    onClick={() => handleOutForDelivery(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <Truck className="mr-2 size-4" /> Out for delivery
+                  </Button>
+                )}
+
+                {selectedOrder.status === "OUT_FOR_DELIVERY" && (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="delivery-proof">Delivery photo</Label>
+                      <Input
+                        key={selectedOrder.id}
+                        id="delivery-proof"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        capture="environment"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          setProofPhoto(file ? { orderId: selectedOrder.id, file } : null);
+                        }}
+                      />
+                    </div>
+                    <Button
+                      className="w-full rounded-full"
+                      onClick={() => handleMarkDelivered(selectedOrder.id)}
+                      disabled={isPending || proofPhoto?.orderId !== selectedOrder.id}
+                    >
+                      <CheckCircle2 className="mr-2 size-4" /> Mark delivered
+                    </Button>
+                  </div>
+                )}
+
                 <div className="mt-6 space-y-1.5 border-t pt-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Subtotal</span>
                     <span className="tabular-nums">{money(selectedOrder.subtotalCents)}</span>
                   </div>
+                  {selectedOrder.discountCents > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Promo discount{selectedOrder.coupon ? ` ${selectedOrder.coupon.code}` : ""} (your store funds it)</span>
+                      <span className="tabular-nums" data-testid="order-discount">−{money(selectedOrder.discountCents)}</span>
+                    </div>
+                  )}
+                  {selectedOrder.serviceFeeCents > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Service fee (platform)</span>
+                      <span className="tabular-nums">{money(selectedOrder.serviceFeeCents)}</span>
+                    </div>
+                  )}
                   {selectedOrder.tipCents > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Tip</span>
@@ -435,13 +770,26 @@ export function OrderInbox({
                   {(() => {
                     const captured = selectedOrder.capturedAmountCents;
                     if (captured == null || !showCapturedLine(selectedOrder.status, captured)) return null;
+                    const split = capturedPayout({ ...selectedOrder, capturedAmountCents: captured });
                     return (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Captured</span>
-                        <span className="tabular-nums" data-testid="order-captured">
-                          {money(captured)}
-                        </span>
-                      </div>
+                      <>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Captured</span>
+                          <span className="tabular-nums" data-testid="order-captured">
+                            {money(captured)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Card fee on your part ({CARD_FEE_LABEL})</span>
+                          <span className="tabular-nums">−{money(split.storeCardFeeCents)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-medium">
+                          <span>Your payout</span>
+                          <span className="tabular-nums" data-testid="order-payout">
+                            {money(split.storeReceivesCents)}
+                          </span>
+                        </div>
+                      </>
                     );
                   })()}
                 </div>
@@ -450,6 +798,8 @@ export function OrderInbox({
           </div>
         ) : (
           <div>
+            {problems}
+            <BatchPicking orders={orders} storeParam={storeParam} />
             {orders.length === 0 ? (
               <div className="py-20 text-center">
                 <ShoppingBag className="mx-auto mb-4 size-12 text-muted-foreground/50" />
@@ -467,7 +817,7 @@ export function OrderInbox({
                   return (
                     <button
                       key={order.id}
-                      onClick={() => setSelectedOrderId(order.id)}
+                      onClick={() => selectOrder(order.id)}
                       className="w-full text-left"
                     >
                       <Card className="transition-all duration-200 hover:shadow-md active:scale-[0.99]">
@@ -480,7 +830,7 @@ export function OrderInbox({
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                               <span className="text-sm font-bold tabular-nums text-foreground">
                                 #{order.number}
                               </span>
@@ -489,6 +839,8 @@ export function OrderInbox({
                               >
                                 {config?.label ?? order.status}
                               </Badge>
+                              {order.disputed && <DisputedBadge />}
+                              {order.hasAccount && <AccountBadge />}
                             </div>
                             <div className="mt-0.5 flex items-baseline gap-1 text-xs text-muted-foreground">
                               <span className="min-w-0 truncate">
@@ -516,6 +868,38 @@ export function OrderInbox({
           </div>
         )}
       </main>
+
+      <Dialog open={shortLine !== null} onOpenChange={(open) => !open && setShortLine(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Item short</DialogTitle>
+            <DialogDescription>
+              How many of {shortLine?.qtyOrdered} × {shortLine?.name} did you find? The customer gets 10 minutes to choose a swap or a refund for the rest.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="qty-found">Quantity found</Label>
+            <Input
+              id="qty-found"
+              type="number"
+              inputMode="numeric"
+              min="0"
+              max={shortLine ? shortLine.qtyOrdered - 1 : undefined}
+              value={qtyFound}
+              onChange={(e) => setQtyFound(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShortLine(null)} className="rounded-full">
+              Cancel
+            </Button>
+            <Button onClick={handleShortConfirm} disabled={isPending} className="rounded-full">
+              Ask customer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={acceptDialogOpen} onOpenChange={setAcceptDialogOpen}>
         <DialogContent>
@@ -551,6 +935,63 @@ export function OrderInbox({
               className="rounded-full"
             >
               Accept
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={cancellingOrderId !== null}
+        onOpenChange={(open) => {
+          if (!open) setCancellingOrderId(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel order</DialogTitle>
+            <DialogDescription>
+              The customer is told and the card hold is released. Put any picked items back on the shelf.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <Label id="cancel-reason-label">Reason</Label>
+            <div role="group" aria-labelledby="cancel-reason-label" className="grid grid-cols-2 gap-2">
+              {(Object.keys(STORE_CANCEL_REASON_LABELS) as StoreCancelReason[]).map((reason) => (
+                <Button
+                  key={reason}
+                  type="button"
+                  variant={cancelReason === reason ? "default" : "outline"}
+                  aria-pressed={cancelReason === reason}
+                  className="rounded-full"
+                  onClick={() => setCancelReason(reason)}
+                >
+                  {STORE_CANCEL_REASON_LABELS[reason]}
+                </Button>
+              ))}
+            </div>
+            <Label htmlFor="cancel-note">Note (optional)</Label>
+            <Textarea
+              id="cancel-note"
+              maxLength={500}
+              value={cancelNote}
+              onChange={(e) => setCancelNote(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCancellingOrderId(null)}
+              className="rounded-full"
+            >
+              Keep order
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCancelConfirm}
+              disabled={isPending || !cancelReason}
+              className="rounded-full"
+            >
+              Cancel order
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,149 +1,168 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
+import { Button } from "@/components/ui/button";
+import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  AUTHENTICATOR_ENTRY,
+  AUTH_BACK,
+  AUTH_INPUT,
+  AUTH_SUBMIT,
+  AuthError,
+  BackArrow,
+  NETWORK_ERROR,
+  PasswordInput,
+  authErrorMessage,
+  fieldValue,
+  focusField,
+  NOT_READY_LABEL,
+  SecondStepForm,
+  missingField,
+  useHydrated,
+  CREDENTIALS_ERRORS,
+} from "../auth-form-parts";
 
 type Step = "credentials" | "totp";
 
+const ERROR_ID = "admin-sign-in-error";
+const DESCRIPTION_ID = "admin-sign-in-description";
+const EMAIL_ID = "admin-email";
+const PASSWORD_ID = "admin-password";
+// Mouse and trackpad only: on a phone this would open the keyboard over the page.
+const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
+  if (input && document.activeElement === document.body && window.matchMedia("(pointer: fine)").matches) {
+    input.focus();
+  }
+};
+
 export default function AdminSignIn() {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleCredentials(e: React.FormEvent) {
+  async function handleCredentials(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const missing = missingField([[EMAIL_ID, "Enter your email."], [PASSWORD_ID, "Enter your password."]]);
+    if (missing) {
+      setError(missing);
+      return;
+    }
+    const submittedEmail = fieldValue(e.currentTarget, EMAIL_ID);
+    const password = fieldValue(e.currentTarget, PASSWORD_ID);
+    setEmail(submittedEmail);
     setError("");
     setLoading(true);
 
     try {
       const result = await authClient.signIn.email({
-        email,
+        email: submittedEmail,
         password,
       });
 
       if (result.error) {
-        setError(result.error.message ?? "Sign-in failed");
+        setError(authErrorMessage(result.error, CREDENTIALS_ERRORS, "Sign-in failed"));
+        setLoading(false);
+        focusField(PASSWORD_ID);
       } else if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
         setStep("totp");
+        setLoading(false);
       } else {
-        router.push("/admin/stores");
+        router.push("/admin");
       }
     } catch {
-      setError("Sign-in failed. Check your credentials.");
-    } finally {
+      setError(NETWORK_ERROR);
       setLoading(false);
+      focusField(PASSWORD_ID);
     }
   }
 
-  async function handleTotp(e: React.FormEvent) {
-    e.preventDefault();
+  function backToCredentials() {
+    setStep("credentials");
     setError("");
-    setLoading(true);
-
-    try {
-      const result = await authClient.twoFactor.verifyTotp({
-        code: totpCode,
-      });
-
-      if (result.error) {
-        setError(result.error.message ?? "Invalid code");
-      } else {
-        router.push("/admin/stores");
-      }
-    } catch {
-      setError("Verification failed. Try again.");
-    } finally {
-      setLoading(false);
-    }
   }
+
+  const errorProps = error ? { "aria-invalid": true, "aria-describedby": ERROR_ID } : {};
 
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <div className="w-full max-w-sm rounded-lg border border-[#e2e4e9] bg-white p-8 shadow-sm">
-        <h1 className="mb-6 text-center text-xl font-bold text-[#15201A]">
-          Platform Admin
-        </h1>
-
-        {error && (
-          <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {step === "credentials" && (
-          <form onSubmit={handleCredentials}>
-            <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-[#15201A]">
-              Email
-            </label>
-            <input
-              id="admin-email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mb-4 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-              autoComplete="email"
-            />
-
-            <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-[#15201A]">
-              Password
-            </label>
-            <input
-              id="admin-password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mb-6 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-              autoComplete="current-password"
-            />
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
-            >
-              {loading ? "Signing in..." : "Sign in"}
+    <StorySurface>
+      <StoryCard className="gap-6 py-8">
+        <CardHeader className="grid-cols-[minmax(0,1fr)] px-6 sm:px-8">
+          {step === "totp" && (
+            <button type="button" onClick={backToCredentials} className={`${AUTH_BACK} cursor-pointer`}>
+              <BackArrow />
+              Back to sign in
             </button>
-          </form>
-        )}
+          )}
+          <h1 className="font-display text-[1.75rem] leading-tight font-bold">
+            {step === "credentials" ? "Platform Admin" : "Confirm it's you"}
+          </h1>
+          <CardDescription id={DESCRIPTION_ID} className="text-base [overflow-wrap:anywhere]">
+            {step === "credentials"
+              ? "Sign in to manage stores and the catalog."
+              : `Last step: enter the 6-digit code for ${AUTHENTICATOR_ENTRY} from your authenticator app, or a backup code, to finish signing in as ${email}.`}
+          </CardDescription>
+        </CardHeader>
 
-        {step === "totp" && (
-          <form onSubmit={handleTotp}>
-            <p className="mb-4 text-sm text-[#55625A]">
-              Enter the 6-digit code from your authenticator app.
-            </p>
-            <label htmlFor="admin-totp" className="mb-1 block text-sm font-medium text-[#15201A]">
-              Verification code
-            </label>
-            <input
-              id="admin-totp"
-              type="text"
-              required
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value)}
-              className="mb-6 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-center text-lg tracking-[0.3em] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-              autoComplete="one-time-code"
+        <CardContent className="px-6 sm:px-8">
+          {step === "credentials" && (
+            <form onSubmit={handleCredentials} noValidate className="flex flex-col gap-4">
+              {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
+              <div className="flex flex-col gap-2">
+                <Label htmlFor={EMAIL_ID}>Email</Label>
+                <Input
+                  ref={focusEmailOnDesktop}
+                  id={EMAIL_ID}
+                  type="email"
+                  required
+                  defaultValue={email}
+                  className={AUTH_INPUT}
+                  autoComplete="email"
+                  {...errorProps}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <Label htmlFor={PASSWORD_ID}>Password</Label>
+                  <Link
+                    href="/admin/reset-password"
+                    className="text-sm font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+                <PasswordInput
+                  id={PASSWORD_ID}
+                  required
+                  autoComplete="current-password"
+                  {...errorProps}
+                />
+              </div>
+
+              <Button type="submit" disabled={loading || !hydrated} className={AUTH_SUBMIT}>
+                {!hydrated ? NOT_READY_LABEL : loading ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
+          )}
+
+          {step === "totp" && (
+            <SecondStepForm
+              idPrefix="admin"
+              describedBy={DESCRIPTION_ID}
+              onVerified={() => router.push("/admin")}
             />
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
-            >
-              {loading ? "Verifying..." : "Verify"}
-            </button>
-          </form>
-        )}
-      </div>
-    </main>
+          )}
+        </CardContent>
+      </StoryCard>
+    </StorySurface>
   );
 }

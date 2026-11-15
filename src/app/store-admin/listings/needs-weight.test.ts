@@ -39,15 +39,14 @@ describe("needs weight", () => {
     expect(needsWeightSentence(2)).toBe("2 listings need a weight.");
   });
 
-  it("a blank label is dropped so an only-blank form sends no variants", () => {
+  it("a new blank-label row is dropped; a saved row with a cleared label is still sent", () => {
     expect(JSON.parse(serializeVariants([
-      { id: "v1", label: "   ", price: "9.00", weightG: "" },
+      { label: "   ", price: "9.00", weightG: "" },
     ]))).toEqual([]);
     expect(JSON.parse(serializeVariants([
       { id: "v1", label: "   ", price: "9.00", weightG: "" },
-      { id: "v2", label: "1 lb", price: "4.00", weightG: "454" },
     ]))).toEqual([
-      { id: "v2", label: "1 lb", price: 400, weightG: 454, sku: null, barcode: null },
+      { id: "v1", label: "", price: 900, weightG: 0, sku: null, barcode: null },
     ]);
   });
 });

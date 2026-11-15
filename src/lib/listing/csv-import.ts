@@ -1,19 +1,32 @@
 import { parse } from "csv-parse/sync";
+import { z } from "zod";
 import { platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow, IMPORT_TOKEN_TTL_MS } from "../db";
-import { resolveStockMode, type Actor } from "./service";
+import { CsvImportRejection } from "./csv-import-error";
+import { CSV_FILE_CAP_BYTES, csvFileTooLarge } from "./csv-file-cap";
+import {
+  resolveStockMode,
+  isStockMode,
+  isStockStatus,
+  type Actor,
+  type StockMode,
+  type StockStatus,
+} from "./service";
 
-const NON_CSV_REASON =
+export const NON_CSV_REASON =
   "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB
+const CSV_FORMAT_REASON = "Could not parse file as CSV. Check the file format.";
+
 const MAX_ROWS = 5000;
 const MAX_NAME_LENGTH = 200;
+const MAX_PENDING_IMPORTS = 10;
+const INT4_MAX = 2_147_483_647;
+const QTY_PLAIN_RE = /^\d+$/;
+const QTY_GROUPED_RE = /^\d{1,3}(,\d{3})+$/;
 
 const DEFAULT_WEIGHT_G = 100;
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 const PRICE_DOLLAR_RE = /^\$?\s*/;
-const VALID_STATUSES = new Set(["in_stock", "low", "out_of_stock"]);
-const VALID_STOCK_MODES = new Set(["counted", "status"]);
 
 export interface CsvPreviewMatch {
   row: number;
@@ -76,22 +89,12 @@ interface ParsedRow {
   row: number;
   name: string;
   price: number;
-  stockMode?: string;
+  stockMode?: StockMode;
   qty?: number;
-  status?: string;
+  status?: StockStatus;
   /** Whole grams from a valid weight cell. Absent when the cell was empty. */
   weightG?: number;
 }
-
-const KNOWN_HEADERS = new Set([
-  "name",
-  "price",
-  "stock_mode",
-  "stockmode",
-  "qty",
-  "quantity",
-  "status",
-]);
 
 function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/[\s_-]+/g, "_");
@@ -197,12 +200,36 @@ function nonCsvParseResult(): {
 }
 
 /** Binary uploads and UTF-16 Excel exports are not CSV. U+FFFD alone is not enough. */
-function isNonCsvText(text: string): boolean {
-  if (text.includes("\u0000")) return true;
-  if (text.startsWith("PK\u0003\u0004")) return true;
-  if (text.startsWith("%PDF")) return true;
-  if (text.startsWith("\uFFFD" + "PNG")) return true;
+export function textLooksNonCsv(text: string): boolean {
+  const cleaned = stripBom(text);
+  if (cleaned.includes("\u0000")) return true;
+  if (cleaned.startsWith("PK\u0003\u0004")) return true;
+  if (cleaned.startsWith("%PDF")) return true;
+  if (cleaned.startsWith("\uFFFD" + "PNG")) return true;
   return false;
+}
+
+type KnownColumn = "name" | "price" | "stock_mode" | "qty" | "status" | "weight";
+
+function knownColumnKey(normalized: string): KnownColumn | null {
+  if (normalized === "name") return "name";
+  if (normalized === "price") return "price";
+  if (normalized === "stock_mode" || normalized === "stockmode") return "stock_mode";
+  if (normalized === "qty" || normalized === "quantity") return "qty";
+  if (normalized === "status") return "status";
+  if (headerWeightUnit(normalized) !== undefined) return "weight";
+  return null;
+}
+
+function parseQuantityCell(cell: string): number | null {
+  if (!QTY_PLAIN_RE.test(cell) && !QTY_GROUPED_RE.test(cell)) return null;
+  const value = Number(cell.replace(/,/g, ""));
+  if (!Number.isSafeInteger(value) || value > INT4_MAX) return null;
+  return value;
+}
+
+function invalidQuantityReason(cell: string): string {
+  return `Invalid quantity: "${cell}". Use a whole number like 12 or 1,000.`;
 }
 
 export function parseCsvText(raw: string): {
@@ -212,33 +239,39 @@ export function parseCsvText(raw: string): {
   hasQtyColumn: boolean;
 } {
   const cleaned = stripBom(raw);
-  if (isNonCsvText(cleaned)) return nonCsvParseResult();
+  if (textLooksNonCsv(cleaned)) return nonCsvParseResult();
 
   const rows: ParsedRow[] = [];
   const errors: CsvPreviewError[] = [];
 
-  let records: Record<string, string>[];
-  let rawHeaders: string[] = [];
+  let table: string[][];
   try {
-    records = parse(cleaned, {
-      columns: (headers: string[]) => {
-        rawHeaders = headers;
-        return headers;
-      },
+    table = parse(cleaned, {
       skip_empty_lines: true,
       trim: true,
       relax_column_count: true,
       bom: true,
-    });
+    }) as string[][];
   } catch {
     return {
       rows: [],
-      errors: [{ row: 0, reason: "Could not parse file as CSV. Check the file format." }],
+      errors: [{ row: 0, reason: CSV_FORMAT_REASON }],
       unknownColumns: [],
       hasQtyColumn: false,
     };
   }
 
+  if (table.length === 0) {
+    return {
+      rows: [],
+      errors: [{ row: 0, reason: "File is empty or contains only headers." }],
+      unknownColumns: [],
+      hasQtyColumn: false,
+    };
+  }
+
+  const rawHeaders = table[0] ?? [];
+  const records = table.slice(1);
   if (records.length === 0) {
     return {
       rows: [],
@@ -257,28 +290,46 @@ export function parseCsvText(raw: string): {
     };
   }
 
-  const headers = Object.keys(records[0] ?? {});
-  const normalizedMap = new Map<string, string>();
   const unknownColumns: string[] = [];
-  for (const h of headers) {
-    const norm = normalizeHeader(h);
-    normalizedMap.set(h, norm);
-    if (!KNOWN_HEADERS.has(norm) && headerWeightUnit(norm) === undefined) {
-      unknownColumns.push(h);
+  const columnIndex = new Map<KnownColumn, number>();
+  let duplicateKnown = false;
+  for (let i = 0; i < rawHeaders.length; i++) {
+    const header = rawHeaders[i] ?? "";
+    const key = knownColumnKey(normalizeHeader(header));
+    if (!key) {
+      unknownColumns.push(header);
+      continue;
     }
+    if (columnIndex.has(key)) duplicateKnown = true;
+    else columnIndex.set(key, i);
   }
 
-  const nameCol = headers.find((h) => normalizedMap.get(h) === "name");
-  const priceCol = headers.find((h) => normalizedMap.get(h) === "price");
-  const stockModeCol = headers.find(
-    (h) => normalizedMap.get(h) === "stock_mode" || normalizedMap.get(h) === "stockmode",
-  );
-  const qtyCol = headers.find(
-    (h) => normalizedMap.get(h) === "qty" || normalizedMap.get(h) === "quantity",
-  );
-  const statusCol = headers.find((h) => normalizedMap.get(h) === "status");
+  const nameIdx = columnIndex.get("name");
+  const priceIdx = columnIndex.get("price");
+  const stockModeIdx = columnIndex.get("stock_mode");
+  const qtyIdx = columnIndex.get("qty");
+  const statusIdx = columnIndex.get("status");
+  const weightIdx = columnIndex.get("weight");
+  const hasQtyColumn = qtyIdx !== undefined;
 
-  if (!nameCol) {
+  if (columnIndex.has("weight") && rawHeaders.filter((header) => knownColumnKey(normalizeHeader(header)) === "weight").length > 1) {
+    return {
+      rows: [],
+      errors: [{ row: 0, reason: "Use one weight column" }],
+      unknownColumns,
+      hasQtyColumn: false,
+    };
+  }
+  if (duplicateKnown) {
+    return {
+      rows: [],
+      errors: [{ row: 0, reason: CSV_FORMAT_REASON }],
+      unknownColumns,
+      hasQtyColumn: false,
+    };
+  }
+
+  if (nameIdx === undefined) {
     return {
       rows: [],
       errors: [{ row: 0, reason: "Missing required column: name" }],
@@ -286,7 +337,7 @@ export function parseCsvText(raw: string): {
       hasQtyColumn: false,
     };
   }
-  if (!priceCol) {
+  if (priceIdx === undefined) {
     return {
       rows: [],
       errors: [{ row: 0, reason: "Missing required column: price" }],
@@ -295,27 +346,28 @@ export function parseCsvText(raw: string): {
     };
   }
 
-  const weightHeaders = rawHeaders.filter(
-    (header) => headerWeightUnit(normalizeHeader(header)) !== undefined,
-  );
-  if (weightHeaders.length > 1) {
-    return {
-      rows: [],
-      errors: [{ row: 0, reason: "Use one weight column" }],
-      unknownColumns,
-      hasQtyColumn: false,
-    };
+  const headerUnit = weightIdx === undefined ? null : headerWeightUnit(normalizeHeader(rawHeaders[weightIdx] ?? "")) ?? null;
+
+  function cell(record: string[], index: number | undefined): string {
+    if (index === undefined || index >= record.length) return "";
+    return record[index] ?? "";
   }
 
-  // A short first record omits trailing keys. The header row still names the column.
-  const weightCol = weightHeaders[0];
-  const headerUnit = weightCol ? headerWeightUnit(normalizeHeader(weightCol)) ?? null : null;
-
   for (let i = 0; i < records.length; i++) {
-    const record = records[i];
+    const record = records[i] ?? [];
     const rowNum = i + 2; // 1-indexed, row 1 is header
 
-    const rawName = record[nameCol]?.trim() ?? "";
+    if (record.length > rawHeaders.length) {
+      const spilledName = cell(record, nameIdx).trim();
+      errors.push({
+        row: rowNum,
+        ...(spilledName ? { csvName: spilledName } : {}),
+        reason: CSV_FORMAT_REASON,
+      });
+      continue;
+    }
+
+    const rawName = cell(record, nameIdx).trim();
     if (!rawName) {
       errors.push({ row: rowNum, reason: "Missing required field: name" });
       continue;
@@ -339,7 +391,7 @@ export function parseCsvText(raw: string): {
       continue;
     }
 
-    const rawPrice = record[priceCol]?.trim() ?? "";
+    const rawPrice = cell(record, priceIdx).trim();
     if (!rawPrice) {
       errors.push({ row: rowNum, csvName: rawName, reason: "Missing required field: price" });
       continue;
@@ -373,31 +425,45 @@ export function parseCsvText(raw: string): {
       continue;
     }
 
-    const stockModeRaw = stockModeCol ? record[stockModeCol]?.trim().toLowerCase().replace(/[\s-]/g, "_") || undefined : undefined;
-    const qtyRaw = qtyCol ? record[qtyCol]?.trim() : undefined;
-    const statusRaw = statusCol ? record[statusCol]?.trim().toLowerCase().replace(/[\s-]/g, "_") || undefined : undefined;
+    const stockModeCell = cell(record, stockModeIdx).trim();
+    const qtyRaw = cell(record, qtyIdx).trim();
+    const statusCell = cell(record, statusIdx).trim();
+    const stockModeRaw = stockModeIdx === undefined || stockModeCell === ""
+      ? undefined
+      : stockModeCell.toLowerCase().replace(/[\s-]/g, "_");
+    const statusRaw = statusIdx === undefined || statusCell === ""
+      ? undefined
+      : statusCell.toLowerCase().replace(/[\s-]/g, "_");
 
-    if (stockModeRaw && !VALID_STOCK_MODES.has(stockModeRaw)) {
-      errors.push({
-        row: rowNum,
-        csvName: rawName,
-        reason: `Unrecognised stock_mode: "${record[stockModeCol!]?.trim()}". Use "counted" or "status".`,
-      });
-      continue;
+    let stockMode: StockMode | undefined;
+    if (stockModeRaw !== undefined) {
+      if (!isStockMode(stockModeRaw)) {
+        errors.push({
+          row: rowNum,
+          csvName: rawName,
+          reason: `Unrecognised stock_mode: "${stockModeCell}". Use "counted" or "status".`,
+        });
+        continue;
+      }
+      stockMode = stockModeRaw;
     }
 
-    if (statusRaw && !VALID_STATUSES.has(statusRaw)) {
-      errors.push({
-        row: rowNum,
-        csvName: rawName,
-        reason: `Unrecognised status: "${record[statusCol!]?.trim()}". Use "in_stock", "low", or "out_of_stock".`,
-      });
-      continue;
+    let status: StockStatus | undefined;
+    if (statusRaw !== undefined) {
+      if (!isStockStatus(statusRaw)) {
+        errors.push({
+          row: rowNum,
+          csvName: rawName,
+          reason: `Unrecognised status: "${statusCell}". Use "in_stock", "low", or "out_of_stock".`,
+        });
+        continue;
+      }
+      status = statusRaw;
     }
 
     let weightG: number | undefined;
-    if (weightCol) {
-      const parsedWeight = parseWeightToGrams(record[weightCol] ?? "", headerUnit);
+    if (weightIdx !== undefined) {
+      const parsedWeight = parseWeightToGrams(cell(record, weightIdx), headerUnit);
       if (parsedWeight.kind === "error") {
         errors.push({ row: rowNum, csvName: rawName, reason: parsedWeight.message });
         continue;
@@ -406,13 +472,13 @@ export function parseCsvText(raw: string): {
     }
 
     let qty: number | undefined;
-    if (qtyRaw !== undefined && qtyRaw !== "") {
-      const parsed = parseInt(qtyRaw, 10);
-      if (!isFinite(parsed) || parsed < 0 || parsed > 2_147_483_647) {
+    if (qtyIdx !== undefined && qtyRaw !== "") {
+      const parsed = parseQuantityCell(qtyRaw);
+      if (parsed === null) {
         errors.push({
           row: rowNum,
           csvName: rawName,
-          reason: `Invalid quantity: "${qtyRaw}".`,
+          reason: invalidQuantityReason(qtyRaw),
         });
         continue;
       }
@@ -423,14 +489,14 @@ export function parseCsvText(raw: string): {
       row: rowNum,
       name: rawName,
       price: priceCents,
-      stockMode: stockModeRaw as "counted" | "status" | undefined,
+      stockMode,
       qty,
-      status: statusRaw as "in_stock" | "low" | "out_of_stock" | undefined,
+      status,
       ...(weightG !== undefined ? { weightG } : {}),
     });
   }
 
-  return { rows, errors, unknownColumns, hasQtyColumn: !!qtyCol };
+  return { rows, errors, unknownColumns, hasQtyColumn };
 }
 
 const PRICE_THOUSANDS_RE = /^\d{1,3}(,\d{3})*(\.\d{1,2})?$/;
@@ -472,6 +538,47 @@ interface MasterProductRow {
   synonyms: Array<{ term: string }>;
 }
 
+interface CatalogIndex {
+  byExactName: Map<string, MasterProductRow[]>;
+  bySynonym: Map<string, MasterProductRow[]>;
+}
+
+/** One normalized lookup for the whole call. Not cached across calls or stores. */
+function buildCatalogIndex(products: MasterProductRow[]): CatalogIndex {
+  const byExactName = new Map<string, MasterProductRow[]>();
+  const bySynonym = new Map<string, MasterProductRow[]>();
+  for (const product of products) {
+    const nameKey = normalizeForMatch(product.name);
+    const exact = byExactName.get(nameKey) ?? [];
+    exact.push(product);
+    byExactName.set(nameKey, exact);
+
+    const seenSynonyms = new Set<string>();
+    for (const synonym of product.synonyms) {
+      const synKey = normalizeForMatch(synonym.term);
+      if (synKey === nameKey || seenSynonyms.has(synKey)) continue;
+      seenSynonyms.add(synKey);
+      const list = bySynonym.get(synKey) ?? [];
+      if (!list.some((row) => row.id === product.id)) list.push(product);
+      bySynonym.set(synKey, list);
+    }
+  }
+  return { byExactName, bySynonym };
+}
+
+function candidatesFor(
+  index: CatalogIndex,
+  csvName: string,
+): Array<{ product: MasterProductRow; matchType: "exact" | "synonym" }> {
+  const norm = normalizeForMatch(csvName);
+  const exact = index.byExactName.get(norm) ?? [];
+  if (exact.length > 0) {
+    return exact.map((product) => ({ product, matchType: "exact" as const }));
+  }
+  const synonyms = index.bySynonym.get(norm) ?? [];
+  return synonyms.map((product) => ({ product, matchType: "synonym" as const }));
+}
+
 export async function matchToMasterProducts(
   csvNames: string[],
 ): Promise<
@@ -481,33 +588,14 @@ export async function matchToMasterProducts(
     where: { status: "active" },
     include: { synonyms: true },
   });
-
+  const index = buildCatalogIndex(products);
   const result = new Map<
     string,
     Array<{ product: MasterProductRow; matchType: "exact" | "synonym" }>
   >();
-
   for (const csvName of csvNames) {
-    const norm = normalizeForMatch(csvName);
-    const matches: Array<{ product: MasterProductRow; matchType: "exact" | "synonym" }> = [];
-
-    for (const p of products) {
-      if (normalizeForMatch(p.name) === norm) {
-        matches.push({ product: p, matchType: "exact" });
-        continue;
-      }
-
-      for (const syn of p.synonyms) {
-        if (normalizeForMatch(syn.term) === norm) {
-          matches.push({ product: p, matchType: "synonym" });
-          break;
-        }
-      }
-    }
-
-    result.set(csvName, matches);
+    result.set(csvName, candidatesFor(index, csvName));
   }
-
   return result;
 }
 
@@ -551,13 +639,14 @@ interface ListingToCreate {
   masterProductId: string | null;
   customName: string | null;
   price: number;
-  stockMode: string;
+  stockMode: StockMode;
   qty: number | null;
-  status: string | null;
+  status: StockStatus | null;
   frozen: boolean;
   perishable: boolean;
   weightG: number;
   weightPlaceholder: boolean;
+  sourceRow: number;
 }
 
 function buildListingData(
@@ -584,6 +673,7 @@ function buildListingData(
       perishable: false,
       weightG: weight.weightG,
       weightPlaceholder: weight.placeholder,
+      sourceRow: row.row,
     };
   }
   return {
@@ -595,6 +685,7 @@ function buildListingData(
     perishable: product.perishable,
     weightG: weight.weightG,
     weightPlaceholder: weight.placeholder,
+    sourceRow: row.row,
   };
 }
 
@@ -786,34 +877,38 @@ export async function generatePreview(
   const ready = await context.bindExistingListings(scoped);
   const classified = classifyPreviewRows(ready.rows, ready.matchMap, ready.existing);
 
-  const MAX_PENDING_IMPORTS = 10;
-  const expiryCutoff = new Date(Date.now() - IMPORT_TOKEN_TTL_MS);
-  await scoped.listingImport.deleteMany({
-    where: { status: "pending", createdAt: { lt: expiryCutoff } },
-  });
-
-  const pendingCount = await scoped.listingImport.count({
-    where: { status: "pending" },
-  });
-  if (pendingCount >= MAX_PENDING_IMPORTS) {
-    const oldest = await scoped.listingImport.findFirst({
-      where: { status: "pending" },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
+  const importRecord = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const expiryCutoff = new Date(Date.now() - IMPORT_TOKEN_TTL_MS);
+    await tx.listingImport.deleteMany({
+      where: { status: "pending", createdAt: { lt: expiryCutoff } },
     });
-    if (oldest) {
-      await scoped.listingImport.delete({ where: { id: oldest.id } });
-    }
-  }
 
-  const importRecord = await scoped.listingImport.create({
-    data: {
-      storeId,
-      csvText,
-      rowCount: context.rows.length,
-      status: "pending",
-      createdById: actorId,
-    },
+    const pendingCount = await tx.listingImport.count({
+      where: { status: "pending" },
+    });
+    if (pendingCount >= MAX_PENDING_IMPORTS) {
+      const oldest = await tx.listingImport.findFirst({
+        where: { status: "pending" },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (oldest) {
+        await tx.listingImport.deleteMany({
+          where: { id: oldest.id, status: "pending" },
+        });
+      }
+    }
+
+    return tx.listingImport.create({
+      data: {
+        storeId,
+        csvText,
+        rowCount: context.rows.length,
+        status: "pending",
+        createdById: actorId,
+      },
+    });
   });
 
   return {
@@ -831,12 +926,63 @@ export interface CommitSelection {
     row: number;
     masterProductId: string;
   }>;
+  /** Previewed product for a checked match. Absent on callers that predate this field. */
+  matchedIdentities?: Array<{
+    row: number;
+    masterProductId: string;
+  }>;
 }
 
 export interface CommitResult {
   createdCount: number;
   listingIds: string[];
   needsWeightCount: number;
+}
+
+const ALREADY_COMMITTED_MESSAGE = "This import has already been committed.";
+
+const commitResultSchema = z.object({
+  createdCount: z.number().int().nonnegative().max(MAX_ROWS),
+  listingIds: z.array(z.string().min(1)).min(1).max(MAX_ROWS),
+  needsWeightCount: z.number().int().nonnegative().max(MAX_ROWS),
+}).strict().superRefine((value, ctx) => {
+  if (value.createdCount !== value.listingIds.length) {
+    ctx.addIssue({ code: "custom", message: "createdCount" });
+  }
+  if (new Set(value.listingIds).size !== value.listingIds.length) {
+    ctx.addIssue({ code: "custom", message: "listingIds" });
+  }
+  if (value.needsWeightCount > value.createdCount) {
+    ctx.addIssue({ code: "custom", message: "needsWeightCount" });
+  }
+});
+
+function storedCommitResult(value: unknown): CommitResult {
+  const parsed = commitResultSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new CsvImportRejection(ALREADY_COMMITTED_MESSAGE);
+  }
+  return {
+    createdCount: parsed.data.createdCount,
+    listingIds: parsed.data.listingIds,
+    needsWeightCount: parsed.data.needsWeightCount,
+  };
+}
+
+/** Selection and catalog refusals lose to a commit that landed while this call was matching. */
+async function replayOrReject(
+  storeId: string,
+  importToken: string,
+  message: string,
+): Promise<CommitResult> {
+  const current = await storeScoped(storeId).listingImport.findUnique({
+    where: { id: importToken },
+    select: { status: true, commitResult: true },
+  });
+  if (current?.status === "committed") {
+    return storedCommitResult(current.commitResult);
+  }
+  throw new CsvImportRejection(message);
 }
 
 export async function commitImport(
@@ -851,10 +997,10 @@ export async function commitImport(
   });
 
   if (!importRecord) {
-    throw new Error("Import token is invalid, expired, or already used.");
+    throw new CsvImportRejection("Import token is invalid, expired, or already used.");
   }
   if (importRecord.status === "committed") {
-    throw new Error("This import has already been committed.");
+    return storedCommitResult(importRecord.commitResult);
   }
 
   const context = await buildMatchContext(importRecord.csvText);
@@ -866,7 +1012,12 @@ export async function commitImport(
   ]);
 
   if (selectedRows.size === 0 && selection.ambiguousResolutions.length === 0) {
-    throw new Error("No rows selected for import.");
+    return replayOrReject(storeId, importToken, "No rows selected for import.");
+  }
+
+  const identityByRow = new Map<number, string>();
+  for (const identity of selection.matchedIdentities ?? []) {
+    identityByRow.set(identity.row, identity.masterProductId);
   }
 
   const selectedNumbers = new Set<number>([
@@ -884,12 +1035,25 @@ export async function commitImport(
     if (!row) continue;
 
     const productMatches = matchMap.get(row.name) ?? [];
-    if (productMatches.length === 1) {
+    const previewedId = identityByRow.get(rowNum);
+    if (previewedId !== undefined) {
+      const sole = productMatches.length === 1 ? productMatches[0] : undefined;
+      if (!sole || sole.product.id !== previewedId) {
+        return replayOrReject(
+          storeId,
+          importToken,
+          `Resolution for row ${rowNum} references product ${previewedId} which is not in the match list.`,
+        );
+      }
+      toCreate.push(buildListingData(row, sole.product, context.hasQtyColumn));
+    } else if (productMatches.length === 1) {
       toCreate.push(buildListingData(row, productMatches[0].product, context.hasQtyColumn));
     } else if (productMatches.length === 0) {
       toCreate.push(buildListingData(row, null, context.hasQtyColumn));
     } else {
-      throw new Error(
+      return replayOrReject(
+        storeId,
+        importToken,
         `Row ${rowNum} ("${row.name}") matches multiple master products. Use ambiguous resolutions to pick one.`,
       );
     }
@@ -902,17 +1066,20 @@ export async function commitImport(
     const allProducts = (matchMap.get(row.name) ?? []).map((m) => m.product);
     const selectedProduct = allProducts.find((p) => p.id === resolution.masterProductId);
     if (!selectedProduct) {
-      throw new Error(
+      return replayOrReject(
+        storeId,
+        importToken,
         `Resolution for row ${resolution.row} references product ${resolution.masterProductId} which is not in the match list.`,
       );
     }
     toCreate.push(buildListingData(row, selectedProduct, context.hasQtyColumn));
   }
 
+  toCreate.sort((a, b) => a.sourceRow - b.sourceRow);
   const { kept: dedupedToCreate, duplicatesSkipped } = dropDuplicateBuiltItems(toCreate);
 
   if (dedupedToCreate.length === 0) {
-    throw new Error("No valid rows to import after re-validation.");
+    return replayOrReject(storeId, importToken, "No valid rows to import after re-validation.");
   }
 
   const committed = await storeScopedTransaction(storeId, async (tx) => {
@@ -922,12 +1089,12 @@ export async function commitImport(
     if (!didClaim) {
       const current = await tx.listingImport.findUnique({
         where: { id: importToken },
-        select: { status: true },
+        select: { status: true, commitResult: true },
       });
       if (current?.status === "committed") {
-        throw new Error("This import has already been committed.");
+        return storedCommitResult(current.commitResult);
       }
-      throw new Error("Import token has expired. Please upload the file again.");
+      throw new CsvImportRejection("Import token has expired. Please upload the file again.");
     }
 
     const ready = await context.bindExistingListings(tx);
@@ -949,7 +1116,7 @@ export async function commitImport(
     });
 
     if (toInsert.length === 0) {
-      throw new Error("All selected listings are already listed in this store.");
+      throw new CsvImportRejection("All selected listings are already listed in this store.");
     }
 
     const ids = toInsert.map(() => crypto.randomUUID());
@@ -1016,21 +1183,23 @@ export async function commitImport(
       },
     });
 
-    return { ids, needsWeightCount };
+    const result = {
+      createdCount: ids.length,
+      listingIds: ids,
+      needsWeightCount,
+    };
+    await tx.listingImport.update({
+      where: { id: importToken },
+      data: { commitResult: result },
+    });
+    return result;
   }, { timeout: 60_000, maxWait: 15_000 });
 
-  return {
-    createdCount: committed.ids.length,
-    listingIds: committed.ids,
-    needsWeightCount: committed.needsWeightCount,
-  };
+  return committed;
 }
 
 export function validateFileSize(bytes: number): string | null {
-  if (bytes > MAX_FILE_BYTES) {
-    return `File exceeds the maximum size of ${MAX_FILE_BYTES / (1024 * 1024)} MB.`;
-  }
-  return null;
+  return csvFileTooLarge(bytes);
 }
 
-export { MAX_FILE_BYTES, MAX_ROWS, MAX_NAME_LENGTH };
+export { CSV_FILE_CAP_BYTES as MAX_FILE_BYTES, MAX_ROWS, MAX_NAME_LENGTH, MAX_PENDING_IMPORTS };

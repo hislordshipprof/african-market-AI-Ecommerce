@@ -3,6 +3,7 @@ import { unstable_cache, revalidateTag } from "next/cache";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { platform } from "./db";
+import { DIRECTORY_CACHE_TAG } from "./directory/stores";
 import { VALID_PRESETS, type ThemePreset } from "./theme";
 import type { Store } from "@prisma/client";
 
@@ -32,6 +33,10 @@ export function storeTagsForSlug(slug: string): string[] {
   return [`store-slug:${slug}`];
 }
 
+export function storeTagsForDomain(domain: string): string[] {
+  return [`store-domain:${domain}`];
+}
+
 export function storeTagsForId(id: string): string[] {
   return [`store:${id}`];
 }
@@ -57,20 +62,62 @@ export const findStore = cache(
   },
 );
 
-export function revalidateStore(store: { id: string; slug: string }): void {
-  for (const tag of [
+function findStoreByDomainPersistent(
+  domain: string,
+): Promise<ValidatedStore | null> {
+  return unstable_cache(
+    async () => {
+      const store = await platform.store.findUnique({
+        where: { customDomain: domain },
+      });
+      if (!store) return null;
+      return validateStore(store);
+    },
+    ["store-by-domain", domain],
+    {
+      revalidate: STORE_CACHE_REVALIDATE,
+      tags: [`store-domain:${domain}`],
+    },
+  )();
+}
+
+export const findStoreByDomain = cache(
+  async (domain: string): Promise<ValidatedStore | null> => {
+    return findStoreByDomainPersistent(domain);
+  },
+);
+
+export function revalidateStore(store: {
+  id: string;
+  slug: string;
+  customDomain?: string | null;
+}): void {
+  const tags = [
     ...storeTagsForSlug(store.slug),
     ...storeTagsForId(store.id),
-  ]) {
+    DIRECTORY_CACHE_TAG,
+  ];
+  if (store.customDomain) {
+    tags.push(...storeTagsForDomain(store.customDomain));
+  }
+  for (const tag of tags) {
     revalidateTag(tag, { expire: 0 });
   }
 }
 
-export async function getStore(): Promise<ValidatedStore> {
-  const headerList = await headers();
+/** The host's store from the proxy's headers: the subdomain slug, else a custom domain. */
+export async function findStoreForHeaders(
+  headerList: Headers,
+): Promise<ValidatedStore | null> {
   const slug = headerList.get("x-store-slug");
-  if (!slug) notFound();
-  const store = await findStore(slug);
+  if (slug) return findStore(slug);
+  const customDomain = headerList.get("x-custom-domain");
+  if (customDomain) return findStoreByDomain(customDomain);
+  return null;
+}
+
+export async function getStore(): Promise<ValidatedStore> {
+  const store = await findStoreForHeaders(await headers());
   if (!store) notFound();
   return store;
 }

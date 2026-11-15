@@ -74,6 +74,7 @@ describe("GET /api/e2e/magic-link-token", () => {
     vi.stubEnv("E2E_STORE_OVERRIDE", "1");
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("CI", "");
     const res = await GET(
       new NextRequest("http://localhost/api/e2e/magic-link-token?email=a@b.test"),
     );

@@ -1,0 +1,188 @@
+import { randomInt } from "node:crypto";
+import { readSendConfig, readWhatsAppConfig } from "./config";
+import { WhatsAppApiError, WhatsAppNotConfiguredError } from "./errors";
+import { isBsuid } from "./phone";
+import type { ConnectedStoreNumber, ConnectStoreNumberInput, OutboundMessage, SendResult, WhatsAppProvider } from "./types";
+
+/**
+ * Graph API version, pinned in one place. v25.0 is the newest release found
+ * (Feb 2026); Meta's changelog could not be opened to confirm a later one [unverified, #143].
+ */
+export const GRAPH_API_VERSION = "v25.0";
+const SEND_TIMEOUT_MS = 10_000;
+
+/**
+ * Meta's `to` accepts digits; the plus is dropped so `to` and wa_id compare
+ * equal. A business-scoped user id goes in `recipient` instead, with no `to`.
+ */
+function addressee(to: string): { to: string } | { recipient: string } {
+  return isBsuid(to) ? { recipient: to } : { to: to.replace(/^\+/, "") };
+}
+
+export function toGraphPayload(message: OutboundMessage): Record<string, unknown> {
+  const base = { messaging_product: "whatsapp", recipient_type: "individual", ...addressee(message.to) };
+  switch (message.type) {
+    case "text":
+      return { ...base, type: "text", text: { body: message.body, preview_url: false } };
+    case "interactive":
+      return {
+        ...base,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: message.body },
+          action: {
+            buttons: message.buttons.map((button) => ({
+              type: "reply",
+              reply: { id: button.id, title: button.title },
+            })),
+          },
+        },
+      };
+    case "list":
+      return {
+        ...base,
+        type: "interactive",
+        interactive: {
+          type: "list",
+          body: { text: message.body },
+          action: { button: message.button, sections: [{ title: "Choices", rows: message.rows }] },
+        },
+      };
+    case "template":
+      return {
+        ...base,
+        type: "template",
+        template: {
+          name: message.name,
+          language: { code: message.language },
+          ...(message.components ? { components: message.components } : {}),
+        },
+      };
+    case "media":
+      return {
+        ...base,
+        type: message.mediaType,
+        [message.mediaType]: {
+          link: message.link,
+          ...(message.caption && message.mediaType !== "audio" ? { caption: message.caption } : {}),
+        },
+      };
+  }
+}
+
+function graphErrorCode(body: unknown): number | null {
+  if (!body || typeof body !== "object") return null;
+  const error = (body as { error?: unknown }).error;
+  if (!error || typeof error !== "object") return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "number" && Number.isInteger(code) ? code : null;
+}
+
+function readSendResult(body: unknown): SendResult | null {
+  if (!body || typeof body !== "object") return null;
+  const messages = (body as { messages?: unknown }).messages;
+  const contacts = (body as { contacts?: unknown }).contacts;
+  const first = Array.isArray(messages) ? (messages[0] as { id?: unknown } | undefined) : undefined;
+  if (!first || typeof first.id !== "string" || first.id.length === 0) return null;
+  const contact = Array.isArray(contacts) ? (contacts[0] as { wa_id?: unknown } | undefined) : undefined;
+  const waId = contact && typeof contact.wa_id === "string" && contact.wa_id.length > 0 ? contact.wa_id : null;
+  return { messageId: first.id, waId };
+}
+
+const GRAPH = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+
+/** One Graph call; failures carry the numeric code only (Meta's message can echo the code or token). */
+async function graph(url: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+  } catch {
+    throw new WhatsAppApiError(null, 0);
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok) throw new WhatsAppApiError(graphErrorCode(body), response.status);
+  if (!body || typeof body !== "object") throw new WhatsAppApiError(null, response.status);
+  return body as Record<string, unknown>;
+}
+
+function bearer(token: string, json?: unknown): RequestInit {
+  return {
+    method: json === undefined ? "GET" : "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+  };
+}
+
+/**
+ * Embedded Signup v4, Tech Provider steps: exchange the code for the store's
+ * business token, subscribe our app to its WABA's webhooks, register the
+ * number (skipped under coexistence: the Business app already registered it),
+ * then read the display number. Register must carry the number's two-step PIN,
+ * so a fresh random PIN is set first and registered with; it is not kept. A
+ * retried link or relink sets a new one the same way.
+ */
+async function connectStoreNumber(input: ConnectStoreNumberInput): Promise<ConnectedStoreNumber> {
+  const { appId, appSecret } = readWhatsAppConfig();
+  if (!appId || !appSecret) throw new WhatsAppNotConfiguredError();
+  if (!input.code) throw new WhatsAppApiError(100, 400);
+  const exchange = new URL(`${GRAPH}/oauth/access_token`);
+  exchange.searchParams.set("client_id", appId);
+  exchange.searchParams.set("client_secret", appSecret);
+  exchange.searchParams.set("code", input.code);
+  const token = (await graph(exchange.toString())).access_token;
+  if (typeof token !== "string" || token.length === 0) throw new WhatsAppApiError(null, 200);
+
+  const phone = encodeURIComponent(input.phoneNumberId);
+  await graph(`${GRAPH}/${encodeURIComponent(input.wabaId)}/subscribed_apps`, bearer(token, {}));
+  if (!input.coexistence) {
+    const pin = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    await graph(`${GRAPH}/${phone}`, bearer(token, { pin }));
+    await graph(`${GRAPH}/${phone}/register`, bearer(token, { messaging_product: "whatsapp", pin }));
+  }
+  const number = await graph(`${GRAPH}/${phone}?fields=display_phone_number`, bearer(token));
+  const displayNumber = typeof number.display_phone_number === "string" ? number.display_phone_number : input.phoneNumberId;
+  return { businessToken: token, displayNumber };
+}
+
+/**
+ * Cloud API adapter. Keys are read on each send. No automatic retry: the send
+ * endpoint has no idempotency key, so a retry could deliver twice.
+ */
+export const cloudApiWhatsAppProvider: WhatsAppProvider = {
+  async send(message, from) {
+    const config = from ?? readSendConfig();
+    if (!config) throw new WhatsAppNotConfiguredError();
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(config.phoneNumberId)}/messages`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(toGraphPayload(message)),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      });
+    } catch {
+      throw new WhatsAppApiError(null, 0);
+    }
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    if (!response.ok) throw new WhatsAppApiError(graphErrorCode(body), response.status);
+    const result = readSendResult(body);
+    if (!result) throw new WhatsAppApiError(null, response.status);
+    return result;
+  },
+  connectStoreNumber,
+};

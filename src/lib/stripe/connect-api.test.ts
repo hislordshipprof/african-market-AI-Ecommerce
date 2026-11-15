@@ -31,7 +31,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { auth } from "@/lib/auth";
-import { getStore } from "@/lib/get-store";
+import { getStore, revalidateStore } from "@/lib/get-store";
 import { storeScoped, platformAdmin } from "@/lib/db";
 
 function makeStore(overrides = {}) {
@@ -41,6 +41,7 @@ function makeStore(overrides = {}) {
     name: "Test Store",
     stripeAccountId: null,
     stripeOnboardingStatus: "not_started",
+    customDomain: "shop.test-store.com",
     ...overrides,
   };
 }
@@ -64,6 +65,7 @@ async function callConnect() {
   const { POST } = await import("@/app/api/stripe/connect/route");
   const req = new Request("http://localhost:3000/api/stripe/connect?store=test-store", {
     method: "POST",
+    headers: { origin: "http://localhost:3000", host: "localhost:3000" },
   });
   const { NextRequest } = await import("next/server");
   return POST(new NextRequest(req));
@@ -141,6 +143,9 @@ describe("POST /api/stripe/connect", () => {
           stripeOnboardingStatus: "pending",
         }),
       }),
+    );
+    expect(revalidateStore).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "store_123", customDomain: "shop.test-store.com" }),
     );
   });
 

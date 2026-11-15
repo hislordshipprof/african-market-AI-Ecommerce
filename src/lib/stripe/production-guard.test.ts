@@ -102,56 +102,42 @@ describe("fake Stripe selection", () => {
     setStripeProvider(null);
   });
 
-  const nodeEnvs = ["development", "test", "production"] as const;
-  const vercels = [undefined, "1"] as const;
-  const cis = [undefined, "true", "1"] as const;
-  const flags = [undefined, "1"] as const;
-  const keys = [undefined, "sk_test_present"] as const;
+  type Env = { NODE_ENV: string; VERCEL?: string; CI?: string; E2E_FAKE_STRIPE?: string; STRIPE_SECRET_KEY?: string };
+  // Written out by hand from the policy, not computed, so a policy mistake cannot pass in both places.
+  const cases: Array<[Env, StripeSelection]> = [
+    [{ NODE_ENV: "development" }, "real"],
+    [{ NODE_ENV: "development", E2E_FAKE_STRIPE: "1" }, "fake"],
+    [{ NODE_ENV: "test", E2E_FAKE_STRIPE: "1" }, "fake"],
+    [{ NODE_ENV: "test", CI: "true", E2E_FAKE_STRIPE: "1", STRIPE_SECRET_KEY: "sk_test_present" }, "fake"],
+    [{ NODE_ENV: "development", VERCEL: "1", E2E_FAKE_STRIPE: "1" }, "unconfigured"],
+    [{ NODE_ENV: "development", VERCEL: "1", E2E_FAKE_STRIPE: "1", STRIPE_SECRET_KEY: "sk_test_present" }, "real"],
+    [{ NODE_ENV: "test", VERCEL: "1" }, "unconfigured"],
+    [{ NODE_ENV: "production" }, "unconfigured"],
+    [{ NODE_ENV: "production", STRIPE_SECRET_KEY: "sk_test_present" }, "real"],
+    [{ NODE_ENV: "production", CI: "true", E2E_FAKE_STRIPE: "1" }, "fake"],
+    [{ NODE_ENV: "production", CI: "1", E2E_FAKE_STRIPE: "1" }, "unconfigured"],
+    [{ NODE_ENV: "production", CI: "1", E2E_FAKE_STRIPE: "1", STRIPE_SECRET_KEY: "sk_test_present" }, "real"],
+    [{ NODE_ENV: "production", E2E_FAKE_STRIPE: "1", STRIPE_SECRET_KEY: "sk_test_present" }, "real"],
+    [{ NODE_ENV: "production", VERCEL: "1", CI: "true", E2E_FAKE_STRIPE: "1" }, "unconfigured"],
+  ];
 
-  function expectedKind(input: {
-    NODE_ENV: string;
-    VERCEL?: string;
-    CI?: string;
-    E2E_FAKE_STRIPE?: string;
-    STRIPE_SECRET_KEY?: string;
-  }): StripeSelection {
-    const fake =
-      input.E2E_FAKE_STRIPE === "1" &&
-      !input.VERCEL &&
-      (input.CI === "true" || input.NODE_ENV !== "production");
-    if (fake) return "fake";
-    const production = input.NODE_ENV === "production" || Boolean(input.VERCEL);
-    if (production && !input.STRIPE_SECRET_KEY) return "unconfigured";
-    return "real";
-  }
-
-  it("selects the fake, real or unconfigured provider for every environment combination", async () => {
-    for (const NODE_ENV of nodeEnvs) {
-      for (const VERCEL of vercels) {
-        for (const CI of cis) {
-          for (const E2E_FAKE_STRIPE of flags) {
-            for (const STRIPE_SECRET_KEY of keys) {
-              const env = { NODE_ENV, VERCEL, CI, E2E_FAKE_STRIPE, STRIPE_SECRET_KEY };
-              const kind = expectedKind(env);
-              vi.stubEnv("NODE_ENV", NODE_ENV);
-              vi.stubEnv("VERCEL", VERCEL ?? "");
-              vi.stubEnv("CI", CI ?? "");
-              vi.stubEnv("E2E_FAKE_STRIPE", E2E_FAKE_STRIPE ?? "");
-              vi.stubEnv("STRIPE_SECRET_KEY", STRIPE_SECRET_KEY ?? "");
-              setStripeProvider(null);
-              const provider = getStripeProvider();
-              if (kind === "fake") {
-                expect(provider, JSON.stringify(env)).toBe(fakeStripeProvider);
-              } else if (kind === "real") {
-                expect(provider, JSON.stringify(env)).toBe(stripeProvider);
-              } else {
-                await expect(provider.capturePaymentIntent("pi_matrix", 100, "k")).rejects.toThrow(
-                  /STRIPE_SECRET_KEY/,
-                );
-              }
-            }
-          }
-        }
+  it("selects the fake, real or unconfigured provider for each listed environment", async () => {
+    for (const [env, kind] of cases) {
+      vi.stubEnv("NODE_ENV", env.NODE_ENV);
+      vi.stubEnv("VERCEL", env.VERCEL ?? "");
+      vi.stubEnv("CI", env.CI ?? "");
+      vi.stubEnv("E2E_FAKE_STRIPE", env.E2E_FAKE_STRIPE ?? "");
+      vi.stubEnv("STRIPE_SECRET_KEY", env.STRIPE_SECRET_KEY ?? "");
+      setStripeProvider(null);
+      const provider = getStripeProvider();
+      if (kind === "fake") {
+        expect(provider, JSON.stringify(env)).toBe(fakeStripeProvider);
+      } else if (kind === "real") {
+        expect(provider, JSON.stringify(env)).toBe(stripeProvider);
+      } else {
+        await expect(provider.capturePaymentIntent("pi_matrix", 100, "k"), JSON.stringify(env)).rejects.toThrow(
+          /STRIPE_SECRET_KEY/,
+        );
       }
     }
   });

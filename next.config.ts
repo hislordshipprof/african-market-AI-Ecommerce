@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+import { CSV_ACTION_BODY_LIMIT_BYTES } from "./src/lib/listing/csv-file-cap";
+import { staticSecurityHeaders } from "./src/lib/security/headers";
 
 const logoHosts = (process.env.LOGO_HOSTS ?? "")
   .split(",")
@@ -6,10 +8,29 @@ const logoHosts = (process.env.LOGO_HOSTS ?? "")
   .filter(Boolean);
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["pdfjs-dist", "sharp"],
   experimental: {
     serverActions: {
-      bodySizeLimit: "3mb",
+      bodySizeLimit: CSV_ACTION_BODY_LIMIT_BYTES,
     },
+  },
+  async headers() {
+    const headers = staticSecurityHeaders();
+    return [
+      { source: "/:path*", headers },
+      { source: "/", headers },
+      { source: "/_next/static/:path*", headers },
+      // The driver's route link (#566): the token is the key, so the page is never indexed or cached.
+      {
+        source: "/driver/:path*",
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+      // Every order detail view is audited (#537): no browser cache or back-forward cache copy.
+      { source: "/admin/orders/search/:orderId", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
+    ];
   },
   images: {
     // SVG logos are rendered with a plain <img> (StoreLogo), never via the optimizer (#60).

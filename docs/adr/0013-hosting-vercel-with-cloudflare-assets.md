@@ -17,3 +17,6 @@ Storefronts need fast server-rendered pages that Google can index, one custom do
 - Best practices: follow the `vercel-react-best-practices` skill (no request waterfalls, small client bundles, server components by default). Cache storefront pages per store and tag them by store ID, so a price change revalidates only that store.
 - Cost watch: function invocations and bandwidth on Vercel. Images are offloaded to R2 to keep Vercel bandwidth low. Set Vercel spend alerts.
 - Vercel's domain-add API is rate-limited, so onboarding queues domain adds instead of doing them inline.
+
+## Amendment 2026-11-09: proof photos without signed URLs
+Owner decision for #134 (store delivery). Proof photos still live in a private R2 bucket, `R2_PROOF_BUCKET`, separate from the catalog bucket `R2_BUCKET`. They are not served through signed URLs. The app reads them through `GET /api/delivery-proof/<tracking token>`, which checks the tracking token on the requesting store and answers `Cache-Control: private, no-store`. The order id does not open the photo. If `R2_PROOF_BUCKET` is unset, staff cannot mark a store-delivery order Delivered. The original Decision line above is kept as written.

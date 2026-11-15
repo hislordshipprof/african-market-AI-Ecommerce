@@ -1,0 +1,3 @@
+# Every ticket PR appends one line here. A union merge keeps both sides, so local rebases do not conflict on it.
+scripts/ticket-env.txt merge=union
+docs/security/endpoint-audit.md merge=union

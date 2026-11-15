@@ -5,9 +5,12 @@
 # "run-ci" label to a PR).
 # Usage (inside a ticket worktree, tracked changes committed, HEAD pushed):
 #   E2E_PORT=3100 scripts/ci-local.sh
+# A run does only what the change needs (scripts/ci-scope.sh): docs, pipeline scripts and test-only changes skip
+# the whole suite, and a push makes an older run of the same branch stop. scripts/ci-main.sh is the full run on main.
 # scripts/build-ticket.sh runs this itself after each builder push, in parallel with the independent review;
 # builders do not run it. CI_DB=<name> runs on a fresh private database, and CI_RUNNER=<dir> runs in a separate
 # checkout of HEAD, so the reviewer working in the ticket worktree at the same time is never disturbed.
+# A run without both of them (a hand run) uses only local-ci slot 1, so it never runs beside another hand run.
 set -euo pipefail
 # The whole script sits in one { } block, so bash parses all of it before running any of it. A run then cannot
 # break when this file changes underneath it (a git pull on main, or an edit) while a lane's suite is running.
@@ -27,38 +30,106 @@ if [ -z "$(git branch -r --contains "$SHA")" ]; then
 fi
 
 status() { gh api "repos/$REPO/statuses/$SHA" -f state="$1" -f context=local-ci -f description="$2" >/dev/null || true; }
+
+# How much to run (scripts/ci-scope.sh). CI_SCOPE forces a tier. CI_MERGED_FROM=<sha> is set by merge-ticket.sh:
+# that commit already passed, and this one is it with a newer main merged in, so only the tests it reaches rerun.
+. "$SCRIPTS/review-watch.sh"
+. "$SCRIPTS/ci-scope.sh"
+CHANGED=$(changed_paths "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
+# The paths handed to a test runner: a deleted file has nothing to run, and a runner fails on a path it can't find.
+PRESENT=$(changed_paths --diff-filter=d "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
+SCOPE="${CI_SCOPE:-$(printf '%s\n' "$CHANGED" | ci_scope)}"
+if [ -z "${CI_SCOPE:-}" ] && [ -n "${CI_MERGED_FROM:-}" ] && [ "$SCOPE" = full ] \
+  && [ "$(gh api "repos/$REPO/commits/$CI_MERGED_FROM/status" --jq '[.statuses[] | select(.context == "local-ci")][0].state // "missing"')" = success ] \
+  && merge_is_safe "$CI_MERGED_FROM" "$SHA"; then
+  SCOPE=merge
+fi
+# A deleted test can be one another test depends on, and the tests tier would have nothing to run for it.
+if [ "$SCOPE" = tests ] && [ "$CHANGED" != "$PRESENT" ]; then SCOPE=full; fi
+echo "== local-ci: scope $SCOPE"
+if [ "$SCOPE" = docs ]; then
+  status success "docs only: nothing to run"
+  echo "local-ci PASSED on $SHA (docs only)"
+  exit 0
+fi
+
+# A newer push to this branch makes this run pointless, queued or running: stop and free the machine for it.
+# main is excluded, because a full run on main is still wanted after main moves on.
+BRANCH=$(git symbolic-ref --short -q HEAD || true)
+[ "$BRANCH" != main ] || BRANCH=""
+superseded() {
+  [ -n "$BRANCH" ] || return 1
+  local tip; tip=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
+  [ -n "$tip" ] && [ "$tip" != "$SHA" ]
+}
+
 export E2E_WORKERS="${E2E_WORKERS:-4}"
 export VITEST_MAX_WORKERS="${VITEST_MAX_WORKERS:-4}"
 STEP_TIMEOUT="${CI_STEP_TIMEOUT:-40m}"
 
-# One full suite at a time on this machine. Parallel full suites from several lanes starved the CPU, and the
-# resulting timeouts (Vitest onTaskUpdate, silent next build crashes) cost far more than waiting in line.
-# The lock lives in the shared git dir, so every worktree sees it. A lock is taken over when its owner is gone,
-# when it has no pid after 2 minutes, or when it is older than 3 hours (a hung run).
-LOCK="$(git rev-parse --git-common-dir)/ci-local.lock"
-status pending "queued for the machine-wide local-ci lock"
-while ! mkdir "$LOCK" 2>/dev/null; do
-  owner=$(cat "$LOCK/pid" 2>/dev/null || true)
-  age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || date +%s) ))
-  if { [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; } || { [ -z "$owner" ] && [ "$age" -gt 120 ]; } || [ "$age" -gt 10800 ]; then
-    # Rename first: only one waiter wins the rename, so two waiters cannot both take over.
-    mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null && rm -rf "$LOCK.stale.$$"
-    continue
+# At most CI_SLOTS full suites (default 2) at a time on this machine. Unbounded parallel suites from several lanes
+# starved the CPU, and the resulting timeouts (Vitest onTaskUpdate, silent next build crashes) cost far more than
+# waiting in line; one at a time left reviewed PRs waiting hours (owner, 2026-11-13).
+# Each slot has its own lock in the shared git dir, so every worktree sees it (scripts/ci-lock.sh). A lock is taken
+# over only when its owner is gone or it never got a pid; a run hung for 6 hours is stopped first, then replaced.
+# The path is absolute because this script changes directory (CI_RUNNER) before it releases the lock.
+. "$SCRIPTS/ci-lock.sh"
+LOCK="$(cd "$(git rev-parse --git-common-dir)" && pwd)/ci-local.lock"
+LOCK_TOKEN="$$-$RANDOM-$(date +%s)"
+CI_SLOTS=$(ci_slot_count "${CI_SLOTS:-2}" "${CI_RUNNER:-}" "${CI_DB:-}") || exit 1
+status pending "queued for a local-ci slot"
+waited=0
+while ! SLOT=$(ci_slot_try "$LOCK" "$CI_SLOTS" "$$" "$LOCK_TOKEN"); do
+  waited=$((waited + 1))
+  if [ $((waited % 6)) = 0 ] && superseded; then
+    echo "local-ci SUPERSEDED while queued: $BRANCH has a newer commit than $SHA"
+    status error "superseded by a newer push"; exit "$CI_SUPERSEDED"
   fi
-  sleep 10
+  ci_slot_takeover "$LOCK" "$CI_SLOTS"
+  sleep "${CI_LOCK_POLL_SEC:-10}"
 done
-echo $$ > "$LOCK/pid"
-# build-ticket.sh greps for this line: a run that has not printed it is still queued and is safe to cancel.
-echo "== local-ci: lock acquired"
+LOCK=$(ci_slot_lock "$LOCK" "$SLOT")
+# build-ticket.sh greps for "lock acquired": a run that has not printed it is still queued and is safe to cancel.
+echo "== local-ci: lock acquired (slot $SLOT)"
+ci_slot_env "$SLOT"
 FAILED_AT=""
 TEST_OUT=""
 cleanup() {
   local rc=$?
   if [ "$rc" -ne 0 ] && [ -z "$FAILED_AT" ]; then status failure "failed: setup (see log)"; echo "local-ci SETUP failed on $SHA"; fi
   [ -z "$TEST_OUT" ] || rm -f "$TEST_OUT"
-  rm -rf "$LOCK"
+  [ -z "${SUPERSEDE_WATCH:-}" ] || kill "$SUPERSEDE_WATCH" 2>/dev/null || true
+  ci_lock_release "$LOCK" "$LOCK_TOKEN"
 }
 trap cleanup EXIT
+
+# A full run on main that waited in the queue while main moved on: a newer one is queued behind it
+# (scripts/ci-main.sh writes its commit to this file when it starts), so this one would only delay every lane.
+if [ -n "${CI_MAIN_LAST_FILE:-}" ] && [ "$(cat "$CI_MAIN_LAST_FILE" 2>/dev/null || echo "$SHA")" != "$SHA" ]; then
+  FAILED_AT=superseded
+  echo "local-ci SUPERSEDED: a newer full run on main is queued; skipping $SHA"
+  status error "skipped: a newer run on main is queued"
+  exit "$CI_SUPERSEDED"
+fi
+
+# Checks once a minute while the run holds the lock. The running step is stopped, then this script, so a stale
+# run gives up the lock in about a minute instead of finishing a suite nobody will read.
+if [ -n "$BRANCH" ]; then
+  (
+    while sleep "${CI_SUPERSEDE_POLL_SEC:-60}"; do
+      if superseded; then
+        echo "local-ci SUPERSEDED: $BRANCH has a newer commit than $SHA"
+        status error "superseded by a newer push"
+        stop_all_children_but "$BASHPID"
+        # The script dies before the lock goes, so it cannot start another step on a lock it no longer holds.
+        kill -KILL "$$"
+        ci_lock_release "$LOCK" "$LOCK_TOKEN"
+        exit 0
+      fi
+    done
+  ) &
+  SUPERSEDE_WATCH=$!
+fi
 
 # Separate checkout: the ticket worktree's .next, prisma client and test-results stay the reviewer's.
 if [ -n "${CI_RUNNER:-}" ]; then
@@ -71,7 +142,7 @@ if [ -n "${CI_RUNNER:-}" ]; then
   echo "== local-ci: running in $CI_RUNNER at $SHA"
 fi
 
-# Fresh private database (one is enough: the lock allows one run at a time). Process env wins over .env.local
+# Fresh private database (one per slot: each slot runs one suite at a time). Process env wins over .env.local
 # in every loader here (test-setup.ts, playwright.config.ts, dotenv-cli without -o, prisma.config.ts).
 if [ -n "${CI_DB:-}" ]; then
   PGBIN="${PGBIN:-/c/Program Files/PostgreSQL/18/bin}"; PGP="${LANE_PG_PORT:-5434}"
@@ -91,34 +162,95 @@ if [ -n "${CI_DB:-}" ]; then
   echo "== local-ci: fresh database $db (migrated + seeded)"
 fi
 
-status pending "typecheck, lint, test, build, e2e (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORKERS=$VITEST_MAX_WORKERS)"
+status pending "scope $SCOPE: running (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORKERS=$VITEST_MAX_WORKERS)"
 
 # Retries rerun only what failed, never the whole suite again: a real failure used to cost two full runs while
 # every other lane waited for the lock. Vitest and Playwright retry a failed test in place (--retry/--retries);
 # a whole e2e run that still fails gets one rerun of just its failed tests (--last-failed), in case the web
 # server itself fell over. Only the build (silent next build crashes under load) reruns whole.
-# Every step has a timeout, so one hung run cannot hold the machine-wide lock for every lane.
+# Every step has a timeout, so one hung run cannot hold a local-ci slot for long.
 fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $1 on $SHA ($2)"; exit 1; }
 step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
+# run_unit <vitest command...>: every tier's unit tests.
+# Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during slow tests even when every test passed.
+# It hit about half of the runs on 2026-11-05 and a rerun often hit it again, so a run that accounts for every test
+# (scripts/vitest-rpc-only.sh) passes as it stands. A timeout with results unproved gets one whole rerun. A real test
+# failure does not, because --retry already retried each failed test.
+# Vitest colours its summary even through a pipe on Windows, so strip ANSI codes before reading the counts.
+# Either a failed test or a test file that failed to load means a real failure.
+run_unit() {
+  TEST_OUT="$(mktemp)"
+  local rc=0 codes
+  step test "$@" 2>&1 | tee "$TEST_OUT" || {
+    codes=("${PIPESTATUS[@]}")
+    rc="${codes[0]}"
+    # A failed tee means the output cannot be trusted, so it is never exit code 1.
+    if [ "${codes[1]:-0}" != 0 ]; then rc=2; fi
+  }
+  if [ "$rc" != 0 ]; then
+    if bash "$SCRIPTS/vitest-rpc-only.sh" "$TEST_OUT" "$rc"; then
+      echo "== local-ci: every test is accounted for and the only error is Vitest's worker RPC timeout; not rerunning"
+    elif grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
+      && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
+      echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
+      step test "$@" || fail test "failed again on the rerun after a Vitest RPC timeout"
+    else
+      fail test "each failed test already retried once, so not a one-off flake"
+    fi
+  fi
+}
+
+# Lighter tiers end here. Each one finishes with the same success status, which the merge gate reads.
+if [ "$SCOPE" = pipeline ] || [ "$SCOPE" = full ]; then
+  for t in scripts/*.test.sh; do
+    step "$t" bash "$t" || fail "$t" "no retry"
+  done
+fi
+if [ "$SCOPE" = pipeline ]; then
+  # Some pipeline tests are Vitest files that read or run these scripts (catalog-prune.test.ts). Found by content,
+  # so a new one joins this tier without a list to update.
+  SCRIPT_TESTS=$(git grep -lE 'scripts/[a-z-]+\.(sh|mjs)|"scripts"' -- 'src/*.test.ts' 'src/*.test.tsx' || true)
+  if [ -n "$SCRIPT_TESTS" ]; then
+    # shellcheck disable=SC2086
+    run_unit pnpm exec vitest run --retry=1 $SCRIPT_TESTS
+  fi
+  status success "pipeline scripts: their tests passed"
+  echo "local-ci PASSED on $SHA (pipeline scope)"
+  exit 0
+fi
 step typecheck pnpm typecheck || fail typecheck "no retry"
 step lint pnpm lint || fail lint "no retry"
-TEST_OUT="$(mktemp)"
-if ! step test pnpm test --retry=1 2>&1 | tee "$TEST_OUT"; then
-  # Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during the slow Stripe sandbox tests even
-  # when every test passed. That is the runner, not the code, so it gets one whole rerun. A real test failure
-  # does not, because --retry already retried each failed test.
-  # Vitest colours its summary even through a pipe on Windows, so strip ANSI codes before reading the counts.
-  # Either a failed test or a test file that failed to load means a real failure.
-  if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
-    && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
-    echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
-    step test pnpm test --retry=1 || fail test "failed again on the rerun after a Vitest RPC timeout"
-  else
-    fail test "each failed test already retried once, so not a one-off flake"
+if [ "$SCOPE" = tests ]; then
+  UNIT=$(printf '%s\n' "$PRESENT" | grep -E '^src/.*\.test\.tsx?$' || true)
+  SPECS=$(printf '%s\n' "$PRESENT" | grep -E '^e2e/.*\.spec\.ts$' || true)
+  if [ -n "$UNIT" ]; then
+    # shellcheck disable=SC2086
+    run_unit pnpm exec vitest run --retry=1 $UNIT
   fi
+  if [ -n "$SPECS" ]; then
+    step build pnpm build || fail build "no retry"
+    # shellcheck disable=SC2086
+    step e2e pnpm test:e2e --retries=1 $SPECS || fail e2e "each failed test already retried"
+  fi
+  status success "test files only: typecheck, lint and the changed tests passed"
+  echo "local-ci PASSED on $SHA (tests scope)"
+  exit 0
 fi
+if [ "$SCOPE" = merge ]; then
+  SOURCES=$(printf '%s\n' "$PRESENT" | grep -E '^src/.*\.tsx?$' || true)
+  if [ -n "$SOURCES" ]; then
+    # shellcheck disable=SC2086
+    run_unit pnpm exec vitest related --run --retry=1 --passWithNoTests $SOURCES
+  fi
+  status success "main merged cleanly into a passing commit: typecheck, lint and related tests passed"
+  echo "local-ci PASSED on $SHA (merge scope)"
+  exit 0
+fi
+run_unit pnpm test --retry=1
 step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
   step build pnpm build || fail build "failed twice in a row"; }
+# Storefront home first-load JS budget (#629): fails with size, budget and the largest chunks (scripts/js-budget.json).
+step js-budget node scripts/js-budget.mjs || fail js-budget "storefront home first-load JS is over its budget"
 if ! step e2e pnpm test:e2e --retries=1; then
   if tr -d ' \r\n' 2>/dev/null < test-results/.last-run.json | grep -q '"failedTests":\["'; then
     echo "== local-ci: rerunning only the failed e2e tests"

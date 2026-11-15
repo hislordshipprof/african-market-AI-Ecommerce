@@ -60,7 +60,7 @@ export function mapRouteError(input: {
   if (known === "assistant_resting") {
     return {
       code,
-      title: "The helper is resting right now. You can keep shopping the usual way.",
+      title: "Shop with AI is resting right now. You can keep shopping the usual way.",
       searchHref: "/search",
       terminal: true,
       retry: false,
@@ -69,7 +69,7 @@ export function mapRouteError(input: {
   if (known === "assistant_unavailable" || known === "assistant_disabled") {
     return {
       code,
-      title: "The helper isn't available right now.",
+      title: "Shop with AI isn't available right now.",
       searchHref: "/search",
       terminal: true,
       retry: false,
@@ -92,6 +92,37 @@ export function mapRouteError(input: {
       terminal: false,
       retry: true,
     };
+  }
+  if (known === "attachment_rate_limited") {
+    const minutes = minutesFromRetryAfter(input.retryAfter);
+    const title = minutes == null
+      ? "Too many files this hour. You can still type a message."
+      : `Too many files this hour. You can still type a message. Try a file again in about ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+    return { code, title, searchHref: "/search", terminal: false, retry: false };
+  }
+  if (known === "attachment_too_many") {
+    return { code, title: "You can send up to 3 files.", searchHref: "/search", terminal: false, retry: false };
+  }
+  if (known === "attachment_too_large") {
+    return { code, title: "Those files are too big to send. Keep them under 3 MB.", searchHref: "/search", terminal: false, retry: false };
+  }
+  if (known === "attachment_type") {
+    return { code, title: "That file needs to be a JPEG, PNG, WebP, or a PDF we can read.", searchHref: "/search", terminal: false, retry: false };
+  }
+  if (known === "attachment_pixels") {
+    return { code, title: "That photo is too large to read.", searchHref: "/search", terminal: false, retry: false };
+  }
+  if (known === "attachment_pages") {
+    return { code, title: "PDFs can be up to 10 pages.", searchHref: "/search", terminal: false, retry: false };
+  }
+  if (known === "attachment_encrypted") {
+    return { code, title: "That PDF is locked. Send one that opens without a password.", searchHref: "/search", terminal: false, retry: false };
+  }
+  if (known === "attachment_missing") {
+    return { code, title: "Send those files again so the helper can read them.", searchHref: "/search", terminal: false, retry: true };
+  }
+  if (known === "attachment_conflict") {
+    return { code, title: "That message does not match the files already sent.", searchHref: "/search", terminal: false, retry: false };
   }
   if (known === "invalid_request") {
     return {
@@ -134,6 +165,10 @@ export function createAssistantFetch(base: typeof fetch = fetch): typeof fetch {
       }
     } catch {
       parsed = false;
+    }
+    if (response.status === 413 && !parsed) {
+      code = "attachment_too_large";
+      parsed = true;
     }
     throw new AssistantRouteError({ code, status: response.status, retryAfter, parsed });
   };

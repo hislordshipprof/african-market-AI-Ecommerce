@@ -1,5 +1,3 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
 import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import {
   deleteCartLine,
@@ -11,6 +9,7 @@ import {
   type ListingStock,
 } from "./listing-db";
 import { BROWSER_COOKIE } from "../src/lib/cart/browser";
+import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 import { storeUrl } from "./urls";
 
 /**
@@ -508,7 +507,8 @@ test.describe("quick add limits and recovery", () => {
     await page.getByRole("button", { name: "Shopping cart" }).click();
     await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
     await settle(page);
-    await expect(page.getByRole("dialog", { name: "Your cart" })).not.toContainText("Yellow Garri");
+    // The drawer's "Removed Yellow Garri (Ijebu). Undo" bar names the item, so check the lines only.
+    await expect(page.getByRole("dialog", { name: "Your cart" }).getByRole("listitem").filter({ hasText: "Yellow Garri" })).toHaveCount(0);
     await page.reload();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     await expect(cartCount(page)).toHaveText("0");
@@ -1276,6 +1276,14 @@ test.describe("quick add recovery gaps", () => {
   test("an unknown server action asks for a reload and a fresh page still adds", async ({ page }) => {
     await openGrains(page);
     await addGarri(page);
+    const cartId = await cartCookie(page);
+    const yellow = () =>
+      readCartLines("mama-ngozi", cartId).then((lines) =>
+        lines.filter((line) => line.listingId === "mn_garri_yellow"),
+      );
+    const saved = await yellow();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.qty).toBe(1);
     let actions = 0;
     let rewritten = 0;
     await page.route("**/*", async (route) => {
@@ -1296,17 +1304,30 @@ test.describe("quick add recovery gaps", () => {
     });
     await garri(page).getByTestId("stepper-plus").click();
     await expectNoCrash(page);
-    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "This page is out of date" }).first()).toBeVisible();
+    const staleToast = page.locator("[data-sonner-toast]").filter({ hasText: "This page is out of date" });
+    await expect(staleToast.first()).toBeVisible();
     const actionsAtToast = actions;
-    const qtyAtToast = await garri(page).getByTestId("stepper-qty").innerText();
+    const qtyAtToast = (await garri(page).getByTestId("stepper-qty").innerText()).trim();
+    const headerAtToast = (await cartCount(page).innerText()).trim();
+    const rowAtToast = await yellow();
     expect(rewritten).toBe(1);
+    expect(actionsAtToast).toBeGreaterThan(0);
+    expect(rowAtToast).toHaveLength(1);
+    expect(rowAtToast[0]?.id).toBe(saved[0]?.id);
+    expect(rowAtToast[0]?.qty).toBe(1);
     await settle(page);
     await garri(page).getByTestId("stepper-plus").click();
+    await expect(staleToast.first()).toBeVisible();
     await settle(page);
     await page.waitForTimeout(400);
     expect(actions).toBe(actionsAtToast);
     expect(rewritten).toBe(1);
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText(qtyAtToast);
+    await expect(cartCount(page)).toHaveText(headerAtToast);
+    const frozen = await yellow();
+    expect(frozen).toHaveLength(1);
+    expect(frozen[0]?.id).toBe(rowAtToast[0]?.id);
+    expect(frozen[0]?.qty).toBe(1);
     await page.unroute("**/*");
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
@@ -3131,62 +3152,19 @@ test.describe("cart recovery after a failed write", () => {
   });
 });
 
-function reservePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      probe.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
-}
-
-/** LISTENING rows only. A remote address can also contain the port. */
-function pidsListeningOn(port: number): Promise<number[]> {
-  return new Promise((resolve) => {
-    execFile("netstat", ["-ano"], { windowsHide: true, encoding: "utf8" }, (error, stdout) => {
-      if (error) {
-        resolve([]);
-        return;
-      }
-      const needle = new RegExp(`:${port}(?!\\d)`);
-      const pids = new Set<number>();
-      for (const line of stdout.split(/\r?\n/)) {
-        if (!line.includes("LISTENING") || !needle.test(line)) continue;
-        const pid = Number(line.trim().split(/\s+/).at(-1));
-        if (pid > 0) pids.add(pid);
-      }
-      resolve([...pids]);
-    });
-  });
-}
-
-function forceKill(pid: number): Promise<void> {
-  return new Promise((resolve) => {
-    const killer =
-      process.platform === "win32"
-        ? spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { shell: true, stdio: "ignore" })
-        : spawn("kill", ["-TERM", String(pid)], { stdio: "ignore" });
-    killer.on("exit", () => resolve());
-    killer.on("error", () => resolve());
-  });
-}
-
 test("cart recovery works with production Vercel flags and no provider keys", async ({ page }) => {
   test.setTimeout(180_000);
-  // A hardcoded port accepts whatever is already listening. pnpm detaches
-  // `next start`, so killing the shell leaves that server behind, and the next
-  // run's health check (any 200 or 503) talks to it while this process reads
-  // a different database.
-  const port = await reservePort();
+  // Playwright keeps E2E_PORT. This child takes the lane smoke port when it
+  // is free, and another free port when a leftover is still listening. Health
+  // counts only after this child prints Ready, so a stranger's 200 or 503
+  // cannot pass for this database.
+  const port = await reservePort(laneSmokePort());
   const origin = `http://mama-ngozi.localhost:${port}`;
-  let childLogs = "";
-  const child: ChildProcess = spawn(`pnpm exec next start -p ${port}`, {
+  const running = await startSpawnedServer({
+    command: `pnpm exec next start -p ${port}`,
     shell: true,
     cwd: process.cwd(),
-    stdio: ["ignore", "pipe", "pipe"],
+    port,
     env: {
       ...process.env,
       VERCEL: "1",
@@ -3209,45 +3187,10 @@ test("cart recovery works with production Vercel flags and no provider keys", as
       INNGEST_EVENT_KEY: "",
       INNGEST_SIGNING_KEY: "",
     },
+    healthUrl: `http://127.0.0.1:${port}/api/health`,
+    healthOk: (status) => status === 200 || status === 503,
   });
-  child.stdout?.setEncoding("utf8");
-  child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk: string) => {
-    childLogs += chunk;
-  });
-  child.stderr?.on("data", (chunk: string) => {
-    childLogs += chunk;
-  });
-  let childExited = false;
-  child.on("exit", () => {
-    childExited = true;
-  });
-  async function stopServer() {
-    const pids = new Set<number>(await pidsListeningOn(port));
-    if (child.pid !== undefined) pids.add(child.pid);
-    await Promise.all([...pids].map((pid) => forceKill(pid)));
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline && (await pidsListeningOn(port)).length > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-  }
   try {
-    await expect.poll(() => {
-      if (childExited) return "exited";
-      if (childLogs.includes("EADDRINUSE")) return "busy";
-      if (childLogs.includes("Ready")) return "ready";
-      return "starting";
-    }, { timeout: 60_000 }).toBe("ready");
-    await expect.poll(async () => {
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/api/health`);
-        return response.status === 200 || response.status === 503;
-      } catch {
-        return false;
-      }
-    }, { timeout: 15_000 }).toBe(true);
-    expect(childExited).toBe(false);
-
     await page.goto(`${origin}/categories/grains-and-flours`);
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     await expect(page.getByRole("heading", { name: "The market could not load" })).toHaveCount(0);
@@ -3311,6 +3254,6 @@ test("cart recovery works with production Vercel flags and no provider keys", as
     expect(saved.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
     expect(saved.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
   } finally {
-    await stopServer();
+    await running.stop();
   }
 });

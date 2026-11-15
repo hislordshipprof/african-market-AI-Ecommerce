@@ -23,10 +23,58 @@ export interface WebhookRefund {
   reservationKey?: string;
 }
 
+export interface WebhookPaymentIntent {
+  id: string;
+  status: string;
+  cancellationReason: string | null;
+}
+
+/** A store's platform subscription (#494). Times are Unix seconds. */
+export interface WebhookSubscription {
+  id: string;
+  customerId: string;
+  status: string;
+  lookupKey: string | null;
+  storeId: string | null;
+  trialEnd: number | null;
+  currentPeriodEnd: number | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+export interface WebhookInvoice {
+  id: string;
+  customerId: string;
+  subscriptionId: string | null;
+  storeId: string | null;
+}
+
+/** A card dispute on a platform charge (#539). `evidenceDueBy` is Unix seconds. */
+export interface WebhookDispute {
+  id: string;
+  chargeId: string;
+  paymentIntentId: string | null;
+  amountCents: number;
+  currency: string;
+  reason: string;
+  status: string;
+  evidenceDueBy: number | null;
+  livemode: boolean;
+  /** Stripe's dispute fees net of any returned, summed over the dispute's balance transactions. */
+  feeCents: number;
+}
+
 export interface WebhookEvent {
   type: string;
   accountId: string;
+  /** Stripe's event id; a replay carries the same one. */
+  eventId?: string;
+  /** Unix seconds when Stripe created the event. */
+  created?: number;
   refund?: WebhookRefund;
+  paymentIntent?: WebhookPaymentIntent;
+  subscription?: WebhookSubscription;
+  invoice?: WebhookInvoice;
+  dispute?: WebhookDispute;
 }
 
 export interface CaptureResult {
@@ -59,6 +107,24 @@ export interface RefundResult {
   orderId?: string;
 }
 
+/** A payout to a store's bank (#548). `arrivalDate` is Unix seconds. */
+export interface Payout {
+  id: string;
+  amountCents: number;
+  arrivalDate: number;
+  status: string;
+}
+
+/** One balance transaction in a payout, traced back to the platform PaymentIntent when it has one. */
+export interface PayoutTransaction {
+  id: string;
+  type: string;
+  amountCents: number;
+  feeCents: number;
+  netCents: number;
+  paymentIntentId: string | null;
+}
+
 export interface StripeProvider {
   createConnectAccount(input: {
     email: string;
@@ -84,6 +150,8 @@ export interface StripeProvider {
     amountCents: number,
     idempotencyKey?: string,
     applicationFeeAmount?: number,
+    /** Sent with the capture; carries `coupon_id` for a coupon order (#557). */
+    metadata?: Record<string, string>,
   ): Promise<CaptureResult>;
 
   cancelPaymentIntent(
@@ -102,12 +170,34 @@ export interface StripeProvider {
     options?: { refundApplicationFee?: boolean; reservationKey?: string; orderId?: string },
   ): Promise<RefundResult>;
 
+  /**
+   * Returns `amountCents` of the charge's application fee to the connected account, once per
+   * `reservationKey` (the refund it goes with). The platform funds that part of the refund.
+   */
+  refundApplicationFeePart(
+    paymentIntentId: string,
+    amountCents: number,
+    reservationKey: string,
+  ): Promise<{ feeRefundId: string }>;
+
   /** Refunds on this PaymentIntent. Pending refunds stay pending. */
   listRefunds(paymentIntentId: string): Promise<RefundResult[]>;
 
   retrieveRefund(
     refundId: string,
   ): Promise<RefundResult>;
+
+  /** The connected account's latest payouts, newest first. */
+  listPayouts(accountId: string, limit: number): Promise<Payout[]>;
+
+  /** Throws a 404 error when the payout is not the account's. */
+  retrievePayout(accountId: string, payoutId: string): Promise<Payout>;
+
+  /** The payout's balance transactions, without the payout's own. */
+  listPayoutTransactions(accountId: string, payoutId: string): Promise<PayoutTransaction[]>;
+
+  /** A single-use Express Dashboard login link. Never store, log or send it. */
+  createLoginLink(accountId: string): Promise<{ url: string }>;
 }
 
 export class ProviderStateError extends Error {

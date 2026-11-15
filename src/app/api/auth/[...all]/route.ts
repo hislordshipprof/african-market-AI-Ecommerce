@@ -1,6 +1,8 @@
-import { auth } from "@/lib/auth";
+import { auth, onCustomDomain, registeredCustomDomain } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { parseInput } from "@/lib/security/parse-input";
 
 const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
 
@@ -11,26 +13,38 @@ const CUSTOMER_ONLY_PATHS = [
 
 const CALLBACK_PARAMS = ["callbackURL", "newUserCallbackURL", "errorCallbackURL"];
 
-function isRelativeUrl(url: string): boolean {
-  return url.startsWith("/") && !url.startsWith("//");
+const callbackValue = z.string().max(2000).refine(
+  (value) => value.startsWith("/") && !value.startsWith("//"),
+);
+
+function rejectCallback(param: string, value: unknown): NextResponse | null {
+  if (value === undefined || value === null) return null;
+  const parsed = parseInput(callbackValue, value);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: `${param} must be a relative path` },
+      { status: 400 },
+    );
+  }
+  return null;
 }
 
 function rejectIfBadCallback(req: NextRequest): NextResponse | null {
   const url = new URL(req.url);
   for (const param of CALLBACK_PARAMS) {
-    const value = url.searchParams.get(param);
-    if (value !== null && (typeof value !== "string" || !isRelativeUrl(value))) {
-      return NextResponse.json(
-        { error: `${param} must be a relative path` },
-        { status: 400 },
-      );
-    }
+    const rejected = rejectCallback(param, url.searchParams.get(param));
+    if (rejected) return rejected;
   }
   return null;
 }
 
-function rejectIfAdminHost(req: NextRequest): NextResponse | null {
-  if (!req.headers.get("x-store-slug")) {
+async function isStoreHost(req: NextRequest): Promise<boolean> {
+  if (req.headers.get("x-store-slug")) return true;
+  return (await registeredCustomDomain(req.headers)) !== null;
+}
+
+async function rejectIfAdminHost(req: NextRequest): Promise<NextResponse | null> {
+  if (!(await isStoreHost(req))) {
     const url = new URL(req.url);
     const authPath = url.pathname.replace(/^\/api\/auth/, "");
     if (CUSTOMER_ONLY_PATHS.some((p) => authPath.startsWith(p))) {
@@ -43,14 +57,24 @@ function rejectIfAdminHost(req: NextRequest): NextResponse | null {
   return null;
 }
 
+async function keepOnCustomDomain(req: NextRequest, res: Response): Promise<Response> {
+  const location = res.headers.get("location");
+  if (!location) return res;
+  const domain = await registeredCustomDomain(req.headers);
+  if (!domain) return res;
+  const headers = new Headers(res.headers);
+  headers.set("location", onCustomDomain(location, domain));
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 export async function GET(req: NextRequest) {
-  const bad = rejectIfBadCallback(req) ?? rejectIfAdminHost(req);
+  const bad = rejectIfBadCallback(req) ?? (await rejectIfAdminHost(req));
   if (bad) return bad;
-  return rawGET(req);
+  return keepOnCustomDomain(req, await rawGET(req));
 }
 
 export async function POST(req: NextRequest) {
-  const bad = rejectIfAdminHost(req);
+  const bad = await rejectIfAdminHost(req);
   if (bad) return bad;
   let body: Record<string, unknown> | null = null;
   try {
@@ -58,13 +82,8 @@ export async function POST(req: NextRequest) {
   } catch {}
   if (body) {
     for (const param of CALLBACK_PARAMS) {
-      const val = body[param];
-      if (val !== undefined && (typeof val !== "string" || !isRelativeUrl(val))) {
-        return NextResponse.json(
-          { error: `${param} must be a relative path` },
-          { status: 400 },
-        );
-      }
+      const rejected = rejectCallback(param, body[param]);
+      if (rejected) return rejected;
     }
   }
   return rawPOST(req);

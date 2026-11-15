@@ -1,5 +1,6 @@
 import { money } from "@/lib/format";
-import { ASSISTANT_FIXED_ERROR } from "../contract";
+import { minimumOrderMessage } from "@/lib/storefront/minimum-order";
+import { ASSISTANT_FIXED_ERROR, ASSISTANT_TOOL_NAMES, type AssistantToolName } from "../contract";
 
 export const CARD_TOOL_ERROR = ASSISTANT_FIXED_ERROR;
 
@@ -12,6 +13,13 @@ export type ProductCard = {
   priceLabel: string;
   imageUrl: string | null;
   mayBeUnavailable: boolean;
+  /** The shelf disables quick-add for "ask-store" items; the chat card does too. */
+  askStore: boolean;
+  /** The shopper's saved needs cannot be confirmed for it: the card says so and has no quick-add. */
+  cannotConfirm: boolean;
+  /** What the card's quick-add puts in the basket; null when the tool did not say. */
+  listingId: string | null;
+  variantId: string | null;
 };
 
 export type AddedCard = {
@@ -66,6 +74,21 @@ export type ChoiceCard = {
   options: ChoiceOption[];
 };
 
+export type ReviewLine = SummaryLine & { mayBeUnavailable: boolean };
+
+/** The handoff to normal checkout (#247). Information only: money moves on that page's Pay button. */
+export type ReviewCard = {
+  kind: "review";
+  key: string;
+  lines: ReviewLine[];
+  fulfillmentLabel: string;
+  rows: Array<{ label: string; value: string }>;
+  holdLabel: string;
+  bufferLabel: string;
+  problems: string[];
+  href: "/checkout";
+};
+
 export type SkeletonCard = { kind: "skeleton"; key: string };
 export type ToolErrorCard = { kind: "tool-error"; key: string; message: string };
 
@@ -75,6 +98,7 @@ export type AssistantCard =
   | MissingCard
   | SummaryCard
   | ChoiceCard
+  | ReviewCard
   | SkeletonCard
   | ToolErrorCard;
 
@@ -90,7 +114,8 @@ type Part = {
   data?: unknown;
 };
 
-const CART_TOOLS = new Set(["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"]);
+const SUPPORTED_TOOLS: ReadonlySet<string> = new Set(ASSISTANT_TOOL_NAMES);
+const CART_TOOLS = new Set<string>(["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"] satisfies readonly AssistantToolName[]);
 
 export function cardsFromParts(parts: readonly Part[], options?: { turnFailed?: boolean }): AssistantCard[] {
   const cards: AssistantCard[] = [];
@@ -98,7 +123,7 @@ export function cardsFromParts(parts: readonly Part[], options?: { turnFailed?: 
     const type = typeof part.type === "string" ? part.type : "";
     if (type === "data-step-limit" || type === "text" || type === "step-start") return;
     const tool = toolNameOf(part, type);
-    if (!tool) return;
+    if (!tool || !SUPPORTED_TOOLS.has(tool)) return;
     const callId = typeof part.toolCallId === "string" ? part.toolCallId : `part-${index}`;
     const state = typeof part.state === "string" ? part.state : "";
     if (state === "input-streaming" || state === "input-available") {
@@ -108,6 +133,7 @@ export function cardsFromParts(parts: readonly Part[], options?: { turnFailed?: 
       return;
     }
     if (state === "output-error") {
+      if (CART_TOOLS.has(tool)) return;
       cards.push({ kind: "tool-error", key: `${callId}:error`, message: CARD_TOOL_ERROR });
       return;
     }
@@ -145,7 +171,18 @@ function cardsForOutput(tool: string, callId: string, input: unknown, output: un
   if (tool === "add_to_cart") return addedCards(callId, output);
   if (tool === "offer_choices") return choiceCards(callId, output);
   if (tool === "get_cart_summary") return summaryCards(callId, output);
+  if (tool === "get_recipe") return recipeCards(callId, output);
+  if (tool === "prepare_checkout") return reviewCards(callId, output);
   return [];
+}
+
+function recipeCards(callId: string, output: unknown): AssistantCard[] {
+  const body = isRecord(output) ? output : {};
+  const items = [body.inStock, body.lowOrOut].flatMap((group) => (Array.isArray(group) ? group : []));
+  return items.flatMap((item, index) => {
+    const card = productFromSearch(item, `${callId}:product:${index}`);
+    return card ? [card] : [];
+  });
 }
 
 function searchCards(callId: string, input: unknown, output: unknown): AssistantCard[] {
@@ -176,6 +213,10 @@ function productFromSearch(item: unknown, key: string): ProductCard | null {
     priceLabel: money(item.priceCents),
     imageUrl,
     mayBeUnavailable: item.mayBeUnavailable === true,
+    askStore: item.badge === "ask-store",
+    cannotConfirm: item.cannotConfirm === true,
+    listingId: typeof item.listingId === "string" ? item.listingId : null,
+    variantId: typeof item.variantId === "string" ? item.variantId : null,
   };
 }
 
@@ -222,6 +263,10 @@ function productFromShow(card: unknown, key: string): ProductCard | null {
     priceLabel: money(cheapest.priceCents),
     imageUrl,
     mayBeUnavailable: card.mayBeUnavailable === true,
+    askStore: card.badge === "ask-store",
+    cannotConfirm: card.cannotConfirm === true,
+    listingId: typeof card.listingId === "string" ? card.listingId : null,
+    variantId: typeof cheapest.variantId === "string" ? cheapest.variantId : null,
   };
 }
 
@@ -344,8 +389,51 @@ function summaryCards(callId: string, output: unknown): AssistantCard[] {
     missingCents,
     missingLabel: money(missingCents),
     gapLabel: missingCents > 0
-      ? `${money(missingCents)} to reach the ${money(typeof body.minimumOrderCents === "number" ? body.minimumOrderCents : 0)} minimum order`
+      ? minimumOrderMessage(missingCents, typeof body.minimumOrderCents === "number" ? body.minimumOrderCents : 0)
       : null,
+  }];
+}
+
+function cents(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) ? value : 0;
+}
+
+function reviewCards(callId: string, output: unknown): AssistantCard[] {
+  const body = isRecord(output) ? output : null;
+  if (!body) return [];
+  if (body.ok !== true) return [{ kind: "missing", key: `${callId}:missing`, message: serverMessage(body) }];
+  const lines: ReviewLine[] = (Array.isArray(body.lines) ? body.lines : []).flatMap((line) => {
+    if (!isRecord(line) || typeof line.lineId !== "string" || typeof line.name !== "string") return [];
+    if (typeof line.qty !== "number" || typeof line.lineTotalCents !== "number") return [];
+    return [{
+      lineId: line.lineId,
+      name: line.name,
+      packLabel: typeof line.packLabel === "string" ? line.packLabel : "",
+      qty: line.qty,
+      lineTotalCents: line.lineTotalCents,
+      lineTotalLabel: money(line.lineTotalCents),
+      mayBeUnavailable: line.mayBeUnavailable === true,
+    }];
+  });
+  const fulfillment = isRecord(body.fulfillment) ? body.fulfillment : null;
+  return [{
+    kind: "review",
+    key: `${callId}:review`,
+    lines,
+    fulfillmentLabel: fulfillment && typeof fulfillment.slotLabel === "string"
+      ? `Pickup · ${fulfillment.slotLabel}`
+      : "Pickup or delivery: choose at checkout",
+    rows: [
+      { label: "Subtotal", value: money(cents(body.subtotalCents)) },
+      { label: "Service fee", value: money(cents(body.serviceFeeCents)) },
+      { label: "Tax", value: money(cents(body.taxCents)) },
+      { label: "Total", value: money(cents(body.totalCents)) },
+    ],
+    holdLabel: money(cents(body.holdCents)),
+    bufferLabel: money(cents(body.bufferCents)),
+    problems: (Array.isArray(body.problems) ? body.problems : []).filter((problem): problem is string => typeof problem === "string"),
+    // Never a link the tool output names: the handoff always goes to this store's checkout.
+    href: "/checkout",
   }];
 }
 

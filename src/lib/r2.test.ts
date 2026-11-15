@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@aws-sdk/client-s3", () => {
   const send = vi.fn();
@@ -128,6 +128,34 @@ describe("streamFromR2 key allowlist", () => {
     const { streamFromR2 } = await import("./r2");
     const result = await streamFromR2("catalog/nonexistent.jpg");
     expect(result).toBeNull();
+  });
+});
+
+describe("delivery proof keys", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("a delivery-proof key is refused by the catalog reader, and the proof reader refuses catalog keys", async () => {
+    __mockSend.mockResolvedValue({
+      Body: { transformToWebStream: () => new ReadableStream() },
+      ContentType: "image/jpeg",
+    });
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
+    const { deliveryProofKey, streamDeliveryProof, streamFromR2 } = await import("./r2");
+    const key = deliveryProofKey("cmorder123", 1762700000000);
+    expect(key).toMatch(/^delivery-proof\/cmorder123\/1762700000000-[a-f0-9]{16}\.jpg$/);
+    expect(deliveryProofKey("cmorder123", 1762700000000)).not.toBe(key);
+
+    expect(await streamFromR2(key)).toBeNull();
+    expect(await streamDeliveryProof("catalog/foo.jpg")).toBeNull();
+    expect(await streamDeliveryProof("delivery-proof/cmorder123/../x.jpg")).toBeNull();
+    expect(await streamDeliveryProof("delivery-proof/cmorder123/1762700000000.svg")).toBeNull();
+    expect(await streamDeliveryProof("delivery-proof/cmorder123/1762700000000.png")).toBeNull();
+    expect(__mockSend).not.toHaveBeenCalled();
+
+    expect(await streamDeliveryProof(key)).not.toBeNull();
+    expect(await streamDeliveryProof("delivery-proof/cmorder123/1762700000000.jpg")).not.toBeNull();
   });
 });
 

@@ -1,11 +1,93 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { findOrderByPaymentIntent } from "@/lib/db";
 import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
-import { markTerminalRefundFailure } from "@/lib/order/service";
+import { cancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "@/lib/order/service";
 import { applyProviderRefund, evaluateOrderRefundState } from "@/lib/order/refund-requests";
+import { CANCELLABLE_BEFORE_CAPTURE } from "@/lib/order/constants";
 import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
 import type { RefundResult } from "@/lib/stripe/types";
+import { parseInput } from "@/lib/security/parse-input";
+import { applyBillingEvent, isBillingEvent } from "@/lib/billing/service";
+import { applyDisputeEvent, isDisputeEvent } from "@/lib/disputes/service";
+
+const webhookEventSchema = z.looseObject({
+  type: z.string().min(1).max(200),
+  accountId: z.string().max(200),
+  refund: z.looseObject({
+    id: z.string().min(1).max(200),
+    status: z.string().min(1).max(40),
+    paymentIntentId: z.string().min(1).max(200),
+    reservationKey: z.string().max(200).optional(),
+  }).optional(),
+  eventId: z.string().max(200).optional(),
+  created: z.number().int().nonnegative().optional(),
+  subscription: z.looseObject({
+    id: z.string().min(1).max(200),
+    customerId: z.string().max(200),
+    status: z.string().max(40),
+    lookupKey: z.string().max(200).nullable(),
+    storeId: z.string().max(200).nullable(),
+    trialEnd: z.number().int().nullable(),
+    currentPeriodEnd: z.number().int().nullable(),
+    cancelAtPeriodEnd: z.boolean(),
+  }).optional(),
+  invoice: z.looseObject({
+    id: z.string().min(1).max(200),
+    customerId: z.string().max(200),
+    subscriptionId: z.string().max(200).nullable(),
+    storeId: z.string().max(200).nullable(),
+  }).optional(),
+  paymentIntent: z.looseObject({
+    id: z.string().min(1).max(200),
+    status: z.string().min(1).max(40),
+    cancellationReason: z.string().max(100).nullable(),
+  }).optional(),
+  dispute: z.looseObject({
+    id: z.string().min(1).max(200),
+    chargeId: z.string().min(1).max(200),
+    paymentIntentId: z.string().min(1).max(200).nullable(),
+    amountCents: z.number().int().nonnegative(),
+    currency: z.string().min(1).max(10),
+    reason: z.string().min(1).max(100),
+    status: z.string().min(1).max(40),
+    evidenceDueBy: z.number().int().nonnegative().nullable(),
+    livemode: z.boolean(),
+    feeCents: z.number().int(),
+  }).optional(),
+});
+
+/** Before capture the hold can end on Stripe's side; these orders follow it. */
+const PROVIDER_CANCELLABLE: readonly string[] = [...CANCELLABLE_BEFORE_CAPTURE, "CANCELLING"];
+
+/** Our own cancel echoes back here: a CANCELLED order stays a no-op, a CANCELLING one resumes. Returns false when Stripe should retry. */
+async function handlePaymentIntentCanceled(
+  paymentIntent: { id: string; cancellationReason: string | null },
+  eventId: string | null,
+): Promise<boolean> {
+  const order = await findOrderByPaymentIntent(paymentIntent.id);
+  console.log(JSON.stringify({
+    event: "payment_intent_canceled",
+    stripeEventId: eventId,
+    paymentIntentId: paymentIntent.id,
+    cancellationReason: paymentIntent.cancellationReason,
+    orderId: order?.id ?? null,
+    orderStatus: order?.status ?? null,
+  }));
+  if (!order) return true;
+  if (order.status === "CAPTURING") {
+    await reconcileStuckOrder(order.storeId, order.id);
+    return true;
+  }
+  if (!PROVIDER_CANCELLABLE.includes(order.status)) return true;
+  const result = await cancelOrder(order.storeId, order.id, {
+    action: "provider_canceled",
+    stripeEventId: eventId,
+    cancellationReason: paymentIntent.cancellationReason,
+  });
+  return result.ok || !result.retry;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +133,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const parsed = parseInput(webhookEventSchema, event);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: "Invalid webhook payload" }, { status: 400 });
+  }
+  const verified = parsed.data;
+
   const accountEventTypes = [
     "account.updated",
     "v1.account.updated",
@@ -58,23 +146,52 @@ export async function POST(req: NextRequest) {
     "v2.core.account[configuration.merchant].capability_status_updated",
     "v2.core.account.including.requirements.updated",
   ];
-  if (accountEventTypes.includes(event.type) && event.accountId) {
-    await updateStoreOnboardingStatus(event.accountId);
+  if (accountEventTypes.includes(verified.type) && verified.accountId) {
+    await updateStoreOnboardingStatus(verified.accountId);
   }
 
-  if (event.refund) {
+  if (isBillingEvent(verified)) {
+    try {
+      await applyBillingEvent(verified);
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ error: "Billing event could not be recorded" }, { status: 500 });
+    }
+  }
+
+  if (isDisputeEvent(verified)) {
+    try {
+      await applyDisputeEvent(verified);
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ error: "Dispute could not be recorded" }, { status: 500 });
+    }
+  }
+
+  if (verified.type === "payment_intent.canceled" && verified.paymentIntent) {
+    try {
+      if (!(await handlePaymentIntentCanceled(verified.paymentIntent, verified.eventId ?? null))) {
+        return NextResponse.json({ error: "Cancellation is still confirming with the bank" }, { status: 500 });
+      }
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ error: "Cancellation could not be recorded" }, { status: 500 });
+    }
+  }
+
+  if (verified.refund) {
     const provider = getStripeProvider();
     let refund: RefundResult;
     try {
-      refund = await provider.retrieveRefund(event.refund.id);
+      refund = await provider.retrieveRefund(verified.refund.id);
     } catch (err) {
       const code = (err as { code?: string }).code;
       if (code === "resource_missing") {
         refund = {
-          refundId: event.refund.id,
+          refundId: verified.refund.id,
           amountRefunded: 0,
-          status: event.refund.status,
-          ...(event.refund.reservationKey ? { reservationKey: event.refund.reservationKey } : {}),
+          status: verified.refund.status,
+          ...(verified.refund.reservationKey ? { reservationKey: verified.refund.reservationKey } : {}),
         };
       } else if (isRetryableProviderError(err)) {
         return NextResponse.json({ error: "Refund could not be read" }, { status: 500 });
@@ -82,18 +199,23 @@ export async function POST(req: NextRequest) {
         throw err;
       }
     }
-    await applyProviderRefund({ ...refund, paymentIntentId: event.refund.paymentIntentId });
-    const refundedOrder = await findOrderByPaymentIntent(event.refund.paymentIntentId);
-    if (refundedOrder) await evaluateOrderRefundState(refundedOrder.id);
-    if (refund.status === "failed" || refund.status === "canceled") {
-      const settled = await markTerminalRefundFailure({
-        paymentIntentId: event.refund.paymentIntentId,
-        refundId: refund.refundId,
-        refundStatus: refund.status,
-      });
-      if (!settled.ok && settled.retry) {
-        return NextResponse.json({ error: settled.error }, { status: 500 });
+    try {
+      await applyProviderRefund({ ...refund, paymentIntentId: verified.refund.paymentIntentId });
+      const refundedOrder = await findOrderByPaymentIntent(verified.refund.paymentIntentId);
+      if (refundedOrder) await evaluateOrderRefundState(refundedOrder.id);
+      if (refund.status === "failed" || refund.status === "canceled") {
+        const settled = await markTerminalRefundFailure({
+          paymentIntentId: verified.refund.paymentIntentId,
+          refundId: refund.refundId,
+          refundStatus: refund.status,
+        });
+        if (!settled.ok && settled.retry) {
+          return NextResponse.json({ error: settled.error }, { status: 500 });
+        }
       }
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ error: "Refund could not be recorded" }, { status: 500 });
     }
   }
 

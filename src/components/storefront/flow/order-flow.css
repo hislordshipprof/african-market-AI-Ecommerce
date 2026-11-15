@@ -54,7 +54,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   flex-shrink: 0;
 }
 .of-timeline small,
@@ -103,10 +103,10 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: var(--color-soft);
+  background: var(--color-raised);
   border: 1px solid var(--color-line);
   border-radius: 12px;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .of-swap {
   display: grid;
@@ -134,7 +134,7 @@
 .of-wrap textarea,
 .of-wrap select {
   width: 100%;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-line-strong);
   border-radius: 8px;
   padding: 12px;
   background: var(--color-surface);
@@ -172,7 +172,7 @@
   color: var(--color-muted);
 }
 .of-timeline [aria-current="step"] strong {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .of-proof {
   max-width: 320px;

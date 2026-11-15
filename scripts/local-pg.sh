@@ -9,8 +9,18 @@ set -euo pipefail
 PGBIN="${PGBIN:-/c/Program Files/PostgreSQL/18/bin}"
 LANE_PG_PORT="${LANE_PG_PORT:-5434}"
 LANE_PG_DATA="${LANE_PG_DATA:-$LOCALAPPDATA/african-markets-pg/data}"
-LANE_PG_DATA="$(cygpath -u "$LANE_PG_DATA" 2>/dev/null || echo "$LANE_PG_DATA")"
+# A path that is already a unix path does not need cygpath. Windows paths still convert.
+case "$LANE_PG_DATA" in
+  [A-Za-z]:* | *\\*) LANE_PG_DATA="$(cygpath -u "$LANE_PG_DATA" 2>/dev/null || echo "$LANE_PG_DATA")" ;;
+esac
 export PGPASSWORD=postgres
+
+# Two local-ci slots can get here at once: one initialises and starts the server, the other waits for it.
+# A mutex left by a killed run is taken anyway after a minute.
+STARTING="$LANE_PG_DATA.starting"
+mkdir -p "$(dirname "$LANE_PG_DATA")"
+for _ in $(seq 1 60); do mkdir "$STARTING" 2>/dev/null && break; sleep 1; done
+trap 'rmdir "$STARTING" 2>/dev/null || true' EXIT
 
 if [ ! -f "$LANE_PG_DATA/PG_VERSION" ]; then
   mkdir -p "$LANE_PG_DATA"

@@ -72,6 +72,7 @@ export function getOrderSwapRule(
 import type { FlowOrder } from "./contracts";
 import type { CartLine } from "../storefront/cart-store";
 import { cartItemKey } from "../storefront/cart-store";
+import { ADR_0021_SERVICE_FEE, serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
 /** Keep original line identity so issue keys remain stable after a swap. */
 export function effectiveOrderLines(order: FlowOrder): CartLine[] {
   return order.lines.flatMap((line) => {
@@ -92,6 +93,9 @@ export function effectiveOrderLines(order: FlowOrder): CartLine[] {
     return [{ ...line }];
   });
 }
+/** Demo quotes use the ADR-0021 defaults; real quotes read the platform settings. */
+export const DEMO_SERVICE_FEE: ServiceFeeSettings = ADR_0021_SERVICE_FEE;
+
 export function finalOrderAmounts(order: FlowOrder) {
   const lines = effectiveOrderLines(order);
   const subtotalCents = lines.reduce((sum, l) => sum + l.price * l.quantity, 0);
@@ -100,16 +104,18 @@ export function finalOrderAmounts(order: FlowOrder) {
       ? Math.min(1000, Math.round(subtotalCents * 0.1))
       : 0;
   const taxCents = Math.round((subtotalCents - discountCents) * 0.06);
+  const serviceFeeCentsCharged = serviceFeeCents(subtotalCents - discountCents, DEMO_SERVICE_FEE);
   const totalCents =
     subtotalCents -
     discountCents +
+    serviceFeeCentsCharged +
     taxCents +
     order.quote.deliveryFeeCents +
     order.quote.courierFeeCents +
     order.quote.tipCents;
-  return { subtotalCents, discountCents, taxCents, totalCents };
+  return { subtotalCents, discountCents, serviceFeeCents: serviceFeeCentsCharged, taxCents, totalCents };
 }
-/** Allocate net goods and tax by cumulative rounding; allocations sum exactly. */
+/** Allocate net goods, service fee and tax by cumulative rounding; allocations sum exactly. */
 export function orderIssueRefundCents(
   order: FlowOrder,
   lineKeys: readonly string[],
@@ -119,7 +125,7 @@ export function orderIssueRefundCents(
   let gross = 0,
     allocated = 0,
     total = 0;
-  const net = amounts.subtotalCents - amounts.discountCents + amounts.taxCents;
+  const net = amounts.subtotalCents - amounts.discountCents + amounts.serviceFeeCents + amounts.taxCents;
   for (const line of lines) {
     gross += line.price * line.quantity;
     const cumulative = amounts.subtotalCents

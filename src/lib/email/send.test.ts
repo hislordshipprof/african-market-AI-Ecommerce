@@ -27,14 +27,14 @@ describe("sendEmail (test double)", () => {
   });
 
   it("accumulates multiple emails", async () => {
-    await sendEmail({ to: "a@example.com", subject: "First", html: "" });
-    await sendEmail({ to: "b@example.com", subject: "Second", html: "" });
+    await sendEmail({ to: "a@example.com", subject: "First", html: "<p>First</p>" });
+    await sendEmail({ to: "b@example.com", subject: "Second", html: "<p>Second</p>" });
 
     expect(getTestSentEmails()).toHaveLength(2);
   });
 
   it("clearTestSentEmails resets the inbox", async () => {
-    await sendEmail({ to: "a@example.com", subject: "Test", html: "" });
+    await sendEmail({ to: "a@example.com", subject: "Test", html: "<p>Test</p>" });
     clearTestSentEmails();
     expect(getTestSentEmails()).toHaveLength(0);
   });
@@ -53,9 +53,30 @@ describe("createSender", () => {
     expect(sender).not.toBeInstanceOf(ResendSender);
   });
 
-  it("returns TestSender when CI=true without RESEND_API_KEY", () => {
-    const sender = createSender({ CI: "true", NODE_ENV: "production" });
-    expect(sender).not.toBeInstanceOf(ResendSender);
+  it("returns TestSender when CI=true without RESEND_API_KEY", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
+    try {
+      clearTestSentEmails();
+      const sender = createSender({ CI: "true", NODE_ENV: "production" });
+      expect(sender).not.toBeInstanceOf(ResendSender);
+      const result = await sender.send({
+        to: "ci-shopper@example.com",
+        subject: "Your sign-in link",
+        html: "<p>CI sink</p>",
+      });
+      expect(result.id).toMatch(/^test-/);
+      expect(getTestSentEmails()).toEqual([
+        {
+          to: "ci-shopper@example.com",
+          subject: "Your sign-in link",
+          html: "<p>CI sink</p>",
+        },
+      ]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      clearTestSentEmails();
+    }
   });
 
   it("returns TestSender in development without RESEND_API_KEY", () => {
@@ -138,6 +159,6 @@ describe("ResendSender", () => {
         subject: "Fail",
         html: "<p>Fail</p>",
       }),
-    ).rejects.toThrow(/Resend API error 500/);
+    ).rejects.toMatchObject({ status: 500, code: "http_500" });
   });
 });

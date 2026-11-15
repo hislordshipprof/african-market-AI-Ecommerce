@@ -21,11 +21,23 @@ import {
 
 export type { SwapRuleValue };
 
+export interface CartDeliverySnapshot {
+  line1: string | null;
+  line2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lat: number | null;
+  lng: number | null;
+  leaveAtDoor: boolean;
+}
+
 export interface CartWithLines {
   id: string;
   storeId: string;
   lines: CartLineView[];
   subtotalCents: number;
+  delivery: CartDeliverySnapshot;
 }
 
 export interface CartLineView {
@@ -40,10 +52,12 @@ export interface CartLineView {
     label: string;
     price: number;
     weightG: number;
-    listing: {
+      listing: {
       id: string;
       customName: string | null;
       maxPerOrder: number | null;
+      frozen: boolean;
+      perishable: boolean;
       masterProduct: { name: string; categoryId: string | null } | null;
     };
   };
@@ -181,6 +195,13 @@ async function customerIdForCartUser(storeId: string, userId: string): Promise<s
   return customer.id;
 }
 
+/** Integer cents: the sum of live variant price × quantity over the lines. */
+export function cartLineSubtotalCents(lines: ReadonlyArray<{ priceCents: number; qty: number }>): number {
+  let sum = 0;
+  for (const line of lines) sum += line.priceCents * line.qty;
+  return sum;
+}
+
 export interface AddLineOptions {
   source?: "manual" | "ai";
   /** Add up to the max and report the clamp. Storefront callers omit this and still throw. */
@@ -207,6 +228,7 @@ export interface AppliedAddLine {
     status: string | null;
     customName: string | null;
     maxPerOrder: number | null;
+    masterProduct: { name: string; imageUrl: string | null } | null;
   };
   variant: { id: string; label: string; price: number };
 }
@@ -238,7 +260,11 @@ export async function applyAddLine(
 ): Promise<ApplyAddLineResult> {
   const variant = await tx.listingVariant.findUnique({
     where: { id: variantId },
-    include: { listing: true },
+    include: {
+      listing: {
+        include: { masterProduct: { select: { name: true, imageUrl: true } } },
+      },
+    },
   });
   if (!variant || variant.listing.storeId !== storeId) {
     return { ok: false, code: "variant_not_found" };
@@ -270,6 +296,9 @@ export async function applyAddLine(
     status: variant.listing.status,
     customName: variant.listing.customName,
     maxPerOrder: variant.listing.maxPerOrder,
+    masterProduct: variant.listing.masterProduct
+      ? { name: variant.listing.masterProduct.name, imageUrl: variant.listing.masterProduct.imageUrl }
+      : null,
   };
   const variantView = { id: variant.id, label: variant.label, price: variant.price };
 
@@ -561,10 +590,12 @@ export async function getCartWithLines(
         label: line.variant.label,
         price: line.variant.price,
         weightG: line.variant.weightG,
-        listing: {
+          listing: {
           id: line.variant.listing.id,
           customName: line.variant.listing.customName,
           maxPerOrder: line.variant.listing.maxPerOrder,
+          frozen: line.variant.listing.frozen,
+          perishable: line.variant.listing.perishable,
           masterProduct: line.variant.listing.masterProduct
             ? {
                 name: line.variant.listing.masterProduct.name,
@@ -576,12 +607,26 @@ export async function getCartWithLines(
     };
   });
 
-  const subtotalCents = lines.reduce(
-    (sum, l) => sum + l.variant.price * l.qty,
-    0,
+  const subtotalCents = cartLineSubtotalCents(
+    lines.map((line) => ({ priceCents: line.variant.price, qty: line.qty })),
   );
 
-  return { id: cart.id, storeId: cart.storeId, lines, subtotalCents };
+  return {
+    id: cart.id,
+    storeId: cart.storeId,
+    lines,
+    subtotalCents,
+    delivery: {
+      line1: cart.deliveryLine1,
+      line2: cart.deliveryLine2,
+      city: cart.deliveryCity,
+      state: cart.deliveryState,
+      zip: cart.deliveryZip,
+      lat: cart.deliveryLat,
+      lng: cart.deliveryLng,
+      leaveAtDoor: cart.leaveAtDoor,
+    },
+  };
 }
 
 export async function checkMinimumOrder(
@@ -603,7 +648,7 @@ export async function checkMinimumOrder(
 
   const minimumCents = store?.minimumOrderCents ?? 0;
   const currentCents = cart
-    ? cart.lines.reduce((sum, l) => sum + l.variant.price * l.qty, 0)
+    ? cartLineSubtotalCents(cart.lines.map((l) => ({ priceCents: l.variant.price, qty: l.qty })))
     : 0;
 
   return {

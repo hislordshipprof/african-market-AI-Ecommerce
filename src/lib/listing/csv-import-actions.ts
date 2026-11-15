@@ -1,20 +1,21 @@
 "use server";
 
+import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
+import { parseInput, readFormField } from "../security/parse-input";
 import {
   generatePreview,
   commitImport,
   validateFileSize,
+  MAX_FILE_BYTES,
   type CsvPreviewResult,
   type CommitSelection,
   type CommitResult,
 } from "./csv-import";
-import type { Actor } from "./service";
+import { CsvImportRejection } from "./csv-import-error";
+import { readCsvUpload } from "./csv-upload";
+import { toActor } from "./service";
 import { revalidateStorefront } from "../storefront/cache";
-
-function toActor(user: { id: string; email: string }): Actor {
-  return { id: user.id, email: user.email };
-}
 
 export interface PreviewActionResult {
   error?: string;
@@ -25,17 +26,21 @@ export async function csvPreviewAction(
   formData: FormData,
 ): Promise<PreviewActionResult> {
   const session = await requireStoreOwner();
-  const file = formData.get("file") as File | null;
-
-  if (!file || file.size === 0) {
-    return { error: "Please select a CSV file." };
+  const file = readFormField(formData, "file");
+  const selected = parseInput(
+    z.custom<File>((value) => value instanceof File && value.size > 0),
+    file,
+  );
+  if (!selected.ok) return { error: "Please select a CSV file." };
+  const sized = parseInput(z.number().int().nonnegative().max(MAX_FILE_BYTES), selected.data.size);
+  if (!sized.ok) {
+    return { error: validateFileSize(selected.data.size) ?? "Please select a CSV file." };
   }
 
-  const sizeError = validateFileSize(file.size);
-  if (sizeError) return { error: sizeError };
-
-  const csvText = await file.text();
-  const preview = await generatePreview(session.store.id, csvText, session.user.id);
+  const bytes = new Uint8Array(await selected.data.arrayBuffer());
+  const decoded = readCsvUpload(bytes);
+  if ("error" in decoded) return { error: decoded.error };
+  const preview = await generatePreview(session.store.id, decoded.text, session.user.id);
 
   const hasContent =
     preview.matches.length > 0 ||
@@ -61,24 +66,38 @@ export async function csvCommitAction(
   selection: CommitSelection,
 ): Promise<CommitActionResult> {
   const session = await requireStoreOwner();
-
-  if (!importToken) {
+  const token = parseInput(z.string().min(1).max(200), importToken);
+  const selectionParsed = parseInput(z.strictObject({
+    matchedRows: z.array(z.number().int()).max(5001),
+    newItemRows: z.array(z.number().int()).max(5001),
+    ambiguousResolutions: z.array(z.strictObject({
+      row: z.number().int(),
+      masterProductId: z.string().min(1).max(200),
+    })).max(5001),
+    matchedIdentities: z.array(z.strictObject({
+      row: z.number().int(),
+      masterProductId: z.string().min(1).max(200),
+    })).max(5001).optional(),
+  }), selection);
+  if (!token.ok) {
     return { error: "Missing import token. Please upload the file again." };
+  }
+  if (!selectionParsed.ok) {
+    return { error: "No rows selected." };
   }
 
   let result: CommitResult;
   try {
     result = await commitImport(
       session.store.id,
-      importToken,
-      selection,
+      token.data,
+      selectionParsed.data,
       toActor(session.user),
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "";
-    const safe = /^(Import token|This import|No rows|No valid|All selected|Resolution for|Row \d)/.test(msg);
-    if (!safe) console.error("[csv-import] commit error:", e);
-    return { error: safe ? msg : "Import failed. Please try again." };
+    if (e instanceof CsvImportRejection) return { error: e.message };
+    console.error("[csv-import] commit error:", e);
+    return { error: "Import failed. Please try again." };
   }
 
   // Only a synchronous throw is caught here. Next applies queued tags after

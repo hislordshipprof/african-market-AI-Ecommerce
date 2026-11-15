@@ -10,10 +10,11 @@
 # .cursor/skills/supermatt/skills/<skill>/SKILL.md, since Cursor has no plugin slash commands.
 
 _AGENT_CLI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_REVIEW_ENGINE_OVERRIDE="${REVIEW_ENGINE:-}"
 # shellcheck disable=SC1091
 [ -f "$_AGENT_CLI_DIR/agent-engine.env" ] && . "$_AGENT_CLI_DIR/agent-engine.env"
 AGENT_ENGINE="${AGENT_ENGINE:-${ENGINE:-claude}}"
-REVIEW_ENGINE="${REVIEW_ENGINE:-$AGENT_ENGINE}"
+REVIEW_ENGINE="${_REVIEW_ENGINE_OVERRIDE:-${REVIEW_ENGINE:-$AGENT_ENGINE}}"
 
 # Resolve the Cursor CLI's bundled node + index.js (newest installed version) so long multi-line prompts
 # never pass through cmd.exe quoting.
@@ -73,15 +74,42 @@ agent_run() {
         -c model="${CODEX_REVIEW_MODEL:-gpt-6-astra}" -c model_reasoning_effort="${CODEX_REVIEW_EFFORT:-medium}" \
         -o "$log.last.md" "$(_spill_prompt "$(_cursor_prompt "$prompt")" "$role")" < /dev/null > "$log" 2>&1 ;;
     claude)
-      local flags=(--dangerously-skip-permissions --strict-mcp-config --output-format json)
-      case "$role" in
-        light)  flags+=(--model claude-sonnet-5-5 --effort medium) ;;
-        build|review|review2) flags+=(--effort high) ;;
-      esac
+      # Owner 2026-11-10: every role on Opus 5.5 at medium effort; never Fable unless the owner asks for it.
+      local flags=(--dangerously-skip-permissions --strict-mcp-config --output-format json
+        --model "${AGENT_CLAUDE_MODEL:-claude-opus-5-5}" --effort "${AGENT_CLAUDE_EFFORT:-medium}")
+      [ "$role" = ship ] && flags+=(--disallowedTools "Bash(gh pr merge:*)")
+      # A session started from the desktop app passes its own sign-in to child processes, so a headless run would
+      # bill the parent account instead of the chosen profile. Drop those variables when a profile is chosen.
+      local runner=(env)
+      if [ -n "${AGENT_CLAUDE_CONFIG_DIR:-}" ]; then
+        local v
+        for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
+          case "$v" in CLAUDE_CODE_DISABLE_BACKGROUND_TASKS) ;; CLAUDE_CODE_*|CLAUDE_AGENT_SDK_*|ANTHROPIC_*) runner+=(-u "$v") ;; esac
+        done
+      fi
+      # Reviews may run on a separate Claude profile. It has no supermatt plugin, so the slash skill is rewritten
+      # to the vendored copy, as for Cursor. Headless Claude exits when it ends a turn while a background subagent
+      # still runs, so reviews run with background tasks off.
+      # AGENT_CLAUDE_CONFIG_DIR puts every role on one Claude profile (owner 2026-11-07: the Ben profile for everything).
+      if [ -n "${AGENT_CLAUDE_CONFIG_DIR:-}" ]; then
+        [ -d "$AGENT_CLAUDE_CONFIG_DIR" ] || { echo "No Claude profile at $AGENT_CLAUDE_CONFIG_DIR" >&2; return 2; }
+        local -x CLAUDE_CONFIG_DIR="$AGENT_CLAUDE_CONFIG_DIR"
+        local -x CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+        prompt="$(_cursor_prompt "$prompt")"
+        [ "$role" = review ] || [ "$role" = review2 ] && [ -n "${REVIEW_CLAUDE_MODEL:-}" ] && flags+=(--model "$REVIEW_CLAUDE_MODEL")
+      elif [ "$role" = review ] || [ "$role" = review2 ]; then
+        local -x CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+        if [ -n "${REVIEW_CLAUDE_CONFIG_DIR:-}" ]; then
+          [ -d "$REVIEW_CLAUDE_CONFIG_DIR" ] || { echo "No Claude profile at $REVIEW_CLAUDE_CONFIG_DIR" >&2; return 2; }
+          local -x CLAUDE_CONFIG_DIR="$REVIEW_CLAUDE_CONFIG_DIR"
+          prompt="$(_cursor_prompt "$prompt")"
+        fi
+        [ -n "${REVIEW_CLAUDE_MODEL:-}" ] && flags+=(--model "$REVIEW_CLAUDE_MODEL")
+      fi
       if [ -n "$resume" ]; then
-        claude -p --resume "$resume" "$(_spill_prompt "$prompt" "$role")" "${flags[@]}" < /dev/null > "$log" 2>&1
+        "${runner[@]}" claude -p --resume "$resume" "$(_spill_prompt "$prompt" "$role")" "${flags[@]}" < /dev/null > "$log" 2>&1
       else
-        claude -p "$(_spill_prompt "$prompt" "$role")" "${flags[@]}" < /dev/null > "$log" 2>&1
+        "${runner[@]}" claude -p "$(_spill_prompt "$prompt" "$role")" "${flags[@]}" < /dev/null > "$log" 2>&1
       fi ;;
     cursor)
       local cmd node js model

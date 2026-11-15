@@ -47,6 +47,7 @@ function ProductPhoto({ src, name, category, sizes, priority }: {
   const [attempt, setAttempt] = useState(0);
   const Glyph = glyphs[category as keyof typeof glyphs] ?? Package;
   const retrySrc = attempt === 0 ? src : productImageRetrySrc(src);
+  // Cutouts are marked by path; if they ever move to R2 this needs a metadata flag instead (#103).
   return <div className="sf-product-image" data-image-kind={src?.startsWith("/images/products/") ? "cutout" : "photo"}>
     {src && attempt < 2 && retrySrc ? <Image
       key={attempt} src={retrySrc} alt={name} fill sizes={sizes} preload={priority}
@@ -54,7 +55,7 @@ function ProductPhoto({ src, name, category, sizes, priority }: {
     /> : src ? <div className="sf-product-fallback" role="img" aria-label={"Photo temporarily unavailable for " + name}>
       <ImageOff size={28} aria-hidden /><small>Photo unavailable</small>
     </div> : <div className="sf-product-fallback" data-testid="designed-image-fallback" role="img" aria-label={name + " - product illustration"}>
-      <Glyph size={28} aria-hidden /><span aria-hidden>{name.charAt(0).toUpperCase()}</span>
+      <Glyph size={28} strokeWidth={1.75} aria-hidden /><span aria-hidden>{name}</span>
     </div>}
   </div>;
 }

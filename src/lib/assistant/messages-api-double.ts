@@ -119,6 +119,15 @@ export function judgeMessagesRequest(args: {
       message: "unknown model",
     };
   }
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  const dynamicSearch = tools.some((item) => isRecord(item) && typeof item.type === "string" && /^web_(search|fetch)_2026/.test(item.type));
+  if (dynamicSearch && body.model === "claude-haiku-5-5") {
+    return {
+      status: 400,
+      errorType: "invalid_request_error",
+      message: "this web tool version is not supported on claude-haiku-5-5; use web_search_20250305",
+    };
+  }
   if (
     body.temperature !== undefined ||
     body.top_p !== undefined ||
@@ -201,7 +210,56 @@ export function judgeMessagesRequest(args: {
       }
     }
   }
+  const media = judgeMedia(body);
+  if (media) return media;
   return judgeToolHistory(body);
+}
+
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+function judgeMedia(body: Record<string, unknown>): MessagesVerdict | null {
+  if (!Array.isArray(body.messages)) return null;
+  for (const message of body.messages) {
+    if (!isRecord(message)) continue;
+    for (const block of contentBlocks(message.content)) {
+      if (block.type === "image" && isRecord(block.source) && block.source.type === "base64") {
+        const mediaType = typeof block.source.media_type === "string" ? block.source.media_type : "";
+        const data = typeof block.source.data === "string" ? block.source.data : "";
+        if (!IMAGE_TYPES.has(mediaType)) {
+          return { status: 400, errorType: "invalid_request_error", message: "unsupported image media_type" };
+        }
+        const bytes = strictBase64(data);
+        if (!bytes) return { status: 400, errorType: "invalid_request_error", message: "image base64 does not decode" };
+        if (!imageMagic(bytes, mediaType)) {
+          return { status: 400, errorType: "invalid_request_error", message: "Image does not match the provided media type" };
+        }
+      }
+      if (block.type === "document" && isRecord(block.source) && block.source.type === "base64") {
+        if (block.source.media_type !== "application/pdf") {
+          return { status: 400, errorType: "invalid_request_error", message: "document media_type must be application/pdf" };
+        }
+        if (!strictBase64(typeof block.source.data === "string" ? block.source.data : "")) {
+          return { status: 400, errorType: "invalid_request_error", message: "document base64 does not decode" };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function strictBase64(data: string): Buffer | null {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(data) || data.length % 4 !== 0) return null;
+  const bytes = Buffer.from(data, "base64");
+  if (bytes.toString("base64") !== data) return null;
+  return bytes;
+}
+
+function imageMagic(bytes: Buffer, mediaType: string): boolean {
+  if (mediaType === "image/jpeg") return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (mediaType === "image/png") return bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if (mediaType === "image/gif") return bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a";
+  if (mediaType === "image/webp") return bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+  return false;
 }
 
 function contentBlocks(content: unknown): Array<Record<string, unknown>> {
@@ -209,15 +267,12 @@ function contentBlocks(content: unknown): Array<Record<string, unknown>> {
   return content.filter(isRecord);
 }
 
-/** Anthropic rejects orphaned, mismatched, duplicate, or undeclared tool calls. */
+/**
+ * Pairing still has to hold. A later file turn drops cart tools from the request,
+ * so an earlier add_to_cart block is history, not an offer to call that tool again.
+ */
 function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null {
   if (!Array.isArray(body.messages)) return null;
-  const declared = new Set<string>();
-  if (Array.isArray(body.tools)) {
-    for (const tool of body.tools) {
-      if (isRecord(tool) && typeof tool.name === "string") declared.add(tool.name);
-    }
-  }
   const seen = new Set<string>();
   let pending = new Map<string, string>();
   for (const message of body.messages) {
@@ -241,18 +296,18 @@ function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null
             message: "tool_use requires id and name",
           };
         }
+        if (!/^[a-zA-Z0-9_-]+$/.test(block.id) || block.id.startsWith("srvtoolu_")) {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "tool_use id must match ^[a-zA-Z0-9_-]+$",
+          };
+        }
         if (seen.has(block.id)) {
           return {
             status: 400,
             errorType: "invalid_request_error",
             message: "duplicate tool_use id",
-          };
-        }
-        if (declared.size > 0 && !declared.has(block.name)) {
-          return {
-            status: 400,
-            errorType: "invalid_request_error",
-            message: "undeclared tool",
           };
         }
         seen.add(block.id);
@@ -386,10 +441,13 @@ export function createMessagesApiDouble(expectedKey: string): MessagesApiDouble 
 }
 
 export interface FakeAnthropicStep {
-  kind: "text" | "tool" | "error";
+  /** pause: the web search blocks only, ending in pause_turn (non-streaming only). */
+  kind: "text" | "tool" | "error" | "pause";
   text?: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  /** Server-side web search blocks sent before the tool call (non-streaming only). */
+  webSearch?: { query: string; results: Array<{ url: string; title: string }> };
   inputTokens?: number;
   cacheWriteTokens?: number;
   cacheReadTokens?: number;
@@ -412,6 +470,14 @@ function usageOf(step: FakeAnthropicStep) {
     cache_read_input_tokens: step.cacheReadTokens ?? 0,
     output_tokens: step.outputTokens ?? 4,
   };
+}
+
+/** Two deltas, cut inside the first dollar amount so the adapter sees a price split across deltas. */
+function splitText(text: string): string[] {
+  if (text.length < 2) return [text];
+  const dollar = text.indexOf("$");
+  const cut = dollar >= 0 && dollar + 2 < text.length ? dollar + 2 : Math.floor(text.length / 2);
+  return [text.slice(0, cut), text.slice(cut)];
 }
 
 function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_0"): unknown[] {
@@ -441,16 +507,25 @@ function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_
   if (step.kind === "tool") {
     const name = step.toolName ?? "ping";
     const input = JSON.stringify(step.toolInput ?? {});
+    const preamble = step.text
+      ? [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: step.text } },
+          { type: "content_block_stop", index: 0 },
+        ]
+      : [];
+    const toolIndex = step.text ? 1 : 0;
     return [
       start,
       { type: "ping" },
+      ...preamble,
       {
         type: "content_block_start",
-        index: 0,
+        index: toolIndex,
         content_block: { type: "tool_use", id: toolId, name },
       },
-      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: input } },
-      { type: "content_block_stop", index: 0 },
+      { type: "content_block_delta", index: toolIndex, delta: { type: "input_json_delta", partial_json: input } },
+      { type: "content_block_stop", index: toolIndex },
       {
         type: "message_delta",
         delta: { stop_reason: "tool_use", stop_sequence: null },
@@ -463,7 +538,9 @@ function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_
     start,
     { type: "ping" },
     { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: step.text ?? "ok" } },
+    ...splitText(step.text ?? "ok").map((text) => (
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }
+    )),
     { type: "content_block_stop", index: 0 },
     {
       type: "message_delta",
@@ -520,7 +597,75 @@ export function createFakeAnthropicFetch(options?: {
         headers: { "content-type": "text/event-stream" },
       });
     }
+    if (step.kind === "error") {
+      return Response.json(
+        {
+          type: "error",
+          error: { type: "overloaded_error", message: "Overloaded" },
+          request_id: "req_fake_step",
+        },
+        { status: 529, headers: { "request-id": "req_fake_step" } },
+      );
+    }
     const usage = usageOf(step);
+    if (step.kind === "tool" || step.kind === "pause") {
+      const content: Array<Record<string, unknown>> = [];
+      if (step.webSearch) {
+        const declared = (Array.isArray(body?.tools) ? body.tools : []).some(
+          (item) => isRecord(item) && item.name === "web_search",
+        );
+        if (!declared) {
+          return Response.json(
+            errorBody({ status: 400, errorType: "invalid_request_error", message: "web_search is not declared" }),
+            { status: 400 },
+          );
+        }
+        content.push(
+          { type: "server_tool_use", id: `srv${toolId}`, name: "web_search", input: { query: step.webSearch.query } },
+          {
+            type: "web_search_tool_result",
+            tool_use_id: `srv${toolId}`,
+            content: step.webSearch.results.map((result) => ({
+              type: "web_search_result",
+              url: result.url,
+              title: result.title,
+              encrypted_content: "fake",
+              page_age: null,
+            })),
+          },
+        );
+      }
+      if (step.text) content.push({ type: "text", text: step.text });
+      const searchUsage = step.webSearch ? { ...usage, server_tool_use: { web_search_requests: 1 } } : usage;
+      if (step.kind === "pause") {
+        return Response.json({
+          id: "msg_fake",
+          type: "message",
+          role: "assistant",
+          model,
+          content,
+          stop_reason: "pause_turn",
+          stop_sequence: null,
+          usage: searchUsage,
+        });
+      }
+      content.push({
+        type: "tool_use",
+        id: toolId,
+        name: step.toolName ?? "ping",
+        input: step.toolInput ?? {},
+      });
+      return Response.json({
+        id: "msg_fake",
+        type: "message",
+        role: "assistant",
+        model,
+        content,
+        stop_reason: "tool_use",
+        stop_sequence: null,
+        usage: searchUsage,
+      });
+    }
     return Response.json({
       ...messagesSuccessBody(model, step.text ?? "ok"),
       usage,

@@ -5,7 +5,7 @@ vi.mock("next/cache", () => ({
   revalidateTag: () => {},
 }));
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { runtimeDatabaseUrl } from "../env";
@@ -31,7 +31,7 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
   let ambigId = "";
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     const storeA = await raw.store.create({
       data: { slug: `ph-a-${RUN}`, name: `Placeholder A ${RUN}`, themePreset: "palm-and-shea" },
@@ -312,16 +312,12 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
     const name = `Once ${RUN}`;
     const preview = await generatePreview(storeAId, `name,price\n${name},1.50\n`, userId);
     const selection = { matchedRows: [] as number[], newItemRows: [2], ambiguousResolutions: [] as Array<{ row: number; masterProductId: string }> };
-    const settled = await Promise.allSettled([
+    const settled = await Promise.all([
       commitImport(storeAId, preview.importToken, selection, actor),
       commitImport(storeAId, preview.importToken, selection, actor),
     ]);
-    const ok = settled.filter((row) => row.status === "fulfilled");
-    const bad = settled.filter((row) => row.status === "rejected");
-    expect(ok).toHaveLength(1);
-    expect(bad).toHaveLength(1);
-    expect((bad[0] as PromiseRejectedResult).reason.message).toBe("This import has already been committed.");
-    expect((ok[0] as PromiseFulfilledResult<{ needsWeightCount: number }>).value.needsWeightCount).toBe(1);
+    expect(settled[0]).toEqual(settled[1]);
+    expect(settled[0].needsWeightCount).toBe(1);
     const listings = await storeScoped(storeAId).listing.findMany({
       where: { customName: name },
       include: { variants: true },

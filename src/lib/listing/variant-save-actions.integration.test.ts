@@ -28,32 +28,15 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { createListing } from "./service";
 import { updateListingAction } from "./actions";
 import { storefrontTag } from "../storefront/cache";
+import { authPost, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `v221-act-${Date.now().toString(36)}`;
 const password = "VariantSave-123!";
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
 
 async function signUp(email: string, name: string): Promise<void> {
   const res = await authPost("/sign-up/email", { email, password, name });
@@ -279,7 +262,7 @@ describe.skipIf(!hasDb)("listing save actions (real auth, lane DB)", () => {
     const result = await updateListingAction(saveForm(listingId, listingName, [
       { id: variantId, label: "1kg", price: 950, weightG: 1200 },
     ]));
-    expect(result).toEqual({ success: true, id: listingId });
+    expect(result).toMatchObject({ success: true, id: listingId });
     const row = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: variantId } });
     expect(row).toMatchObject({ id: variantId, price: 950, weightG: 1200 });
     expect(revalidated).toEqual([[storefrontTag(storeAId), { expire: 0 }]]);

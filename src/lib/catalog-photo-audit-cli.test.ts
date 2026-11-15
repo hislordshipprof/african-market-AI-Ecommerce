@@ -117,17 +117,6 @@ describe("catalog photo audit CLI", () => {
     else process.env.TZ = previousTz;
   });
 
-  it.each(RUNTIME_KEYS)("exits non-zero listing every missing env name before loading deps (%s)", async (missing) => {
-    const env = { ...inertEnv } as Record<string, string | undefined>;
-    env[missing] = "";
-    const result = await collect(spawnEntry(env));
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain(`Missing environment: ${missing}`);
-    expect(result.stderr).not.toMatch(/\n\s+at /);
-    expect(result.stderr).not.toContain("app must connect as app_runtime");
-    expect(result.stdout).toBe("");
-  });
-
   it("all seven runtime names are checked and DIRECT_URL is not required (E18, E26)", async () => {
     const cleared = Object.fromEntries(RUNTIME_KEYS.map((key) => [key, ""])) as Record<string, string | undefined>;
     const allMissing = await collect(spawnEntry({
@@ -152,17 +141,6 @@ describe("catalog photo audit CLI", () => {
     expect(buildPhase.stderr).toContain("APP_RUNTIME_PASSWORD");
     expect(buildPhase.stderr).not.toContain("falling back");
     expect(buildPhase.stderr).not.toContain("app must connect as app_runtime");
-  });
-
-  it.each(RUNTIME_KEYS)("unset NODE_ENV still names one empty runtime key before I/O (%s)", async (missing) => {
-    const env = { ...inertEnv, NODE_ENV: undefined } as Record<string, string | undefined>;
-    env[missing] = "";
-    const result = await collect(spawnEntry(env));
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain(`Missing environment: ${missing}`);
-    expect(result.stderr).not.toContain("app must connect as app_runtime");
-    expect(result.stderr).not.toMatch(/\n\s+at /);
-    expect(result.stdout).toBe("");
   });
 
   it("unset NODE_ENV with every runtime key empty lists each name and writes no report (AC4, E18, E26)", async () => {

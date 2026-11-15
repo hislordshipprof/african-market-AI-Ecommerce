@@ -32,6 +32,7 @@ interface Member {
   name: string;
   email: string;
   role: string;
+  readOnly: boolean;
 }
 
 interface Invite {
@@ -47,6 +48,8 @@ interface Props {
   currentUserId: string;
   members: Member[];
   invites: Invite[];
+  /** Staff seats on the plan; null is unlimited. */
+  staffSeats: number | null;
 }
 
 export function TeamManagement({
@@ -55,7 +58,10 @@ export function TeamManagement({
   currentUserId,
   members,
   invites,
+  staffSeats,
 }: Props) {
+  const seatsUsed = members.filter((m) => m.role !== "owner").length + invites.filter((i) => i.role === "staff").length;
+  const seatsFull = staffSeats !== null && seatsUsed >= staffSeats;
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -118,10 +124,21 @@ export function TeamManagement({
                 <CardTitle className="text-base">Invite a team member</CardTitle>
               </div>
               <CardDescription>
-                Send an invitation to join this store
+                {staffSeats === null
+                  ? "Send an invitation to join this store"
+                  : `${Math.min(seatsUsed, staffSeats)} of ${staffSeats} staff seats used on the Starter plan`}
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {seatsFull ? (
+                <p className="text-sm text-foreground">
+                  The Starter plan includes the owner and {staffSeats} staff.{" "}
+                  <Link href={`/store-admin/plan?store=${storeParam}`} className="font-medium text-primary underline underline-offset-4">
+                    Upgrade to Pro
+                  </Link>{" "}
+                  for unlimited staff, or remove someone to free a seat.
+                </p>
+              ) : (
               <form
                 onSubmit={handleInvite}
                 className="flex flex-col gap-4 sm:flex-row sm:items-end"
@@ -143,6 +160,7 @@ export function TeamManagement({
                   {isPending ? "Sending..." : "Send invite"}
                 </Button>
               </form>
+              )}
             </CardContent>
           </Card>
 
@@ -174,6 +192,7 @@ export function TeamManagement({
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
+                      {member.readOnly && <Badge variant="outline">Read-only</Badge>}
                       <Badge variant="secondary">{member.role}</Badge>
                       {member.userId !== currentUserId && (
                         <Button

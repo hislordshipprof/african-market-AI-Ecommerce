@@ -38,7 +38,8 @@ export function replaceRecoveredTurn(messages: UIMessage[], clientId: string, sy
   return [...messages.slice(0, index + 1), synthetic, ...after];
 }
 
-export function replyStatus(message: UIMessage): "complete" | "failed" | null {
+/** The stored status of an assistant reply. Shared by the replay path and the shown-message reader. */
+export function replyStatus(message: { metadata?: unknown }): "complete" | "failed" | null {
   const meta = message.metadata;
   if (!meta || typeof meta !== "object") return null;
   const status = (meta as { status?: unknown }).status;

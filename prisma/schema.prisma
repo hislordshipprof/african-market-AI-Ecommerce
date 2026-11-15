@@ -7,49 +7,124 @@ datasource db {
 }
 
 model Store {
-  id                   String   @id @default(cuid())
-  slug                 String   @unique
-  name                 String
-  logoUrl              String?  @map("logo_url")
-  brandColor           String?  @map("brand_color")
-  themePreset          String   @default("palm-and-shea") @map("theme_preset")
-  status               String   @default("active")
-  hours                Json?
-  timezone             String   @default("America/New_York")
-  prepTimeMinutes      Int      @default(30) @map("prep_time_minutes")
-  deliveryRadiusMi     Decimal  @default(8) @map("delivery_radius_mi")
-  minimumOrderCents    Int      @default(3500) @map("minimum_order_cents")
-  pickupEnabled        Boolean  @default(false) @map("pickup_enabled")
-  autoAcceptOrders     Boolean  @default(false) @map("auto_accept_orders")
-  autoRefundLimitCents    Int      @default(2500) @map("auto_refund_limit_cents")
-  stripeAccountId        String?  @unique @map("stripe_account_id")
-  stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  id                        String   @id @default(cuid())
+  slug                      String   @unique
+  name                      String
+  customDomain              String?  @unique @map("custom_domain")
+  logoUrl                   String?  @map("logo_url")
+  brandColor                String?  @map("brand_color")
+  themePreset               String   @default("palm-and-shea") @map("theme_preset")
+  status                    String   @default("active")
+  hours                     Json?
+  timezone                  String   @default("America/New_York")
+  prepTimeMinutes           Int      @default(30) @map("prep_time_minutes")
+  deliveryRadiusMi          Decimal  @default(8) @map("delivery_radius_mi")
+  storeDeliveryEnabled      Boolean  @default(false) @map("store_delivery_enabled")
+  storeDeliveryFeeCents     Int      @default(0) @map("store_delivery_fee_cents")
+  /// Scheduled slot settings per fulfillment (#565); shape in src/lib/order/slot-schedule.ts.
+  pickupSlotSettings        Json?    @map("pickup_slot_settings")
+  storeDeliverySlotSettings Json?    @map("store_delivery_slot_settings")
+  addressLine1              String?  @map("address_line1")
+  addressLine2              String?  @map("address_line2")
+  city                      String?
+  state                     String?
+  zip                       String?
+  /// Who collects sales tax on this store's orders (ADR-0008): "platform" (marketplace facilitator) or "store".
+  taxLiableParty            String   @default("platform") @map("tax_liable_party")
+  /// E.164. The courier's pickup contact; Uber Direct will not book without it (#527).
+  phone                     String?
+  lat                       Float?
+  lng                       Float?
+  minimumOrderCents         Int      @default(3500) @map("minimum_order_cents")
+  pickupEnabled             Boolean  @default(false) @map("pickup_enabled")
+  autoAcceptOrders          Boolean  @default(false) @map("auto_accept_orders")
+  autoRefundLimitCents      Int      @default(2500) @map("auto_refund_limit_cents")
+  supportSlaMinutes         Int      @default(30) @map("support_sla_minutes")
+  digestHour                Int      @default(20) @map("digest_hour")
+  /// Reorder suggestions (#551): days from order to shelf, and days the order should last after that.
+  reorderLeadDays           Int      @default(7) @map("reorder_lead_days")
+  reorderCoverDays          Int      @default(14) @map("reorder_cover_days")
+  stripeAccountId           String?  @unique @map("stripe_account_id")
+  stripeOnboardingStatus    String   @default("not_started") @map("stripe_onboarding_status")
+  /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
+  doordashStoreId           String?  @unique @map("doordash_store_id")
+  /// Uber Direct organization id, set once the platform registers the store (#139).
+  uberLocationId            String?  @unique @map("uber_location_id")
+  /// Why the last Uber Direct registration failed; set means the store needs a retry (#139).
+  uberRegistrationError     String?  @map("uber_registration_error")
+  /// Why the last DoorDash Drive registration failed; set means the store needs a retry (#526).
+  doordashRegistrationError String?  @map("doordash_registration_error")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
 
-  ownerName            String?  @map("owner_name")
-  ownerStory           String?  @map("owner_story")
-  ownerPhotoUrl        String?  @map("owner_photo_url")
-  neighborhood         String?
-  deliveryInfo         String?  @map("delivery_info")
+  ownerName     String?  @map("owner_name")
+  ownerStory    String?  @map("owner_story")
+  ownerPhotoUrl String?  @map("owner_photo_url")
+  neighborhood  String?
+  deliveryInfo  String?  @map("delivery_info")
+  /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on; a platform admin can override (#450).
+  listed        Boolean  @default(false)
+  listingBlurb  String?  @map("listing_blurb") @db.VarChar(160)
+  /// Up to 3 directory cuisine tags (src/lib/directory/cuisine.ts, #450).
+  cuisineTags   String[] @default([]) @map("cuisine_tags")
 
-  rlsFixtures  RlsTestFixture[]
-  auditLogs    AuditLog[]
-  memberships  StoreMembership[]
-  invites      StoreInvite[]
-  listings     Listing[]
-  stockEvents  StockEvent[]
-  banners      StoreBanner[]
-  collections  StoreCollection[]
-  carts        Cart[]
-  customers    Customer[]
-  orders          Order[]
-  refundRequests  RefundRequest[]
-  listingImports  ListingImport[]
-  aiConversations AiConversation[]
-  aiActions       AiAction[]
+  rlsFixtures           RlsTestFixture[]
+  auditLogs             AuditLog[]
+  memberships           StoreMembership[]
+  invites               StoreInvite[]
+  listings              Listing[]
+  listingAttributes     ListingAttributes[]
+  listingIngredients    ListingIngredient[]
+  stockEvents           StockEvent[]
+  banners               StoreBanner[]
+  collections           StoreCollection[]
+  carts                 Cart[]
+  customers             Customer[]
+  orders                Order[]
+  coupons               StoreCoupon[]
+  deliveries            Delivery[]
+  refundRequests        RefundRequest[]
+  paymentDisputes       PaymentDispute[]
+  issueReports          IssueReport[]
+  substitutionRequests  SubstitutionRequest[]
+  listingImports        ListingImport[]
+  aiConversations       AiConversation[]
+  aiActions             AiAction[]
   assistantUndoReceipts AssistantUndoReceipt[]
-  guestBrowserCarts GuestBrowserCart[]
+  guestBrowserCarts     GuestBrowserCart[]
+  paymentIntentReleases PaymentIntentRelease[]
+  copilotConversations  CopilotConversation[]
+  aiReviewFlags         AiReviewFlag[]
+  copilotClientMessages CopilotClientMessage[]
+  stockProposals        StockProposal[]
+  copilotAlerts         CopilotAlert[]
+  copilotDigests        CopilotDigest[]
+  copilotWeeklyReports  CopilotWeeklyReport[]
+  ownerReports          OwnerReport[]
+  ownerReportItems      OwnerReportItem[]
+  listingDrafts         ListingDraft[]
+  productProposals      ProductProposal[]
+  reorderLists          ReorderList[]
+  reorderListItems      ReorderListItem[]
+  notificationLogs      NotificationLog[]
+  deliveryEvents        DeliveryEvent[]
+  courierIncidentNotes  CourierIncidentNote[]
+  pushSubscriptions     PushSubscription[]
+  orderPushSubscriptions OrderPushSubscription[]
+  supportThreads        SupportThread[]
+  supportMessages       SupportMessage[]
+  subscription          StoreSubscription?
+  billingEvents         StripeBillingEvent[]
+  assistantChatMonths   AssistantChatMonth[]
+  ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  application           StoreApplication?
+  whatsAppNumber        StoreWhatsAppNumber?
+  whatsAppOptOuts       WhatsAppOptOut[]
+  whatsAppShopperCarts  WhatsAppShopperCart[]
+  whatsAppCheckoutLinks WhatsAppCheckoutLink[]
+  driverRoutes          DriverRoute[]
+  pickBatches           PickBatch[]
+  notifiedStoreRequests DirectoryStoreRequest[]
 
   @@map("stores")
 }
@@ -70,26 +145,44 @@ model RlsTestFixture {
 }
 
 model User {
-  id               String    @id
+  id               String   @id
   name             String
-  email            String    @unique
-  emailVerified    Boolean   @default(false) @map("email_verified")
+  email            String   @unique
+  emailVerified    Boolean  @default(false) @map("email_verified")
   image            String?
-  role             String    @default("customer")
-  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  role             String   @default("customer")
+  twoFactorEnabled Boolean  @default(false) @map("two_factor_enabled")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  sessions    Session[]
-  accounts    Account[]
-  twoFactor   TwoFactor[]
-  auditLogs   AuditLog[]
-  memberships StoreMembership[]
-  invitesSent StoreInvite[]
-stockEvents    StockEvent[]
-  customers      Customer[]
-  carts          Cart[]
-  listingImports ListingImport[]
+  sessions                Session[]
+  accounts                Account[]
+  twoFactor               TwoFactor[]
+  auditLogs               AuditLog[]
+  courierIncidentNotes    CourierIncidentNote[]
+  memberships             StoreMembership[]
+  invitesSent             StoreInvite[]
+  stockEvents             StockEvent[]
+  customers               Customer[]
+  carts                   Cart[]
+  listingImports          ListingImport[]
+  platformCustomerProfile PlatformCustomerProfile?
+  customerAddresses       CustomerAddress[]
+  cardSaveConsents        CardSaveConsent[]
+  pushSubscriptions       PushSubscription[]
+  supportMessages         SupportMessage[]
+  copilotConversations    CopilotConversation[]
+  aiReviewFlags           AiReviewFlag[]
+  stockProposalDecisions  StockProposal[]          @relation("StockProposalDecision")
+  copilotAlertResolutions CopilotAlert[]           @relation("CopilotAlertResolution")
+  ownerReports            OwnerReport[]            @relation("OwnerReportActor")
+  ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
+  listingDraftsCreated    ListingDraft[]           @relation("ListingDraftCreator")
+  listingDraftsPublished  ListingDraft[]           @relation("ListingDraftPublisher")
+  productProposals        ProductProposal[]        @relation("ProductProposalProposer")
+  productProposalReviews  ProductProposal[]        @relation("ProductProposalReviewer")
+  storeCouponsCreated     StoreCoupon[]
+  reorderLists            ReorderList[]            @relation("ReorderListSaver")
 
   @@map("users")
 }
@@ -146,13 +239,13 @@ model Verification {
 }
 
 model TwoFactor {
-  id                     String    @id
-  secret                 String
-  backupCodes            String    @map("backup_codes")
-  userId                 String    @map("user_id")
-  verified               Boolean   @default(false)
-  failedVerificationCount Int      @default(0) @map("failed_verification_count")
-  lockedUntil            DateTime? @map("locked_until")
+  id                      String    @id
+  secret                  String
+  backupCodes             String    @map("backup_codes")
+  userId                  String    @map("user_id")
+  verified                Boolean   @default(false)
+  failedVerificationCount Int       @default(0) @map("failed_verification_count")
+  lockedUntil             DateTime? @map("locked_until")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -161,12 +254,96 @@ model TwoFactor {
 }
 
 model RateLimit {
-  id        String   @id @default(cuid())
-  key       String   @unique
-  count     Int
+  id          String @id @default(cuid())
+  key         String @unique
+  count       Int
   lastRequest BigInt @map("last_request")
 
   @@map("rate_limits")
+}
+
+/// File-turn counter for the shopper assistant. Not store-owned: the key is
+/// `assistant:files:cart:<cartId>` after the cart is resolved in that store.
+/// Better Auth prunes `rate_limits` after 60 seconds, so this hour-long counter
+/// cannot live there.
+model AssistantFileTurn {
+  id   String @id @default(cuid())
+  key  String
+  atMs BigInt @map("at_ms")
+
+  @@index([key, atMs])
+  @@map("assistant_file_turns")
+}
+
+/// Platform counters. Not store-owned: no store_id and no RLS, same grants as rate_limits.
+/// Better Auth prunes rate_limits; it never touches this table.
+model AppRateLimit {
+  key         String @id
+  windowStart BigInt @map("window_start")
+  count       Int
+
+  @@index([windowStart])
+  @@map("app_rate_limits")
+}
+
+/// Shared Census match. Not store-owned: the key is a normalized address, and
+/// the row never stores a distance or an inside/outside result.
+model AddressGeocode {
+  key              String   @id
+  line1            String
+  city             String
+  state            String
+  zip              String
+  formattedAddress String   @map("formatted_address")
+  lat              Float
+  lng              Float
+  cachedAt         DateTime @map("cached_at")
+
+  @@map("address_geocodes")
+}
+
+/// US Census Gazetteer ZCTA centroid, seeded once by migration for the directory's near-me search (#452).
+model GazetteerZip {
+  zip           String                  @id
+  lat           Float
+  lng           Float
+  /// A point within this many miles of the centroid is taken to be in the ZIP (for "is this point in the US").
+  reachMi       Float                   @map("reach_mi")
+  storeRequests DirectoryStoreRequest[]
+
+  @@index([lat])
+  @@map("gazetteer_zips")
+}
+
+/// US Census Gazetteer place centroid; nameKey is placeKey(name) (#452).
+model GazetteerPlace {
+  state   String
+  nameKey String @map("name_key")
+  name    String
+  lat     Float
+  lng     Float
+
+  @@id([state, nameKey])
+  @@index([nameKey])
+  @@map("gazetteer_places")
+}
+
+/// "Tell me when a store opens near me" (#455). Checks and RLS live in its migration.
+model DirectoryStoreRequest {
+  id              String       @id
+  zip             String
+  email           String?
+  phone           String?
+  consentText     String       @map("consent_text")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  notifiedAt      DateTime?    @map("notified_at")
+  notifiedStoreId String?      @map("notified_store_id")
+  gazetteerZip    GazetteerZip @relation(fields: [zip], references: [zip], onDelete: Restrict)
+  notifiedStore   Store?       @relation(fields: [notifiedStoreId], references: [id], onDelete: SetNull)
+
+  @@unique([zip, email])
+  @@unique([zip, phone])
+  @@map("directory_store_requests")
 }
 
 model AuditLog {
@@ -187,6 +364,7 @@ model AuditLog {
   @@index([storeId])
   @@index([entityType, entityId])
   @@index([actorId])
+  @@index([action, createdAt])
   @@map("audit_logs")
 }
 
@@ -200,6 +378,8 @@ model StoreMembership {
 
   store Store @relation(fields: [storeId], references: [id])
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  whatsAppLink OwnerWhatsAppLink?
 
   @@unique([storeId, userId])
   @@index([userId])
@@ -232,42 +412,95 @@ model Category {
   localName String?  @map("local_name")
   imageUrl  String?  @map("image_url")
   sortOrder Int      @map("sort_order")
+  parentId  String?  @map("parent_id")
+  /// Stripe tax code (#65); null falls back to the parent's, then the Stripe account's preset.
+  taxCode   String?  @map("tax_code")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  parent         Category?       @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children       Category[]      @relation("CategoryTree")
   masterProducts MasterProduct[]
+  productProposals ProductProposal[]
 
+  @@index([parentId])
   @@map("categories")
 }
 
 model MasterProduct {
-  id              String    @id @default(cuid())
-  name            String
-  categoryId      String?   @map("category_id")
-  description     String?
-  imageUrl        String?   @map("image_url")
-  imageSourceUrl  String?   @map("image_source_url")
-  imageAuthor     String?   @map("image_author")
-  imageLicense    String?   @map("image_license")
-  unit            String?
-  weightG         Int?      @map("weight_g")
-  frozen          Boolean   @default(false)
-  perishable      Boolean   @default(false)
-  storage         String?
-  subcategory     String?
-  originCountries String?   @map("origin_countries")
-  status          String    @default("active")
-  confidence      String?
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id                String   @id @default(cuid())
+  name              String
+  categoryId        String?  @map("category_id")
+  description       String?
+  imageUrl          String?  @map("image_url")
+  imageSourceUrl    String?  @map("image_source_url")
+  imageAuthor       String?  @map("image_author")
+  imageLicense      String?  @map("image_license")
+  unit              String?
+  weightG           Int?     @map("weight_g")
+  frozen            Boolean  @default(false)
+  perishable        Boolean  @default(false)
+  storage           String?
+  subcategory       String?
+  originCountries   String?  @map("origin_countries")
+  status            String   @default("active")
+  confidence        String?
+  ingredientsStatus String   @default("unknown") @map("ingredients_status")
+  allergens         String[] @default([])
+  allergensStatus   String   @default("unknown") @map("allergens_status")
+  dietaryClaims     String[] @default([]) @map("dietary_claims")
+  dietaryStatus     String   @default("unknown") @map("dietary_status")
+  /// Set with status "merged": the product that took this one's listings, synonyms and recipe links.
+  mergedIntoId      String?  @map("merged_into_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
-  category Category?  @relation(fields: [categoryId], references: [id])
-  listings Listing[]
-  synonyms ProductSynonym[]
+  category           Category?                 @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  mergedInto         MasterProduct?            @relation("MasterProductMerge", fields: [mergedIntoId], references: [id], onDelete: Restrict)
+  mergedFrom         MasterProduct[]           @relation("MasterProductMerge")
+  duplicatePairsA    CatalogDuplicatePair[]    @relation("DuplicatePairA")
+  duplicatePairsB    CatalogDuplicatePair[]    @relation("DuplicatePairB")
+  listings           Listing[]
+  synonyms           ProductSynonym[]
+  ingredients        MasterProductIngredient[]
+  attributeProposals AttributeProposal[]
+  recipeIngredients  RecipeIngredient[]
+  listingDrafts      ListingDraft[]
+  productProposals   ProductProposal[]
 
   @@index([categoryId])
   @@index([status])
+  @@index([mergedIntoId])
   @@map("master_products")
+}
+
+/// A possible duplicate in the master catalog (#542). Product A has the smaller id. A dismissed pair is
+/// never proposed again; an open pair is replaced on the next scan.
+model CatalogDuplicatePair {
+  id             String    @id @default(cuid())
+  productAId     String    @map("product_a_id")
+  productBId     String    @map("product_b_id")
+  nameSimilarity Float     @map("name_similarity") @db.Real
+  sharedTerms    Int       @map("shared_terms")
+  score          Float     @db.Real
+  /// open | dismissed | merged
+  status         String    @default("open")
+  /// same | different | unsure; null until Claude judges the pair.
+  verdict        String?
+  verdictReason  String?   @map("verdict_reason")
+  judgedAt       DateTime? @map("judged_at") @db.Timestamptz(6)
+  decidedById    String?   @map("decided_by_id")
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  productA MasterProduct @relation("DuplicatePairA", fields: [productAId], references: [id], onDelete: Cascade)
+  productB MasterProduct @relation("DuplicatePairB", fields: [productBId], references: [id], onDelete: Cascade)
+
+  @@unique([productAId, productBId])
+  @@index([productBId])
+  @@index([status, score])
+  @@map("catalog_duplicate_pairs")
 }
 
 model ProductSynonym {
@@ -285,29 +518,95 @@ model ProductSynonym {
   @@map("product_synonyms")
 }
 
-model Listing {
-  id                    String    @id @default(cuid())
-  storeId               String    @map("store_id")
-  masterProductId       String?   @map("master_product_id")
-  customName            String?   @map("custom_name")
-  price                 Int
-  stockMode             String    @map("stock_mode")
-  qty                   Int?
-  status                String?
-  frozen                Boolean   @default(false)
-  perishable            Boolean   @default(false)
-  maxPerOrder           Int?      @map("max_per_order")
-  active                Boolean   @default(true)
-  confidence            Float     @default(1.0)
-  confidenceUpdatedAt   DateTime  @default(now()) @map("confidence_updated_at")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
+model Ingredient {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
 
-  store          Store          @relation(fields: [storeId], references: [id])
-  masterProduct  MasterProduct? @relation(fields: [masterProductId], references: [id])
-  variants       ListingVariant[]
-  stockEvents    StockEvent[]
-  collectionItems StoreCollectionListing[]
+  synonyms       IngredientSynonym[]
+  masterProducts MasterProductIngredient[]
+  listings       ListingIngredient[]
+
+  @@map("ingredients")
+}
+
+model IngredientSynonym {
+  id           String   @id @default(cuid())
+  ingredientId String   @map("ingredient_id")
+  term         String   @unique
+  language     String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@index([ingredientId])
+  @@map("ingredient_synonyms")
+}
+
+model MasterProductIngredient {
+  productId    String @map("product_id")
+  ingredientId String @map("ingredient_id")
+
+  masterProduct MasterProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredient    Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([productId, ingredientId])
+  @@index([ingredientId])
+  @@map("master_product_ingredients")
+}
+
+model AttributeProposal {
+  id              String    @id @default(cuid())
+  productId       String    @map("product_id")
+  ingredientsRead Boolean   @map("ingredients_read")
+  ingredients     String[]  @default([])
+  allergensRead   Boolean   @map("allergens_read")
+  allergens       String[]  @default([])
+  dietaryRead     Boolean   @map("dietary_read")
+  dietaryClaims   String[]  @default([]) @map("dietary_claims")
+  status          String    @default("pending")
+  model           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  reviewedAt      DateTime? @map("reviewed_at")
+  reviewedBy      String?   @map("reviewed_by")
+
+  masterProduct MasterProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([productId])
+  @@map("attribute_proposals")
+}
+
+model Listing {
+  id                  String   @id @default(cuid())
+  storeId             String   @map("store_id")
+  masterProductId     String?  @map("master_product_id")
+  customName          String?  @map("custom_name")
+  price               Int
+  stockMode           String   @map("stock_mode")
+  qty                 Int?
+  status              String?
+  frozen              Boolean  @default(false)
+  perishable          Boolean  @default(false)
+  maxPerOrder         Int?     @map("max_per_order")
+  active              Boolean  @default(true)
+  confidence          Float    @default(1.0)
+  confidenceUpdatedAt DateTime @default(now()) @map("confidence_updated_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  store             Store                    @relation(fields: [storeId], references: [id])
+  masterProduct     MasterProduct?           @relation(fields: [masterProductId], references: [id])
+  variants          ListingVariant[]
+  stockEvents       StockEvent[]
+  ownerReportItems  OwnerReportItem[]
+  draftsListedAs    ListingDraft[]           @relation("ListingDraftExisting")
+  draftsPublishedAs ListingDraft[]           @relation("ListingDraftPublished")
+  productProposal   ProductProposal?
+  reorderListItems  ReorderListItem[]
+  collectionItems   StoreCollectionListing[]
+  attributes        ListingAttributes?
+  ingredients       ListingIngredient[]
 
   @@index([storeId])
   @@index([storeId, active])
@@ -315,45 +614,406 @@ model Listing {
   @@map("listings")
 }
 
+model ListingAttributes {
+  listingId         String   @id @map("listing_id")
+  storeId           String   @map("store_id")
+  ingredientsStatus String?  @map("ingredients_status")
+  allergens         String[] @default([])
+  allergensStatus   String?  @map("allergens_status")
+  dietaryClaims     String[] @default([]) @map("dietary_claims")
+  dietaryStatus     String?  @map("dietary_status")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  store   Store   @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+  @@map("listing_attributes")
+}
+
+model ListingIngredient {
+  listingId    String @map("listing_id")
+  ingredientId String @map("ingredient_id")
+  storeId      String @map("store_id")
+
+  listing    Listing    @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  store      Store      @relation(fields: [storeId], references: [id])
+
+  @@id([listingId, ingredientId])
+  @@index([storeId])
+  @@index([ingredientId])
+  @@map("listing_ingredients")
+}
+
 model ListingVariant {
-  id        String   @id @default(cuid())
-  listingId String   @map("listing_id")
-  label     String
-  price     Int
+  id                String   @id @default(cuid())
+  listingId         String   @map("listing_id")
+  label             String
+  price             Int
   weightG           Int      @map("weight_g")
   weightPlaceholder Boolean  @default(false) @map("weight_placeholder")
   sku               String?
-  barcode   String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  barcode           String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  cartLines                CartLine[]
-  substituteCartLines      CartLine[]  @relation("substituteVariant")
-  orderLines               OrderLine[]
-  substituteOrderLines     OrderLine[] @relation("substituteOrderLine")
+  listing               Listing               @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  cartLines             CartLine[]
+  substituteCartLines   CartLine[]            @relation("substituteVariant")
+  orderLines            OrderLine[]
+  substituteOrderLines  OrderLine[]           @relation("substituteOrderLine")
+  substitutedOrderLines OrderLine[]           @relation("substitutedOrderLine")
+  substitutionProposals SubstitutionRequest[]
 
   @@index([listingId])
   @@map("listing_variants")
 }
 
 model StockEvent {
-  id        String   @id @default(cuid())
-  storeId   String   @map("store_id")
-  listingId String   @map("listing_id")
-  type      String
-  delta     Int
-  actorId   String   @map("actor_id")
-  createdAt DateTime @default(now()) @map("created_at")
+  id             String   @id @default(cuid())
+  storeId        String   @map("store_id")
+  listingId      String   @map("listing_id")
+  type           String
+  delta          Int
+  actorId        String   @map("actor_id")
+  idempotencyKey String?  @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   store   Store   @relation(fields: [storeId], references: [id])
   listing Listing @relation(fields: [listingId], references: [id])
   actor   User    @relation(fields: [actorId], references: [id])
 
+  @@unique([storeId, idempotencyKey])
   @@index([storeId])
   @@index([listingId])
   @@index([actorId])
+  @@index([storeId, listingId, createdAt])
   @@map("stock_events")
+}
+
+/// Owner copilot thread. Shopper transcripts stay on ai_conversations.
+model CopilotConversation {
+  id            String    @id @default(cuid())
+  storeId       String    @map("store_id")
+  userId        String    @map("user_id")
+  model         String
+  messages      Json      @default("[]")
+  inFlightUntil DateTime? @map("in_flight_until")
+  tokensIn      Int       @default(0) @map("tokens_in")
+  tokensOut     Int       @default(0) @map("tokens_out")
+  costMicros    BigInt    @default(0) @map("cost_micros")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  lastMessageAt DateTime  @default(now()) @map("last_message_at")
+
+  store     Store                  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  proposals StockProposal[]
+  receipts  CopilotClientMessage[]
+  flags     AiReviewFlag[]
+
+  @@unique([id, storeId])
+  @@index([storeId])
+  @@index([storeId, userId, lastMessageAt])
+  @@index([userId])
+  @@map("copilot_conversations")
+}
+
+/// One row per owner send, so a repeated client message id replays without a second model call.
+model CopilotClientMessage {
+  id              String   @id @default(cuid())
+  storeId         String   @map("store_id")
+  userId          String   @map("user_id")
+  conversationId  String?  @map("conversation_id")
+  clientMessageId String   @map("client_message_id")
+  reply           String?
+  claimedUntil    DateTime @map("claimed_until")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  store        Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conversation CopilotConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, userId, clientMessageId])
+  @@index([storeId])
+  @@index([conversationId])
+  @@map("copilot_client_messages")
+}
+
+/// A stock change the owner has not applied until they tap confirm. No stock-event foreign key.
+model StockProposal {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  conversationId  String    @map("conversation_id")
+  listingId       String    @map("listing_id")
+  clientMessageId String    @map("client_message_id")
+  kind            String
+  quantity        Int?
+  statusValue     String?   @map("status_value")
+  before          Json
+  state           String
+  expiresAt       DateTime  @map("expires_at")
+  decidedById     String?   @map("decided_by_id")
+  decidedAt       DateTime? @map("decided_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  store        Store               @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conversation CopilotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  decidedBy    User?               @relation("StockProposalDecision", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([storeId, listingId, state])
+  @@index([storeId, clientMessageId])
+  @@index([conversationId])
+  @@index([listingId])
+  @@index([decidedById])
+  @@map("stock_proposals")
+}
+
+/// A stock alert or confirm-request for the owner. No foreign key to listings or orders: RLS checks them.
+model CopilotAlert {
+  id           String    @id @default(cuid())
+  storeId      String    @map("store_id")
+  kind         String
+  listingId    String    @map("listing_id")
+  orderId      String?   @map("order_id")
+  state        String    @default("open")
+  dedupeKey    String    @map("dedupe_key")
+  pushedAt     DateTime? @map("pushed_at")
+  resolvedById String?   @map("resolved_by_id")
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  store      Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  resolvedBy User? @relation("CopilotAlertResolution", fields: [resolvedById], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, dedupeKey])
+  @@index([storeId, state, pushedAt])
+  @@index([storeId, listingId, state])
+  @@index([resolvedById])
+  @@map("copilot_alerts")
+}
+
+/// One per store per local day, claimed before the digest email goes out; sent_at is set once every owner has it.
+model CopilotDigest {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  localDate       String    @map("local_date")
+  /// Rendered once at claim time, so a retry resends the same body under the same Resend idempotency key.
+  html            String
+  /// The WhatsApp digest's figures (#144), fixed at claim time like the email body.
+  whatsappSummary Json?     @map("whatsapp_summary")
+  /// Owners the WhatsApp digest was handed to, added before each send so a retry never sends twice.
+  whatsappSentTo  String[]  @default([]) @map("whatsapp_sent_to")
+  sentAt          DateTime? @map("sent_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, localDate])
+  @@map("copilot_digests")
+}
+
+/// One weekly report per store per ISO week (#550). The figures are fixed when the row is made. `claimedAt` holds
+/// the send; a failed send clears it, and the retry sends only to the owners not yet in `deliveredTo`.
+model CopilotWeeklyReport {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  /// ISO week of the store week reported, e.g. 2026-W46.
+  isoWeek     String    @map("iso_week")
+  /// Monday of that week, YYYY-MM-DD in the store's zone.
+  weekStart   String    @map("week_start")
+  figures     Json
+  claimedAt   DateTime? @map("claimed_at")
+  sentAt      DateTime? @map("sent_at")
+  /// User ids of the owners the email was delivered to; a retry sends only to the rest.
+  deliveredTo String[]  @default([]) @map("delivered_to")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, isoWeek])
+  @@index([storeId, weekStart])
+  @@map("copilot_weekly_reports")
+}
+
+/// A voice or photo stock report from a store member (#21). Nothing is written to stock until the owner confirms.
+model OwnerReport {
+  id            String    @id @default(cuid())
+  storeId       String    @map("store_id")
+  actorId       String    @map("actor_id")
+  /// voice | invoice_photo | shelf_photo
+  type          String
+  /// pending | confirmed | rejected | partial
+  status        String    @default("pending")
+  rawTranscript String?   @map("raw_transcript")
+  imageKey      String?   @map("image_key")
+  /// sha256 of the type and the transcript or photo bytes; one pending report per store per hash (partial unique index in SQL).
+  sourceHash    String?   @map("source_hash")
+  aiExtraction  Json      @map("ai_extraction")
+  decidedById   String?   @map("decided_by_id")
+  decidedAt     DateTime? @map("decided_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  store     Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  actor     User              @relation("OwnerReportActor", fields: [actorId], references: [id], onDelete: Restrict)
+  decidedBy User?             @relation("OwnerReportDecision", fields: [decidedById], references: [id], onDelete: Restrict)
+  items     OwnerReportItem[]
+
+  @@index([storeId])
+  @@index([storeId, status, createdAt])
+  @@index([actorId])
+  @@index([decidedById])
+  @@map("owner_reports")
+}
+
+/// One extracted line of an owner report. `listingId` is null when nothing matched; such a line stays `unmatched`.
+model OwnerReportItem {
+  id              String   @id @default(cuid())
+  reportId        String   @map("report_id")
+  storeId         String   @map("store_id")
+  extractedName   String   @map("extracted_name")
+  extractedQty    Int?     @map("extracted_qty")
+  unit            String?
+  listingId       String?  @map("listing_id")
+  matchConfidence Float    @default(0) @map("match_confidence")
+  /// restock (counted listing) | set_status (status listing, to in_stock)
+  kind            String?
+  proposedDelta   Int?     @map("proposed_delta")
+  /// pending | confirmed | rejected | unmatched
+  status          String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  report  OwnerReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  store   Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing Listing?    @relation(fields: [listingId], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([reportId])
+  @@index([listingId])
+  @@map("owner_report_items")
+}
+
+/// The owner's saved reorder list (#551): one draft per store, replaced on each save. Nothing is ordered from it.
+model ReorderList {
+  id        String   @id @default(cuid())
+  storeId   String   @unique @map("store_id")
+  savedById String   @map("saved_by_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store   Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  savedBy User              @relation("ReorderListSaver", fields: [savedById], references: [id], onDelete: Restrict)
+  items   ReorderListItem[]
+
+  @@index([savedById])
+  @@map("reorder_lists")
+}
+
+/// One line of a reorder list. A null quantity is a status listing marked "reorder (no count)".
+model ReorderListItem {
+  id        String @id @default(cuid())
+  listId    String @map("list_id")
+  storeId   String @map("store_id")
+  listingId String @map("listing_id")
+  name      String
+  quantity  Int?
+  position  Int
+
+  list    ReorderList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  store   Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, listingId])
+  @@index([storeId])
+  @@index([listingId])
+  @@map("reorder_list_items")
+}
+
+/// One item Claude read from a shelf photo (#552), waiting for the owner. Nothing is listed until the
+/// owner confirms a price and publishes; the shelf photo is never a product image.
+model ListingDraft {
+  id                String    @id @default(cuid())
+  storeId           String    @map("store_id")
+  createdById       String    @map("created_by_id")
+  /// Private, under listing-photos/<storeId>/; several drafts share one photo.
+  photoKey          String    @map("photo_key")
+  extractedName     String    @map("extracted_name")
+  extractedSize     String?   @map("extracted_size")
+  /// Cents read from a price tag; shown as "read from photo, check it", never published unconfirmed.
+  priceReadCents    Int?      @map("price_read_cents")
+  /// one | several | none | already_listed
+  match             String
+  masterProductId   String?   @map("master_product_id")
+  /// Master products the owner picks from when `match` is several.
+  candidateIds      String[]  @default([]) @map("candidate_ids")
+  existingListingId String?   @map("existing_listing_id")
+  /// pending | published | dismissed
+  status            String    @default("pending")
+  priceCents        Int?      @map("price_cents")
+  listingId         String?   @map("listing_id")
+  publishedById     String?   @map("published_by_id")
+  publishedAt       DateTime? @map("published_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  store           Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  createdBy       User           @relation("ListingDraftCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  publishedBy     User?          @relation("ListingDraftPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
+  masterProduct   MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
+  existingListing Listing?       @relation("ListingDraftExisting", fields: [existingListingId], references: [id], onDelete: SetNull)
+  listing         Listing?       @relation("ListingDraftPublished", fields: [listingId], references: [id], onDelete: Restrict)
+  productProposal ProductProposal?
+
+  @@index([storeId, status, createdAt])
+  @@index([createdById])
+  @@index([publishedById])
+  @@index([masterProductId])
+  @@index([existingListingId])
+  @@index([listingId])
+  @@map("listing_drafts")
+}
+
+/// A new master product a store owner suggested while publishing an unmatched listing draft (#553).
+/// The store's custom listing sells at once; a platform admin approves (a new or an existing master
+/// product, and the listing is re-pointed to it) or rejects (the listing stays as it is).
+model ProductProposal {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  /// The proposing store's custom listing, re-pointed to the master product on approval.
+  listingId       String    @unique @map("listing_id")
+  draftId         String?   @unique @map("draft_id")
+  proposedById    String    @map("proposed_by_id")
+  name            String
+  localName       String?   @map("local_name")
+  size            String?
+  categoryId      String?   @map("category_id")
+  /// Private crop of the shelf photo, under product-proposals/<storeId>/; used only once an admin approves it.
+  photoKey        String?   @map("photo_key")
+  /// pending | approved | rejected
+  status          String    @default("pending")
+  masterProductId String?   @map("master_product_id")
+  rejectReason    String?   @map("reject_reason")
+  reviewedById    String?   @map("reviewed_by_id")
+  reviewedAt      DateTime? @map("reviewed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing       Listing        @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  draft         ListingDraft?  @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  proposedBy    User           @relation("ProductProposalProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  reviewedBy    User?          @relation("ProductProposalReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  masterProduct MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, createdAt])
+  @@index([status, createdAt])
+  @@index([proposedById])
+  @@index([reviewedById])
+  @@index([categoryId])
+  @@index([masterProductId])
+  @@map("product_proposals")
 }
 
 model StoreBanner {
@@ -377,19 +1037,19 @@ model StoreBanner {
 }
 
 model StoreCollection {
-  id          String   @id @default(cuid())
-  storeId     String   @map("store_id")
-  title       String
-  subtitle    String?
-  imageUrl    String?  @map("image_url")
-  slug        String
-  sortOrder   Int      @default(0) @map("sort_order")
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  title     String
+  subtitle  String?
+  imageUrl  String?  @map("image_url")
+  slug      String
+  sortOrder Int      @default(0) @map("sort_order")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  store    Store                    @relation(fields: [storeId], references: [id])
-  items    StoreCollectionListing[]
+  store Store                    @relation(fields: [storeId], references: [id])
+  items StoreCollectionListing[]
 
   @@unique([storeId, slug])
   @@index([storeId])
@@ -414,28 +1074,69 @@ model StoreCollectionListing {
 }
 
 model Cart {
-  id              String   @id @default(cuid())
-  storeId         String   @map("store_id")
-  userId          String?  @map("user_id")
-  customerId      String?  @map("customer_id")
-  paymentIntentId String?  @unique @map("payment_intent_id")
-  source          String   @default("manual")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  userId                String?   @map("user_id")
+  customerId            String?   @map("customer_id")
+  paymentIntentId       String?   @unique @map("payment_intent_id")
+  paymentAttemptToken   String?   @map("payment_attempt_token")
+  purchaseEpoch         Int       @default(0) @map("purchase_epoch")
+  deliveryLine1         String?   @map("delivery_line1")
+  deliveryLine2         String?   @map("delivery_line2")
+  deliveryCity          String?   @map("delivery_city")
+  deliveryState         String?   @map("delivery_state")
+  deliveryZip           String?   @map("delivery_zip")
+  deliveryLat           Float?    @map("delivery_lat")
+  deliveryLng           Float?    @map("delivery_lng")
+  leaveAtDoor           Boolean   @default(false) @map("leave_at_door")
+  /// The cheapest courier quote last shown at checkout (#527), for the basket and address in courierQuoteKey.
+  courierFeeCents       Int?      @map("courier_fee_cents")
+  courierProvider       String?   @map("courier_provider")
+  courierQuoteKey       String?   @map("courier_quote_key")
+  courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
+  /// The Stripe Tax calculation last shown at checkout (#65), for the basket and address in taxQuoteKey.
+  taxCents              Int?      @map("tax_cents")
+  taxLines              Json?     @map("tax_lines")
+  taxLiableParty        String?   @map("tax_liable_party")
+  taxCalculationId      String?   @map("tax_calculation_id")
+  taxQuoteKey           String?   @map("tax_quote_key")
+  /// The one store coupon code the shopper entered (#557), upper-case. Checked on every quote and at placement.
+  couponCode            String?   @map("coupon_code")
+  source                String    @default("manual")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  /// Last time the orphan-hold sweep found this cart's intent not held; cleared when the shopper reopens payment.
+  orphanCheckedAt       DateTime? @map("orphan_checked_at")
 
-  store    Store     @relation(fields: [storeId], references: [id])
-  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  customer Customer? @relation(fields: [customerId], references: [id])
-  lines    CartLine[]
-  aiConversations AiConversation[]
+  store                 Store                  @relation(fields: [storeId], references: [id])
+  user                  User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  customer              Customer?              @relation(fields: [customerId], references: [id])
+  lines                 CartLine[]
+  aiConversations       AiConversation[]
   assistantUndoReceipts AssistantUndoReceipt[]
-  guestBrowserCarts GuestBrowserCart[]
+  guestBrowserCarts     GuestBrowserCart[]
+  whatsAppShopperCarts  WhatsAppShopperCart[]
+  whatsAppCheckoutLinks WhatsAppCheckoutLink[]
 
   @@index([storeId])
   @@index([storeId, userId])
   @@index([userId])
   @@index([customerId])
   @@map("carts")
+}
+
+/// A PaymentIntent reserved for release. Placement and release take the same
+/// locks, and this row is the decision: the intent becomes an order, or it is
+/// released. Stripe is told only after the row commits.
+model PaymentIntentRelease {
+  paymentIntentId String   @id @map("payment_intent_id")
+  storeId         String   @map("store_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("payment_intent_releases")
 }
 
 model CartLine {
@@ -463,26 +1164,35 @@ model CartLine {
 }
 
 model Customer {
-  id               String   @id @default(cuid())
-  storeId          String   @map("store_id")
-  userId           String?  @map("user_id")
-  name             String
-  email            String?
-  phone            String?
-  marketingConsent Boolean  @default(false) @map("marketing_consent")
-  notes            String?
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id                  String    @id @default(cuid())
+  storeId             String    @map("store_id")
+  userId              String?   @map("user_id")
+  name                String
+  email               String?
+  phone               String?
+  marketingConsent    Boolean   @default(false) @map("marketing_consent")
+  notes               String?
+  /// The account Customer at this store that claimed this guest row (Claimed order). Set once.
+  claimedByCustomerId String?   @map("claimed_by_customer_id")
+  claimedAt           DateTime? @map("claimed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  store  Store    @relation(fields: [storeId], references: [id])
-  user   User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
-  orders Order[]
-  carts  Cart[]
+  store           Store            @relation(fields: [storeId], references: [id])
+  user            User?            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  claimedBy       Customer?        @relation("CustomerClaim", fields: [claimedByCustomerId, storeId], references: [id, storeId], onDelete: Restrict, onUpdate: Cascade)
+  claimedGuests   Customer[]       @relation("CustomerClaim")
+  orders          Order[]
+  carts           Cart[]
   aiConversations AiConversation[]
 
   @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, email])
+  /// Admin order search by exact email or phone across stores (#537).
+  @@index([email])
+  @@index([phone])
+  @@index([storeId, claimedByCustomerId])
   @@index([userId])
   @@map("customers")
 }
@@ -498,20 +1208,55 @@ model AiConversation {
   tokensOut     Int       @default(0) @map("tokens_out")
   costMicros    BigInt    @default(0) @map("cost_micros")
   messages      Json      @default("[]")
+  /// Shopper constraints (#485): what to avoid, what must hold, and unknown items the customer confirmed.
+  constraints   Json      @default("{}")
+  /// Assistant checkout draft (#247): fulfillment and pickup slot for the normal checkout page.
+  checkoutDraft Json?     @map("checkout_draft")
+  /// Short item handles (#597): the ids each handle stands for in this conversation, by kind.
+  itemHandles   Json      @default("{}") @map("item_handles")
   inFlightUntil DateTime? @map("in_flight_until")
   createdAt     DateTime  @default(now()) @map("created_at")
   lastMessageAt DateTime  @default(now()) @map("last_message_at")
 
-  store    Store     @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  cart     Cart      @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  store    Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart     Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  customer Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
   actions  AiAction[]
+  flags    AiReviewFlag[]
 
   @@unique([storeId, cartId])
+  @@unique([id, storeId])
+  @@index([cartId])
   @@index([storeId])
+  @@index([storeId, createdAt])
   @@index([createdAt])
   @@index([customerId])
   @@map("ai_conversations")
+}
+
+/// Platform admin review label on one shopper or copilot conversation (#544). Store-owned with RLS.
+/// Deleted with its conversation, and after 90 days by the assistant retention job.
+model AiReviewFlag {
+  id                    String   @id @default(cuid())
+  storeId               String   @map("store_id")
+  aiConversationId      String?  @map("ai_conversation_id")
+  copilotConversationId String?  @map("copilot_conversation_id")
+  label                 String
+  note                  String   @default("")
+  createdById           String   @map("created_by_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  store               Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  aiConversation      AiConversation?      @relation(fields: [aiConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  copilotConversation CopilotConversation? @relation(fields: [copilotConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  createdBy           User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([aiConversationId])
+  @@index([copilotConversationId])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("ai_review_flags")
 }
 
 model AiAction {
@@ -530,6 +1275,7 @@ model AiAction {
   @@index([conversationId])
   @@index([storeId])
   @@index([createdAt])
+  @@index([storeId, tool, createdAt])
   @@map("ai_actions")
 }
 
@@ -588,6 +1334,43 @@ model AssistantSpendCall {
   @@map("assistant_spend_calls")
 }
 
+/// Recipe base (#25). Platform-shared like master products: seeded dishes, plus dishes the
+/// shopper assistant looked up online, saved as ingredient names and a source link only.
+model Recipe {
+  id        String   @id @default(cuid())
+  /// Folded dish name; a request matches this or one of the aliases.
+  key       String   @unique
+  name      String
+  aliases   String[] @default([])
+  cuisine   String?
+  /// Servings the quantities are for. Null when the recipe has no quantities (looked up).
+  servings  Int?
+  sourceUrl String?  @map("source_url")
+  origin    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ingredients RecipeIngredient[]
+
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id              String   @id @default(cuid())
+  recipeId        String   @map("recipe_id")
+  position        Int
+  name            String
+  masterProductId String?  @map("master_product_id")
+  qty             Decimal? @db.Decimal(10, 3)
+  unit            String?
+
+  recipe        Recipe         @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  masterProduct MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: SetNull)
+
+  @@unique([recipeId, position])
+  @@index([masterProductId])
+  @@map("recipe_ingredients")
+}
+
 /// Committed retention batch. A replay of the same key returns this count.
 model AssistantRetentionBatch {
   id      String @id
@@ -597,60 +1380,152 @@ model AssistantRetentionBatch {
 }
 
 model Order {
-  id                   String    @id @default(cuid())
-  storeId              String    @map("store_id")
-  number               Int
-  customerId           String    @map("customer_id")
-  status               String    @default("AUTHORIZED")
-  fulfillment          String    @default("pickup")
-  pickupSlot           String?   @map("pickup_slot")
-  subtotalCents        Int       @map("subtotal_cents")
-  tipCents             Int       @default(0) @map("tip_cents")
-  bufferCents          Int       @map("buffer_cents")
-  totalAuthorizedCents Int       @map("total_authorized_cents")
-  paymentIntentId      String?   @unique @map("payment_intent_id")
-  capturedAmountCents  Int?      @map("captured_amount_cents")
-  refundId             String?   @map("refund_id")
-  platformFeeCents     Int?      @map("platform_fee_cents")
-  deliveryFeeCents     Int       @default(0) @map("delivery_fee_cents")
-  totalCents           Int       @default(0) @map("total_cents")
-  notes                String?
-  prepEstimateMinutes  Int?      @map("prep_estimate_minutes")
-  acceptedAt           DateTime? @map("accepted_at")
-  readyAt              DateTime? @map("ready_at")
-  completedAt          DateTime? @map("completed_at")
-  cancelledAt          DateTime? @map("cancelled_at")
-  inngestEventSentAt   DateTime? @map("inngest_event_sent_at")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
+  id                      String    @id @default(cuid())
+  storeId                 String    @map("store_id")
+  number                  Int
+  customerId              String    @map("customer_id")
+  status                  String    @default("AUTHORIZED")
+  fulfillment             String    @default("pickup")
+  pickupSlot              String?   @map("pickup_slot")
+  subtotalCents           Int       @map("subtotal_cents")
+  tipCents                Int       @default(0) @map("tip_cents")
+  bufferCents             Int       @map("buffer_cents")
+  totalAuthorizedCents    Int       @map("total_authorized_cents")
+  paymentIntentId         String?   @unique @map("payment_intent_id")
+  sourceCartId            String?   @map("source_cart_id")
+  /// "directory" when the shopper arrived from a Store directory link within 30 days (#454); null otherwise.
+  acquisitionSource       String?   @map("acquisition_source")
+  capturedAmountCents     Int?      @map("captured_amount_cents")
+  /// What Stripe captured and when (#537). Kept when a refund or cancellation later clears capturedAmountCents.
+  captureCents            Int?      @map("capture_cents")
+  capturedAt              DateTime? @map("captured_at")
+  refundId                String?   @map("refund_id")
+  platformFeeCents        Int?      @map("platform_fee_cents")
+  deliveryFeeCents        Int       @default(0) @map("delivery_fee_cents")
+  /// Customer service fee (ADR-0021), on the quote and then on the goods picked at capture.
+  serviceFeeCents         Int       @default(0) @map("service_fee_cents")
+  /// The fee settings the order was quoted with; 0 on orders placed before the fee.
+  serviceFeeBps           Int       @default(0) @map("service_fee_bps")
+  serviceFeeMinCents      Int       @default(0) @map("service_fee_min_cents")
+  serviceFeeMaxCents      Int       @default(0) @map("service_fee_max_cents")
+  deliveryLine1           String?   @map("delivery_line1")
+  deliveryLine2           String?   @map("delivery_line2")
+  deliveryCity            String?   @map("delivery_city")
+  deliveryState           String?   @map("delivery_state")
+  deliveryZip             String?   @map("delivery_zip")
+  deliveryLat             Float?    @map("delivery_lat")
+  deliveryLng             Float?    @map("delivery_lng")
+  deliveryDistanceMi      Float?    @map("delivery_distance_mi")
+  leaveAtDoor             Boolean   @default(false) @map("leave_at_door")
+  totalCents              Int       @default(0) @map("total_cents")
+  notes                   String?
+  prepEstimateMinutes     Int?      @map("prep_estimate_minutes")
+  acceptedAt              DateTime? @map("accepted_at")
+  readyAt                 DateTime? @map("ready_at")
+  /// Courier orders (#562): when the first line was picked or marked short, the ready time the courier is booked for, and the store's one push.
+  pickingStartedAt        DateTime? @map("picking_started_at")
+  readyEstimateAt         DateTime? @map("ready_estimate_at")
+  readyPushedAt           DateTime? @map("ready_pushed_at")
+  completedAt             DateTime? @map("completed_at")
+  cancelledAt             DateTime? @map("cancelled_at")
+  /// Fee ledger (#546): the confirmed capture and when, written once by a trigger and never cleared.
+  captureConfirmedAt      DateTime? @map("capture_confirmed_at")
+  confirmedCaptureCents   Int?      @map("confirmed_capture_cents")
+  inngestEventSentAt      DateTime? @map("inngest_event_sent_at")
+  trackingToken           String?   @unique @map("tracking_token")
+  /// When the acceptance alert and auto-cancel start counting. NULL means created_at (orders before #167).
+  acceptanceClockStartsAt DateTime? @map("acceptance_clock_starts_at") @db.Timestamptz(6)
+  outForDeliveryAt        DateTime? @map("out_for_delivery_at")
+  deliveredAt             DateTime? @map("delivered_at")
+  deliveryProofKey        String?   @map("delivery_proof_key")
+  deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
+  /// The store coupon used (#556). The SQL foreign key is (coupon_id, store_id), so it is always this store's.
+  couponId                String?   @map("coupon_id")
+  /// Goods discount from the coupon, in cents; #557 writes it.
+  discountCents           Int       @default(0) @map("discount_cents")
+  /// Who the coupon use counts against: "user:<id>" for an account, otherwise "email:<lower-case email>" (#557).
+  couponCustomerKey       String?   @map("coupon_customer_key")
+  /// The store's own driver route this order is on (#566).
+  driverRouteId           String?   @map("driver_route_id")
+  /// The open pick batch this order is in (#564); cleared when staff leave the batch.
+  pickBatchId             String?   @map("pick_batch_id")
+  /// Sales tax (#65, ADR-0008): Stripe Tax's rounded total, its lines, who collects it, and the
+  /// calculation it came from (the checkout's, replaced by the final one at capture).
+  taxCents                Int       @default(0) @map("tax_cents")
+  taxLines                Json      @default("[]") @map("tax_lines")
+  taxLiableParty          String    @default("platform") @map("tax_liable_party")
+  taxCalculationId        String?   @map("tax_calculation_id")
+  /// The Stripe tax transaction recorded after capture; null with a captured order means it is pending.
+  taxTransactionId        String?   @map("tax_transaction_id")
+  /// Checkout opt-in to WhatsApp order updates (#560); NULL keeps SMS.
+  whatsappOptInAt         DateTime? @map("whatsapp_opt_in_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  store    Store      @relation(fields: [storeId], references: [id])
-  customer Customer   @relation(fields: [customerId, storeId], references: [id, storeId])
-  lines    OrderLine[]
-  refundRequests RefundRequest[]
+  store                Store                 @relation(fields: [storeId], references: [id])
+  customer             Customer              @relation(fields: [customerId, storeId], references: [id, storeId])
+  lines                OrderLine[]
+  refundRequests       RefundRequest[]
+  paymentDisputes      PaymentDispute[]
+  issueReports         IssueReport[]
+  notificationLogs     NotificationLog[]
+  pushSubscriptions    OrderPushSubscription[]
+  deliveryEvents       DeliveryEvent[]
+  courierIncidentNotes CourierIncidentNote[]
+  deliveries           Delivery[]
+  supportThreads       SupportThread[]
+  substitutionRequests SubstitutionRequest[]
+  coupon               StoreCoupon?          @relation(fields: [couponId, storeId], references: [id, storeId], onDelete: Restrict)
+  driverRoute          DriverRoute?          @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
+  pickBatch            PickBatch?            @relation(fields: [pickBatchId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
+  @@index([storeId, couponId])
+  @@index([storeId, couponId, couponCustomerKey])
+  @@index([storeId, driverRouteId])
+  @@index([storeId, pickBatchId])
   @@index([storeId])
   @@index([storeId, status])
+  @@index([storeId, fulfillment, pickupSlot])
+  @@index([storeId, sourceCartId, createdAt])
+  /// Keyset pages of the admin order search (#537), per store and across stores.
+  @@index([storeId, createdAt, id])
+  @@index([createdAt, id])
   @@index([customerId])
+  @@index([captureConfirmedAt])
   @@map("orders")
 }
 
 /// One refund the app asked Stripe for. Stripe owns the outcome; this row owns the request.
 model RefundRequest {
-  id                   String   @id @default(cuid())
-  storeId              String   @map("store_id")
-  orderId              String   @map("order_id")
-  paymentIntentId      String   @map("payment_intent_id")
-  key                  String   @unique
-  amountCents          Int      @map("amount_cents")
-  refundApplicationFee Boolean  @map("refund_application_fee")
+  id                   String    @id @default(cuid())
+  storeId              String    @map("store_id")
+  orderId              String    @map("order_id")
+  paymentIntentId      String    @map("payment_intent_id")
+  key                  String    @unique
+  amountCents          Int       @map("amount_cents")
+  refundApplicationFee Boolean   @map("refund_application_fee")
   state                String
-  providerRefundId     String?  @map("provider_refund_id")
-  providerStatus       String?  @map("provider_status")
-  createdAt            DateTime @default(now()) @map("created_at")
-  lastCheckedAt        DateTime @default(now()) @map("last_checked_at")
+  providerRefundId     String?   @map("provider_refund_id")
+  providerStatus       String?   @map("provider_status")
+  /// #495: on a courier issue refund, the service fee part the platform returns from its application fee.
+  serviceFeeShareCents Int       @default(0) @map("service_fee_share_cents")
+  /// #65: the sales tax paid on the goods this refund returns.
+  taxShareCents        Int       @default(0) @map("tax_share_cents")
+  /// #65: on a courier refund of an order whose tax the platform collects, the tax the platform returns from its
+  /// application fee with the service fee share, so the store's transfer reversal never pays it.
+  platformTaxShareCents Int      @default(0) @map("platform_tax_share_cents")
+  /// #671: what the Stripe Tax reversal for this refund returns, set when the request is reserved:
+  /// { mode: "full" | "flat" | "lines", totalCents, lines?: [{ reference, amountCents, taxCents }] }. Null reverses nothing.
+  taxReversal          Json?     @map("tax_reversal")
+  /// #671: the Stripe Tax reversal transaction, once made; null with a plan is pending for the sweep.
+  taxReversalId        String?   @map("tax_reversal_id")
+  feeRefundId          String?   @map("fee_refund_id")
+  /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
+  succeededAt          DateTime? @map("succeeded_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  lastCheckedAt        DateTime  @default(now()) @map("last_checked_at")
 
   store Store @relation(fields: [storeId], references: [id])
   order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
@@ -658,43 +1533,298 @@ model RefundRequest {
   @@index([storeId])
   @@index([orderId])
   @@index([storeId, state])
+  @@index([succeededAt])
   @@map("refund_requests")
 }
 
-model OrderLine {
-  id                  String   @id @default(cuid())
-  storeId             String   @map("store_id")
-  orderId             String   @map("order_id")
-  listingVariantId    String   @map("listing_variant_id")
-  substituteVariantId String?  @map("substitute_variant_id")
-  qtyOrdered          Int      @map("qty_ordered")
-  qtyPicked           Int      @default(0) @map("qty_picked")
-  unitPriceCents      Int      @map("unit_price_cents")
-  swapRule            String   @default("exact_only") @map("swap_rule")
-  status              String   @default("pending")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
+/// One customer report per order (#428). State: auto_refunded, in_review, approved, declined, refund_failed.
+model IssueReport {
+  id              String   @id @default(cuid())
+  storeId         String   @map("store_id")
+  orderId         String   @unique @map("order_id")
+  type            String
+  /// [{ lineId, qty }] chosen by the customer.
+  lines           Json
+  note            String?
+  photoKey        String?  @map("photo_key")
+  amountCents     Int      @map("amount_cents")
+  state           String
+  refundRequestId String?  @unique @map("refund_request_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
 
-  order              Order          @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
-  listingVariant     ListingVariant @relation(fields: [listingVariantId], references: [id])
-  substituteVariant  ListingVariant? @relation("substituteOrderLine", fields: [substituteVariantId], references: [id], onDelete: Restrict)
+  store Store @relation(fields: [storeId], references: [id])
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([storeId, state])
+  @@map("issue_reports")
+}
+
+/// One send attempt for one order event and channel. Contact is read from the order at send time.
+model NotificationLog {
+  id                String    @id @default(cuid())
+  storeId           String    @map("store_id")
+  orderId           String    @map("order_id")
+  event             String
+  channel           String
+  status            String    @default("pending")
+  reason            String?
+  providerMessageId String?   @map("provider_message_id")
+  attempts          Int       @default(0)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  sentAt            DateTime? @map("sent_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@unique([orderId, event, channel])
+  @@index([storeId])
+  @@index([storeId, orderId])
+  @@index([status, createdAt])
+  @@map("notification_logs")
+}
+
+/// One store-delivery step: out_for_delivery or delivered.
+/// One courier booking for an order (DoorDash Drive or Uber Direct). Fees are the provider's quote, no markup (ADR-0006).
+model Delivery {
+  id             String    @id @default(cuid())
+  storeId        String    @map("store_id")
+  orderId        String    @map("order_id")
+  provider       String
+  externalId     String    @map("external_id")
+  status         String
+  quoteFeeCents  Int       @map("quote_fee_cents")
+  actualFeeCents Int?      @map("actual_fee_cents")
+  trackingUrl    String?   @map("tracking_url")
+  courierJson    Json?     @map("courier_json")
+  proofUrl       String?   @map("proof_url")
+  pin            String?
+  /// The ready time sent to the provider (#562); null books the courier as soon as possible.
+  pickupReadyAt  DateTime? @map("pickup_ready_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  store  Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order  Order           @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  events DeliveryEvent[]
+
+  @@unique([id, storeId])
+  @@unique([provider, externalId])
+  @@index([storeId, orderId])
+  @@map("deliveries")
+}
+
+/// Store delivery steps (#134) and courier webhook events (#135). created_at is when the event was received.
+model DeliveryEvent {
+  id              String   @id @default(cuid())
+  storeId         String   @map("store_id")
+  orderId         String   @map("order_id")
+  deliveryId      String?  @map("delivery_id")
+  externalEventId String?  @map("external_event_id")
+  type            String
+  payload         Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  store    Store     @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order    Order     @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  delivery Delivery? @relation(fields: [deliveryId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@unique([deliveryId, externalEventId])
+  @@index([storeId])
+  @@index([storeId, orderId])
+  @@index([type, createdAt])
+  @@map("delivery_events")
+}
+
+/// A platform admin's note on a courier incident (#536); resolves marks the incident resolved. Incidents themselves
+/// are derived on read from delivery_events. Append-only.
+model CourierIncidentNote {
+  id          String   @id @default(cuid())
+  storeId     String   @map("store_id")
+  orderId     String   @map("order_id")
+  authorId    String   @map("author_id")
+  authorEmail String   @map("author_email")
+  body        String
+  resolves    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  store  Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order  Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, orderId, createdAt])
+  @@index([authorId])
+  @@map("courier_incident_notes")
+}
+
+/// A store's own driver for one slot (#566). Only the link token's hash is kept; the link dies at expiresAt or revokedAt.
+model DriverRoute {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  /// The slot start, a UTC ISO instant as on Order.pickupSlot.
+  slot        String
+  driverName  String    @map("driver_name")
+  /// E.164.
+  driverPhone String    @map("driver_phone")
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  /// Set once the SMS is accepted. A route never sent does not hold its orders.
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, slot])
+  @@map("driver_routes")
+}
+
+/// Platform-wide settings, one row with id "platform". Readable by every app user; platform admins write.
+model PlatformSettings {
+  id                   String   @id @default("platform")
+  courierWeightLimitLb Int      @default(50) @map("courier_weight_limit_lb")
+  /// Customer service fee (ADR-0021): rate in basis points, held between min and max cents.
+  serviceFeeBps        Int      @default(300) @map("service_fee_bps")
+  serviceFeeMinCents   Int      @default(99) @map("service_fee_min_cents")
+  serviceFeeMaxCents   Int      @default(299) @map("service_fee_max_cents")
+  /// Courier settings (#535): cheapest, doordash_first or uber_first.
+  courierSelectionMode String   @default("cheapest") @map("courier_selection_mode")
+  /// Seconds with no courier assigned before failover, 300 to 1200.
+  courierAssignmentTimeoutS Int @default(600) @map("courier_assignment_timeout_s")
+  doordashEnabled      Boolean  @default(true) @map("doordash_enabled")
+  uberEnabled          Boolean  @default(true) @map("uber_enabled")
+  /// AI and onboarding settings (#561). Active listings with a price a store needs before Go live (#555), 1 to 200.
+  goLiveListingFloor   Int      @default(20) @map("go_live_listing_floor")
+  /// Random shopper and copilot chats per store per day in the AI review list (#544), 0 to 20.
+  aiDailySamplePerStore Int     @default(5) @map("ai_daily_sample_per_store")
+  /// An AI turn costing more than this many cents is auto-flagged for review (#544), 1 to 100.
+  aiTurnCostFlagCents  Int      @default(2) @map("ai_turn_cost_flag_cents")
+  /// Months a rejected store application is kept before the retention job deletes it (#554), 1 to 24.
+  rejectedApplicationRetentionMonths Int @default(12) @map("rejected_application_retention_months")
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
+}
+
+/// Support thread: one per order, customer and store messages about that order.
+model SupportThread {
+  id               String    @id @default(cuid())
+  storeId          String    @map("store_id")
+  orderId          String    @unique @map("order_id")
+  topic            String    @default("order")
+  state            String    @default("open")
+  lastCustomerAt   DateTime? @map("last_customer_at")
+  lastReplyAt      DateTime? @map("last_reply_at")
+  escalatedAt      DateTime? @map("escalated_at")
+  escalationReason String?   @map("escalation_reason")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  store    Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order    Order            @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  messages SupportMessage[]
+
+  @@unique([id, storeId])
+  @@index([storeId, lastCustomerAt])
+  @@index([escalatedAt])
+  @@map("support_threads")
+}
+
+model SupportMessage {
+  id           String   @id @default(cuid())
+  storeId      String   @map("store_id")
+  threadId     String   @map("thread_id")
+  sender       String
+  senderUserId String?  @map("sender_user_id")
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  store      Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  thread     SupportThread @relation(fields: [threadId, storeId], references: [id, storeId], onDelete: Cascade)
+  senderUser User?         @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([storeId])
+  @@index([threadId, createdAt])
+  @@index([senderUserId])
+  @@map("support_messages")
+}
+
+model OrderLine {
+  id                        String   @id @default(cuid())
+  storeId                   String   @map("store_id")
+  orderId                   String   @map("order_id")
+  listingVariantId          String   @map("listing_variant_id")
+  substituteVariantId       String?  @map("substitute_variant_id")
+  qtyOrdered                Int      @map("qty_ordered")
+  qtyPicked                 Int      @default(0) @map("qty_picked")
+  unitPriceCents            Int      @map("unit_price_cents")
+  swapRule                  String   @default("exact_only") @map("swap_rule")
+  status                    String   @default("pending")
+  /// The variant the customer's answer or swap rule put in for the units found short (#13).
+  substitutedVariantId      String?  @map("substituted_variant_id")
+  substitutedUnitPriceCents Int?     @map("substituted_unit_price_cents")
+  /// This line's share of the order's coupon discount, written at capture (#557); an issue refund deducts it.
+  discountCents             Int      @default(0) @map("discount_cents")
+  /// This line's sales tax from the final calculation, written at capture (#671); a refund of the line returns it.
+  taxCents                  Int      @default(0) @map("tax_cents")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @default(now()) @updatedAt @map("updated_at")
+
+  order               Order                @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  listingVariant      ListingVariant       @relation(fields: [listingVariantId], references: [id])
+  substituteVariant   ListingVariant?      @relation("substituteOrderLine", fields: [substituteVariantId], references: [id], onDelete: Restrict)
+  substitutedVariant  ListingVariant?      @relation("substitutedOrderLine", fields: [substitutedVariantId], references: [id], onDelete: Restrict)
+  substitutionRequest SubstitutionRequest?
 
   @@index([storeId])
   @@index([orderId])
   @@index([listingVariantId])
   @@index([substituteVariantId])
+  @@index([substitutedVariantId])
   @@map("order_lines")
 }
 
+/// One customer prompt for one short line (#13). Status: pending, approved, declined, timed_out.
+model SubstitutionRequest {
+  id                     String    @id @default(cuid())
+  storeId                String    @map("store_id")
+  orderId                String    @map("order_id")
+  orderLineId            String    @unique @map("order_line_id")
+  /// Null when only a refund is offered.
+  proposedVariantId      String?   @map("proposed_variant_id")
+  proposedUnitPriceCents Int?      @map("proposed_unit_price_cents")
+  /// Units found short: a swap replaces this many.
+  qty                    Int
+  status                 String    @default("pending")
+  expiresAt              DateTime  @map("expires_at")
+  answeredAt             DateTime? @map("answered_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  store           Store           @relation(fields: [storeId], references: [id])
+  order           Order           @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  orderLine       OrderLine       @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  proposedVariant ListingVariant? @relation(fields: [proposedVariantId], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([orderId])
+  @@index([proposedVariantId])
+  @@map("substitution_requests")
+}
+
 model ListingImport {
-  id          String    @id @default(cuid())
-  storeId     String    @map("store_id")
-  csvText     String    @map("csv_text")
-  rowCount    Int       @map("row_count")
-  status      String    @default("pending")
-  createdById String    @map("created_by_id")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  committedAt DateTime? @map("committed_at")
+  id           String    @id @default(cuid())
+  storeId      String    @map("store_id")
+  csvText      String    @map("csv_text")
+  rowCount     Int       @map("row_count")
+  status       String    @default("pending")
+  createdById  String    @map("created_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  committedAt  DateTime? @map("committed_at")
+  commitResult Json?     @map("commit_result")
 
   store     Store @relation(fields: [storeId], references: [id])
   createdBy User  @relation(fields: [createdById], references: [id])
@@ -702,4 +1832,396 @@ model ListingImport {
   @@index([createdById])
   @@index([storeId, status])
   @@map("listing_imports")
+}
+
+/// Platform account profile. One row per login. Not store-scoped.
+model PlatformCustomerProfile {
+  userId                       String    @id @map("user_id")
+  stripeCustomerId             String?   @unique @map("stripe_customer_id")
+  stripeCustomerStatus         String?   @map("stripe_customer_status")
+  stripeCustomerIdempotencyKey String?   @map("stripe_customer_idempotency_key")
+  stripeCustomerAttemptedAt    DateTime? @map("stripe_customer_attempted_at")
+  phone                        String?
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("platform_customer_profiles")
+}
+
+/// A delivery address saved on the customer's account. Copied onto an order only by #15.
+model CustomerAddress {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  label     String
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  zip       String
+  notes     String?
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("customer_addresses")
+}
+
+/// Affirmative consent to reuse a card at any store. The payment method id is a Stripe token, not card data.
+model CardSaveConsent {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  paymentIntentId  String   @map("payment_intent_id")
+  paymentMethodId  String?  @map("payment_method_id")
+  stripeCustomerId String?  @map("stripe_customer_id")
+  termsVersion     String   @map("terms_version")
+  purpose          String
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, paymentMethodId])
+  @@map("card_save_consents")
+}
+
+/// A store owner's WhatsApp number (#143). Store-owned with RLS. The partial
+/// unique index on wa_id WHERE verified lives in the migration only.
+model OwnerWhatsAppLink {
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  userId                String    @map("user_id")
+  phoneNumber           String    @map("phone_number")
+  waId                  String    @map("wa_id")
+  /// Number a live or last-sent code is for. The linked number above changes only when it is verified.
+  pendingPhoneNumber    String?   @map("pending_phone_number")
+  pendingWaId           String?   @map("pending_wa_id")
+  /// Meta's business-scoped user id for the owner's account; matched like wa_id (#409).
+  bsuid                 String?
+  verified              Boolean   @default(false)
+  optInAlerts           Boolean   @default(false) @map("opt_in_alerts")
+  optInDigest           Boolean   @default(false) @map("opt_in_digest")
+  verificationCodeHash  String?   @map("verification_code_hash")
+  verificationExpiresAt DateTime? @map("verification_expires_at")
+  verificationAttempts  Int       @default(0) @map("verification_attempts")
+  verifiedAt            DateTime? @map("verified_at")
+  /// Meta's send time of the owner's last message to the platform number (#144): inside 24 hours, free text; else a template.
+  lastInboundAt         DateTime? @map("last_inbound_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  store      Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  membership StoreMembership @relation(fields: [storeId, userId], references: [storeId, userId], onDelete: Cascade)
+
+  @@unique([storeId, userId])
+  @@index([waId])
+  @@index([pendingWaId])
+  @@map("owner_whatsapp_links")
+}
+
+/// Processed inbound WhatsApp message ids. Not store-owned (no store_id, no RLS).
+model WhatsAppInboundMessage {
+  id         String   @id
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  @@index([receivedAt])
+  @@map("whatsapp_inbound_messages")
+}
+
+/// A store member's browser that gets a web push for each new order.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  userId    String   @map("user_id")
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, endpoint])
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+/// Customer web push for one order's updates (#563). The tracking token is the only credential; 404/410 deletes the row.
+model OrderPushSubscription {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  orderId   String   @map("order_id")
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@unique([orderId, endpoint])
+  @@index([storeId, orderId])
+  @@map("order_push_subscriptions")
+}
+
+/// Store subscription on Stripe Billing (#494, ADR-0021). Billing state comes from Stripe webhooks; the admin sets `pilot`.
+model StoreSubscription {
+  storeId              String    @id @map("store_id")
+  plan                 String    @default("starter")
+  /// Stripe's subscription status, or "none" before the owner subscribes.
+  status               String    @default("none")
+  stripeCustomerId     String?   @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  trialEndsAt          DateTime? @map("trial_ends_at") @db.Timestamptz(6)
+  currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd    Boolean   @default(false) @map("cancel_at_period_end")
+  pilot                Boolean   @default(false)
+  paymentFailedAt      DateTime? @map("payment_failed_at") @db.Timestamptz(6)
+  /// Creation time of the last subscription event applied; an older event arriving late is skipped.
+  lastEventAt          DateTime? @map("last_event_at") @db.Timestamptz(6)
+  /// The owner's open Stripe Checkout; expired before another opens, cleared when the subscription arrives.
+  checkoutSessionId    String?   @map("checkout_session_id")
+  /// Creation time of the newest paid invoice event; an older payment failure arriving late is skipped.
+  lastInvoicePaidAt    DateTime? @map("last_invoice_paid_at") @db.Timestamptz(6)
+  /// Plan a platform admin gave the store (#547); it drives the plan gate until overrideEndsAt, then the Stripe plan applies.
+  overridePlan         String?   @map("override_plan")
+  overrideEndsAt       DateTime? @map("override_ends_at") @db.Timestamptz(6)
+  overrideReason       String?   @map("override_reason")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@map("store_subscriptions")
+}
+
+/// One row per Stripe billing event applied, so a replay changes nothing.
+model StripeBillingEvent {
+  id        String   @id
+  storeId   String?  @map("store_id")
+  type      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@map("stripe_billing_events")
+}
+
+/// A card dispute (chargeback or inquiry) from Stripe's charge.dispute.* webhooks (#539). Store and order are
+/// null when the charge maps to no order; the platform is alerted. The platform absorbs a lost dispute in v1.
+model PaymentDispute {
+  id              String    @id @default(cuid())
+  storeId         String?   @map("store_id")
+  orderId         String?   @map("order_id")
+  stripeDisputeId String    @unique @map("stripe_dispute_id")
+  chargeId        String    @map("charge_id")
+  paymentIntentId String?   @map("payment_intent_id")
+  /// What the cardholder disputes; may be less than the order (a partial dispute).
+  amountCents     Int       @map("amount_cents")
+  currency        String
+  reason          String
+  /// Stripe's status, e.g. needs_response, under_review, warning_needs_response, won, lost, warning_closed.
+  status          String
+  evidenceDueBy   DateTime? @map("evidence_due_by") @db.Timestamptz(6)
+  /// won, lost or warning_closed once Stripe closes the dispute.
+  outcome         String?
+  /// Stripe's dispute fees net of any returned, from the dispute's balance transactions.
+  feeCents        Int       @default(0) @map("fee_cents")
+  livemode        Boolean   @default(false)
+  /// Stripe `created` of the newest event applied; an older one arriving late is skipped.
+  lastEventAt     DateTime  @map("last_event_at") @db.Timestamptz(6)
+  /// When the store owners (or, with no order, the platform) were told. Null after a crash means tell on retry.
+  notifiedAt      DateTime? @map("notified_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order? @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Restrict)
+
+  @@index([storeId, orderId])
+  @@index([status, evidenceDueBy])
+  @@map("payment_disputes")
+}
+
+/// One row per charge.dispute.* event applied; a replayed event id is a no-op (#539).
+model PaymentDisputeEvent {
+  id              String   @id
+  stripeDisputeId String   @map("stripe_dispute_id")
+  type            String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([stripeDisputeId])
+  @@map("payment_dispute_events")
+}
+
+/// Shopper assistant chats per store per calendar month (UTC), for the plan cap.
+model AssistantChatMonth {
+  storeId  String    @map("store_id")
+  month    DateTime  @db.Date
+  chats    Int       @default(0)
+  warnedAt DateTime? @map("warned_at") @db.Timestamptz(6)
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, month])
+  @@map("assistant_chat_months")
+}
+
+/// An application from the public /sell page (#554). Platform data with no RLS: only platform-admin code reads it.
+/// One pending application per email and per phone (partial unique indexes in the migration).
+model StoreApplication {
+  id                 String    @id @default(cuid())
+  businessName       String    @map("business_name")
+  /// african | caribbean | other_grocery | specialty_food
+  storeType          String    @map("store_type")
+  addressLine1       String    @map("address_line1")
+  city               String
+  state              String
+  zip                String
+  ownerName          String    @map("owner_name")
+  /// Lower-cased and trimmed.
+  email              String
+  /// E.164, US only: +1 and 10 digits.
+  phone              String
+  website            String?
+  offersPickup       Boolean   @default(false) @map("offers_pickup")
+  offersDelivery     Boolean   @default(false) @map("offers_delivery")
+  /// pending | approved | rejected
+  status             String    @default("pending")
+  /// Internal only; never sent to the applicant.
+  rejectReason       String?   @map("reject_reason")
+  decidedAt          DateTime? @map("decided_at")
+  decidedByEmail     String?   @map("decided_by_email")
+  /// Set once the plain rejection email has gone; a rejected row without it can be sent again.
+  rejectionEmailedAt DateTime? @map("rejection_emailed_at")
+  storeId            String?   @unique @map("store_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([status, decidedAt])
+  @@map("store_applications")
+}
+
+/// A store's own WhatsApp number for customers (#558, ADR-0010). Written by raw SQL in src/lib/db.ts.
+model StoreWhatsAppNumber {
+  id            String   @id @default(cuid())
+  storeId       String   @unique @map("store_id")
+  wabaId        String   @map("waba_id")
+  /// Unique platform-wide among pending and registered rows (partial unique index in SQL), so an inbound message resolves to one store.
+  phoneNumberId String   @map("phone_number_id")
+  displayNumber String?  @map("display_number")
+  /// pending | registered | failed | disconnected
+  status        String   @default("pending")
+  coexistence   Boolean  @default(true)
+  /// AES-256-GCM ciphertext (WHATSAPP_TOKEN_KEY). Never read outside src/lib/whatsapp.
+  businessToken String?  @map("business_token")
+  failureCode   String?  @map("failure_code")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@map("store_whatsapp_numbers")
+}
+
+/// A customer who sent STOP to the store's own WhatsApp number (#560). Per store.
+model WhatsAppOptOut {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  /// Meta's digits-only sender id.
+  waId      String   @map("wa_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, waId])
+  @@map("whatsapp_opt_outs")
+}
+
+/// The cart a customer's WhatsApp chat with a store fills (#559). Keyed by an HMAC of the sender's wa_id, never the number.
+model WhatsAppShopperCart {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  senderKey String   @map("sender_key")
+  cartId    String   @map("cart_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, senderKey])
+  @@index([cartId])
+  @@map("whatsapp_shopper_carts")
+}
+
+/// A checkout link sent on WhatsApp (#559): opens the store's checkout with this cart once, within 60 minutes. Only the token's SHA-256 is kept.
+model WhatsAppCheckoutLink {
+  id        String    @id @default(cuid())
+  storeId   String    @map("store_id")
+  cartId    String    @map("cart_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([cartId])
+  @@map("whatsapp_checkout_links")
+}
+
+/// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.
+model StoreCoupon {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  code            String
+  /// "percent" or "fixed".
+  kind            String
+  percentOff      Int?      @map("percent_off")
+  amountOffCents  Int?      @map("amount_off_cents")
+  minGoodsCents   Int       @default(0) @map("min_goods_cents")
+  startsAt        DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt          DateTime? @map("ends_at") @db.Timestamptz(6)
+  /// Null is no limit.
+  totalUses       Int?      @map("total_uses")
+  usesPerCustomer Int?      @map("uses_per_customer")
+  firstOrderOnly  Boolean   @default(false) @map("first_order_only")
+  active          Boolean   @default(true)
+  createdById     String    @map("created_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  store     Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  orders    Order[]
+
+  @@unique([storeId, code])
+  @@unique([id, storeId])
+  @@index([createdById])
+  @@map("store_coupons")
+}
+
+/// Staff picking 2-4 Accepted orders together (#564). Orders point at it while it is open; closedAt is set when staff leave.
+model PickBatch {
+  id        String    @id @default(cuid())
+  storeId   String    @map("store_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+  closedAt  DateTime? @map("closed_at")
+
+  store  Store   @relation(fields: [storeId], references: [id])
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, closedAt])
+  @@map("pick_batches")
 }

@@ -1,0 +1,4611 @@
+{
+ "375-dark": {
+  "home": {
+   "checked": 207,
+   "overImage": 11,
+   "fails": [
+    {
+     "text": "10 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.74,
+     "fg": "#0b0b0b",
+     "bg": "#21412e",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.74,
+     "fg": "#0b0b0b",
+     "bg": "#21412e",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "15 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 2.9,
+     "fg": "#0b0b0b",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 2.9,
+     "fg": "#0b0b0b",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 3.9,
+     "fg": "#6cc08f",
+     "bg": "#2c543c",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "$0.80 / 100 g",
+     "sel": "small",
+     "size": 13,
+     "weight": 400,
+     "ratio": 3.04,
+     "fg": "#a3b1a7",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "500 ml bottle",
+     "sel": "span",
+     "size": 13,
+     "weight": 400,
+     "ratio": 3.04,
+     "fg": "#a3b1a7",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 2.55,
+     "fg": "#6cc08f",
+     "bg": "#4c7058",
+     "image": false,
+     "fail": true,
+     "small": false
+    }
+   ],
+   "small": [
+    {
+     "text": "Your neighborhood store, online",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "No swaps without your say",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "0",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Same-day delivery within 8 miles · Pickup ready in",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "Fill your basket",
+     "sel": "a.sf-button",
+     "size": 12
+    },
+    {
+     "text": "Market inspiration · Bodija, Ibadan · Tunde Buremo",
+     "sel": "figcaption",
+     "size": 10
+    },
+    {
+     "text": "Demo store story",
+     "sel": "span.sf-badge",
+     "size": 12
+    },
+    {
+     "text": "Part of the neighborhood",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Local delivery radius",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Products on our shelves",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Pickup ready in about 30 minutes.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "No swaps without your approval.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   },
+   {
+    "name": "Shop your favorites",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 1",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 2",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 3",
+    "ring": true
+   },
+   {
+    "name": "Previous slide",
+    "ring": true
+   },
+   {
+    "name": "Next slide",
+    "ring": true
+   },
+   {
+    "name": "Your neighborhood store, onlineNo swaps ",
+    "ring": true
+   },
+   {
+    "name": "Egusi",
+    "ring": true
+   },
+   {
+    "name": "Garri",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 93,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Home",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Grains & Flours",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Tubers & Roots",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Grains & Flours",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Spices & Seasonings",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Frozen",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Pack size",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Sort",
+     "sel": "button.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "0",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 75,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Home",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Grains & Flours",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Ofada Rice",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Representative product photo. Packaging and appear",
+     "sel": "p.sf-photo-note",
+     "size": 11
+    },
+    {
+     "text": "907 g / $8.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "4.5 kg / $35.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "0",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Origin",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Size",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Storage",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  }
+ },
+ "1280-dark": {
+  "home": {
+   "checked": 315,
+   "overImage": 17,
+   "fails": [
+    {
+     "text": "10 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.74,
+     "fg": "#0b0b0b",
+     "bg": "#21412e",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.74,
+     "fg": "#0b0b0b",
+     "bg": "#21412e",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 3.9,
+     "fg": "#6cc08f",
+     "bg": "#2c543c",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "15 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 2.9,
+     "fg": "#0b0b0b",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 2.9,
+     "fg": "#0b0b0b",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "$0.80 / 100 g",
+     "sel": "small",
+     "size": 12,
+     "weight": 400,
+     "ratio": 3.04,
+     "fg": "#a3b1a7",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "500 ml bottle",
+     "sel": "span",
+     "size": 12,
+     "weight": 400,
+     "ratio": 3.04,
+     "fg": "#a3b1a7",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 2.55,
+     "fg": "#6cc08f",
+     "bg": "#4c7058",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "20 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.67,
+     "fg": "#0b0b0b",
+     "bg": "#233d2f",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.67,
+     "fg": "#0b0b0b",
+     "bg": "#233d2f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.06,
+     "fg": "#6cc08f",
+     "bg": "#2e513d",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "10 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.74,
+     "fg": "#0b0b0b",
+     "bg": "#21412e",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.74,
+     "fg": "#0b0b0b",
+     "bg": "#21412e",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 3.9,
+     "fg": "#6cc08f",
+     "bg": "#2c543c",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12,
+     "weight": 400,
+     "ratio": 3.04,
+     "fg": "#a3b1a7",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12,
+     "weight": 400,
+     "ratio": 3.04,
+     "fg": "#a3b1a7",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12,
+     "weight": 400,
+     "ratio": 3.04,
+     "fg": "#a3b1a7",
+     "bg": "#47614f",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 2.55,
+     "fg": "#6cc08f",
+     "bg": "#4c7058",
+     "image": false,
+     "fail": true,
+     "small": true
+    }
+   ],
+   "small": [
+    {
+     "text": "Explore the pantry",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.91 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "330 ml can",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.80 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "500 ml bottle",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.91 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "330 ml can",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.80 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "500 ml bottle",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Odunkun",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ede · Taro",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.88 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ege · Cassava root",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 piece (~1.5 lb)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Dodo · Ripe plantain",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "Single",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Isu · Puna yam",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 tuber (~2 lb)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Pounded Yam Flour",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.55 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "Frozen",
+     "sel": "span.sf-photo-tag",
+     "size": 11
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Isu · Puna yam",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 tuber (~2 lb)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.66 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "African eggplant",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "4 pieces",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$2.65 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ata rodo · Hot pepper",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "4 oz (~6 peppers)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.88 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ila · Okro",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$2.20 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "8 oz bag (frozen)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Market inspiration · Bodija, Ibadan · Tunde Buremo",
+     "sel": "figcaption",
+     "size": 10
+    },
+    {
+     "text": "Demo store story",
+     "sel": "span.sf-badge",
+     "size": 12
+    },
+    {
+     "text": "Part of the neighborhood",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Local delivery radius",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Products on our shelves",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "monday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "tuesday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "wednesday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "thursday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "friday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 9:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "saturday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "8:00 AM - 9:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "sunday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "10:00 AM - 6:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "Pickup ready in about 30 minutes.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "No swaps without your approval.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "All aisles",
+    "ring": true
+   },
+   {
+    "name": "Tubers & Roots",
+    "ring": true
+   },
+   {
+    "name": "Grains & Flours",
+    "ring": true
+   },
+   {
+    "name": "Spices & Seasonings",
+    "ring": true
+   },
+   {
+    "name": "Oils & Butters",
+    "ring": true
+   },
+   {
+    "name": "Vegetables",
+    "ring": true
+   },
+   {
+    "name": "Fish & Meat",
+    "ring": true
+   },
+   {
+    "name": "Frozen",
+    "ring": true
+   },
+   {
+    "name": "Snacks",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 106,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Pounded Yam Flour",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.55 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.32 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 95,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Representative product photo. Packaging and appear",
+     "sel": "p.sf-photo-note",
+     "size": 11
+    },
+    {
+     "text": "907 g / $8.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "4.5 kg / $35.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "Origin",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Size",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Storage",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Pounded Yam Flour",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.55 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  }
+ },
+ "375-light": {
+  "home": {
+   "checked": 207,
+   "overImage": 11,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "10 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.2,
+     "fg": "#ffffff",
+     "bg": "#e1eee3",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.2,
+     "fg": "#ffffff",
+     "bg": "#e1eee3",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "15 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.13,
+     "fg": "#ffffff",
+     "bg": "#e5f5e9",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.13,
+     "fg": "#ffffff",
+     "bg": "#e5f5e9",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 3.53,
+     "fg": "#2e7d4f",
+     "bg": "#c6decd",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 3.72,
+     "fg": "#2e7d4f",
+     "bg": "#cae4d2",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    }
+   ],
+   "small": [
+    {
+     "text": "Pickup · 30 min",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Your neighborhood store, online",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "No swaps without your say",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "0",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Same-day delivery within 8 miles · Pickup ready in",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "Fill your basket",
+     "sel": "a.sf-button",
+     "size": 12
+    },
+    {
+     "text": "Market inspiration · Bodija, Ibadan · Tunde Buremo",
+     "sel": "figcaption",
+     "size": 10
+    },
+    {
+     "text": "Demo store story",
+     "sel": "span.sf-badge",
+     "size": 12
+    },
+    {
+     "text": "Part of the neighborhood",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Local delivery radius",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Products on our shelves",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Pickup ready in about 30 minutes.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "No swaps without your approval.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   },
+   {
+    "name": "Shop your favorites",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 1",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 2",
+    "ring": true
+   },
+   {
+    "name": "Go to slide 3",
+    "ring": true
+   },
+   {
+    "name": "Previous slide",
+    "ring": true
+   },
+   {
+    "name": "Next slide",
+    "ring": true
+   },
+   {
+    "name": "Your neighborhood store, onlineNo swaps ",
+    "ring": true
+   },
+   {
+    "name": "Egusi",
+    "ring": true
+   },
+   {
+    "name": "Garri",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 93,
+   "overImage": 0,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    }
+   ],
+   "small": [
+    {
+     "text": "Pickup · 30 min",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Home",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Grains & Flours",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Tubers & Roots",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Grains & Flours",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Spices & Seasonings",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Frozen",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Pack size",
+     "sel": "a.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "Sort",
+     "sel": "button.sf-chip",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "0",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 75,
+   "overImage": 0,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 3.79,
+     "fg": "#2e7d4f",
+     "bg": "#d6e3d7",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    }
+   ],
+   "small": [
+    {
+     "text": "Pickup · 30 min",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Home",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Grains & Flours",
+     "sel": "a",
+     "size": 12
+    },
+    {
+     "text": "/",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Ofada Rice",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Representative product photo. Packaging and appear",
+     "sel": "p.sf-photo-note",
+     "size": 11
+    },
+    {
+     "text": "907 g / $8.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "4.5 kg / $35.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "0",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Origin",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Size",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Storage",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Shop the aisle",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  }
+ },
+ "1280-light": {
+  "home": {
+   "checked": 315,
+   "overImage": 17,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "10 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.2,
+     "fg": "#ffffff",
+     "bg": "#e1eee3",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.2,
+     "fg": "#ffffff",
+     "bg": "#e1eee3",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 3.53,
+     "fg": "#2e7d4f",
+     "bg": "#c6decd",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "15 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.13,
+     "fg": "#ffffff",
+     "bg": "#e5f5e9",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.13,
+     "fg": "#ffffff",
+     "bg": "#e5f5e9",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 3.72,
+     "fg": "#2e7d4f",
+     "bg": "#cae4d2",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "20 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.21,
+     "fg": "#ffffff",
+     "bg": "#e4ebe8",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.21,
+     "fg": "#ffffff",
+     "bg": "#e4ebe8",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 3.5,
+     "fg": "#2e7d4f",
+     "bg": "#c9dbd1",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "10 %",
+     "sel": "span.sf-deal-percent",
+     "size": 25,
+     "weight": 750,
+     "ratio": 1.2,
+     "fg": "#ffffff",
+     "bg": "#e1eee3",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9,
+     "weight": 400,
+     "ratio": 1.2,
+     "fg": "#ffffff",
+     "bg": "#e1eee3",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 3.53,
+     "fg": "#2e7d4f",
+     "bg": "#c6decd",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 3.72,
+     "fg": "#2e7d4f",
+     "bg": "#cae4d2",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    }
+   ],
+   "small": [
+    {
+     "text": "Set ZIP code",
+     "sel": "small",
+     "size": 11
+    },
+    {
+     "text": "/",
+     "sel": "kbd.sf-search-key",
+     "size": 12
+    },
+    {
+     "text": "Explore the pantry",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.91 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "330 ml can",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.80 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "500 ml bottle",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.91 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "330 ml can",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.80 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "500 ml bottle",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "sample offer",
+     "sel": "small",
+     "size": 9
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Odunkun",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ede · Taro",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.88 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ege · Cassava root",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 piece (~1.5 lb)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Dodo · Ripe plantain",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "Single",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Isu · Puna yam",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 tuber (~2 lb)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Pounded Yam Flour",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.55 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "Frozen",
+     "sel": "span.sf-photo-tag",
+     "size": 11
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Isu · Puna yam",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 tuber (~2 lb)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.66 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "African eggplant",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "4 pieces",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$2.65 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ata rodo · Hot pepper",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "4 oz (~6 peppers)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.88 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ila · Okro",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$2.20 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "8 oz bag (frozen)",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Market inspiration · Bodija, Ibadan · Tunde Buremo",
+     "sel": "figcaption",
+     "size": 10
+    },
+    {
+     "text": "Demo store story",
+     "sel": "span.sf-badge",
+     "size": 12
+    },
+    {
+     "text": "Part of the neighborhood",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Local delivery radius",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Products on our shelves",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "monday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "tuesday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "wednesday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "thursday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 8:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "friday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "9:00 AM - 9:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "saturday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "8:00 AM - 9:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "sunday",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "10:00 AM - 6:00 PM",
+     "sel": "dd",
+     "size": 12
+    },
+    {
+     "text": "Pickup ready in about 30 minutes.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "No swaps without your approval.",
+     "sel": "p",
+     "size": 12
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "Sample review",
+     "sel": "small",
+     "size": 10.4
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "focus": [
+   {
+    "name": "Mama Ngozi African Market",
+    "ring": true
+   },
+   {
+    "name": "Pickup · 30 minSet ZIP code",
+    "ring": true
+   },
+   {
+    "name": "INPUT",
+    "ring": true
+   },
+   {
+    "name": "Sign in",
+    "ring": true
+   },
+   {
+    "name": "Shopping cart",
+    "ring": true
+   },
+   {
+    "name": "All aisles",
+    "ring": true
+   },
+   {
+    "name": "Tubers & Roots",
+    "ring": true
+   },
+   {
+    "name": "Grains & Flours",
+    "ring": true
+   },
+   {
+    "name": "Spices & Seasonings",
+    "ring": true
+   },
+   {
+    "name": "Oils & Butters",
+    "ring": true
+   },
+   {
+    "name": "Vegetables",
+    "ring": true
+   },
+   {
+    "name": "Fish & Meat",
+    "ring": true
+   },
+   {
+    "name": "Frozen",
+    "ring": true
+   },
+   {
+    "name": "Snacks",
+    "ring": true
+   },
+   {
+    "name": "HOMEA little closer to home.The ingredie",
+    "ring": true
+   }
+  ],
+  "aisle": {
+   "checked": 106,
+   "overImage": 0,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    }
+   ],
+   "small": [
+    {
+     "text": "Set ZIP code",
+     "sel": "small",
+     "size": 11
+    },
+    {
+     "text": "/",
+     "sel": "kbd.sf-search-key",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Pounded Yam Flour",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.55 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.32 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "product": {
+   "checked": 95,
+   "overImage": 0,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 3.79,
+     "fg": "#2e7d4f",
+     "bg": "#d6e3d7",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    }
+   ],
+   "small": [
+    {
+     "text": "Set ZIP code",
+     "sel": "small",
+     "size": 11
+    },
+    {
+     "text": "/",
+     "sel": "kbd.sf-search-key",
+     "size": 12
+    },
+    {
+     "text": "Representative product photo. Packaging and appear",
+     "sel": "p.sf-photo-note",
+     "size": 11
+    },
+    {
+     "text": "907 g / $8.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "4.5 kg / $35.99",
+     "sel": "small",
+     "size": 11.2
+    },
+    {
+     "text": "Origin",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Size",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "Storage",
+     "sel": "dt",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "$0.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.77 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Pounded Yam Flour",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$0.55 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$5.72 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Ogbono · Wild mango seed",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.84 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Egusi · Melon seeds",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.54 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Garri",
+     "sel": "p.sf-local-name",
+     "size": 12
+    },
+    {
+     "text": "2 lb bag",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "8 oz",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "1 lb",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  }
+ }
+}

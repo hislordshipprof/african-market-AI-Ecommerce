@@ -1,6 +1,10 @@
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { test, expect, type Page, type Request } from "@playwright/test";
+import { resolveDirectUrl } from "../src/lib/env";
 import { storeUrl } from "./urls";
-import { test, expect } from "@playwright/test";
 import { generateTOTP } from "./totp";
+import { ADMIN_NAV } from "../src/app/admin/(shell)/admin-nav";
 
 const ADMIN_EMAIL = "admin@platform.test";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
@@ -23,7 +27,7 @@ async function adminSignIn(page: import("@playwright/test").Page) {
   await page.click("button[type='submit']");
 
   try {
-    await page.waitForURL("**/admin/stores", { timeout: 15000 });
+    await page.waitForURL("**/admin", { timeout: 15000 });
   } catch {
     const url = page.url();
     const errText = await page.locator(".bg-red-50").textContent().catch(() => "");
@@ -59,17 +63,73 @@ test.describe("Platform admin console", () => {
     await expect(page.getByLabel("Email")).toBeVisible();
   });
 
-  test("sign-in with valid credentials and TOTP reaches stores", async ({
+  test("sign-in with valid credentials and TOTP lands on the home page", async ({
     page,
   }) => {
     await adminSignIn(page);
-    await expect(page.locator("h1")).toHaveText("Stores");
+    await expect(page.locator("h1")).toHaveText("Home");
+  });
+
+  test("sign-in and 2FA pages stay outside the admin menu", async ({ page }) => {
+    await page.goto("/admin/sign-in");
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+  });
+
+  test("sign-in form works over the poster when WebGL is unavailable", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.addInitScript(() => {
+      const realGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (
+        this: HTMLCanvasElement,
+        type: string,
+        ...rest: unknown[]
+      ) {
+        if (type === "webgl" || type === "webgl2") return null;
+        return realGetContext.call(this, type, ...(rest as []));
+      } as typeof HTMLCanvasElement.prototype.getContext;
+    });
+
+    await page.goto("/admin/sign-in");
+    await expect(page.getByTestId("story-poster")).toBeVisible();
+    await page.getByLabel("Email").fill(ADMIN_EMAIL);
+    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+    await page.click("button[type='submit']");
+
+    await expect(page.getByLabel("Verification code")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("canvas")).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
+
+  // Reproduced: on software rendering the scene ran at 3 to 12 fps and typing 19
+  // characters took 3 to 14 seconds. failIfMajorPerformanceCaveat doesn't catch it.
+  test("a software WebGL renderer stays on the poster", async ({ page }) => {
+    await page.addInitScript(() => {
+      const UNMASKED_RENDERER_WEBGL = 0x9246;
+      const realGetParameter = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function (
+        this: WebGL2RenderingContext,
+        parameter: number,
+      ) {
+        if (parameter === UNMASKED_RENDERER_WEBGL) return "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))";
+        return realGetParameter.call(this, parameter);
+      };
+    });
+
+    await page.goto("/admin/sign-in");
+    await expect(page.getByTestId("story-poster")).toBeVisible();
+    await page.waitForTimeout(3000);
+    await expect(page.locator("canvas")).toHaveCount(0);
   });
 });
 
 test.describe("Store management (authenticated)", () => {
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
+    await page.goto("/admin/stores");
   });
 
   test("stores list page shows seeded stores", async ({ page }) => {
@@ -217,25 +277,120 @@ test.describe("Store management (authenticated)", () => {
   });
 });
 
-test.describe("Layout regression", () => {
-  test("sign-in card is at least 320px wide at 1280 viewport", async ({ page }) => {
-    await page.goto("/admin/sign-in");
-    const card = page.locator("main > div");
-    await expect(card).toBeVisible();
-    const box = await card.boundingBox();
-    expect(box).toBeTruthy();
-    expect(box!.width).toBeGreaterThanOrEqual(320);
-  });
+// The review list is confidence desc (nulls first), then name asc, 25 per page.
+// A null confidence sorts ahead of the seeded medium/low queue and ahead of
+// the active catalog, whose nulls would otherwise fill page 1. "!" sorts
+// before those names, so the row stays on page 1 after a rename. A name like
+// AAA-E2E-* does not: 25 earlier needs_review names hide it.
+let reviewNameSeq = 0;
 
-  test("storefront page still renders", async ({ page }) => {
-    await page.goto(`${storeUrl("mama-ngozi")}/`);
-    await expect(page.locator("h1")).toHaveText("Mama Ngozi African Market");
+function reviewProductName(label: string): string {
+  reviewNameSeq += 1;
+  const rank = String(Number.MAX_SAFE_INTEGER - Date.now()).padStart(16, "0");
+  return `!${rank}-${reviewNameSeq} ${label}`;
+}
+
+async function withPlatformCatalog<T>(
+  run: (tx: import("@prisma/client").Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      return run(tx);
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+async function insertReviewProduct(name: string): Promise<string> {
+  const row = await withPlatformCatalog((tx) =>
+    tx.masterProduct.create({
+      data: { name, status: "needs_review", confidence: null },
+    }),
+  );
+  return row.id;
+}
+
+async function deleteReviewProduct(id: string): Promise<void> {
+  await withPlatformCatalog(async (tx) => {
+    await tx.auditLog.deleteMany({ where: { entityId: id } });
+    await tx.masterProduct.deleteMany({ where: { id } });
   });
-});
+}
+
+function reviewRow(page: Page, name: string) {
+  return page.locator("table tbody tr").filter({ hasText: name });
+}
+
+function isActionPost(request: Request): boolean {
+  return request.method() === "POST" && !!request.headers()["next-action"];
+}
+
+async function reloadReview(page: Page): Promise<void> {
+  await page.reload();
+  await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+}
+
+type ClosingTarget = { kind: "save" } | { kind: "edit"; name: string };
+
+/** Click Cancel, then click `target` in the same turn `data-closed` appears. */
+async function clickWhileDialogCloses(page: Page, target: ClosingTarget): Promise<void> {
+  await page.evaluate((wanted) => {
+    const popup = document.querySelector("[data-slot=dialog-content]");
+    if (!(popup instanceof HTMLElement)) {
+      throw new Error("edit dialog is not open");
+    }
+    const labelOf = (button: Element) => button.textContent?.trim() ?? "";
+    const findTarget = (): HTMLElement | null => {
+      if (wanted.kind === "save") {
+        const save = [...popup.querySelectorAll("button")].find((button) => labelOf(button) === "Save");
+        return save instanceof HTMLElement ? save : null;
+      }
+      const row = [...document.querySelectorAll("table tbody tr")].find((candidate) =>
+        candidate.textContent?.includes(wanted.name),
+      );
+      const edit = row
+        ? [...row.querySelectorAll("button")].find((button) => labelOf(button) === "Edit")
+        : undefined;
+      return edit instanceof HTMLElement ? edit : null;
+    };
+    return new Promise<void>((resolve, reject) => {
+      let timer = 0;
+      const observer = new MutationObserver(() => {
+        if (!popup.hasAttribute("data-closed")) return;
+        observer.disconnect();
+        window.clearTimeout(timer);
+        const button = findTarget();
+        if (!button) {
+          reject(new Error("closing-phase target is missing"));
+          return;
+        }
+        button.click();
+        resolve();
+      });
+      timer = window.setTimeout(() => {
+        observer.disconnect();
+        reject(new Error("data-closed never appeared"));
+      }, 2000);
+      observer.observe(popup, { attributes: true, attributeFilter: ["data-closed"] });
+      const cancel = [...popup.querySelectorAll("button")].find((button) => labelOf(button) === "Cancel");
+      if (!(cancel instanceof HTMLElement)) {
+        observer.disconnect();
+        window.clearTimeout(timer);
+        reject(new Error("Cancel is missing"));
+        return;
+      }
+      cancel.click();
+    });
+  }, target);
+}
 
 test.describe("Catalog review (authenticated)", () => {
-  // These tests all mutate the first review row. Parallel workers were approving
-  // that row while another test was renaming it.
+  // Sign-in uses one shared admin. Keep the cases serial so two TOTP submits
+  // do not overlap. Each case still targets a product it created.
   test.describe.configure({ mode: "serial" });
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -244,43 +399,50 @@ test.describe("Catalog review (authenticated)", () => {
   });
 
   test("approve moves product to active tab", async ({ page }) => {
-    const reviewCountBefore = await page.locator("a[href*='status=needs_review'] span").last().textContent();
-    const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
+    const name = reviewProductName("approve");
+    const id = await insertReviewProduct(name);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const row = reviewRow(page, name);
+      await expect(row).toBeVisible({ timeout: 10000 });
+      await row.getByRole("button", { name: "Approve" }).click();
+      await expect(row).toHaveCount(0, { timeout: 10000 });
 
-    const firstRow = page.locator("table tbody tr").first();
-    await firstRow.getByRole("button", { name: "Approve" }).click();
-
-    await expect(page.locator("a[href*='status=needs_review'] span").last()).not.toHaveText(reviewCountBefore!, { timeout: 10000 });
-
-    const reviewCountAfter = await page.locator("a[href*='status=needs_review'] span").last().textContent();
-    const activeCountAfter = await page.locator("a[href*='status=active'] span").last().textContent();
-    expect(Number(reviewCountAfter)).toBe(Number(reviewCountBefore) - 1);
-    expect(Number(activeCountAfter)).toBe(Number(activeCountBefore) + 1);
+      await page.goto("/admin/catalog/review?status=active");
+      await expect(reviewRow(page, name)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await deleteReviewProduct(id);
+    }
   });
 
   test("edit-then-approve updates name and moves to active", async ({ page }) => {
-    const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
+    const original = reviewProductName("edit");
+    const editedName = reviewProductName("edited");
+    const id = await insertReviewProduct(original);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const row = reviewRow(page, original);
+      await expect(row).toBeVisible({ timeout: 10000 });
+      await row.getByRole("button", { name: "Edit" }).click();
 
-    const firstRow = page.locator("table tbody tr").first();
-    await firstRow.getByRole("button", { name: "Edit" }).click();
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(editedName);
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
-    const modal = page.getByRole("heading", { name: "Edit product" });
-    await expect(modal).toBeVisible({ timeout: 5000 });
+      await reloadReview(page);
 
-    const nameInput = page.getByRole("dialog").locator("input").first();
-    const editedName = `AAA-E2E-${Date.now()}`;
-    await nameInput.fill(editedName);
-    await page.getByRole("button", { name: "Save" }).click();
-    await expect(modal).not.toBeVisible({ timeout: 5000 });
+      const editedRow = reviewRow(page, editedName);
+      await expect(editedRow).toBeVisible({ timeout: 10000 });
+      await editedRow.getByRole("button", { name: "Approve" }).click();
+      await expect(editedRow).toHaveCount(0, { timeout: 10000 });
 
-    await page.reload();
-    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
-
-    const editedRow = page.locator("table tbody tr").filter({ hasText: editedName });
-    await expect(editedRow).toBeVisible({ timeout: 10000 });
-    await editedRow.getByRole("button", { name: "Approve" }).click();
-
-    await expect(page.locator("a[href*='status=active'] span").last()).not.toHaveText(activeCountBefore!, { timeout: 10000 });
+      await page.goto("/admin/catalog/review?status=active");
+      await expect(reviewRow(page, editedName)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await deleteReviewProduct(id);
+    }
   });
 
   test("edit modal is an accessible dialog: role, aria-modal, focus trap, Escape", async ({ page }) => {
@@ -307,15 +469,20 @@ test.describe("Catalog review (authenticated)", () => {
   });
 
   test("reject moves product to rejected tab", async ({ page }) => {
-    const rejectedCountBefore = await page.locator("a[href*='status=rejected'] span").last().textContent();
+    const name = reviewProductName("reject");
+    const id = await insertReviewProduct(name);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const row = reviewRow(page, name);
+      await expect(row).toBeVisible({ timeout: 10000 });
+      await row.getByRole("button", { name: "Reject" }).click();
+      await expect(row).toHaveCount(0, { timeout: 10000 });
 
-    const firstRow = page.locator("table tbody tr").first();
-    await firstRow.getByRole("button", { name: "Reject" }).click();
-
-    await expect(page.locator("a[href*='status=rejected'] span").last()).not.toHaveText(rejectedCountBefore!, { timeout: 10000 });
-
-    const rejectedCountAfter = await page.locator("a[href*='status=rejected'] span").last().textContent();
-    expect(Number(rejectedCountAfter)).toBe(Number(rejectedCountBefore) + 1);
+      await page.goto("/admin/catalog/review?status=rejected");
+      await expect(reviewRow(page, name)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await deleteReviewProduct(id);
+    }
   });
 
   test("non-admin access to catalog review redirects to sign-in", async ({ browser }) => {
@@ -325,44 +492,244 @@ test.describe("Catalog review (authenticated)", () => {
     await expect(freshPage).toHaveURL(/\/admin\/sign-in/, { timeout: 10000 });
     await context.close();
   });
-});
 
-test.describe("Catalog review screenshots", () => {
-  test("desktop 1440px light and dark", async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const page = await context.newPage();
-    await adminSignIn(page);
-    await page.goto("/admin/catalog/review");
-    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
-    await page.waitForTimeout(1000);
-    await page.screenshot({ path: "screenshots/review-1440px-light.png", fullPage: true });
+  test("edit dialog never carries one product's typed values to another", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("product-a");
+    const nameB = reviewProductName("product-b");
+    const savedB = reviewProductName("saved-b");
+    const typed = reviewProductName("typed");
+    const idA = await insertReviewProduct(nameA);
+    const idB = await insertReviewProduct(nameB);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      let dialog = page.getByRole("dialog", { name: "Edit product" });
 
-    await page.evaluate(() => document.documentElement.classList.add("dark"));
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: "screenshots/review-1440px-dark.png", fullPage: true });
-    await context.close();
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(page.locator("[data-slot=dialog-content]")).toHaveCount(0);
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel("Name").fill("x".repeat(501));
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog.getByRole("alert")).toBeVisible();
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+      await expect(dialog.getByRole("alert")).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+
+      await reviewRow(page, nameB).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameB);
+      await dialog.getByLabel("Name").fill(savedB);
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog).toBeHidden({ timeout: 5000 });
+
+      await reloadReview(page);
+      await expect(reviewRow(page, savedB)).toBeVisible({ timeout: 10000 });
+      await expect(reviewRow(page, nameA)).toBeVisible();
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      dialog = page.getByRole("dialog", { name: "Edit product" });
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+    } finally {
+      await deleteReviewProduct(idA);
+      await deleteReviewProduct(idB);
+    }
   });
 
-  test("mobile 390px light and dark", async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    const page = await context.newPage();
-    await adminSignIn(page);
-    await page.goto("/admin/catalog/review");
-    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
-    await page.waitForTimeout(1000);
-    await page.screenshot({ path: "screenshots/review-390px-light.png", fullPage: true });
+  test("reopening during the closing phase starts from saved values", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("closing-a");
+    const nameB = reviewProductName("closing-b");
+    const savedB = reviewProductName("closing-saved-b");
+    const typed = reviewProductName("closing-typed");
+    const idA = await insertReviewProduct(nameA);
+    const idB = await insertReviewProduct(nameB);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
 
-    await page.evaluate(() => document.documentElement.classList.add("dark"));
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: "screenshots/review-390px-dark.png", fullPage: true });
-    await context.close();
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+      await clickWhileDialogCloses(page, { kind: "edit", name: nameB });
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameB);
+      await dialog.getByLabel("Name").fill(savedB);
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog).toBeHidden({ timeout: 5000 });
+
+      await reloadReview(page);
+      await expect(reviewRow(page, savedB)).toBeVisible({ timeout: 10000 });
+      await expect(reviewRow(page, nameA)).toBeVisible();
+      await expect(reviewRow(page, typed)).toHaveCount(0);
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+      await clickWhileDialogCloses(page, { kind: "edit", name: nameA });
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+    } finally {
+      await deleteReviewProduct(idA);
+      await deleteReviewProduct(idB);
+    }
+  });
+
+  test("a cancelled edit cannot be saved during the closing phase", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("cancel-save");
+    const typed = reviewProductName("cancel-typed");
+    const idA = await insertReviewProduct(nameA);
+    let actionPosts = 0;
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+
+      await page.route("**/*", async (route) => {
+        const request = route.request();
+        if (isActionPost(request)) actionPosts += 1;
+        await route.continue();
+      });
+      await clickWhileDialogCloses(page, { kind: "save" });
+      await expect(page.locator("[data-slot=dialog-content]")).toHaveCount(0);
+      expect(actionPosts).toBe(0);
+
+      await reloadReview(page);
+      await expect(reviewRow(page, nameA)).toBeVisible({ timeout: 10000 });
+      await expect(reviewRow(page, typed)).toHaveCount(0);
+    } finally {
+      await page.unroute("**/*").catch(() => {});
+      await deleteReviewProduct(idA);
+    }
+  });
+
+  test("a pending save cannot be dismissed, even by Cancel in the same turn", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("pending");
+    const saved = reviewProductName("pending-saved");
+    const idA = await insertReviewProduct(nameA);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(saved);
+
+      await page.route("**/*", async (route) => {
+        const request = route.request();
+        if (!held && isActionPost(request)) {
+          held = true;
+          await gate;
+        }
+        try {
+          await route.continue();
+        } catch {
+          /* the page closed the request */
+        }
+      });
+      // Playwright's click waits until the button is enabled, and the gate keeps Save and Cancel pending.
+      const clickControl = (name: string) =>
+        dialog.getByRole("button", { name }).evaluate((button) => {
+          if (button instanceof HTMLElement) button.click();
+        });
+      // Cancel in the same turn as Save, before isPending is true.
+      await dialog.getByRole("button", { name: "Save" }).evaluate((save) => {
+        const cancel = [...(save.parentElement?.querySelectorAll("button") ?? [])].find(
+          (button) => button.textContent?.trim() === "Cancel",
+        );
+        if (!(save instanceof HTMLElement) || !(cancel instanceof HTMLElement)) throw new Error("Save or Cancel is missing");
+        save.click();
+        cancel.click();
+      });
+      await expect.poll(() => held, { timeout: 10000 }).toBe(true);
+      await expect(dialog.getByRole("button", { name: "Saving…" })).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
+
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
+      await page.mouse.click(8, 8);
+      await expect(dialog).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
+      await clickControl("Cancel");
+      await expect(dialog).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
+      await expect(dialog.getByLabel("Name")).toHaveValue(saved);
+
+      release();
+      await expect(dialog).toBeHidden({ timeout: 10000 });
+      await reloadReview(page);
+      await expect(reviewRow(page, saved)).toBeVisible({ timeout: 10000 });
+    } finally {
+      release();
+      await page.unroute("**/*").catch(() => {});
+      await deleteReviewProduct(idA);
+    }
+  });
+
+  test("a second Save in the same turn writes one audit row", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("double");
+    const saved = reviewProductName("double-saved");
+    const idA = await insertReviewProduct(nameA);
+    let actionPosts = 0;
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(saved);
+
+      await page.route("**/*", async (route) => {
+        const request = route.request();
+        if (isActionPost(request)) actionPosts += 1;
+        await route.continue();
+      });
+      await dialog.getByRole("button", { name: "Save" }).evaluate((button) => {
+        if (button instanceof HTMLElement) {
+          button.click();
+          button.click();
+        }
+      });
+      await expect(dialog).toBeHidden({ timeout: 10000 });
+      const audits = await withPlatformCatalog((tx) =>
+        tx.auditLog.count({ where: { entityId: idA, action: "catalog.edit" } }),
+      );
+      expect(actionPosts).toBe(1);
+      expect(audits).toBe(1);
+
+      await reloadReview(page);
+      await expect(reviewRow(page, saved)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await page.unroute("**/*").catch(() => {});
+      await deleteReviewProduct(idA);
+    }
   });
 });
 
 test.describe("2FA enrollment (unenrolled admin)", () => {
   const UNENROLLED_EMAIL = "unenrolled-admin@platform.test";
 
-  test("unenrolled admin is redirected to enroll-2fa, completes enrollment, reaches stores", async ({
+  test("unenrolled admin is redirected to enroll-2fa, completes enrollment, lands on home", async ({
     page,
   }) => {
     await page.goto("/admin/sign-in");
@@ -389,50 +756,257 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     await page.fill("input[inputmode='numeric']", code);
     await page.click("button:has-text('Verify and continue')");
 
-    await page.waitForURL("**/admin/stores", { timeout: 15000 });
-    await expect(page.locator("h1")).toHaveText("Stores");
+    // The backup codes show once, before the admin moves on (#395).
+    await expect(page.getByRole("heading", { name: "Save your backup codes" })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator("ul li")).toHaveCount(10);
+    await page.getByRole("button", { name: /saved them/ }).click();
+    await page.waitForURL("**/admin", { timeout: 15000 });
+    await expect(page.locator("h1")).toHaveText("Home");
   });
 });
 
-test("the store form timezone control uses the input and destructive tokens", async ({ page }) => {
-  await page.goto("/admin/sign-in");
-  await page.getByLabel("Email").fill(ADMIN_EMAIL);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.click("button[type='submit']");
-  await page.getByLabel("Verification code").fill(generateTotpCode());
-  await page.click("button[type='submit']");
-  await page.waitForURL("**/admin/stores");
-  await page.goto("/admin/stores/new");
+test.describe("Admin shell (authenticated)", () => {
+  const MENU = ADMIN_NAV.map((entry) => entry.label);
 
-  const border = await page.locator("#timezone").evaluate((el) => {
-    const probe = document.createElement("div");
-    probe.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue("--input");
-    document.body.append(probe);
-    const expected = getComputedStyle(probe).borderTopColor;
-    probe.remove();
-    return { actual: getComputedStyle(el).borderTopColor, expected };
+  test.beforeEach(async ({ page }) => {
+    await adminSignIn(page);
   });
-  expect(border.actual).toBe(border.expected);
 
-  await page.locator("#timezone").evaluate((el: HTMLSelectElement) => {
-    const option = document.createElement("option");
-    option.value = "Not/AZone";
-    option.text = "Not/AZone";
-    el.append(option);
-    el.value = "Not/AZone";
+  test("every admin page has the menu with the current page marked", async ({ page }) => {
+    // Every menu entry, plus a nested page that keeps its section marked.
+    const pages: Array<[string, string]> = [...ADMIN_NAV.map((entry): [string, string] => [entry.href, entry.label]), ["/admin/stores/new", "Stores"]];
+    for (const [path, current] of pages) {
+      await page.goto(path);
+      const menu = page.getByRole("navigation", { name: "Admin" });
+      await expect(menu.getByRole("link")).toHaveText(MENU);
+      await expect(menu.locator("[aria-current='page']")).toHaveText(current);
+      // Scoped to the shell: the settings page also names the admin in its last-changed line.
+      await expect(page.locator("header").getByText(ADMIN_EMAIL)).toBeVisible();
+    }
   });
-  await page.locator("#slug").fill(`token-${Date.now()}`);
-  await page.locator("#storeName").fill("Token Check");
-  await page.locator("button[type='submit']").click();
-  const error = page.locator("p", { hasText: "Invalid timezone" });
-  await expect(error).toBeVisible();
-  const destructive = await error.evaluate((el) => {
-    const probe = document.createElement("div");
-    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--destructive");
-    document.body.append(probe);
-    const expected = getComputedStyle(probe).color;
-    probe.remove();
-    return { actual: getComputedStyle(el).color, expected };
+
+  test("home counts link to their queues", async ({ page }) => {
+    const links: Array<[string, string]> = [
+      ["count-stores", "/admin/stores"],
+      ["count-refunds", "/admin/orders"],
+      ["count-orders-to-check", "/admin/orders/check"],
+      ["count-messages", "/admin/support"],
+      ["count-catalog-review", "/admin/catalog/review"],
+    ];
+    for (const [testId, href] of links) {
+      await expect(page.getByTestId(testId)).toHaveAttribute("href", href);
+    }
+    await expect(page.getByTestId("count-stores")).toContainText(/\d+ active/);
+    await expect(page.getByTestId("count-catalog-review")).toContainText(/\d+/);
   });
-  expect(destructive.actual).toBe(destructive.expected);
+
+  test("the phone menu opens, closes with Escape and navigates", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const toggle = page.getByRole("button", { name: "Menu" });
+    const menu = page.getByRole("navigation", { name: "Admin" });
+    await expect(menu).toBeHidden();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(toggle).toBeFocused();
+    await toggle.click();
+    await menu.getByRole("link", { name: "Catalog review" }).click();
+    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+    await expect(menu).toBeHidden();
+  });
+
+  test("store edit cards follow the dark theme", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/admin/stores");
+    await page.locator(`tr:has-text("tante-marie") a:has-text("Edit")`).click();
+    const background = (id: string) =>
+      page.locator(`section[aria-labelledby='${id}']`).evaluate((el) => getComputedStyle(el).backgroundColor);
+    const billing = await background("billing");
+    expect(billing).not.toBe("rgb(255, 255, 255)");
+    expect(await background("couriers")).toBe(billing);
+  });
+
+  test("sign-out ends the session and returns to sign-in", async ({ page }) => {
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.waitForURL("**/admin/sign-in", { timeout: 15000 });
+    await page.goto("/admin/stores");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+});
+
+test.describe("Courier settings (#535)", () => {
+  test("signed out, /admin/settings/couriers redirects to sign-in", async ({ page }) => {
+    await page.goto("/admin/settings/couriers");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin changes the courier choice, a switch and the timeout; an out-of-range timeout is refused", async ({ page }) => {
+    const original = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+    const startedAt = new Date();
+    try {
+      await adminSignIn(page);
+      await page.goto("/admin/settings/couriers");
+      await expect(page.locator("h1")).toHaveText("Courier settings");
+
+      // The weight limit stays at its value: customer-journey.spec reads it at the same time.
+      await page.getByRole("radio", { name: /Uber first/ }).check();
+      await page.getByRole("switch", { name: "DoorDash Drive" }).uncheck();
+      await page.getByLabel("Wait for a courier").fill("900");
+      await expect(page.getByText("15 min", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Save courier settings" }).click();
+      await expect(page.getByText(/^Saved\./)).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByRole("radio", { name: /Uber first/ })).toBeChecked();
+      await expect(page.getByRole("switch", { name: "DoorDash Drive" })).not.toBeChecked();
+      await expect(page.getByRole("switch", { name: "Uber Direct" })).toBeChecked();
+      await expect(page.getByLabel("Wait for a courier")).toHaveValue("900");
+      await expect(page.getByLabel("Courier weight limit")).toHaveValue(String(original.courierWeightLimitLb));
+
+      // The browser's own range check is lifted so the server's refusal is what the admin sees.
+      await page.locator("form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.getByLabel("Wait for a courier").fill("1500");
+      await page.getByRole("button", { name: "Save courier settings" }).click();
+      await expect(page.getByText("Enter whole seconds from 300 to 1200.")).toBeVisible();
+      await expect(page.getByText(/Nothing was saved/)).toBeVisible();
+      const stored = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+      expect(stored.courierAssignmentTimeoutS).toBe(900);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.platformSettings.update({
+          where: { id: "platform" },
+          data: {
+            courierSelectionMode: original.courierSelectionMode,
+            courierAssignmentTimeoutS: original.courierAssignmentTimeoutS,
+            doordashEnabled: original.doordashEnabled,
+            uberEnabled: original.uberEnabled,
+          },
+        });
+        await tx.auditLog.deleteMany({ where: { entityType: "platform_settings", createdAt: { gte: startedAt } } });
+      });
+    }
+  });
+});
+
+test.describe("AI and onboarding settings (#561)", () => {
+  test("signed out, /admin/settings/ai-onboarding redirects to sign-in", async ({ page }) => {
+    await page.goto("/admin/settings/ai-onboarding");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin changes the go-live floor, sees who changed it last, and an out-of-range value is refused", async ({ page }) => {
+    const original = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+    const floor = original.goLiveListingFloor === 35 ? 36 : 35;
+    const startedAt = new Date();
+    try {
+      await adminSignIn(page);
+      await page.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "AI and onboarding" }).first().click();
+      await expect(page.locator("h1")).toHaveText("AI and onboarding settings");
+
+      // Only the floor changes: the AI oversight spec reads the sample size at the same time.
+      await page.getByLabel("Listings needed to go live").fill(String(floor));
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(page.getByText(/^Saved\./)).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByLabel("Listings needed to go live")).toHaveValue(String(floor));
+      await expect(page.getByTestId("last-changed")).toContainText(`Last changed by ${ADMIN_EMAIL}`);
+
+      // The browser's own range check is lifted so the server's refusal is what the admin sees.
+      await page.locator("form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.getByLabel("Listings needed to go live").fill("0");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(page.getByText("Enter whole listings from 1 to 200.")).toBeVisible();
+      await expect(page.getByText(/Nothing was saved/)).toBeVisible();
+      const stored = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+      expect(stored.goLiveListingFloor).toBe(floor);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.platformSettings.update({ where: { id: "platform" }, data: { goLiveListingFloor: original.goLiveListingFloor } });
+        await tx.auditLog.deleteMany({ where: { action: "platform.ai_onboarding_settings_update", createdAt: { gte: startedAt } } });
+      });
+    }
+  });
+});
+
+test.describe("Courier incident log (#536)", () => {
+  test("signed out, the list and a detail page redirect to sign-in", async ({ page }) => {
+    await page.goto("/admin/couriers/incidents");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+    await page.goto("/admin/couriers/incidents/some-order");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin finds an incident by store and kind, reads the redacted timeline, adds a note and resolves it", async ({ page }) => {
+    const number = 900_000 + Math.floor(Math.random() * 90_000);
+    const seeded = await withPlatformCatalog(async (tx) => {
+      const store = await tx.store.findFirstOrThrow({ where: { slug: "tante-marie" }, select: { id: true, name: true } });
+      const customer = await tx.customer.create({ data: { storeId: store.id, name: "Incident Shopper", phone: "+13015550199" } });
+      const order = await tx.order.create({
+        data: { storeId: store.id, customerId: customer.id, number, status: "COURIER_REQUESTED", fulfillment: "courier", subtotalCents: 4000, bufferCents: 0, totalCents: 4000, totalAuthorizedCents: 4000 },
+      });
+      const delivery = await tx.delivery.create({
+        data: { storeId: store.id, orderId: order.id, provider: "doordash", externalId: `e2e-536-${number}`, status: "cancelled", quoteFeeCents: 899 },
+      });
+      await tx.deliveryEvent.create({
+        data: {
+          storeId: store.id,
+          orderId: order.id,
+          deliveryId: delivery.id,
+          externalEventId: `DELIVERY_CANCELLED:${number}`,
+          type: "cancelled",
+          payload: { event_name: "DELIVERY_CANCELLED", cancellation_reason: "no_available_dashers", dropoff_phone_number: "+13015550199", dasher_dropoff_phone_number: "+18555550100" },
+        },
+      });
+      return { storeId: store.id, storeName: store.name, orderId: order.id, customerId: customer.id };
+    });
+    try {
+      await adminSignIn(page);
+      await page.goto("/admin/couriers/incidents");
+      await expect(page.locator("h1")).toHaveText("Courier incidents");
+      await page.getByLabel("Store").selectOption(seeded.storeId);
+      await page.getByLabel("What happened").selectOption("provider_cancelled");
+      await page.getByRole("button", { name: "Show incidents" }).click();
+      await expect(page).toHaveURL(/kind=provider_cancelled/);
+      const row = page.getByTestId(`incident-row-${number}`);
+      await expect(row).toContainText(seeded.storeName);
+      await expect(row).toContainText("Courier cancelled");
+      await expect(row).toContainText("DoorDash Drive");
+      await expect(row).toContainText("Open");
+
+      await row.getByRole("link", { name: `#${number}` }).click();
+      await expect(page.locator("h1")).toContainText(`Order #${number}`);
+      await expect(page.getByTestId("incident-timeline")).toContainText(/no available dashers/i);
+      await page.getByText("Event details").click();
+      await expect(page.getByTestId("incident-timeline")).toContainText("[redacted]");
+      await expect(page.locator("body")).not.toContainText("5550199");
+      await expect(page.locator("body")).not.toContainText("5550100");
+
+      await page.getByLabel("Note").fill("Rebooked with Uber by phone.");
+      await page.getByRole("button", { name: "Add note" }).click();
+      await expect(page.getByTestId("incident-notes")).toContainText("Rebooked with Uber by phone.");
+      await page.getByLabel("Note").fill("Delivered by the store.");
+      await page.getByRole("button", { name: "Mark resolved" }).click();
+      await expect(page.getByTestId("incident-notes")).toContainText("Delivered by the store.");
+      await expect(page.getByText("Resolved", { exact: true }).first()).toBeVisible();
+
+      await page.goto(`/admin/couriers/incidents?store=${seeded.storeId}`);
+      await expect(page.getByTestId(`incident-row-${number}`)).toContainText("Resolved");
+      const audit = await withPlatformCatalog((tx) => tx.auditLog.findMany({ where: { entityType: "courier_incident", entityId: seeded.orderId }, select: { action: true } }));
+      expect(audit.map((a) => a.action).sort()).toEqual(["courier_incident.note", "courier_incident.resolve"]);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.auditLog.deleteMany({ where: { entityType: "courier_incident", entityId: seeded.orderId } });
+        await tx.deliveryEvent.deleteMany({ where: { orderId: seeded.orderId } });
+        await tx.delivery.deleteMany({ where: { orderId: seeded.orderId } });
+        await tx.order.deleteMany({ where: { id: seeded.orderId } });
+        await tx.customer.deleteMany({ where: { id: seeded.customerId } });
+      });
+      // Notes are append-only for app_user (no DELETE): they go with the order's FK cascade.
+      const leftover = await withPlatformCatalog((tx) => tx.courierIncidentNote.count({ where: { orderId: seeded.orderId } }));
+      expect(leftover).toBe(0);
+    }
+  });
 });

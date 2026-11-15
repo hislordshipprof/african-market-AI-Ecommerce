@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export type R2Credentials = {
   accountId: string;
@@ -68,14 +68,196 @@ export function isServableCatalogKey(key: string): boolean {
   return ALLOWED_KEY_RE.test(key);
 }
 
+const DELIVERY_PROOF_KEY_RE = /^delivery-proof\/[a-z0-9]+\/\d+(-[a-f0-9]{16})?\.jpg$/;
+
+/**
+ * Private proof photos, always re-encoded to JPEG. Never servable by the catalog route.
+ * The random suffix keeps two uploads in one millisecond from sharing a key.
+ */
+export function deliveryProofKey(orderId: string, timestamp: number): string {
+  const suffix = Buffer.from(crypto.getRandomValues(new Uint8Array(8))).toString("hex");
+  return `delivery-proof/${orderId}/${timestamp}-${suffix}.jpg`;
+}
+
+export function isDeliveryProofKey(key: string): boolean {
+  return DELIVERY_PROOF_KEY_RE.test(key);
+}
+
+/** Proofs live only in their own private bucket, never the catalog one (ADR 0013). */
+export function deliveryProofBucket(): string | null {
+  return process.env.R2_PROOF_BUCKET?.trim() || null;
+}
+
+export async function uploadDeliveryProof(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isDeliveryProofKey(key)) throw new Error("not a delivery-proof key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
+async function deleteFromProofBucket(key: string): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  await getR2Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/** Removes a proof photo no order references, after its transition was rejected. */
+export async function deleteDeliveryProof(key: string): Promise<void> {
+  if (!isDeliveryProofKey(key)) throw new Error("not a delivery-proof key");
+  await deleteFromProofBucket(key);
+}
+
+const ISSUE_PHOTO_KEY_RE = /^issue-photo\/[a-z0-9]+\/[a-z0-9]+\.jpg$/;
+
+/** A customer's issue photo (#428): private, in the proof bucket, never servable by the catalog route. */
+export function issuePhotoKey(orderId: string, issueId: string): string {
+  return `issue-photo/${orderId}/${issueId}.jpg`;
+}
+
+export function isIssuePhotoKey(key: string): boolean {
+  return ISSUE_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadIssuePhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isIssuePhotoKey(key)) throw new Error("not an issue-photo key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
+const OWNER_REPORT_PHOTO_KEY_RE = /^owner-reports\/[a-z0-9-]+\/[a-z0-9]+\.jpg$/;
+
+/** A store member's invoice or shelf photo (#21): private, in the proof bucket, never servable by the catalog route. */
+export function ownerReportPhotoKey(storeId: string, reportId: string): string {
+  return `owner-reports/${storeId}/${reportId}.jpg`;
+}
+
+export function isOwnerReportPhotoKey(key: string): boolean {
+  return OWNER_REPORT_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadOwnerReportPhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isOwnerReportPhotoKey(key)) throw new Error("not an owner-report key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
+/** Removes a report photo no report row points at, after its insert failed. */
+export async function deleteOwnerReportPhoto(key: string): Promise<void> {
+  if (!isOwnerReportPhotoKey(key)) throw new Error("not an owner-report key");
+  await deleteFromProofBucket(key);
+}
+
+const LISTING_PHOTO_KEY_RE = /^listing-photos\/[a-z0-9-]+\/[a-z0-9]+\.jpg$/;
+
+/** A shelf photo for photo-to-listing (#552): private, in the proof bucket, never servable by the catalog route. */
+export function listingPhotoKey(storeId: string, photoId: string): string {
+  return `listing-photos/${storeId}/${photoId}.jpg`;
+}
+
+export function isListingPhotoKey(key: string): boolean {
+  return LISTING_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadListingPhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isListingPhotoKey(key)) throw new Error("not a listing-photo key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
+/** Removes a shelf photo no draft points at, after its insert failed. */
+export async function deleteListingPhoto(key: string): Promise<void> {
+  if (!isListingPhotoKey(key)) throw new Error("not a listing-photo key");
+  await deleteFromProofBucket(key);
+}
+
+const PRODUCT_PROPOSAL_PHOTO_KEY_RE = /^product-proposals\/[a-z0-9-]+\/[a-z0-9]+\.jpg$/;
+
+/** A crop of a shelf photo for a product proposal (#553): private in the proof bucket until an admin approves it. */
+export function productProposalPhotoKey(storeId: string, photoId: string): string {
+  return `product-proposals/${storeId}/${photoId}.jpg`;
+}
+
+export function isProductProposalPhotoKey(key: string): boolean {
+  return PRODUCT_PROPOSAL_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadProductProposalPhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isProductProposalPhotoKey(key)) throw new Error("not a product-proposal key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
+export async function deleteProductProposalPhoto(key: string): Promise<void> {
+  if (!isProductProposalPhotoKey(key)) throw new Error("not a product-proposal key");
+  await deleteFromProofBucket(key);
+}
+
+/** The bytes of a private shelf or proposal photo, or null when it is missing. */
+export async function readPrivatePhoto(key: string): Promise<Uint8Array | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !(isListingPhotoKey(key) || isProductProposalPhotoKey(key))) return null;
+  try {
+    const response = await getR2Client().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    return response.Body ? await response.Body.transformToByteArray() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read through the store-member shelf-photo and platform-admin proposal-photo routes only. */
+export async function streamPrivatePhoto(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !(isListingPhotoKey(key) || isProductProposalPhotoKey(key))) return null;
+  return getObject(bucket, key);
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
   if (!isServableCatalogKey(key)) return null;
-
   const bucket = process.env.R2_BUCKET;
   if (!bucket) return null;
+  return getObject(bucket, key);
+}
 
+/** Read through the private delivery-proof route only. */
+export async function streamDeliveryProof(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !isDeliveryProofKey(key)) return null;
+  return getObject(bucket, key);
+}
+
+/** Read through the store-member issue-photo route only. */
+export async function streamIssuePhoto(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !isIssuePhotoKey(key)) return null;
+  return getObject(bucket, key);
+}
+
+async function getObject(
+  bucket: string,
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
   try {
     const client = getR2Client();
     const response = await client.send(

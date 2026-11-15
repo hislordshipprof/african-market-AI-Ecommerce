@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   fakeStripeProvider,
   reset,
@@ -10,6 +10,7 @@ import {
   setStripeProvider,
   getStripeProvider,
 } from "./index";
+import { getStripeClient, stripeProvider } from "./provider";
 import type { WebhookEvent } from "./types";
 
 describe("deriveOnboardingStatus", () => {
@@ -137,5 +138,37 @@ describe("setStripeProvider / getStripeProvider", () => {
     const provider = getStripeProvider();
     expect(provider).toBeDefined();
     expect(typeof provider.createConnectAccount).toBe("function");
+  });
+});
+
+describe("stripeProvider.listRefunds cap", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  async function listWith(count: number) {
+    vi.stubEnv("STRIPE_SECRET_KEY", process.env.STRIPE_SECRET_KEY || "sk_test_cap_guard");
+    const refunds = Array.from({ length: count }, (_, index) => ({
+      id: `re_cap_${index}`, amount: 1, status: "succeeded", metadata: {},
+    }));
+    vi.spyOn(getStripeClient().refunds, "list").mockReturnValue({
+      autoPagingToArray: async ({ limit }: { limit: number }) => refunds.slice(0, limit),
+    } as never);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const listed = await stripeProvider.listRefunds("pi_cap_guard");
+    return { listed, error };
+  }
+
+  it("logs an alert without values when a listing reaches the cap", async () => {
+    const { listed, error } = await listWith(10_001);
+    expect(listed).toHaveLength(10_000);
+    expect(error).toHaveBeenCalledWith(JSON.stringify({ event: "stripe_refund_list_cap_reached" }));
+  });
+
+  it("stays quiet below the cap", async () => {
+    const { listed, error } = await listWith(3);
+    expect(listed).toHaveLength(3);
+    expect(error).not.toHaveBeenCalled();
   });
 });

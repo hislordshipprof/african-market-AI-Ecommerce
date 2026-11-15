@@ -1,28 +1,11 @@
-import { test, expect, type Page } from "@playwright/test";
-import { generateTOTP } from "./totp";
+import { test, expect } from "@playwright/test";
 import { deleteE2eListings } from "./cleanup-listings";
+import { storeOwnerSignIn } from "./store-owner-auth";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-const OWNER_EMAIL = "owner@mama-ngozi.test";
-const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
-const SEED_TOTP_SECRET = process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP";
 const IMPORT_URL = "/store-admin/listings/import?store=mama-ngozi";
-
-async function storeOwnerSignIn(page: Page) {
-  await page.goto("/store-admin/sign-in?store=mama-ngozi");
-  await page.getByLabel("Email").fill(OWNER_EMAIL);
-  await page.getByLabel("Password").fill(OWNER_PASSWORD);
-  await page.click("button[type='submit']");
-  await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
-  await page.getByLabel("Verification code").fill(generateTOTP(SEED_TOTP_SECRET));
-  await page.click("button[type='submit']");
-  await page.waitForURL(
-    (url) => url.pathname.startsWith("/store-admin") && !url.pathname.includes("sign-in"),
-    { timeout: 15000 },
-  );
-}
 
 test.describe("placeholder weight", () => {
   const createdNames: string[] = [];

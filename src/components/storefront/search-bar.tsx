@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Search, ArrowUpRight } from "lucide-react";
 import type { SearchResult } from "@/lib/storefront/service";
+import { SEARCH_QUERY_TOO_LONG, normalizedSearchQuery } from "@/lib/storefront/search-query";
 import { ProductImage } from "./product-image";
 
 export function Highlight({ text, query }: { text: string; query: string }) {
@@ -49,6 +50,7 @@ function SearchInput({ storeId }: { storeId: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [tooLong, setTooLong] = useState(false);
   useEffect(() => {
     function key(e: KeyboardEvent) {
       const el = e.target as HTMLElement;
@@ -74,11 +76,16 @@ function SearchInput({ storeId }: { storeId: string }) {
       fetch(`/api/storefront/search?q=${encodeURIComponent(query)}`, {
         signal: abort.signal,
       })
-        .then((r) => {
-          if (!r.ok) throw new Error("Search failed");
-          return r.json();
-        })
-        .then((data) => {
+        .then(async (r) => {
+          const data = (await r.json().catch(() => null)) as { results?: SearchResult[]; error?: string } | null;
+          if (r.status === 400 && data?.error === SEARCH_QUERY_TOO_LONG) {
+            setTooLong(true);
+            setResults([]);
+            setLoading(false);
+            return;
+          }
+          if (!r.ok || !data?.results) throw new Error("Search failed");
+          setTooLong(false);
           setResults(data.results);
           setLoading(false);
         })
@@ -96,8 +103,14 @@ function SearchInput({ storeId }: { storeId: string }) {
   }, [query, open]);
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const q = query.trim();
+    const { query: q, tooLong: over } = normalizedSearchQuery(query);
     if (!q) return;
+    if (over) {
+      setTooLong(true);
+      setError(false);
+      setOpen(true);
+      return;
+    }
     rememberSearch(storeId, q);
     setOpen(false);
     router.push(`/search?q=${encodeURIComponent(q)}`);
@@ -131,6 +144,7 @@ function SearchInput({ storeId }: { storeId: string }) {
           setResults([]);
           setLoading(Boolean(e.target.value.trim()));
           setError(false);
+          setTooLong(false);
           setOpen(true);
         }}
         aria-controls={open && query.trim() ? "instant-results" : undefined}
@@ -145,6 +159,8 @@ function SearchInput({ storeId }: { storeId: string }) {
           <div role="status" aria-live="polite">
             {loading ? (
               <p>Searching the shelves…</p>
+            ) : tooLong ? (
+              <p>{SEARCH_QUERY_TOO_LONG}. Use 200 characters or fewer.</p>
             ) : error ? (
               <p>
                 Search couldn’t connect. Press Enter to try the results page.

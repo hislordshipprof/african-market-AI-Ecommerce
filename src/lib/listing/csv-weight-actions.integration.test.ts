@@ -26,30 +26,13 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { csvCommitAction, csvPreviewAction } from "./csv-import-actions";
+import { authPost, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `w215-act-${Date.now()}`;
 const password = "WeightPass-123!";
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(
-    new Request(`${BASE}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-function collectCookies(res: Response): string {
-  return (res.headers.getSetCookie?.() ?? []).join("; ");
-}
 
 async function signUp(email: string, name: string): Promise<void> {
   const res = await authPost("/sign-up/email", { email, password, name });
@@ -160,7 +143,8 @@ describe.skipIf(!hasDb)("csv weight actions (real auth, lane DB)", () => {
     expect(listing?.variants[0]?.price).toBe(4500);
 
     const retried = await csvCommitAction(preview.preview!.importToken, selection);
-    expect(retried.error).toBe("This import has already been committed.");
+    expect(retried.error).toBeUndefined();
+    expect(retried.result).toEqual(committed.result);
     const rows = await storeScoped(storeAId).listing.findMany({
       where: { customName: name },
       include: { variants: true },

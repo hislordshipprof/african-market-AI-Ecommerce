@@ -1,12 +1,24 @@
 import { randomBytes, createHash } from "crypto";
-import { platformAdmin, platformAdminTransaction, storeScoped, lockStoreRow } from "../db";
+import {
+  authPrisma,
+  platformAdmin,
+  platformAdminTransaction,
+  storeScoped,
+  lockStoreRow,
+  readStorePlanRows,
+} from "../db";
 import { sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
+import { effectivePlan, staffLimit } from "../billing/plan";
+import { auth } from "../auth";
+import { escapeHtml } from "../format";
 
 const INVITE_EXPIRY_HOURS = 72;
 const TOKEN_BYTES = 32;
 
 export type StoreRole = "owner" | "staff";
+
+export const STAFF_LIMIT_MESSAGE = `The Starter plan includes the owner and ${staffLimit("starter")} staff. Upgrade to Pro for unlimited staff.`;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -28,73 +40,87 @@ export interface CreateInviteInput {
   storeName: string;
 }
 
+type InviteTx = Parameters<Parameters<typeof platformAdminTransaction>[0]>[0];
+
 export async function createInvite(input: CreateInviteInput): Promise<{ id: string; tokenHash: string }> {
+  const recorded = await platformAdminTransaction((tx) => recordInvite(tx, input));
+  await sendInviteEmail(input, recorded);
+  return { id: recorded.id, tokenHash: recorded.tokenHash };
+}
+
+export type RecordedInvite = { id: string; tokenHash: string; rawToken: string };
+
+/** The invite rows and their audit row, inside the caller's platform-admin transaction. Send the email after it commits. */
+export async function recordInvite(tx: InviteTx, input: CreateInviteInput): Promise<RecordedInvite> {
   const email = normalizeEmail(input.email);
   const { raw, hash } = generateToken();
   const expiresAt = new Date(Date.now() + INVITE_EXPIRY_HOURS * 60 * 60 * 1000);
 
-  const invite = await platformAdminTransaction(async (tx) => {
-    const existing = await tx.storeMembership.findFirst({
-      where: { storeId: input.storeId, user: { email } },
-    });
-    if (existing) {
-      throw new Error("User is already a member of this store");
+  const existing = await tx.storeMembership.findFirst({
+    where: { storeId: input.storeId, user: { email } },
+  });
+  if (existing) {
+    throw new Error("User is already a member of this store");
+  }
+
+  if (input.role === "staff") {
+    await lockStoreRow(tx, input.storeId);
+    const [subscription] = await readStorePlanRows(tx, [input.storeId]);
+    const limit = staffLimit(effectivePlan(subscription));
+    if (limit !== null) {
+      const [staff, invited] = await Promise.all([
+        tx.storeMembership.count({ where: { storeId: input.storeId, role: { not: "owner" } } }),
+        tx.storeInvite.count({
+          where: { storeId: input.storeId, role: "staff", usedAt: null, expiresAt: { gt: new Date() }, email: { not: email } },
+        }),
+      ]);
+      if (staff + invited >= limit) throw new Error(STAFF_LIMIT_MESSAGE);
     }
+  }
 
-    const pendingInvite = await tx.storeInvite.findFirst({
-      where: { storeId: input.storeId, email, usedAt: null, expiresAt: { gt: new Date() } },
+  const pendingInvite = await tx.storeInvite.findFirst({
+    where: { storeId: input.storeId, email, usedAt: null, expiresAt: { gt: new Date() } },
+  });
+  if (pendingInvite) {
+    await tx.storeInvite.update({
+      where: { id: pendingInvite.id },
+      data: { usedAt: new Date() },
     });
-    if (pendingInvite) {
-      await tx.storeInvite.update({
-        where: { id: pendingInvite.id },
-        data: { usedAt: new Date() },
-      });
-    }
+  }
 
-    const created = await tx.storeInvite.create({
-      data: {
-        storeId: input.storeId,
-        email,
-        role: input.role,
-        tokenHash: hash,
-        expiresAt,
-        invitedById: input.invitedById,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        storeId: input.storeId,
-        actorId: input.invitedById,
-        actorEmail: input.actorEmail,
-        action: "invite.create",
-        entityType: "store_invite",
-        entityId: created.id,
-        after: { email, role: input.role },
-      },
-    });
-
-    return created;
+  const created = await tx.storeInvite.create({
+    data: {
+      storeId: input.storeId,
+      email,
+      role: input.role,
+      tokenHash: hash,
+      expiresAt,
+      invitedById: input.invitedById,
+    },
   });
 
-  const inviteUrl = `${input.baseUrl}/invite/${raw}?store=${input.storeSlug}`;
+  await tx.auditLog.create({
+    data: {
+      storeId: input.storeId,
+      actorId: input.invitedById,
+      actorEmail: input.actorEmail,
+      action: "invite.create",
+      entityType: "store_invite",
+      entityId: created.id,
+      after: { email, role: input.role },
+    },
+  });
 
+  return { id: created.id, tokenHash: hash, rawToken: raw };
+}
+
+export async function sendInviteEmail(input: CreateInviteInput, invite: RecordedInvite): Promise<void> {
+  const inviteUrl = `${input.baseUrl}/invite/${invite.rawToken}?store=${input.storeSlug}`;
   await sendEmail({
-    to: email,
+    to: normalizeEmail(input.email),
     subject: `You're invited to ${input.storeName}`,
     html: buildInviteHtml(input.storeName, input.role, inviteUrl),
   });
-
-  return { id: invite.id, tokenHash: hash };
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function buildInviteHtml(storeName: string, role: string, url: string): string {
@@ -157,6 +183,36 @@ export async function validateInviteToken(rawToken: string): Promise<ValidatedIn
     storeName: invite.store.name,
     storeSlug: invite.store.slug,
   };
+}
+
+/**
+ * A shopper who only signed in by magic link has no password, so the invite's password
+ * sign-in can never succeed. The invite token was mailed to that address, which proves the
+ * mailbox as a magic link does: add a password to an account that has none. Never replaces one.
+ */
+export async function setInviteePassword(
+  rawToken: string,
+  password: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const invite = await validateInviteToken(rawToken);
+  if ("error" in invite) return { ok: false, error: invite.error };
+  const ctx = await auth.$context;
+  const { minPasswordLength, maxPasswordLength } = ctx.password.config;
+  if (password.length < minPasswordLength || password.length > maxPasswordLength) {
+    return { ok: false, error: `Use a password of ${minPasswordLength} to ${maxPasswordLength} characters.` };
+  }
+  const user = await authPrisma.user.findFirst({
+    where: { email: normalizeEmail(invite.email) },
+    select: { id: true, accounts: { where: { providerId: "credential" }, select: { id: true } } },
+  });
+  if (!user || user.accounts.length > 0) return { ok: true };
+  await ctx.internalAdapter.linkAccount({
+    userId: user.id,
+    providerId: "credential",
+    accountId: user.id,
+    password: await ctx.password.hash(password),
+  });
+  return { ok: true };
 }
 
 export async function acceptInvite(

@@ -23,6 +23,7 @@ import {
   readCatalogImageReferences,
 } from "../src/lib/catalog-prune-reader";
 import { resolveDirectUrl } from "../src/lib/env";
+import { httpStatusOf } from "../src/lib/catalog-photo-audit";
 import type { DatabaseIdentity } from "../src/lib/catalog-prune";
 
 const CATEGORY_SLUG_TO_ID: Record<string, string> = {
@@ -169,6 +170,41 @@ async function observePrisma(prisma: PrismaClient): Promise<DatabaseIdentity> {
   return { host: row.host, port: String(row.port), database: row.database };
 }
 
+const UPLOAD_CAUSE_LINE_MAX = 200;
+
+function firstCauseLine(value: string): string {
+  const line = value
+    .split(/[\r\n]+/)
+    .map((part) => part.trim())
+    .find((part) => part.length > 0) ?? "";
+  return line.length > UPLOAD_CAUSE_LINE_MAX ? line.slice(0, UPLOAD_CAUSE_LINE_MAX) : line;
+}
+
+function uploadCauseCode(error: Error): string | undefined {
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? firstCauseLine(code) || undefined : undefined;
+}
+
+function uploadCauseStatus(error: Error): number | undefined {
+  const status = httpStatusOf(error);
+  return Number.isInteger(status) ? status : undefined;
+}
+
+/** One line for an R2 upload failure. Never the error object, its response, or credentials. */
+export function formatR2UploadCause(cause: unknown): string {
+  if (typeof cause === "string") return firstCauseLine(cause) || "unknown cause";
+  if (!(cause instanceof Error)) return "unknown cause";
+
+  const name = (typeof cause.name === "string" && firstCauseLine(cause.name)) || "Error";
+  const status = uploadCauseStatus(cause);
+  const statusLabel = status === undefined ? "" : ` (HTTP ${status})`;
+  const message = firstCauseLine(typeof cause.message === "string" ? cause.message : "");
+  const code = uploadCauseCode(cause);
+  if (!message) return code ? `${name}${statusLabel}: ${code}` : `${name}${statusLabel}`;
+  const codeLabel = code && !message.includes(code) ? ` (${code})` : "";
+  return `${name}${statusLabel}: ${message}${codeLabel}`;
+}
+
 export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCatalogDeps = {}) {
   const startedAt = (deps.now ?? (() => new Date()))();
   const log = deps.log ?? ((line: string) => console.log(line));
@@ -215,6 +251,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
   let totalUploadBytes = 0;
   const failures: { id: string; reason: string }[] = [];
   const upsertedIds: string[] = [];
+  let adminKept = 0;
 
   const existingR2Keys =
     listClient && bucket
@@ -260,8 +297,9 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
           imageUploads++;
           totalUploadBytes += img.bytes;
         } else if (img.reason === "upload") {
-          log(`R2 upload failed for ${row.id}`);
-          failures.push({ id: row.id, reason: "R2 upload failed" });
+          const cause = formatR2UploadCause(img.cause);
+          log(`R2 upload failed for ${row.id}: ${cause}`);
+          failures.push({ id: row.id, reason: `R2 upload failed: ${cause}` });
         } else {
           imageSkips++;
           failures.push({ id: row.id, reason: "download/convert failed" });
@@ -275,30 +313,32 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
       }
     }
 
-    await prisma.$transaction(async (tx) => {
+    const { keptAdminChanges } = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await upsertMasterProduct(tx, row, categoryId, {
+      return upsertMasterProduct(tx, row, categoryId, {
         statusOnCreate: "active",
         statusOnUpdate: "active",
         confidence: "high",
         imageUrl,
       });
     });
+    if (keptAdminChanges) adminKept++;
     upsertedIds.push(row.id);
   }
 
   for (const row of reviewRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
-    await prisma.$transaction(async (tx) => {
+    const { keptAdminChanges } = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await upsertMasterProduct(tx, row, categoryId, {
+      return upsertMasterProduct(tx, row, categoryId, {
         statusOnCreate: "needs_review",
         confidence: row.confidence.trim(),
         imageUrl: null,
       });
     });
+    if (keptAdminChanges) adminKept++;
     upsertedIds.push(row.id);
   }
 
@@ -316,7 +356,8 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     log(`Image failures (${failures.length}):`);
     for (const failure of failures) log(`  ${failure.id}: ${failure.reason}`);
   }
-  log(`Seeded ${reviewRows.length} review-queue products (status='needs_review')`);
+  log(`Upserted ${reviewRows.length} review-queue products (new rows get status='needs_review'; existing rows keep their status)`);
+  log(`Kept admin changes on ${adminKept} ${adminKept === 1 ? "product" : "products"} (the fields, status and synonyms an admin changed)`);
 
   if (mode === "off") return;
 

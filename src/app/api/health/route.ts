@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientIp } from "@/lib/assistant/client-ip";
 import { healthQueryRaw } from "@/lib/db";
 import { runHealthChecks, toMinimalResult } from "@/lib/health";
 import { isRateLimited } from "@/lib/rate-limit";
@@ -6,10 +7,7 @@ import { isRateLimited } from "@/lib/rate-limit";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown";
+  const ip = clientIp(req.headers);
 
   if (isRateLimited(ip)) {
     return NextResponse.json(

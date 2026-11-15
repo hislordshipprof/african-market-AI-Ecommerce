@@ -21,7 +21,7 @@ export function findForbiddenImports(roots: string[], srcRoot: string): string[]
       const resolved = resolveSpecifier(file, spec, srcRoot);
       if (!resolved) continue;
       const normalized = resolved.replace(/\\/g, "/");
-      if (normalized.endsWith("/lib/stripe/provider.ts") || normalized.endsWith("/lib/checkout/service.ts")) {
+      if (forbiddenResolved(normalized)) {
         hits.push(`${path.relative(srcRoot, file)} -> ${path.relative(srcRoot, resolved)}`);
       }
       if (resolved.startsWith(srcRoot) && !seen.has(resolved)) queue.push(resolved);
@@ -30,14 +30,40 @@ export function findForbiddenImports(roots: string[], srcRoot: string): string[]
   return hits;
 }
 
+const ACCOUNT_LOADERS = [
+  "customer-account/checkout-profile",
+  "customer-account/saved-cards",
+  "customer-account/address-book",
+];
+
+/** Modules that create a PaymentIntent, pay with a saved card, or call placeOrder (#247). */
+const PAYMENT_MODULES = [
+  "stripe/provider",
+  "stripe/checkout-payments",
+  "checkout/service",
+  "checkout/actions",
+  "checkout/saved-card-payment",
+];
+
+/** Modules that apply, check or list store coupon codes: the assistant can neither apply nor reveal one (#557). */
+const COUPON_MODULES = [
+  "coupon/checkout",
+  "coupon/service",
+  "coupon/actions",
+  "coupon/form",
+];
+
+const FORBIDDEN_MODULES = [...PAYMENT_MODULES, ...ACCOUNT_LOADERS, ...COUPON_MODULES];
+
+function forbiddenResolved(normalized: string): boolean {
+  return FORBIDDEN_MODULES.some((module) => normalized.endsWith(`/lib/${module}.ts`));
+}
+
 function forbiddenSpecifier(spec: string): boolean {
   return spec === "stripe"
     || spec.startsWith("@stripe/")
     || FORBIDDEN_PACKAGES.has(spec)
-    || spec === "@/lib/checkout/service"
-    || spec === "@/lib/stripe/provider"
-    || spec.endsWith("/lib/checkout/service")
-    || spec.endsWith("/lib/stripe/provider");
+    || FORBIDDEN_MODULES.some((module) => spec === `@/lib/${module}` || spec.endsWith(`/lib/${module}`));
 }
 
 /** Import, re-export, import(), and require() specifiers, including side-effect imports. */

@@ -1,7 +1,7 @@
 vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { catalogImageUrl } from "../r2";
 import { storeScoped } from "../db";
@@ -16,9 +16,31 @@ import {
   getCollectionListings,
   getListingsByCategory,
   getFlowCatalog,
+  extractStoreProfile,
 } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
+
+describe("extractStoreProfile delivery radius", () => {
+  const store = (deliveryRadiusMi: unknown) => extractStoreProfile({
+    ownerName: null, ownerStory: null, ownerPhotoUrl: null, neighborhood: null, deliveryInfo: null,
+    hours: null, pickupEnabled: true, deliveryRadiusMi, prepTimeMinutes: 30,
+  }).deliveryRadiusMi;
+
+  it("falls back to the schema default 8 when the radius is missing", () => {
+    expect(store(null)).toBe(8);
+    expect(store(undefined)).toBe(8);
+  });
+
+  it("keeps a valid Decimal radius", () => {
+    expect(store(new Prisma.Decimal("12.5"))).toBe(12.5);
+    expect(store(0)).toBe(0);
+  });
+
+  it("falls back to 8 for values that are not a finite number", () => {
+    for (const bad of ["", "  ", "abc", NaN, Infinity, {}]) expect(store(bad)).toBe(8);
+  });
+});
 
 describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let rawPrisma: PrismaClient;
@@ -63,8 +85,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -263,26 +284,27 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   afterAll(async () => {
-    // Clean up in reverse order of dependencies
+    // Clean up in reverse order of dependencies. By store, not by this run's ids: the
+    // stores are upserted, so an interrupted run's rows would block the store delete.
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.storeCollectionListing.deleteMany({ where: { collectionId } }),
+      rawPrisma.storeCollectionListing.deleteMany({ where: { collection: { storeId: { in: [storeAId, storeBId] } } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.storeCollection.deleteMany({ where: { id: collectionId } }),
+      rawPrisma.storeCollection.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId, inactiveListingId, e2eListingId, frozenListingId, customOnlyListingId] } } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId, inactiveListingId, e2eListingId, frozenListingId, customOnlyListingId] } } }),
+      rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -771,6 +793,20 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       expect((await storeScoped(storeBId).storeCollection.deleteMany({ where: { id: collection.id } })).count).toBe(0);
       expect((await storeScoped(storeBId).storeCollectionListing.updateMany({ where: { id: link.id }, data: { sortOrder: 9 } })).count).toBe(0);
       expect((await storeScoped(storeBId).storeCollectionListing.deleteMany({ where: { id: link.id } })).count).toBe(0);
+      // A link that crosses stores (only a platform admin can write one) is invisible to both stores.
+      const [, , crossed] = await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.storeCollectionListing.create({ data: { collectionId: collection.id, listingId: storeBListing.id } }),
+      ]);
+      expect(await storeScoped(storeAId).storeCollectionListing.findMany({ where: { id: crossed.id } })).toEqual([]);
+      expect(await storeScoped(storeBId).storeCollectionListing.findMany({ where: { id: crossed.id } })).toEqual([]);
+      expect((await storeScoped(storeAId).storeCollectionListing.findMany({ where: { collectionId: collection.id } })).map((item) => item.id)).toEqual([link.id]);
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.storeCollectionListing.deleteMany({ where: { id: crossed.id } }),
+      ]);
       const reread = await storeScoped(storeAId).listing.findUnique({ where: { id: own.id }, include: { variants: true, collectionItems: true } });
       expect(reread?.price).toBe(250);
       expect(reread?.variants.map((item) => item.id)).toEqual([variant.id]);

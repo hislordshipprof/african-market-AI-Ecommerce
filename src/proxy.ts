@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
-import { slugFromHost, isSlugRoutable } from "@/lib/slug";
+import { resolveHost, isSlugRoutable } from "@/lib/slug";
+import { ATTRIBUTION_COOKIE, ATTRIBUTION_MAX_AGE, DIRECTORY_REF } from "@/lib/directory/attribution";
+import { needsNoScriptCsp, newCspNonce, NO_SCRIPT_CSP, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
 const COOKIE_NAME = "store_override";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -17,6 +19,8 @@ export function allowStoreOverride(
 export function proxy(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.delete("x-store-slug");
+  headers.delete("x-custom-domain");
+  headers.delete("x-platform-root");
 
   const host = request.headers.get("host");
   const overrideAllowed = allowStoreOverride(process.env);
@@ -29,6 +33,7 @@ export function proxy(request: NextRequest) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.searchParams.delete("store");
       const response = NextResponse.redirect(redirectUrl, 307);
+      stampSecurity(headers, response);
       rememberBrowser(request, response, browserIdentity(request));
       response.cookies.set(COOKIE_NAME, paramSlug, {
         httpOnly: true,
@@ -47,18 +52,63 @@ export function proxy(request: NextRequest) {
   }
 
   if (!slug && host) {
-    slug = slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN);
+    const resolution = resolveHost(host, process.env.PLATFORM_ROOT_DOMAIN);
+    if (resolution.kind === "slug") {
+      slug = resolution.slug;
+    } else if (resolution.kind === "custom-domain") {
+      headers.set("x-custom-domain", resolution.hostname);
+    } else if (resolution.kind === "root") {
+      headers.set("x-platform-root", "1");
+    }
   }
 
   if (slug) {
     headers.set("x-store-slug", slug);
   }
 
+  // State and city pages are cached for every host, so only the root domain may reach them (#451).
+  if (isDirectoryOnlyPath(request.nextUrl.pathname) && headers.get("x-platform-root") !== "1") {
+    const response = NextResponse.rewrite(new URL("/_directory-not-here", request.url));
+    stampSecurity(headers, response);
+    return response;
+  }
+
   const browserId = browserIdentity(request);
   headers.set("x-shop-browser", browserId);
+  const policy = reportOnlyPolicy(newCspNonce(), process.env);
+  headers.set("content-security-policy-report-only", policy);
   const response = NextResponse.next({ request: { headers } });
+  response.headers.set("content-security-policy-report-only", policy);
+  for (const header of staticSecurityHeaders()) {
+    response.headers.set(header.key, header.value);
+  }
+  if (needsNoScriptCsp(request.nextUrl.pathname)) {
+    response.headers.set("Content-Security-Policy", NO_SCRIPT_CSP);
+  }
   rememberBrowser(request, response, browserId);
+  if (headers.get("x-platform-root") !== "1" && request.nextUrl.searchParams.get("ref") === DIRECTORY_REF) {
+    response.cookies.set(ATTRIBUTION_COOKIE, DIRECTORY_REF, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: ATTRIBUTION_MAX_AGE,
+      secure: request.nextUrl.protocol === "https:",
+    });
+  }
   return response;
+}
+
+function isDirectoryOnlyPath(pathname: string): boolean {
+  return pathname === "/sitemap.xml" || pathname === "/robots.txt" || pathname.startsWith("/stores/");
+}
+
+function stampSecurity(requestHeaders: Headers, response: NextResponse) {
+  const policy = reportOnlyPolicy(newCspNonce(), process.env);
+  requestHeaders.set("content-security-policy-report-only", policy);
+  response.headers.set("content-security-policy-report-only", policy);
+  for (const header of staticSecurityHeaders()) {
+    response.headers.set(header.key, header.value);
+  }
 }
 
 function browserIdentity(request: NextRequest): string {

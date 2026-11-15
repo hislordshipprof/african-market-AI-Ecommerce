@@ -1,6 +1,9 @@
-import { uploadToR2 } from "./r2";
+import { randomBytes } from "node:crypto";
+import { isPhotoType, looksLikeSvg } from "./image/photo-type";
+import { isServableCatalogKey, uploadToR2 } from "./r2";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 export type ImageDownloadOptions = {
   /** Convert to webp (max 960px) with sharp before upload. Default: store the original bytes. */
@@ -13,7 +16,7 @@ export type ImageDownloadOptions = {
   format?: string;
   /** Follow redirects. Default false (a redirect is treated as a failure). */
   followRedirects?: boolean;
-  /** Per-request timeout in ms. Default: none. */
+  /** Per-request timeout in ms. Default 15s. */
   timeoutMs?: number;
   userAgent?: string;
 };
@@ -45,17 +48,35 @@ export function toThumbnailUrl(originalUrl: string, width: number): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Read a body into memory, cancelling the stream once it passes `MAX_IMAGE_BYTES`. */
+async function readCapped(body: ReadableStream<Uint8Array> | null): Promise<Buffer | null> {
+  if (!body) return null;
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_IMAGE_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return total === 0 ? null : Buffer.concat(chunks);
+}
+
 async function fetchImage(
   url: string,
-  opts: Required<Pick<ImageDownloadOptions, "retries" | "followRedirects" | "userAgent">> &
-    Pick<ImageDownloadOptions, "timeoutMs">,
+  opts: Required<Pick<ImageDownloadOptions, "retries" | "followRedirects" | "userAgent" | "timeoutMs">>,
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
   for (let attempt = 0; attempt < opts.retries; attempt++) {
     try {
       const response = await fetch(url, {
         headers: { "User-Agent": opts.userAgent },
         redirect: opts.followRedirects ? "follow" : "error",
-        ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
+        signal: AbortSignal.timeout(opts.timeoutMs),
       });
       if (response.status === 429) {
         if (attempt >= opts.retries - 1) return null;
@@ -67,8 +88,8 @@ async function fetchImage(
       if (!response.ok) return null;
       const declared = response.headers.get("content-length");
       if (declared && parseInt(declared, 10) > MAX_IMAGE_BYTES) return null;
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.byteLength === 0 || buffer.byteLength > MAX_IMAGE_BYTES) return null;
+      const buffer = await readCapped(response.body);
+      if (!buffer) return null;
       return { buffer, contentType: response.headers.get("content-type") || "image/jpeg" };
     } catch {
       if (attempt < opts.retries - 1) {
@@ -121,7 +142,7 @@ export async function downloadAndUploadImage(
     retries: Math.max(1, options.retries ?? 1),
     followRedirects: options.followRedirects ?? false,
     userAgent: options.userAgent ?? "AfricanMarketsPlatform/1.0 (catalog)",
-    timeoutMs: options.timeoutMs,
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
   const thumb = options.rewriteWikimedia ? toThumbnailUrl(sourceUrl, 960) : sourceUrl;
   const candidates = thumb !== sourceUrl ? [thumb, sourceUrl] : [sourceUrl];
@@ -153,5 +174,45 @@ export async function downloadAndUploadImage(
     return { ok: true, key, url, bytes: image.buffer.byteLength };
   } catch (cause) {
     return { ok: false, reason: "upload", cause };
+  }
+}
+
+const MAX_INPUT_PIXELS = 16_777_216;
+
+export type CatalogPhotoResult =
+  | { ok: true; key: string; url: string }
+  | { ok: false; reason: "svg" | "not_photo" | "storage" | "upload" };
+
+/** Catalog photos need the public bucket and its keys. */
+export function catalogStorageConfigured(): boolean {
+  return !!(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET);
+}
+
+/**
+ * An uploaded product photo: checked by its own bytes (never SVG), re-encoded to WebP (long edge 960px,
+ * no metadata) and stored under a new `catalog/{productId}-{random}.webp` key, so caches never serve the old one.
+ */
+export async function uploadCatalogPhoto(productId: string, bytes: Uint8Array): Promise<CatalogPhotoResult> {
+  if (looksLikeSvg(bytes)) return { ok: false, reason: "svg" };
+  if (!isPhotoType(bytes)) return { ok: false, reason: "not_photo" };
+  if (!catalogStorageConfigured()) return { ok: false, reason: "storage" };
+  const key = `catalog/${productId}-${randomBytes(8).toString("hex")}.webp`;
+  if (!isServableCatalogKey(key)) return { ok: false, reason: "upload" };
+
+  let webp: Buffer;
+  try {
+    const { default: sharp } = await import("sharp");
+    webp = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "warning", animated: false })
+      .rotate()
+      .resize(960, 960, { fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
+  } catch {
+    return { ok: false, reason: "not_photo" };
+  }
+  try {
+    return { ok: true, key, url: await uploadToR2(key, webp, "image/webp") };
+  } catch {
+    return { ok: false, reason: "upload" };
   }
 }

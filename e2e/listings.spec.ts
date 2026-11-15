@@ -1,39 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { generateTOTP } from "./totp";
 import { findListingAuditLogs } from "./audit-db";
 import { deleteE2eListings } from "./cleanup-listings";
 import { findListingVariants, seedCartLine } from "./listing-db";
+import { storeOwnerSignIn } from "./store-owner-auth";
 
 const OWNER_EMAIL = "owner@mama-ngozi.test";
-const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
-const SEED_TOTP_SECRET = process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP";
 const LISTINGS_URL = "/store-admin/listings?store=mama-ngozi";
-
-async function storeOwnerSignIn(page: Page) {
-  await page.goto("/store-admin/sign-in?store=mama-ngozi");
-  await page.getByLabel("Email").fill(OWNER_EMAIL);
-  await page.getByLabel("Password").fill(OWNER_PASSWORD);
-  await page.click("button[type='submit']");
-
-  await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
-
-  const code = generateTOTP(SEED_TOTP_SECRET);
-  await page.getByLabel("Verification code").fill(code);
-  await page.click("button[type='submit']");
-
-  try {
-    await page.waitForURL(
-      (url) => url.pathname.startsWith("/store-admin") && !url.pathname.includes("sign-in"),
-      { timeout: 15000 },
-    );
-  } catch {
-    const url = page.url();
-    const bodySnippet = await page.locator("body").textContent().catch(() => "");
-    throw new Error(
-      `Store owner sign-in failed | url: ${url} | body: ${bodySnippet?.slice(0, 300)}`,
-    );
-  }
-}
 
 interface CreateListingOptions {
   name: string;
@@ -56,7 +28,6 @@ async function createListingViaUI(page: Page, opts: CreateListingOptions) {
 
   await page.click("text=Add listing");
   await page.getByLabel("Product name").fill(opts.name);
-  await page.getByLabel("Price ($)").fill(opts.price);
   if (opts.qty !== undefined) await page.getByLabel("Quantity in stock").fill(opts.qty);
 
   await page
@@ -153,7 +124,8 @@ test.describe("Listing management (authenticated)", () => {
 
     await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
     await expect(page.locator("text=Edit listing")).toBeVisible({ timeout: 5000 });
-    await page.getByLabel("Price ($)").fill("7.00");
+    // The listing price follows the cheapest variant (#392 item 6).
+    await page.getByLabel("Variant price in dollars").first().fill("7.00");
     await page.click("text=Save changes");
     await expect(page.locator("text=Listing updated")).toBeVisible({ timeout: 10000 });
 
@@ -175,6 +147,53 @@ test.describe("Listing management (authenticated)", () => {
 
     await page.goto(LISTINGS_URL);
     await expect(listingRow(page, uniqueName).getByText("$7.00")).toBeVisible({ timeout: 5000 });
+  });
+
+  test("an owner sets a listing's allergens and dietary claims, with an audit row", async ({ page }) => {
+    const uniqueName = `E2E Attributes ${Date.now()}`;
+    await createListingViaUI(page, { name: uniqueName, price: "4.00" });
+
+    await page.goto(LISTINGS_URL);
+    await page.getByRole("button", { name: `Ingredients and allergens for ${uniqueName}` }).click();
+    const dialog = page.getByRole("dialog");
+    const allergens = dialog.locator("section", { has: page.getByRole("heading", { name: "Allergens", exact: true }) });
+    await expect(allergens.getByText("Unknown", { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(dialog.getByRole("button", { name: "Save attributes" })).toBeDisabled();
+
+    await allergens.getByRole("switch").click();
+    await allergens.getByRole("button", { name: "Peanuts" }).click();
+    await allergens.getByRole("button", { name: "Sesame" }).click();
+    const dietary = dialog.locator("section", { has: page.getByRole("heading", { name: "Dietary claims", exact: true }) });
+    await dietary.getByRole("switch").click();
+    await dietary.getByRole("button", { name: "Halal" }).click();
+    await dialog.getByRole("button", { name: "Save attributes" }).click();
+    await expect(page.getByText("Attributes saved")).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("button", { name: `Ingredients and allergens for ${uniqueName}` }).click();
+    await expect(allergens.getByText("Set by you")).toBeVisible({ timeout: 10000 });
+    await expect(allergens.getByRole("button", { name: "Peanuts" })).toHaveAttribute("aria-pressed", "true");
+    await expect(allergens.getByRole("button", { name: "Milk" })).toHaveAttribute("aria-pressed", "false");
+    const ingredients = dialog.locator("section", { has: page.getByRole("heading", { name: "Ingredients", exact: true }) });
+    await expect(ingredients.getByText("Unknown", { exact: true })).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const logs = await findListingAuditLogs("mama-ngozi", uniqueName);
+        return logs.find((l) => l.action === "listing.attributes_correct") ?? null;
+      }, { timeout: 10000 })
+      .toMatchObject({
+        actorEmail: OWNER_EMAIL,
+        after: { allergensStatus: "known", allergens: ["peanuts", "sesame"], dietaryStatus: "known", dietaryClaims: ["halal"] },
+      });
+
+    await expect(ingredients.getByRole("button", { name: "Use catalog value" })).toHaveCount(0);
+    await allergens.getByRole("button", { name: "Use catalog value" }).click();
+    await dialog.getByRole("button", { name: "Save attributes" }).click();
+    await expect(page.getByText("Attributes saved").last()).toBeVisible({ timeout: 10000 });
+    await page.getByRole("button", { name: `Ingredients and allergens for ${uniqueName}` }).click();
+    await expect(allergens.getByText("Unknown", { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(allergens.getByRole("button", { name: "Use catalog value" })).toHaveCount(0);
+    await expect(dietary.getByText("Set by you")).toBeVisible();
   });
 
   test("switch stock mode from counted to status", async ({ page }) => {
@@ -222,7 +241,7 @@ test.describe("Listing management (authenticated)", () => {
     const detail = `/listings/${before.id}?store=mama-ngozi`;
     const product = page.getByTestId("product-detail");
     await page.goto(detail);
-    await expect(product.getByLabel("$8.00").first()).toBeVisible({ timeout: 10000 });
+    await expect(product.getByLabel("$8.00").filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
 
     await page.goto(LISTINGS_URL);
     await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
@@ -235,10 +254,11 @@ test.describe("Listing management (authenticated)", () => {
     const after = await findListingVariants("mama-ngozi", uniqueName);
     expect(after.variants.map((variant) => variant.id)).toEqual([variantId]);
     expect(after.variants[0]).toMatchObject({ price: 950, weightG: 1000 });
-    expect(after.price).toBe(800);
+    // The listing price follows the cheapest variant (#392 item 6).
+    expect(after.price).toBe(950);
 
     await page.goto(detail);
-    await expect(product.getByLabel("$9.50").first()).toBeVisible({ timeout: 10000 });
+    await expect(product.getByLabel("$9.50").filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
     await expect(product.getByLabel("$8.00")).toHaveCount(0);
 
     await page.goto(LISTINGS_URL);

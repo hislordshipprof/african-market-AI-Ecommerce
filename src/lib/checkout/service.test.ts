@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 
 const retrieve = vi.hoisted(() => vi.fn());
 const send = vi.hoisted(() => vi.fn());
@@ -16,6 +16,8 @@ vi.mock("../inngest/client", () => ({
 import { computeQuote, placeOrder } from "./service";
 import { storeScoped, storeScopedTransaction } from "../db";
 import type { Contact } from "../customer-flow/contracts";
+import { ADR_0021_SERVICE_FEE, NO_SERVICE_FEE } from "../order/platform-fee";
+
 
 const validContact: Contact = {
   name: "Jane Doe",
@@ -33,7 +35,7 @@ function baseLines(
 
 describe("computeQuote", () => {
   it("calculates subtotal and 10% buffer", () => {
-    const q = computeQuote(0, baseLines(), validContact, "pickup");
+    const q = computeQuote(0, baseLines(), validContact, "pickup", NO_SERVICE_FEE);
     expect(q.subtotalCents).toBe(2400);
     expect(q.bufferCents).toBe(240);
     expect(q.holdCents).toBe(2640);
@@ -46,7 +48,7 @@ describe("computeQuote", () => {
       0,
       [{ price: 25000, qty: 1, maxPerOrder: null }],
       validContact,
-      "pickup",
+      "pickup", NO_SERVICE_FEE,
     );
     expect(q.subtotalCents).toBe(25000);
     expect(q.bufferCents).toBe(2000);
@@ -54,7 +56,7 @@ describe("computeQuote", () => {
   });
 
   it("forces tip to 0 for pickup", () => {
-    const q = computeQuote(0, baseLines(), validContact, "pickup");
+    const q = computeQuote(0, baseLines(), validContact, "pickup", NO_SERVICE_FEE);
     expect(q.tipCents).toBe(0);
     expect(q.totalCents).toBe(2400);
     expect(q.bufferCents).toBe(240);
@@ -62,7 +64,7 @@ describe("computeQuote", () => {
   });
 
   it("flags minimum order violation", () => {
-    const q = computeQuote(5000, baseLines(), validContact, "pickup");
+    const q = computeQuote(5000, baseLines(), validContact, "pickup", NO_SERVICE_FEE);
     expect(q.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "minimum-order" }),
@@ -71,7 +73,7 @@ describe("computeQuote", () => {
   });
 
   it("flags empty cart", () => {
-    const q = computeQuote(0, [], validContact, "pickup");
+    const q = computeQuote(0, [], validContact, "pickup", NO_SERVICE_FEE);
     expect(q.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "minimum-order" }),
@@ -84,7 +86,7 @@ describe("computeQuote", () => {
       0,
       baseLines(),
       { name: "", phone: "+15551234567", email: "a@b.com" },
-      "pickup",
+      "pickup", NO_SERVICE_FEE,
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -98,7 +100,7 @@ describe("computeQuote", () => {
       0,
       baseLines(),
       { name: "Jane", phone: "+15551234567", email: "" },
-      "pickup",
+      "pickup", NO_SERVICE_FEE,
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -112,7 +114,7 @@ describe("computeQuote", () => {
       0,
       baseLines(),
       { name: "Jane", phone: "+15551234567", email: "notanemail" },
-      "pickup",
+      "pickup", NO_SERVICE_FEE,
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -126,7 +128,7 @@ describe("computeQuote", () => {
       0,
       baseLines(),
       { name: "Jane", phone: "123", email: "a@b.com" },
-      "pickup",
+      "pickup", NO_SERVICE_FEE,
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -140,7 +142,7 @@ describe("computeQuote", () => {
       0,
       [{ price: 500, qty: 0, maxPerOrder: null }],
       validContact,
-      "pickup",
+      "pickup", NO_SERVICE_FEE,
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -150,25 +152,91 @@ describe("computeQuote", () => {
   });
 
   it("flags non-pickup fulfillment", () => {
-    const q = computeQuote(0, baseLines(), validContact, "store-delivery");
+    const q = computeQuote(0, baseLines(), validContact, "courier", NO_SERVICE_FEE);
     expect(q.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "ineligible" }),
       ]),
     );
+    expect(q.deliveryFeeCents).toBe(0);
+  });
+
+  it("store delivery adds the store's fee to total and hold", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 4000, qty: 1, maxPerOrder: null }],
+      validContact,
+      "store-delivery", NO_SERVICE_FEE,
+      {
+        enabled: true,
+        feeCents: 500,
+        radiusMi: 8,
+        hasCoordinates: true,
+        confirmed: { withinRadius: true },
+        leaveAtDoor: false,
+      },
+    );
+    expect(q.problems).toEqual([]);
+    expect(q.subtotalCents).toBe(4000);
+    expect(q.deliveryFeeCents).toBe(500);
+    expect(q.totalCents).toBe(4500);
+    expect(q.bufferCents).toBe(400);
+    expect(q.holdCents).toBe(4900);
+  });
+
+  it("courier adds the quoted fee, unmarked, to total and hold", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 4000, qty: 1, maxPerOrder: null }],
+      validContact,
+      "courier", NO_SERVICE_FEE, null,
+      { ok: true, feeCents: 899, provider: "Uber Direct", leaveAtDoor: false },
+    );
+    expect(q.problems).toEqual([]);
+    expect(q.courierFeeCents).toBe(899);
+    expect(q.courierProvider).toBe("Uber Direct");
+    expect(q.deliveryFeeCents).toBe(0);
+    expect(q.totalCents).toBe(4899);
+    expect(q.holdCents).toBe(5299);
+  });
+
+  it("courier shows why it is unavailable and adds no fee", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 4000, qty: 1, maxPerOrder: null }],
+      validContact,
+      "courier", NO_SERVICE_FEE, null,
+      { ok: false, problem: { code: "ineligible", message: "This order is over the 50 lb courier limit." } },
+    );
+    expect(q.problems).toEqual([{ code: "ineligible", message: "This order is over the 50 lb courier limit." }]);
+    expect(q.courierFeeCents).toBe(0);
+    expect(q.totalCents).toBe(4000);
+  });
+
+  it("courier refuses leave at door with frozen or perishable items", () => {
+    for (const line of [{ frozen: true }, { perishable: true }]) {
+      const q = computeQuote(
+        0,
+        [{ price: 4000, qty: 1, maxPerOrder: null, ...line }],
+        validContact,
+        "courier", NO_SERVICE_FEE, null,
+        { ok: true, feeCents: 899, provider: "DoorDash Drive", leaveAtDoor: true },
+      );
+      expect(q.problems).toEqual([expect.objectContaining({ code: "ineligible" })]);
+    }
   });
 
   it("returns a valid expiration ~15 minutes out", () => {
     const before = Date.now();
-    const q = computeQuote(0, baseLines(), validContact, "pickup");
+    const q = computeQuote(0, baseLines(), validContact, "pickup", NO_SERVICE_FEE);
     const expires = new Date(q.expiresAt).getTime();
     expect(expires).toBeGreaterThan(before + 14 * 60_000);
     expect(expires).toBeLessThanOrEqual(before + 16 * 60_000);
   });
 
   it("returns unique quote ids", () => {
-    const q1 = computeQuote(0, baseLines(), validContact, "pickup");
-    const q2 = computeQuote(0, baseLines(), validContact, "pickup");
+    const q1 = computeQuote(0, baseLines(), validContact, "pickup", NO_SERVICE_FEE);
+    const q2 = computeQuote(0, baseLines(), validContact, "pickup", NO_SERVICE_FEE);
     expect(q1.id).not.toBe(q2.id);
   });
 
@@ -177,7 +245,7 @@ describe("computeQuote", () => {
       0,
       [{ price: 1000, qty: 5, maxPerOrder: 3 }],
       validContact,
-      "pickup",
+      "pickup", NO_SERVICE_FEE,
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -186,9 +254,67 @@ describe("computeQuote", () => {
     );
   });
 
+  it("adds the service fee to the total and sizes the hold buffer on goods", () => {
+    const q = computeQuote(0, [{ price: 6000, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE);
+    expect(q.serviceFeeCents).toBe(180);
+    expect(q.totalCents).toBe(6180);
+    expect(q.bufferCents).toBe(600);
+    expect(q.holdCents).toBe(6780);
+  });
+
+  describe("store coupon (#557)", () => {
+    const SAVE20 = { code: "SAVE20", coupon: { id: "c1", kind: "percent" as const, percentOff: 20, amountOffCents: null, minGoodsCents: 2500 } };
+    const FIVE_OFF = { code: "FIVEOFF", coupon: { id: "c2", kind: "fixed" as const, percentOff: null, amountOffCents: 500, minGoodsCents: 0 } };
+    const STORE_DELIVERY = { enabled: true, feeCents: 500, radiusMi: 5, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor: false };
+
+    it("takes the discount off goods, charges the service fee on discounted goods, and holds the discounted total plus the buffer", () => {
+      // $50.00 goods, 20% off = $10.00. Fee 3% of $40.00 = $1.20. Delivery $5.00 is never discounted.
+      // Total 4000 + 120 + 500 = 4620; buffer 10% of $40.00 = 400; hold 5020.
+      const q = computeQuote(0, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "store-delivery", ADR_0021_SERVICE_FEE, STORE_DELIVERY, null, SAVE20);
+      expect(q.problems).toEqual([]);
+      expect(q.subtotalCents).toBe(5000);
+      expect(q.discountCents).toBe(1000);
+      expect(q.serviceFeeCents).toBe(120);
+      expect(q.deliveryFeeCents).toBe(500);
+      expect(q.totalCents).toBe(4620);
+      expect(q.bufferCents).toBe(400);
+      expect(q.holdCents).toBe(5020);
+      expect(q.coupon).toEqual({ code: "SAVE20", discountCents: 1000 });
+    });
+
+    it("caps a fixed discount at the goods, so fees are never discounted", () => {
+      // $3.20 goods, $5 off → $3.20 off; the fee on $0 goods is 0; the $5 delivery stays.
+      const q = computeQuote(0, [{ price: 320, qty: 1, maxPerOrder: null }], validContact, "store-delivery", ADR_0021_SERVICE_FEE, STORE_DELIVERY, null, FIVE_OFF);
+      expect(q.discountCents).toBe(320);
+      expect(q.serviceFeeCents).toBe(0);
+      expect(q.totalCents).toBe(500);
+      expect(q.holdCents).toBe(500);
+    });
+
+    it("gives no discount below the code's minimum and says how much more to add, without blocking checkout", () => {
+      const q = computeQuote(0, [{ price: 2000, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, SAVE20);
+      expect(q.discountCents).toBe(0);
+      expect(q.serviceFeeCents).toBe(99);
+      expect(q.totalCents).toBe(2099);
+      expect(q.problems).toEqual([]);
+      expect(q.coupon).toEqual({ code: "SAVE20", discountCents: 0, message: "Add $5.00 more to use SAVE20." });
+    });
+
+    it("checks the store minimum order on goods before the discount", () => {
+      const q = computeQuote(5000, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, SAVE20);
+      expect(q.problems.some((p) => p.code === "minimum-order")).toBe(false);
+    });
+
+    it("passes a refused code through with no discount", () => {
+      const q = computeQuote(0, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, { code: "SAVE20", refusal: "This code has reached its limit." });
+      expect(q.discountCents).toBe(0);
+      expect(q.coupon).toEqual({ code: "SAVE20", discountCents: 0, message: "This code has reached its limit." });
+    });
+  });
+
   it("client-supplied price has no effect on server-derived amount", () => {
     const serverLines = [{ price: 1200, qty: 2, maxPerOrder: null }];
-    const q = computeQuote(0, serverLines, validContact, "pickup");
+    const q = computeQuote(0, serverLines, validContact, "pickup", NO_SERVICE_FEE);
     expect(q.subtotalCents).toBe(2400);
     expect(q.holdCents).toBe(2640);
   });
@@ -206,7 +332,7 @@ describe.skipIf(!hasDb)("placeOrder Inngest and platform fee (lane DB)", () => {
   const storeIds: string[] = [];
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
   }, 30_000);
 
@@ -260,7 +386,7 @@ describe.skipIf(!hasDb)("placeOrder Inngest and platform fee (lane DB)", () => {
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], FEE_CONTACT, "pickup");
+    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], FEE_CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     retrieve.mockResolvedValue({
       status: "requires_capture",
       amount: quote.holdCents,
@@ -302,17 +428,19 @@ describe.skipIf(!hasDb)("placeOrder Inngest and platform fee (lane DB)", () => {
     });
   }, 20_000);
 
-  it("placeOrder stores the platform fee computed from the order total", async () => {
-    const price = 1234;
-    const { store, cart, paymentIntentId, quote } = await seedStore(price);
+  it("placeOrder stores the service fee, the settings it was quoted with, and the platform fee", async () => {
+    const { store, cart, paymentIntentId, quote } = await seedStore(6000);
     send.mockReset();
     send.mockResolvedValue(undefined);
     const result = await placeOrder(store.id, 0, cart.id, FEE_CONTACT, "pickup", null, null, paymentIntentId);
     const order = await storeScoped(store.id).order.findUnique({ where: { id: result.token } });
-    const expectedFee = Math.min(Math.round((quote.totalCents * 290) / 10_000) + 30, quote.totalCents);
-    expect(quote.totalCents).toBe(price);
-    expect(expectedFee).toBe(66);
-    expect(order?.platformFeeCents).toBe(expectedFee);
+    expect(quote.totalCents).toBe(6180);
+    expect(order?.serviceFeeCents).toBe(180);
+    expect(order?.totalCents).toBe(6180);
+    expect(order?.totalAuthorizedCents).toBe(6780);
+    expect([order?.serviceFeeBps, order?.serviceFeeMinCents, order?.serviceFeeMaxCents]).toEqual([300, 99, 299]);
+    // $1.80 fee + the store's card fee on $60 of goods (2.9% + 30¢ = $2.04).
+    expect(order?.platformFeeCents).toBe(384);
   });
 
   it("a checkout replay after commit does not send a second event", async () => {

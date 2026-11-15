@@ -1,0 +1,185 @@
+import { WhatsAppApiError } from "./errors";
+import { isBsuid } from "./phone";
+import { APPROVED_TEMPLATES, copilotTemplateParameters, isOrderUpdateTemplate, OWNER_LINK_TEMPLATE } from "./templates";
+import type { OutboundMessage, SendResult, WhatsAppProvider } from "./types";
+
+/**
+ * Recording fake for tests and E2E_FAKE_WHATSAPP=1. It enforces the Cloud API
+ * rules this platform depends on, with Meta's error codes:
+ * - free-form messages (text, interactive, media) only within 24 hours of the
+ *   recipient's last inbound message (131047);
+ * - no business-scoped user id recipient for the authentication template (131062);
+ * - text body 1–4096 characters; interactive body 1–1024, 1–3 reply buttons,
+ *   titles 1–20 characters, ids 1–256 and unique (131009);
+ * - list (#559): body 1–4096, button 1–20, 1–10 rows, row titles 1–24,
+ *   descriptions up to 72, ids 1–200 and unique (131009);
+ * - templates only by an approved name and language (132001), and the
+ *   owner_link_code template with exactly a body code and a copy-code button
+ *   code of at most 15 characters (132000);
+ * - an order-update template (#560) with exactly a non-empty body store name
+ *   and a URL button suffix that is a path, not a whole URL (132000);
+ * - a copilot template (#144) with exactly its count of non-empty body
+ *   variables (132000), none holding a new line, a tab or more than four
+ *   spaces in a row (132018).
+ * A test can withdraw a template's approval (revokeFakeTemplate).
+ */
+
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export interface FakeOutboxEntry {
+  message: OutboundMessage;
+  result: SendResult;
+  /** The store number's phone_number_id it was sent from; null is the platform number. */
+  from: string | null;
+}
+
+const outbox: FakeOutboxEntry[] = [];
+const lastInbound = new Map<string, number>();
+const revoked = new Set<string>();
+let sequence = 0;
+
+function digits(to: string): string {
+  return to.replace(/^\+/, "");
+}
+
+function invalid(code: number): never {
+  throw new WhatsAppApiError(code, 400);
+}
+
+function checkWindow(to: string, now: number): void {
+  const at = lastInbound.get(digits(to));
+  if (at === undefined || now - at > WINDOW_MS) invalid(131047);
+}
+
+function checkTemplate(message: Extract<OutboundMessage, { type: "template" }>): void {
+  const approved = APPROVED_TEMPLATES.some(
+    (template) => template.name === message.name && template.language === message.language,
+  );
+  if (!approved || revoked.has(message.name)) throw new WhatsAppApiError(132001, 404);
+  if (isOrderUpdateTemplate(message.name)) return checkOrderUpdate(message);
+  const parameters = copilotTemplateParameters(message.name);
+  if (parameters !== null) return checkCopilot(message, parameters);
+  if (message.name !== OWNER_LINK_TEMPLATE.name) return;
+  const components = message.components ?? [];
+  const body = components.find((component) => component.type === "body");
+  const button = components.find((component) => component.type === "button");
+  if (components.length !== 2 || !body || !button) invalid(132000);
+  if (body.parameters.length !== 1 || !body.parameters[0].text) invalid(132000);
+  if (button.sub_type !== "url" || button.index !== "0") invalid(132000);
+  if (button.parameters.length !== 1) invalid(132000);
+  const code = button.parameters[0].text;
+  if (!code || code.length > 15) invalid(132000);
+}
+
+function checkOrderUpdate(message: Extract<OutboundMessage, { type: "template" }>): void {
+  const components = message.components ?? [];
+  const body = components.find((component) => component.type === "body");
+  const button = components.find((component) => component.type === "button");
+  if (components.length !== 2 || !body || !button) invalid(132000);
+  if (body.parameters.length !== 1 || !body.parameters[0].text.trim()) invalid(132000);
+  if (button.sub_type !== "url" || button.index !== "0" || button.parameters.length !== 1) invalid(132000);
+  const suffix = button.parameters[0].text;
+  if (!suffix || /^[a-z]+:/i.test(suffix) || suffix.startsWith("/")) invalid(132000);
+}
+
+function checkCopilot(message: Extract<OutboundMessage, { type: "template" }>, count: number): void {
+  const components = message.components ?? [];
+  const body = components[0];
+  if (components.length !== 1 || body?.type !== "body" || body.parameters.length !== count) invalid(132000);
+  for (const parameter of body.parameters) {
+    if (!parameter.text.trim()) invalid(132000);
+    if (/[\n\t]| {5}/.test(parameter.text)) invalid(132018);
+  }
+}
+
+function check(message: OutboundMessage, now: number): void {
+  if (isBsuid(message.to)) {
+    // Meta: BSUID recipients are not supported for authentication templates (131062).
+    if (message.type === "template" && message.name === OWNER_LINK_TEMPLATE.name) invalid(131062);
+  } else if (!/^\d{8,15}$/.test(digits(message.to))) invalid(131009);
+  switch (message.type) {
+    case "text":
+      checkWindow(message.to, now);
+      if (message.body.length < 1 || message.body.length > 4096) invalid(131009);
+      return;
+    case "interactive": {
+      checkWindow(message.to, now);
+      if (message.body.length < 1 || message.body.length > 1024) invalid(131009);
+      const { buttons } = message;
+      if (buttons.length < 1 || buttons.length > 3) invalid(131009);
+      const ids = new Set(buttons.map((button) => button.id));
+      if (ids.size !== buttons.length) invalid(131009);
+      for (const button of buttons) {
+        if (button.title.length < 1 || button.title.length > 20) invalid(131009);
+        if (button.id.length < 1 || button.id.length > 256) invalid(131009);
+      }
+      return;
+    }
+    case "list": {
+      checkWindow(message.to, now);
+      if (message.body.length < 1 || message.body.length > 4096) invalid(131009);
+      if (message.button.length < 1 || message.button.length > 20) invalid(131009);
+      const { rows } = message;
+      if (rows.length < 1 || rows.length > 10) invalid(131009);
+      if (new Set(rows.map((row) => row.id)).size !== rows.length) invalid(131009);
+      for (const row of rows) {
+        if (row.title.length < 1 || row.title.length > 24) invalid(131009);
+        if (row.id.length < 1 || row.id.length > 200) invalid(131009);
+        if ((row.description ?? "").length > 72) invalid(131009);
+      }
+      return;
+    }
+    case "media":
+      checkWindow(message.to, now);
+      if (!message.link.startsWith("https://")) invalid(131009);
+      return;
+    case "template":
+      checkTemplate(message);
+      return;
+  }
+}
+
+export const fakeWhatsAppProvider: WhatsAppProvider = {
+  // Fake Embedded Signup: the ids and display number come from the form. A
+  // missing display number is Meta's invalid-parameter error (100).
+  connectStoreNumber(input) {
+    if (!input.displayNumber) return Promise.reject(new WhatsAppApiError(100, 400));
+    return Promise.resolve({
+      businessToken: `fake-business-token-${input.phoneNumberId}`,
+      displayNumber: input.displayNumber,
+    });
+  },
+  // Records synchronously before returning, so a caller that started the send
+  // and did not await it still finds the entry.
+  send(message, from) {
+    try {
+      check(message, Date.now());
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    sequence += 1;
+    const result: SendResult = { messageId: `wamid.fake-${sequence}`, waId: isBsuid(message.to) ? null : digits(message.to) };
+    outbox.push({ message, result, from: from?.phoneNumberId ?? null });
+    return Promise.resolve(result);
+  },
+};
+
+/** Meta opens the 24-hour window when the user writes to the business (by wa_id or BSUID). */
+export function noteInbound(waId: string, at: number = Date.now()): void {
+  lastInbound.set(digits(waId), at);
+}
+
+export function getFakeOutbox(): readonly FakeOutboxEntry[] {
+  return outbox;
+}
+
+/** Meta withdrew this template's approval: sends of it fail with 132001 until resetFake. */
+export function revokeFakeTemplate(name: string): void {
+  revoked.add(name);
+}
+
+export function resetFake(): void {
+  outbox.length = 0;
+  lastInbound.clear();
+  revoked.clear();
+}

@@ -266,3 +266,184 @@ describe("proxy in production (override not allowed)", () => {
     );
   });
 });
+
+describe("security headers on the proxy", () => {
+  it("redirect and pass-through both carry headers", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    const redirect = proxy(makeRequest("http://localhost:3000/?store=mama-ngozi"));
+    expect(redirect.status).toBe(307);
+    expect(redirect.headers.get("content-security-policy")).toBe(
+      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+    );
+    expect(redirect.headers.get("content-security-policy-report-only")).toContain("default-src 'self'");
+    expect(redirect.headers.get("strict-transport-security")).toBe("max-age=63072000");
+
+    vi.stubEnv("NODE_ENV", "production");
+    const pass = proxy(makeRequest("http://localhost:3000/"));
+    expect(pass.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(pass.headers.get("x-frame-options")).toBe("DENY");
+    expect(pass.headers.get("content-security-policy-report-only")).not.toContain("unsafe-eval");
+    expect(pass.headers.get("content-security-policy")).toBe(
+      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+    );
+
+    const nextConfig = (await import("../next.config")).default;
+    if (!nextConfig.headers) throw new Error("next config does not set headers");
+    const configured = await nextConfig.headers();
+    expect(configured.map((entry: { source: string }) => entry.source)).toContain("/_next/static/:path*");
+  });
+
+  it("an SVG path gets a no-script, sandboxed policy (#124)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const path of [
+      "/logos/mama-ngozi-logo.svg",
+      "/api/catalog-image/catalog/logo.svg",
+      "/logos/mama-ngozi-logo%2Esvg",
+      "/logos/mama-ngozi-logo%2esvg",
+      "/logos/mama-ngozi-logo.sv%67",
+      "/logos/bad%E0%A4%A.png",
+    ]) {
+      const res = proxy(makeRequest(`http://localhost:3000${path}`));
+      expect(res.headers.get("content-security-policy")).toMatch(/script-src 'none'.*sandbox/);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+  });
+
+  it("every catalog-image path gets the no-script policy, whatever its extension (#124)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const path of ["/api/catalog-image/catalog/x.jpg", "/api/catalog%2Dimage/catalog/x.jpg"]) {
+      const res = proxy(makeRequest(`http://localhost:3000${path}`));
+      expect(res.headers.get("content-security-policy")).toMatch(/script-src 'none'.*sandbox/);
+    }
+  });
+
+  it("nonce request equals response and differs per request", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const first = proxy(makeRequest("http://localhost:3000/shop"));
+    const second = proxy(makeRequest("http://localhost:3000/shop"));
+    const report = (response: { headers: { get(name: string): string | null } }) =>
+      response.headers.get("content-security-policy-report-only");
+    expect(report(first)).toBe(first.headers.get("x-middleware-request-content-security-policy-report-only"));
+    expect(report(first)).not.toBe(report(second));
+    expect(first.headers.get("content-security-policy")).not.toContain("nonce-");
+  });
+});
+
+describe("proxy custom domain resolution", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "markets.example");
+  });
+
+  it("forwards a non-platform host as x-custom-domain, not as a slug", () => {
+    const res = proxy(makeRequest("https://Shop.MamasMarket.com/"));
+    expect(res.headers.get("x-middleware-request-x-custom-domain")).toBe("shop.mamasmarket.com");
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+  });
+
+  it("keeps platform subdomains on the slug path", () => {
+    const res = proxy(makeRequest("https://mama-ngozi.markets.example/"));
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
+    expect(res.headers.get("x-middleware-request-x-custom-domain")).toBeNull();
+  });
+
+  it("drops a client-sent x-custom-domain on a platform host", () => {
+    const req = new NextRequest("https://markets.example/", {
+      headers: { host: "markets.example", "x-custom-domain": "victim-store.com" },
+    });
+    const res = proxy(req);
+    expect(res.headers.get("x-middleware-request-x-custom-domain")).toBeNull();
+  });
+});
+
+describe("proxy on the platform root domain (store directory)", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "example.com");
+  });
+
+  for (const host of ["example.com", "www.example.com"]) {
+    it(`marks ${host} as the platform root and sets no store`, () => {
+      const res = proxy(makeRequest(`http://${host}/`));
+      expect(res.headers.get("x-middleware-request-x-platform-root")).toBe("1");
+      expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+      expect(res.headers.get("x-middleware-request-x-custom-domain")).toBeNull();
+    });
+  }
+
+  it("leaves a store host unmarked and drops a forged root header", () => {
+    const req = new NextRequest("http://mama-ngozi.example.com/", {
+      headers: { host: "mama-ngozi.example.com", "x-platform-root": "1" },
+    });
+    const res = proxy(req);
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
+    expect(res.headers.get("x-middleware-request-x-platform-root")).toBeNull();
+  });
+
+  for (const path of ["/stores/texas", "/stores/texas/houston", "/sitemap.xml", "/robots.txt"]) {
+    it(`serves ${path} on the root domain`, () => {
+      const res = proxy(makeRequest(`http://example.com${path}`));
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+    });
+
+    it(`answers ${path} with not found on a store host`, () => {
+      const res = proxy(makeRequest(`http://mama-ngozi.example.com${path}`));
+      expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/_directory-not-here");
+    });
+  }
+
+  it("leaves a store's own /stores-like paths alone", () => {
+    const res = proxy(makeRequest("http://mama-ngozi.example.com/storesx"));
+    expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+  });
+});
+
+describe("directory attribution cookie (#454)", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "example.com");
+  });
+
+  it("sets a 30-day first-party cookie holding only the word directory when a store link carries ?ref=directory", () => {
+    const res = proxy(makeRequest("https://mama-ngozi.example.com/?ref=directory"));
+    const cookie = res.cookies.get("came_from");
+    expect(cookie?.value).toBe("directory");
+    expect(cookie?.maxAge).toBe(60 * 60 * 24 * 30);
+    expect(cookie?.httpOnly).toBe(true);
+    expect(cookie?.sameSite).toBe("lax");
+    expect(cookie?.secure).toBe(true);
+    expect(cookie?.domain).toBeUndefined();
+  });
+
+  it("sets it on a store's own domain too", () => {
+    const res = proxy(makeRequest("https://mamangozi.com/?ref=directory"));
+    expect(res.cookies.get("came_from")?.value).toBe("directory");
+  });
+
+  it("does not set the cookie without the ref", () => {
+    const res = proxy(makeRequest("https://mama-ngozi.example.com/"));
+    expect(res.cookies.get("came_from")).toBeUndefined();
+  });
+
+  it("does not set the cookie for any other ref value", () => {
+    for (const ref of ["Directory", "directory2", "xdirectory", ""]) {
+      const res = proxy(makeRequest(`https://mama-ngozi.example.com/?ref=${ref}`));
+      expect(res.cookies.get("came_from")).toBeUndefined();
+    }
+  });
+
+  it("does not set the cookie on the directory itself", () => {
+    const res = proxy(makeRequest("https://example.com/?ref=directory"));
+    expect(res.cookies.get("came_from")).toBeUndefined();
+  });
+});

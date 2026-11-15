@@ -1,25 +1,45 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type Order, type OrderLine } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
+import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
-import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
-import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
-import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
+import { systemAuditData } from "../system-actor";
+import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
+import { captureSplit, courierFeeCents, orderServiceFeeSettings, platformTaxCents } from "./platform-fee";
+import { couponTerms } from "../coupon/discount";
+import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
+import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
+import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
+import { openSubstitutionRequest } from "./substitution";
+import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
+import { captureCharge } from "./substitution-pricing";
+import { finalizeTaxForCapture, recordTaxTransaction, type FinalTax } from "../tax/capture-tax";
+import { TaxLocationError, TaxUnavailableError } from "../tax/calculator";
+import { recordCapture } from "./capture-record";
+import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
+import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
   | "AUTHORIZED"
   | "ACCEPTED"
   | "PICKING"
+  | "SUBSTITUTION_PENDING"
   | "CANCELLING"
   | "CAPTURING"
   | "READY"
   | "AWAITING_PICKUP"
+  | "COURIER_REQUESTED"
+  | "COURIER_ASSIGNED"
+  | "PICKED_UP"
+  | "OUT_FOR_DELIVERY"
+  | "DELIVERED"
   | "COMPLETED"
   | "CANCELLED"
-  | "REFUND_FAILED";
+  | "REFUND_FAILED"
+  | "PARTIALLY_REFUNDED"
+  | "REFUNDED";
 
 // Stripe USD minimum capture: $0.50 (50 cents).
 // https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts
@@ -30,6 +50,9 @@ type TransitionalStatus = "CAPTURING" | "CANCELLING";
 
 const CAPTURE_STATUS_CHANGED = "Order status changed during capture";
 
+/** Stock writes wait on listing locks, so these transactions cannot use Prisma's 5-second default. */
+export const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
+
 /** A capture result may report this amount only when the order row already stored it. */
 function storedCaptureAmount(
   capturedAmountCents: number | null,
@@ -38,25 +61,63 @@ function storedCaptureAmount(
   return { ok: true, capturedAmountCents };
 }
 
-export function fulfilledStatus(fulfillment: string): "AWAITING_PICKUP" | "READY" {
-  return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+function orderAuditWhere(entityId: string, action: string) {
+  return { entityId, action, entityType: "order" as const };
 }
 
-function systemAuditData(
-  storeId: string,
-  orderId: string,
-  action: string,
-  after: Prisma.InputJsonValue = {},
-) {
-  return {
-    storeId,
-    actorId: SYSTEM_ACTOR_ID,
-    actorEmail: SYSTEM_ACTOR_EMAIL,
-    action,
-    entityType: "order" as const,
-    entityId: orderId,
-    after,
-  };
+/**
+ * Label for a CANCELLING order with no cause row: markReady's below-minimum void
+ * (acceptedAt is set) or a claim made before cause rows existed (acceptedAt is null).
+ */
+function cancellationAuditAction(acceptedAt: Date | null): "void_zero_amount" | "auto_cancel" {
+  return acceptedAt == null ? "auto_cancel" : "void_zero_amount";
+}
+
+export type CancelCause =
+  | { action: "auto_cancel" }
+  | { action: "pick_timeout" }
+  | { action: "provider_canceled"; stripeEventId: string | null; cancellationReason: string | null }
+  | {
+      action: "store_cancel";
+      actor: { id: string; email: string };
+      reason: StoreCancelReason;
+      note: string | null;
+    };
+
+const CANCEL_CAUSE_ACTIONS: CancelCause["action"][] = ["store_cancel", "provider_canceled", "auto_cancel", "pick_timeout"];
+
+const CANCELLABLE_FROM: Record<CancelCause["action"], OrderStatus[]> = {
+  auto_cancel: ["AUTHORIZED"],
+  pick_timeout: ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"],
+  store_cancel: [...CANCELLABLE_BEFORE_CAPTURE],
+  provider_canceled: [...CANCELLABLE_BEFORE_CAPTURE],
+};
+
+/** Stripe ended the hold itself: `expired` on API 2025-03-31.basil and later, `automatic` before. */
+export function stripeEndedHold(cancellationReason: string | null): boolean {
+  return cancellationReason === "expired" || cancellationReason === "automatic";
+}
+
+function causeAuditData(storeId: string, orderId: string, cause: CancelCause) {
+  if (cause.action === "store_cancel") {
+    return {
+      storeId,
+      actorId: cause.actor.id,
+      actorEmail: cause.actor.email,
+      action: cause.action,
+      entityType: "order" as const,
+      entityId: orderId,
+      after: { reason: cause.reason, note: cause.note },
+    };
+  }
+  if (cause.action === "provider_canceled") {
+    return systemAuditData(storeId, orderId, cause.action, {
+      stripeEventId: cause.stripeEventId,
+      cancellationReason: cause.cancellationReason,
+      holdEnded: stripeEndedHold(cause.cancellationReason),
+    });
+  }
+  return systemAuditData(storeId, orderId, cause.action, {});
 }
 
 async function finalizeCancelledOrder(
@@ -67,17 +128,19 @@ async function finalizeCancelledOrder(
     from?: TransitionalStatus[];
     refundId?: string | null;
     after?: Prisma.InputJsonValue;
+    /** Stripe captured this much before the cancel refunded it. */
+    capturedCents?: number;
   },
 ): Promise<{ wrote: boolean }> {
   const from = options?.from ?? ["CAPTURING", "CANCELLING"];
-  return storeScopedTransaction(storeId, async (tx) => {
+  const outcome = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status === "CANCELLED" || !from.includes(current.status as TransitionalStatus)) {
-      return { wrote: false };
+      return { wrote: false, notify: false, courier: false };
     }
-    if (await openRefundRequest(tx, orderId)) return { wrote: false };
-    const existing = await tx.auditLog.findFirst({ where: { entityId: orderId, action } });
+    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false, courier: false };
+    const existing = await tx.auditLog.findFirst({ where: orderAuditWhere(orderId, action) });
     await tx.order.update({
       where: { id: orderId },
       data: {
@@ -87,13 +150,20 @@ async function finalizeCancelledOrder(
         ...(options?.refundId ? { refundId: options.refundId } : {}),
       },
     });
+    if (options?.capturedCents != null) await recordCapture(tx, orderId, options.capturedCents, null);
     if (!existing) {
       await tx.auditLog.create({
         data: systemAuditData(storeId, orderId, action, options?.after ?? {}),
       });
     }
-    return { wrote: true };
-  });
+    await releaseOrderStock(tx, storeId, orderId);
+    const notify = await recordOrderNotification(tx, storeId, orderId, "cancelled");
+    return { wrote: true, notify, courier: current.fulfillment === "courier" };
+  }, LEDGER_TRANSACTION);
+  if (outcome.notify) scheduleOrderNotification(storeId, orderId, "cancelled");
+  // A courier booked at packing start (#562) is cancelled with the order.
+  if (outcome.courier) scheduleCourierCancel(storeId, orderId);
+  return { wrote: outcome.wrote };
 }
 
 /** Refund whatever of a captured charge is still unrefunded. The request ledger owns the attempt. */
@@ -122,7 +192,7 @@ async function reserveAttempt(
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action },
+      where: orderAuditWhere(orderId, action),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     const newestAfter = prior[0]?.after as { attempt?: number; inFlight?: boolean } | null;
@@ -193,7 +263,7 @@ async function noteAttemptReleased(
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action },
+      where: orderAuditWhere(orderId, action),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 1,
     });
@@ -214,21 +284,45 @@ function isTerminalRefundStatus(status: string): boolean {
   return status === "failed" || status === "canceled";
 }
 
+/** Statuses a picker can tick or short lines in. */
+export const PICKABLE_STATUSES: string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
+
 const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
   "ACCEPTED",
   "PICKING",
+  "SUBSTITUTION_PENDING",
   "CAPTURING",
   "CANCELLING",
   "READY",
   "AWAITING_PICKUP",
+  "COURIER_REQUESTED",
+  "COURIER_ASSIGNED",
+  "PICKED_UP",
+  "OUT_FOR_DELIVERY",
   "REFUND_FAILED",
 ];
 
+const NAMED_VARIANT = {
+  select: { label: true, listing: { select: { customName: true, masterProduct: { select: { name: true } } } } },
+} as const;
+
 const ORDER_WITH_LINES = {
-  customer: { select: { name: true, phone: true } },
+  customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  coupon: { select: { code: true } },
+  // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
+  deliveries: {
+    where: { status: { not: "cancelled" } },
+    select: { provider: true, status: true, pickupReadyAt: true, courierJson: true },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+  },
   lines: {
     include: {
+      substitutedVariant: NAMED_VARIANT,
+      substitutionRequest: {
+        select: { status: true, qty: true, expiresAt: true, proposedUnitPriceCents: true, proposedVariant: NAMED_VARIANT },
+      },
       listingVariant: {
         include: {
           listing: {
@@ -246,26 +340,56 @@ const ORDER_WITH_LINES = {
   },
 } as const;
 
+const PLATFORM_REFUNDED_STATUSES: OrderStatus[] = ["PARTIALLY_REFUNDED", "REFUNDED"];
+
 export async function getStoreOrders(storeId: string) {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const orders = await storeScopedTransaction(storeId, async (tx) => {
     const resolved = await tx.auditLog.findMany({
       where: { action: "refund_resolved_manually", entityType: "order" },
       select: { entityId: true },
     });
     const resolvedIds = resolved.map((row) => row.entityId);
-    return tx.order.findMany({
+    const platformRefunded = await tx.auditLog.findMany({
+      where: { action: PLATFORM_REFUND_ACTION, entityType: "order" },
+      select: { entityId: true },
+    });
+    const platformRefundedIds = platformRefunded.map((row) => row.entityId);
+    // #539: an order with an open card dispute stays in the inbox, badged, whatever its status.
+    const openDisputes = await tx.paymentDispute.findMany({
+      where: { orderId: { not: null }, status: { notIn: [...CLOSED_DISPUTE_STATUSES] } },
+      select: { orderId: true },
+    });
+    const disputedIds = openDisputes.map((row) => row.orderId!);
+    const rows = await tx.order.findMany({
       where: {
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           ...(resolvedIds.length > 0
             ? [{ id: { in: resolvedIds }, status: "CANCELLED" as const }]
             : []),
+          // #538: the store sees a refund the platform team made.
+          ...(platformRefundedIds.length > 0
+            ? [{ id: { in: platformRefundedIds }, status: { in: PLATFORM_REFUNDED_STATUSES } }]
+            : []),
+          ...(disputedIds.length > 0 ? [{ id: { in: disputedIds } }] : []),
         ],
       },
       include: ORDER_WITH_LINES,
       orderBy: { createdAt: "desc" },
     });
+    return rows.map((row) => ({
+      ...row,
+      refundedByPlatform: platformRefundedIds.includes(row.id) && (PLATFORM_REFUNDED_STATUSES as string[]).includes(row.status),
+      disputed: disputedIds.includes(row.id),
+    }));
   });
+  // This payload reaches a client component. A user id is the same at every store, so it
+  // would let two stores' admins match one person: send only whether an account is linked.
+  return orders.map(({ customer: { userId, claimedByCustomerId, ...customer }, ...order }) => ({
+    ...order,
+    customer,
+    hasAccount: userId !== null || claimedByCustomerId !== null,
+  }));
 }
 
 export type StoreOrderRow = Awaited<ReturnType<typeof getStoreOrders>>[number];
@@ -276,12 +400,12 @@ export async function acceptOrder(
   prepEstimateMinutes: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const clamped = Math.max(1, Math.min(120, Math.round(prepEstimateMinutes)));
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
-    if (!order) return { ok: false, error: "Order not found" };
+    if (!order) return { ok: false as const, error: "Order not found", notify: false };
     if (order.status !== "AUTHORIZED") {
-      return { ok: false, error: `Cannot accept order in status ${order.status}` };
+      return { ok: false as const, error: `Cannot accept order in status ${order.status}`, notify: false };
     }
 
     await tx.order.update({
@@ -293,19 +417,93 @@ export async function acceptOrder(
       },
     });
 
-    return { ok: true };
+    const notify = await recordOrderNotification(tx, storeId, orderId, "accepted");
+    return { ok: true as const, notify };
   });
+  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "accepted");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+/** Packing starts with the first line picked or marked short: a courier order books its courier then (#562). */
+function startPackingData(order: { status: string }) {
+  return order.status === "ACCEPTED" ? { pickingStartedAt: new Date() } : {};
+}
+
+function packingStarted(order: { status: string; fulfillment: string }): boolean {
+  return order.status === "ACCEPTED" && order.fulfillment === "courier";
+}
+
+/** What a pick or short sets off once its transaction commits. */
+export type PickEffects = {
+  orderId: string;
+  packing: boolean;
+  substitution?: { request: { id: string; expiresAt: Date }; notify: boolean };
+};
+
+type PickTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
+
+/** A batched order (#564) is picked from its batch only; a separate pick would race the combined list. */
+export const ORDER_IN_BATCH = "This order is in a batch. Pick it from the batch screen";
+
+/** Ticks one whole line in the caller's transaction, which holds the store lock. */
+export async function pickLineInTx(tx: PickTx, line: OrderLine, order: Order): Promise<{ orderStatus: OrderStatus; effects: PickEffects }> {
+  await tx.orderLine.update({
+    where: { id: line.id },
+    data: { status: "picked", qtyPicked: line.qtyOrdered },
+  });
+  if (order.status === "ACCEPTED") {
+    await tx.order.update({
+      where: { id: order.id },
+      data: { status: "PICKING", ...startPackingData(order) },
+    });
+  }
+  // Picking goes on while a customer answers a substitution prompt.
+  const orderStatus = order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING";
+  return { orderStatus, effects: { orderId: order.id, packing: packingStarted(order) } };
+}
+
+/** Marks one line short in the caller's transaction and opens its #13 prompt. */
+export async function shortLineInTx(
+  tx: PickTx,
+  storeId: string,
+  line: OrderLine,
+  order: Order,
+  qtyFound: number,
+): Promise<{ orderStatus: OrderStatus; effects: PickEffects }> {
+  const request = await openSubstitutionRequest(tx, storeId, line, qtyFound, order);
+  await tx.orderLine.update({
+    where: { id: line.id },
+    data: { status: "short", qtyPicked: qtyFound },
+  });
+  await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING", ...startPackingData(order) } });
+  await settleShortLine(tx, storeId, line.id, line.qtyOrdered - qtyFound);
+  const notify = await recordSubstitutionPrompt(tx, storeId, order.id);
+  return {
+    orderStatus: "SUBSTITUTION_PENDING",
+    effects: { orderId: order.id, packing: packingStarted(order), substitution: { request, notify } },
+  };
+}
+
+export function runPickEffects(storeId: string, effects: PickEffects[]): void {
+  for (const effect of effects) {
+    if (effect.packing) scheduleCourierPacking(storeId, effect.orderId);
+    if (!effect.substitution) continue;
+    const { request, notify } = effect.substitution;
+    scheduleSubstitutionTimer(storeId, effect.orderId, request.id, request.expiresAt);
+    if (notify) scheduleOrderNotification(storeId, effect.orderId, "substitution", request.id);
+  }
 }
 
 export async function markLinePicked(
   storeId: string,
   lineId: string,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx): Promise<
+    { ok: true; orderStatus: OrderStatus; effects: PickEffects } | { ok: false; error: string }
+  > => {
     await lockStoreRow(tx, storeId);
 
-    const lines = await tx.orderLine.findMany({ where: { id: lineId } });
-    const line = lines[0];
+    const line = await tx.orderLine.findUnique({ where: { id: lineId } });
     if (!line) return { ok: false, error: "Order line not found" };
     if (line.status !== "pending") {
       return { ok: false, error: `Line already resolved (${line.status})` };
@@ -313,24 +511,54 @@ export async function markLinePicked(
 
     const order = await tx.order.findUnique({ where: { id: line.orderId } });
     if (!order) return { ok: false, error: "Order not found" };
-    if (order.status !== "ACCEPTED" && order.status !== "PICKING") {
+    if (!PICKABLE_STATUSES.includes(order.status)) {
       return { ok: false, error: `Cannot pick lines for order in status ${order.status}` };
     }
+    if (order.pickBatchId) return { ok: false, error: ORDER_IN_BATCH };
 
-    await tx.orderLine.update({
-      where: { id: lineId },
-      data: { status: "picked", qtyPicked: line.qtyOrdered },
-    });
+    return { ok: true, ...(await pickLineInTx(tx, line, order)) };
+  });
+  if (!result.ok) return result;
+  runPickEffects(storeId, [result.effects]);
+  return { ok: true, orderStatus: result.orderStatus };
+}
 
-    if (order.status === "ACCEPTED") {
-      await tx.order.update({
-        where: { id: order.id },
-        data: { status: "PICKING" },
-      });
+/**
+ * A picker found fewer than ordered. The line waits as `short` while the customer is asked to
+ * approve a swap or take a refund (#13); the order waits in SUBSTITUTION_PENDING until every
+ * prompt is answered or timed out, and only then can it be captured.
+ */
+export async function markLineShort(
+  storeId: string,
+  lineId: string,
+  qtyFound: number,
+): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
+  const result = await storeScopedTransaction(storeId, async (tx): Promise<
+    { ok: true; orderStatus: OrderStatus; effects: PickEffects } | { ok: false; error: string }
+  > => {
+    await lockStoreRow(tx, storeId);
+
+    const line = await tx.orderLine.findUnique({ where: { id: lineId } });
+    if (!line) return { ok: false, error: "Order line not found" };
+    if (line.status !== "pending") {
+      return { ok: false, error: `Line already resolved (${line.status})` };
+    }
+    if (!Number.isInteger(qtyFound) || qtyFound < 0 || qtyFound >= line.qtyOrdered) {
+      return { ok: false, error: "Quantity found must be a whole number below the quantity ordered" };
     }
 
-    return { ok: true, orderStatus: "PICKING" };
-  });
+    const order = await tx.order.findUnique({ where: { id: line.orderId } });
+    if (!order) return { ok: false, error: "Order not found" };
+    if (!PICKABLE_STATUSES.includes(order.status)) {
+      return { ok: false, error: `Cannot mark lines short for order in status ${order.status}` };
+    }
+    if (order.pickBatchId) return { ok: false, error: ORDER_IN_BATCH };
+
+    return { ok: true, ...(await shortLineInTx(tx, storeId, line, order, qtyFound)) };
+  }, LEDGER_TRANSACTION);
+  if (!result.ok) return result;
+  runPickEffects(storeId, [result.effects]);
+  return { ok: true, orderStatus: result.orderStatus };
 }
 
 type CaptureRetryResult =
@@ -385,12 +613,19 @@ async function settleUnconfirmedCapture(
     throw err;
   }
 
-  if (pi.status === "succeeded") {
-    await finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
-    return { ok: true, capturedAmountCents: pi.amountReceived };
+  const settled = await settlePaymentStatus(storeId, order, order.paymentIntentId, pi);
+  if (settled.outcome === "captured") {
+    return { ok: true, capturedAmountCents: settled.capturedAmountCents };
+  }
+  if (settled.outcome === "cancelled") {
+    return {
+      ok: false,
+      error: "Payment authorization was released — order cancelled; contact the customer",
+      resolved: "cancelled",
+    };
   }
 
-  if (pi.status === "requires_capture") {
+  if (settled.outcome === "authorized") {
     const reservedRelease = await reserveAttempt(storeId, orderId, "cancel_retry", { releaseHold: true });
     if (!reservedRelease.ok) {
       return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
@@ -440,20 +675,13 @@ async function settleUnconfirmedCapture(
     };
   }
 
-  if (pi.status === "canceled") {
-    await finalizeCancelFromSweep(storeId, orderId, "reconcile_cancel");
-    return {
-      ok: false,
-      error: "Payment authorization was released — order cancelled; contact the customer",
-      resolved: "cancelled",
-    };
-  }
-
   return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
 }
 
 async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
-  if (stripeProviderKind() !== "fake" || !paymentIntentId.startsWith("pi_seed_")) return;
+  if (stripeProviderKind() !== "fake") return;
+  // pi_seed_ is an order fixture. pi_fake_ is the checkout harness intent.
+  if (!paymentIntentId.startsWith("pi_seed_") && !paymentIntentId.startsWith("pi_fake_")) return;
   const { ensureAuthorizedAmount } = await import("../stripe/fake");
   ensureAuthorizedAmount(paymentIntentId, authorizedCents);
 }
@@ -478,7 +706,7 @@ async function persistRefundFailure(
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || (current.status !== "CANCELLING" && current.status !== "CANCELLED")) return;
     const manual = await tx.auditLog.findFirst({
-      where: { entityId: orderId, action: "refund_resolved_manually" },
+      where: orderAuditWhere(orderId, "refund_resolved_manually"),
     });
     if (manual) {
       alreadyResolved = true;
@@ -495,8 +723,10 @@ async function persistRefundFailure(
           : {}),
       },
     });
+    const known = current.capturedAmountCents ?? restoredCapture;
+    if (known != null) await recordCapture(tx, orderId, known, null);
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action: "refund_failed" },
+      where: orderAuditWhere(orderId, "refund_failed"),
     });
     const duplicate = prior.some((log) => {
       const after = log.after as { refundId?: string } | null;
@@ -556,6 +786,8 @@ async function settleCapturedRefund(
       from: ["CANCELLING"],
       refundId: decision.refundId,
       after: { refundId: decision.refundId, amountRefunded: decision.amountRefunded },
+      // A settled refund covers the whole capture (canonicalSucceededSettlement).
+      capturedCents: decision.amountRefunded,
     });
     return { outcome: "refunded" };
   }
@@ -635,10 +867,7 @@ async function syncProviderRefund(paymentIntentId: string, refundId: string, sta
 
 function refundStillCovers(refunds: RefundResult[], capturedCents: number): boolean {
   if (capturedCents <= 0) return false;
-  const covering = refunds
-    .filter((refund) => refund.status === "succeeded" || refund.status === "pending" || refund.status === "requires_action")
-    .reduce((sum, refund) => sum + refund.amountRefunded, 0);
-  return covering >= capturedCents;
+  return coveredRefundCents(refunds) >= capturedCents;
 }
 
 /** One failure record per refund. A repeat of the same refund does not alert again. */
@@ -652,7 +881,7 @@ async function recordDistinctRefundFailure(
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action: "refund_failed" },
+      where: orderAuditWhere(orderId, "refund_failed"),
     });
     const duplicate = prior.some((log) => {
       const after = log.after as { refundId?: string } | null;
@@ -724,14 +953,15 @@ export async function markTerminalRefundFailure(input: {
     await lockStoreRow(tx, order.storeId);
     const row = await tx.order.findUnique({ where: { id: order.id } });
     if (!row || (row.status !== "CANCELLING" && row.status !== "CANCELLED")) return;
+    await recordCapture(tx, order.id, captured, null);
     const manual = await tx.auditLog.findFirst({
-      where: { entityId: order.id, action: "refund_resolved_manually" },
+      where: orderAuditWhere(order.id, "refund_resolved_manually"),
     });
     if (manual) {
       alreadyResolved = true;
       return;
     }
-    const prior = await tx.auditLog.findMany({ where: { entityId: order.id, action } });
+    const prior = await tx.auditLog.findMany({ where: orderAuditWhere(order.id, action) });
     const duplicate = prior.some((log) => {
       const after = log.after as { refundId?: string } | null;
       return after?.refundId === input.refundId;
@@ -769,10 +999,69 @@ export async function markTerminalRefundFailure(input: {
   return { ok: true, action: covered ? "covered" : "refund_failed" };
 }
 
+/** Stripe metadata naming the coupon an order used (#557). */
+function couponMetadata(couponId: string | null | undefined): Record<string, string> | undefined {
+  return couponId ? { coupon_id: couponId } : undefined;
+}
+
+/** The application fee for a stored capture amount; the service fee was stored with it. */
+function applicationFeeFor(
+  order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number; taxCents: number; taxLiableParty: string },
+  capturedCents: number,
+): number {
+  return captureSplit({
+    capturedCents,
+    serviceFeeCents: order.serviceFeeCents,
+    courierFeeCents: courierFeeCents(order),
+    platformTaxCents: platformTaxCents(order),
+  }).applicationFeeCents;
+}
+
+const ORDER_CHANGED_DURING_CAPTURE = "Order changed during capture, try again";
+
+type ReadyDb = Pick<Prisma.TransactionClient, "storeCoupon">;
+
+/** The capture charge for the final lines. The coupon's value cannot change once an order used it (#556), so it is read as placed. */
+async function readyCharge(db: ReadyDb, order: Order, lines: OrderLine[]) {
+  const couponRow = order.couponId ? await db.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+  const coupon = couponRow ? couponTerms(couponRow) : null;
+  return captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order), coupon });
+}
+
+/** What the final tax was calculated on; phase 1 checks it under the lock. */
+function chargedLinesKey(lines: OrderLine[]): string {
+  return JSON.stringify([...lines]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((l) => [l.id, l.status, l.qtyOrdered, l.qtyPicked, l.unitPriceCents, l.substitutedUnitPriceCents]));
+}
+
+/**
+ * Final tax for a PICKING order whose lines are all resolved, worked out before the lock because it
+ * calls Stripe (#65). Null when phase 1 will not capture from the lines anyway.
+ */
+async function readyTax(storeId: string, orderId: string): Promise<{ ok: true; tax: FinalTax | null; linesKey: string } | { ok: false; error: string }> {
+  const db = storeScoped(storeId);
+  const order = await db.order.findUnique({ where: { id: orderId } });
+  if (!order || order.status !== "PICKING") return { ok: true, tax: null, linesKey: "" };
+  const lines = await db.orderLine.findMany({ where: { orderId } });
+  if (lines.some((l) => !RESOLVED_LINE_STATUSES.includes(l.status as OrderLineStatus))) return { ok: true, tax: null, linesKey: "" };
+  const charge = await readyCharge(db, order, lines);
+  try {
+    return { ok: true, tax: await finalizeTaxForCapture(order, lines, charge.lineDiscountsCents), linesKey: chargedLinesKey(lines) };
+  } catch (error) {
+    if (error instanceof TaxLocationError || error instanceof TaxUnavailableError) return { ok: false, error: error.message };
+    throw error;
+  }
+}
+
 export async function markReady(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true; capturedAmountCents: number; voided?: boolean } | { ok: false; error: string }> {
+  // Phase 0: final tax on the picked lines; never capture untaxed (#65).
+  const finalTax = await readyTax(storeId, orderId);
+  if (!finalTax.ok) return finalTax;
+
   // Phase 1: claim with CAPTURING inside transaction (blocks concurrent changes)
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
@@ -782,7 +1071,7 @@ export async function markReady(
       const stored = storedCaptureAmount(order.capturedAmountCents);
       if (!stored.ok) return stored;
       const amount = stored.capturedAmountCents;
-      const fee = applicationFeeForCapture(amount, order.deliveryFeeCents);
+      const fee = applicationFeeFor(order, amount);
       return {
         ok: true as const,
         capturedAmountCents: amount,
@@ -790,7 +1079,7 @@ export async function markReady(
         paymentIntentId: order.paymentIntentId!,
         totalAuthorizedCents: order.totalAuthorizedCents,
         newStatus: fulfilledStatus(order.fulfillment),
-        alreadyClaiming: true,
+        couponId: order.couponId,
       };
     }
     if (order.status !== "PICKING") {
@@ -806,12 +1095,15 @@ export async function markReady(
       return { ok: false as const, error: "Cannot mark ready: unresolved order lines remain" };
     }
 
-    const lineTotalCents = lines.reduce((sum: number, l: { status: string; qtyPicked: number; unitPriceCents: number }) => {
-      if (l.status === "refunded") return sum;
-      return sum + l.qtyPicked * l.unitPriceCents;
-    }, 0);
+    // The tax was calculated on these lines before the lock; any change since means calculating again.
+    if (!finalTax.tax || finalTax.linesKey !== chargedLinesKey(lines)) {
+      return { ok: false as const, error: ORDER_CHANGED_DURING_CAPTURE };
+    }
+    const tax = finalTax.tax;
 
-    const capturedAmountCents = lineTotalCents + order.tipCents + order.deliveryFeeCents;
+    // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
+    const charge = await readyCharge(tx, order, lines);
+    const capturedAmountCents = charge.amountCents + tax.taxCents;
 
     if (!order.paymentIntentId) {
       return { ok: false as const, error: "Order has no payment intent" };
@@ -829,7 +1121,6 @@ export async function markReady(
         capturedAmountCents,
         paymentIntentId: order.paymentIntentId,
         newStatus: "CANCELLED" as OrderStatus,
-        alreadyClaiming: false,
         voidInsteadOfCapture: true,
         orderId: order.id,
         storeId,
@@ -846,16 +1137,35 @@ export async function markReady(
 
     const newStatus: OrderStatus = fulfilledStatus(order.fulfillment);
 
-    const fee = applicationFeeForCapture(capturedAmountCents, order.deliveryFeeCents);
+    const split = captureSplit({
+      capturedCents: capturedAmountCents,
+      serviceFeeCents: charge.serviceFeeCents,
+      courierFeeCents: courierFeeCents(order),
+      platformTaxCents: platformTaxCents({ taxCents: tax.taxCents, taxLiableParty: order.taxLiableParty }),
+    });
+    const fee = split.applicationFeeCents;
 
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: "CAPTURING",
         capturedAmountCents,
-        platformFeeCents: platformFeeCentsForCapture(capturedAmountCents),
+        serviceFeeCents: charge.serviceFeeCents,
+        platformFeeCents: split.platformFeeCents,
+        discountCents: charge.discountCents,
+        taxCents: tax.taxCents,
+        taxLines: tax.lines as unknown as Prisma.InputJsonValue,
+        taxCalculationId: tax.calculationId,
       },
     });
+    const lineTax = new Map(tax.lineTaxes.map((line) => [line.reference, line.taxCents]));
+    for (const [index, line] of lines.entries()) {
+      const share = charge.lineDiscountsCents[index];
+      const taxCents = lineTax.get(line.id) ?? 0;
+      if (line.discountCents !== share || line.taxCents !== taxCents) {
+        await tx.orderLine.update({ where: { id: line.id }, data: { discountCents: share, taxCents } });
+      }
+    }
 
     return {
       ok: true as const,
@@ -864,10 +1174,10 @@ export async function markReady(
       paymentIntentId: order.paymentIntentId,
       totalAuthorizedCents: order.totalAuthorizedCents,
       newStatus,
-      alreadyClaiming: false,
       voidInsteadOfCapture: false,
       orderId: order.id,
       storeId,
+      couponId: order.couponId,
     };
   });
 
@@ -941,6 +1251,7 @@ export async function markReady(
       validation.capturedAmountCents,
       captureKey(orderId, captureAttempt),
       validation.applicationFeeAmount,
+      couponMetadata(validation.couponId),
     );
   } catch (err) {
     if (isIdempotencyKeyInUse(err)) {
@@ -968,7 +1279,11 @@ export async function markReady(
 
   // Phase 3: finalize in transaction (verify still CAPTURING)
   // Persist Stripe's amount_received, not the requested amount (M2)
+  let notifyReady = false;
+  let courierReady = false;
   const finalize = await storeScopedTransaction(storeId, async (tx) => {
+    notifyReady = false;
+    courierReady = false;
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order || order.status !== "CAPTURING") {
@@ -984,18 +1299,27 @@ export async function markReady(
       }
       return { ok: false as const, error: CAPTURE_STATUS_CHANGED };
     }
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: validation.newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents: captureResult.amountCaptured,
       },
     });
+    await recordCapture(tx, orderId, captureResult.amountCaptured, now);
+    await settleCapturedStock(tx, storeId, orderId);
+    notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
+    courierReady = order.fulfillment === "courier";
     return { ok: true as const, capturedAmountCents: captureResult.amountCaptured };
-  });
+  }, LEDGER_TRANSACTION);
 
   if (!finalize.ok) return finalize;
+  if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
+  if (courierReady) scheduleCourierDispatch(storeId, orderId);
+  // Outside any transaction; a failure leaves it pending for the sweep (E10).
+  await recordTaxTransaction(storeId, orderId);
 
   return { ok: true, capturedAmountCents: finalize.capturedAmountCents };
 }
@@ -1004,15 +1328,15 @@ export async function completePickup(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
-    if (!order) return { ok: false, error: "Order not found" };
+    if (!order) return { ok: false as const, error: "Order not found", notify: false };
     if (order.status !== "AWAITING_PICKUP") {
-      if (order.fulfillment === "delivery") {
-        return { ok: false, error: "Cannot complete pickup for delivery order — use courier dispatch" };
+      if (order.fulfillment === "delivery" || order.fulfillment === "store-delivery" || order.fulfillment === "courier") {
+        return { ok: false as const, error: "Cannot complete pickup for delivery order — use courier dispatch", notify: false };
       }
-      return { ok: false, error: "Order is not awaiting pickup" };
+      return { ok: false as const, error: "Order is not awaiting pickup", notify: false };
     }
 
     await tx.order.update({
@@ -1023,38 +1347,151 @@ export async function completePickup(
       },
     });
 
-    return { ok: true };
+    const notify = await recordOrderNotification(tx, storeId, orderId, "completed");
+    return { ok: true as const, notify };
   });
+  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "completed");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+/** Store delivery only: the store's own driver has left with a packed order. */
+export async function markOutForDelivery(
+  storeId: string,
+  orderId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    if (!order) return { ok: false as const, error: "Order not found", notify: false };
+    if (order.fulfillment !== "store-delivery") {
+      return { ok: false as const, error: STORE_DELIVERY_ONLY, notify: false };
+    }
+    if (order.status !== "READY") {
+      return { ok: false as const, error: `Cannot send out for delivery in status ${order.status}`, notify: false };
+    }
+    const now = new Date();
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "OUT_FOR_DELIVERY", outForDeliveryAt: now },
+    });
+    await tx.deliveryEvent.create({
+      data: { storeId, orderId, type: "out_for_delivery", payload: {} },
+    });
+    const notify = await recordOrderNotification(tx, storeId, orderId, "out_for_delivery");
+    return { ok: true as const, notify };
+  });
+  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "out_for_delivery");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+function deliveredRejection(order: { status: string; fulfillment: string } | null): string | null {
+  if (!order) return "Order not found";
+  if (order.fulfillment !== "store-delivery") return STORE_DELIVERY_ONLY;
+  if (order.status !== "OUT_FOR_DELIVERY") return `Cannot mark delivered in status ${order.status}`;
+  return null;
+}
+
+/**
+ * Store delivery only, and only with a photo. The photo is uploaded first; if the
+ * transition is then rejected, the order is unchanged and the photo is deleted. A thrown
+ * transaction keeps it: the commit may have landed, and a lost proof is worse than an orphan.
+ */
+export async function markDelivered(
+  storeId: string,
+  orderId: string,
+  photo: Uint8Array | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!deliveryProofBucket()) return { ok: false, error: PROOF_STORAGE_NOT_SET_UP };
+  const prepared = await prepareProofPhoto(photo);
+  if (!prepared.ok) return prepared;
+  const current = await storeScoped(storeId).order.findUnique({
+    where: { id: orderId },
+    select: { status: true, fulfillment: true },
+  });
+  const early = deliveredRejection(current);
+  if (early) return { ok: false, error: early };
+
+  const uploadedAt = new Date();
+  const key = deliveryProofKey(orderId, uploadedAt.getTime());
+  await uploadDeliveryProof(key, prepared.jpeg);
+
+  const result = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    const rejected = deliveredRejection(order);
+    if (rejected) return { ok: false as const, error: rejected, notify: false };
+    const now = new Date();
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: "DELIVERED",
+        deliveredAt: now,
+        completedAt: now,
+        deliveryProofKey: key,
+        deliveryProofUploadedAt: uploadedAt,
+      },
+    });
+    await tx.deliveryEvent.create({
+      data: { storeId, orderId, type: "delivered", payload: { proofKey: key } },
+    });
+    const notify = await recordOrderNotification(tx, storeId, orderId, "delivered");
+    return { ok: true as const, notify };
+  });
+  if (!result.ok) {
+    await deleteDeliveryProof(key).catch((err: unknown) => {
+      console.error(JSON.stringify({ event: "delivery_proof_orphaned", orderId, key, message: err instanceof Error ? err.message : "unknown" }));
+    });
+    return { ok: false, error: result.error };
+  }
+  if (result.notify) scheduleOrderNotification(storeId, orderId, "delivered");
+  return { ok: true };
 }
 
 export async function autoCancelOrder(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  // Phase 1: claim with CANCELLING inside transaction (blocks acceptOrder)
+  return cancelOrder(storeId, orderId, { action: "auto_cancel" });
+}
+
+/**
+ * Every cancel before capture. A resumed CANCELLING order keeps the cause it was
+ * claimed with, so a second caller never relabels it.
+ */
+export async function cancelOrder(
+  storeId: string,
+  orderId: string,
+  cause: CancelCause,
+): Promise<{ ok: true } | { ok: false; error: string; retry?: true }> {
+  // Phase 1: claim with CANCELLING and write the cause row, under the store lock.
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
     if (order.status === "CANCELLING") {
+      const causeRow = await tx.auditLog.findFirst({
+        where: { entityId: orderId, entityType: "order", action: { in: CANCEL_CAUSE_ACTIONS } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
       return {
         ok: true as const,
         paymentIntentId: order.paymentIntentId,
         totalAuthorizedCents: order.totalAuthorizedCents,
-        alreadyClaiming: true,
         refundId: order.refundId,
+        action: causeRow?.action ?? cancellationAuditAction(order.acceptedAt),
       };
     }
-    if (order.status !== "AUTHORIZED") {
-      return { ok: false as const, error: `Order is in status ${order.status}, not AUTHORIZED` };
+    if (!CANCELLABLE_FROM[cause.action].includes(order.status as OrderStatus)) {
+      return { ok: false as const, error: `Cannot cancel order in status ${order.status}` };
     }
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLING" } });
+    await tx.auditLog.create({ data: causeAuditData(storeId, orderId, cause) });
     return {
       ok: true as const,
       paymentIntentId: order.paymentIntentId,
       totalAuthorizedCents: order.totalAuthorizedCents,
-      alreadyClaiming: false,
       refundId: null,
+      action: cause.action,
     };
   });
 
@@ -1064,7 +1501,7 @@ export async function autoCancelOrder(
   if (validation.paymentIntentId) {
     const stripe = getStripeProvider();
     const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
-    if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank" };
+    if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
     try {
       await registerE2EPayment(validation.paymentIntentId, validation.totalAuthorizedCents);
       await stripe.cancelPaymentIntent(
@@ -1075,14 +1512,14 @@ export async function autoCancelOrder(
     } catch (err) {
       if (isIdempotencyKeyInUse(err)) {
         await noteAttemptInFlight(storeId, orderId, "cancel_retry", reservedCancel.attempt);
-        return { ok: false, error: "Cancellation is still confirming with the bank" };
+        return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
       }
       if (isRetryableProviderError(err)) {
         const fresh = await stripe.retrievePaymentIntent(validation.paymentIntentId);
         if (fresh.status !== "canceled") {
           await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
         }
-        return { ok: false, error: "Cancellation is still confirming with the bank" };
+        return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
       }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
@@ -1091,7 +1528,7 @@ export async function autoCancelOrder(
           ? await stripe.retrieveRefund(validation.refundId)
           : await refundCapturedBalance(validation.paymentIntentId, orderId, storeId);
         if (refundBlocked(refund)) return { ok: false, error: "Order status changed during cancellation" };
-        if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank" };
+        if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank", retry: true };
         const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };
@@ -1100,17 +1537,34 @@ export async function autoCancelOrder(
     }
   }
 
-  // Phase 3: one cancellation write. Stock restore stays deferred to #141.
-  const finalize = await finalizeCancelledOrder(storeId, orderId, "auto_cancel", { from: ["CANCELLING"] });
-  if (!finalize.wrote) return { ok: false, error: "Order status changed during cancellation" };
+  // Phase 3: one cancellation write, which also returns the order's reserved stock.
+  const finalize = await finalizeCancelledOrder(storeId, orderId, validation.action, { from: ["CANCELLING"] });
+  if (!finalize.wrote) {
+    // A racing echo, timer or sweep may have finalized first; that is still a cancel.
+    const current = await storeScoped(storeId).order.findUnique({ where: { id: orderId } });
+    if (current?.status === "CANCELLED") return { ok: true };
+    return { ok: false, error: "Order status changed during cancellation" };
+  }
 
   return { ok: true };
 }
 
+/** Every outcome the stuck-order sweep can report. */
+export type ReconcileAction =
+  | "already_resolved"
+  | "anomaly_refund"
+  | "finalized_capture"
+  | "finalized_cancel"
+  | "unknown_stripe_status";
+
+export type ReconcileResult =
+  | { ok: true; action: ReconcileAction }
+  | { ok: false; error: string; waiting?: boolean };
+
 export async function reconcileStuckOrder(
   storeId: string,
   orderId: string,
-): Promise<{ ok: true; action: string } | { ok: false; error: string; waiting?: boolean }> {
+): Promise<ReconcileResult> {
   const order = await storeScopedTransaction(storeId, async (tx) => {
     return tx.order.findUnique({
       where: { id: orderId },
@@ -1119,6 +1573,7 @@ export async function reconcileStuckOrder(
   });
 
   if (order?.paymentIntentId) {
+    await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
     await reconcileOpenRefundRequests(storeId, orderId);
     await reconcileAbandonedRefundRequests(storeId, orderId);
   }
@@ -1132,41 +1587,15 @@ export async function reconcileStuckOrder(
     return { ok: false, error: "Order has no payment intent" };
   }
 
-  await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
   const stripe = getStripeProvider();
   const pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
 
-  if (pi.status === "succeeded") {
-    if (order.status === "CANCELLING") {
-      let refund;
-      if (order.refundId) {
-        refund = await stripe.retrieveRefund(order.refundId);
-      } else {
-        refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
-        if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
-        if (refundInFlight(refund)) {
-          return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
-        }
-      }
-      const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
-      if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
-      if (settled.outcome !== "refunded") {
-        return {
-          ok: false,
-          error: settled.error,
-          waiting: settled.outcome === "pending" || settled.outcome === "waiting",
-        };
-      }
-      return { ok: true, action: "anomaly_refund" };
-    }
-    return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
-  }
+  const settledStatus = await settlePaymentStatus(storeId, order, order.paymentIntentId, pi);
+  if (settledStatus.outcome === "captured") return { ok: true, action: "finalized_capture" };
+  if (settledStatus.outcome === "cancelled") return { ok: true, action: "finalized_cancel" };
+  if (settledStatus.outcome === "refund") return settledStatus.result;
 
-  if (pi.status === "canceled") {
-    return finalizeCancelFromSweep(storeId, orderId);
-  }
-
-  if (pi.status === "requires_capture") {
+  if (settledStatus.outcome === "authorized") {
     if (order.status === "CAPTURING") {
       const stored = storedCaptureAmount(order.capturedAmountCents);
       if (!stored.ok) return { ...stored, waiting: true };
@@ -1184,7 +1613,7 @@ export async function reconcileStuckOrder(
         return { ok: false, error: "capture_backoff", waiting: true };
       }
       const attempt = reservedCapture.attempt;
-      const sweepFee = applicationFeeForCapture(amount, order.deliveryFeeCents);
+      const sweepFee = applicationFeeFor(order, amount);
       try {
         await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
         const retryCap = await stripe.capturePaymentIntent(
@@ -1192,6 +1621,7 @@ export async function reconcileStuckOrder(
           amount,
           captureKey(orderId, attempt),
           sweepFee > 0 ? sweepFee : undefined,
+          couponMetadata(order.couponId),
         );
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {
@@ -1241,26 +1671,7 @@ export async function reconcileStuckOrder(
         if (err instanceof ProviderStateError) {
           const freshPi = await stripe.retrievePaymentIntent(order.paymentIntentId);
           if (freshPi.status === "succeeded") {
-            let refund;
-            if (order.refundId) {
-              refund = await stripe.retrieveRefund(order.refundId);
-            } else {
-              refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
-              if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
-              if (refundInFlight(refund)) {
-                return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
-              }
-            }
-            const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
-            if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
-            if (settled.outcome !== "refunded") {
-              return {
-                ok: false,
-                error: settled.error,
-                waiting: settled.outcome === "pending" || settled.outcome === "waiting",
-              };
-            }
-            return { ok: true, action: "anomaly_refund" };
+            return refundCapturedCancellation(storeId, order, order.paymentIntentId);
           }
         }
         throw err;
@@ -1272,40 +1683,120 @@ export async function reconcileStuckOrder(
   return { ok: true, action: "unknown_stripe_status" };
 }
 
+type SettlingOrder = { id: string; status: string; fulfillment: string; refundId: string | null };
+
+/** What a PaymentIntent status settles: `succeeded` and `canceled` finalize here; `authorized` and `pending` are left to the caller. */
+type PaymentStatusSettlement =
+  | { outcome: "captured"; capturedAmountCents: number }
+  | { outcome: "cancelled" }
+  | { outcome: "refund"; result: ReconcileResult }
+  | { outcome: "authorized" }
+  | { outcome: "pending" };
+
+/** The one Stripe status ladder for the capture settle and the stuck-order sweep. Call it outside the store lock. */
+async function settlePaymentStatus(
+  storeId: string,
+  order: SettlingOrder,
+  paymentIntentId: string,
+  pi: { status: string; amountReceived: number },
+): Promise<PaymentStatusSettlement> {
+  if (pi.status === "succeeded") {
+    if (order.status === "CANCELLING") {
+      return { outcome: "refund", result: await refundCapturedCancellation(storeId, order, paymentIntentId) };
+    }
+    await finalizeCaptureFromSweep(storeId, order.id, order.fulfillment, pi.amountReceived);
+    return { outcome: "captured", capturedAmountCents: pi.amountReceived };
+  }
+  if (pi.status === "canceled") {
+    await finalizeCancelFromSweep(storeId, order.id, await canceledHoldAction(storeId, order.id));
+    return { outcome: "cancelled" };
+  }
+  if (pi.status === "requires_capture") return { outcome: "authorized" };
+  return { outcome: "pending" };
+}
+
+/** A cancelling order whose payment was captured anyway: refund the captured balance. */
+async function refundCapturedCancellation(
+  storeId: string,
+  order: SettlingOrder,
+  paymentIntentId: string,
+): Promise<ReconcileResult> {
+  let refund;
+  if (order.refundId) {
+    refund = await getStripeProvider().retrieveRefund(order.refundId);
+  } else {
+    refund = await refundCapturedBalance(paymentIntentId, order.id, storeId);
+    if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
+    if (refundInFlight(refund)) {
+      return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
+    }
+  }
+  const settled = await settleCapturedRefund(storeId, order.id, paymentIntentId, refund);
+  if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
+  if (settled.outcome !== "refunded") {
+    return {
+      ok: false,
+      error: settled.error,
+      waiting: settled.outcome === "pending" || settled.outcome === "waiting",
+    };
+  }
+  return { ok: true, action: "anomaly_refund" };
+}
+
 async function finalizeCaptureFromSweep(
   storeId: string,
   orderId: string,
   fulfillment: string,
   capturedAmountCents: number,
-): Promise<{ ok: true; action: string }> {
+): Promise<{ ok: true; action: ReconcileAction }> {
   const newStatus: OrderStatus = fulfilledStatus(fulfillment);
 
+  let notifyReady = false;
+  let finalized = false;
   await storeScopedTransaction(storeId, async (tx) => {
+    notifyReady = false;
+    finalized = false;
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status !== "CAPTURING") return;
+    finalized = true;
 
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents,
       },
     });
+    await recordCapture(tx, orderId, capturedAmountCents, now);
     await tx.auditLog.create({
-      data: systemAuditData(storeId, orderId, "reconcile_capture"),
+      data: systemAuditData(storeId, orderId, "reconcile_capture", {}),
     });
-  });
+    await settleCapturedStock(tx, storeId, orderId);
+    notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
+  }, LEDGER_TRANSACTION);
+  if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
+  if (finalized && fulfillment === "courier") scheduleCourierDispatch(storeId, orderId);
 
   return { ok: true, action: "finalized_capture" };
+}
+
+/** A canceled hold we asked to release keeps its release audit and alert, even if the cancel's response was lost. */
+async function canceledHoldAction(storeId: string, orderId: string): Promise<"reconcile_cancel" | "capture_released"> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.auditLog.findMany({ where: orderAuditWhere(orderId, "cancel_retry") }),
+  );
+  const released = rows.some((row) => (row.after as { releaseHold?: unknown } | null)?.releaseHold === true);
+  return released ? "capture_released" : "reconcile_cancel";
 }
 
 async function finalizeCancelFromSweep(
   storeId: string,
   orderId: string,
   action: "reconcile_cancel" | "capture_released" = "reconcile_cancel",
-): Promise<{ ok: true; action: string }> {
+): Promise<{ ok: true; action: ReconcileAction }> {
   await finalizeCancelledOrder(storeId, orderId, action, {
     after: action === "capture_released" ? { alert: "store_and_platform" } : {},
   });

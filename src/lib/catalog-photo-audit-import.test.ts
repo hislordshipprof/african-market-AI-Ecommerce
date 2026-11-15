@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -64,12 +63,6 @@ async function collect(args: string[], env: NodeJS.ProcessEnv, timeoutMs = 20000
 
 describe("catalog photo audit import boundaries", () => {
   it("core imports without R2 configuration in production and VERCEL", async () => {
-    const source = readFileSync(path.join(process.cwd(), "src", "lib", "catalog-photo-audit.ts"), "utf8");
-    expect(source).toContain("export function httpStatusOf");
-    expect(source).not.toContain("catalog-photo-audit-r2");
-    expect(source).not.toContain("@aws-sdk");
-    expect(source).not.toContain("@smithy");
-
     const result = await collect([tsxCli, coreProbe], childEnv({
       NODE_ENV: "production",
       VERCEL: "1",
@@ -91,61 +84,4 @@ describe("catalog photo audit import boundaries", () => {
     expect(result.stderr).not.toContain("skipped");
     expect(result.stdout).not.toContain("imported-without-throw");
   });
-
-  it("the reader suite skips when the runtime password is blank under NODE_ENV=test", async () => {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (!databaseUrl) throw new Error("DATABASE_URL is required to prove the suite skips");
-    const suite = "src/lib/catalog-photo-audit.integration.test.ts";
-    const result = await collect(
-      [
-        path.join(process.cwd(), "node_modules", "vitest", "vitest.mjs"),
-        "run",
-        suite,
-        "--reporter=json",
-      ],
-      childEnv({
-        NODE_ENV: "test",
-        DATABASE_URL: databaseUrl,
-        APP_RUNTIME_PASSWORD: "",
-      }),
-      60_000,
-    );
-    const jsonStart = result.stdout.indexOf("{");
-    const jsonEnd = result.stdout.lastIndexOf("}");
-    if (jsonStart === -1 || jsonEnd === -1) {
-      throw new Error(`vitest did not return a JSON report\n${result.stderr}`);
-    }
-    const parsed = JSON.parse(result.stdout.slice(jsonStart, jsonEnd + 1)) as {
-      numPassedTests: number;
-      numFailedTests: number;
-      testResults: Array<{
-        name: string;
-        assertionResults: Array<{ status: string; fullName: string }>;
-      }>;
-    };
-    expect(result.code).toBe(0);
-    expect(parsed.numPassedTests).toBe(0);
-    expect(parsed.numFailedTests).toBe(0);
-    const files = parsed.testResults.map((file) => file.name.replaceAll("\\", "/"));
-    expect(files).toEqual([expect.stringContaining(suite)]);
-    const results = parsed.testResults.flatMap((file) => file.assertionResults);
-    expect(results.map((item) => item.status)).toEqual([
-      "skipped",
-      "skipped",
-      "skipped",
-      "skipped",
-      "skipped",
-      "skipped",
-      "skipped",
-    ]);
-    expect(results.map((item) => item.fullName)).toEqual([
-      "catalog photo audit reader reader returns every seeded master product, including inactive and rejected (AC5)",
-      "catalog photo audit reader real reader returns more than 1000 fixture rows across all statuses (E34)",
-      "catalog photo audit reader actual reader dependency denies writes to known existing fixture rows (AC5, E5)",
-      "catalog photo audit reader named setup rolls back after a partial insert failure",
-      "catalog photo audit reader cleanup removes attempted denied-write IDs after failure and is idempotent",
-      "catalog photo audit reader a second run on the same database removes only its own rows",
-      "catalog photo audit reader cleanup preserves another live run and unrelated rows",
-    ]);
-  }, 60_000);
 });

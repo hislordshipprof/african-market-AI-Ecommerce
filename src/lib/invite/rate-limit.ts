@@ -1,4 +1,4 @@
-import { rateLimitUpsert } from "../db";
+import { takeRateLimit } from "../rate-limit/app-limiter";
 
 export const INVITE_RATE_LIMIT_MAX = 20;
 export const INVITE_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -7,10 +7,11 @@ export async function checkInviteRateLimit(
   storeId: string,
   nowMs?: number,
 ): Promise<{ allowed: boolean; count: number }> {
-  const key = `invite:${storeId}`;
-  const now = BigInt(nowMs ?? Date.now());
-  const windowStart = now - BigInt(INVITE_RATE_LIMIT_WINDOW_MS);
-
-  const { count } = await rateLimitUpsert(key, now, windowStart);
-  return { allowed: count <= INVITE_RATE_LIMIT_MAX, count };
+  const result = await takeRateLimit(
+    `invite:${storeId}`,
+    INVITE_RATE_LIMIT_MAX,
+    INVITE_RATE_LIMIT_WINDOW_MS,
+    nowMs ?? Date.now(),
+  );
+  return { allowed: result.ok, count: result.count };
 }

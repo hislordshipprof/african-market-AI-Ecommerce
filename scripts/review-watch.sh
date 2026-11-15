@@ -7,6 +7,9 @@
 # - or when it runs longer than REVIEW_TIMEOUT_MIN in total (default 120 min).
 # Afterwards, stop_worktree_servers stops any Next.js server still running from the ticket's worktree.
 
+# file_mtime <file>: last write, in epoch seconds. GNU stat, then BSD stat (macOS).
+file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+
 # Lists every descendant pid of a process (children first, deepest last), from ps's PID/PPID columns.
 # Git Bash's ps tracks msys and native processes it started; on Linux ps -o is used.
 _descendants() {
@@ -62,7 +65,7 @@ watch_run() {
     _alive || break
     if [ -s "$result" ] && head -1 "$result" | grep -qE '^\**VERDICT: '; then
       # The grace restarts whenever the file changes, so a reviewer still revising its report is left alone.
-      now=$(stat -c '%Y:%s' "$result" 2>/dev/null || echo x)
+      now=$(stat -c '%Y:%s' "$result" 2>/dev/null || stat -f '%m:%z' "$result" 2>/dev/null || echo x)
       if [ "$now" != "$seen" ]; then seen="$now"; done_at=$SECONDS; fi
     fi
     if [ -n "$done_at" ] && [ $((SECONDS - done_at)) -ge "$grace" ]; then
@@ -70,13 +73,22 @@ watch_run() {
       kill_tree "$pid"; stopped=1; break
     fi
     if [ $((SECONDS - start)) -ge "$cap" ]; then
-      echo "review watchdog: reviewer ran past ${cap}s; stopping it" >&2
+      echo "review watchdog: ${WATCH_WHAT:-reviewer} ran past ${cap}s; stopping it" >&2
       kill_tree "$pid"; stopped=1; break
     fi
   done
   wait "$pid" 2>/dev/null || rc=$?
   [ "$stopped" = 1 ] && return 124
   return "$rc"
+}
+
+# run_capped <minutes> <command...>
+# The same watchdog for sessions that write no verdict (plan, build, fix, ship): only the total cap applies.
+# Until 2026-11-09 only reviews had a cap, and builders on fix rounds ran for 5 and 8 hours.
+# Returns the command's exit status, or 124 when it was stopped at the cap.
+run_capped() {
+  local mins="$1"; shift
+  WATCH_WHAT="${WATCH_WHAT:-agent session}" REVIEW_TIMEOUT_MIN="$mins" watch_run "" "$@"
 }
 
 # stop_worktree_servers <worktree>

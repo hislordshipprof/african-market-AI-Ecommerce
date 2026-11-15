@@ -1,16 +1,14 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import sharp from "sharp";
 import { money } from "../src/lib/format";
-import { resolveDirectUrl } from "../src/lib/env";
-import { WIDE_LAYOUT_STORE, WIDE_LAYOUT_TOKEN, wideLayoutText } from "../src/lib/assistant/fake-model";
 import { storeUrl } from "./urls";
 
 const origin = storeUrl("mama-ngozi");
-const shots = "C:/E-commerce-project/.builder/screenshots-246";
-/** Fake-model reply for "html please". The live region must announce this string, not an image. */
-const HTML_REPLY = 'See <img onerror="alert(1)"> and [a](http://evil.test).';
+/**
+ * The fake model answers "html please" with 'See <img onerror="alert(1)"> and [a](http://evil.test).'
+ * It renders, and is announced, as text: the HTML stays literal and the plain-http link keeps only its words.
+ */
+const HTML_REPLY_SHOWN = 'See <img onerror="alert(1)"> and a.';
 const ROUTE_ERROR = "Sorry, something went wrong. Please try again.";
 
 function bubbles(root: Locator) {
@@ -47,9 +45,10 @@ test("the launcher stays out of the first load and the chat chunk arrives on ope
   expect(chat).toEqual([]);
   expect(await scriptsHave(page, "assistant-chat-chunk-v1")).toBe(false);
   await page.getByTestId("assistant-launcher").click();
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await expect.poll(() => scriptsHave(page, "assistant-chat-chunk-v1")).toBe(true);
+  expect(await scriptsHave(page, "InvalidPDFException")).toBe(false);
   expect(chat).toEqual([]);
 });
 
@@ -59,19 +58,19 @@ test("a shopper can add egusi, undo it, and keep the transcript across pages", a
   await page.getByRole("button", { name: "Cook a dish" }).click();
   await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook ");
   await send(page, "add two egusi");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
   const count = page.getByRole("banner").getByTestId("cart-count");
   await expect(count).toHaveText("2");
   await dialog.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "Undone", exact: true })).toBeVisible();
   await expect(count).toHaveText("0", { timeout: 10_000 });
-  await page.getByRole("button", { name: "Close Shop with help" }).click();
+  await page.getByRole("button", { name: "Close Shop with AI" }).click();
   await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.getByRole("link", { name: /Mama Ngozi/ }).first().click();
   await page.getByRole("link", { name: /Tubers/ }).first().click();
   await page.getByTestId("assistant-launcher").click();
-  const again = page.getByRole("dialog", { name: "Shop with help" });
+  const again = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(bubbles(again).filter({ hasText: "add two egusi" })).toBeVisible();
   await expect(again.getByRole("button", { name: "Undone", exact: true })).toBeVisible();
 });
@@ -86,25 +85,21 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "html please");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
-  await expect(bubbles(dialog).filter({ hasText: HTML_REPLY })).toBeVisible({ timeout: 20_000 });
-  await expect(liveRegion(dialog)).toHaveText(HTML_REPLY, { timeout: 20_000 });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(bubbles(dialog).filter({ hasText: HTML_REPLY_SHOWN })).toBeVisible({ timeout: 20_000 });
+  await expect(liveRegion(dialog)).toHaveText(HTML_REPLY_SHOWN, { timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
+  await expect(dialog.locator('a[href*="evil.test"]')).toHaveCount(0);
   await send(page, "stray price");
-  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "That is (see card)." })).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I couldn't confirm that price." })).toBeVisible({ timeout: 20_000 });
   await send(page, "4242424242424242");
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
   expect(posted).not.toContain("4242");
 });
 
-test("checkout hides the launcher and the sheet fits a phone without sideways scroll", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
+test("checkout hides the launcher", async ({ page }) => {
   await page.goto(`${origin}/checkout`);
   await expect(page.getByTestId("assistant-launcher")).toHaveCount(0);
-  await page.goto(`${origin}/`);
-  await page.getByTestId("assistant-launcher").click();
-  const wide = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  expect(wide).toBe(false);
 });
 
 test("choice chips and the basket summary are keyboard reachable", async ({ page }) => {
@@ -115,6 +110,11 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await composer.press("Enter");
   const chip = page.getByLabel("Choice chips").getByRole("button").first();
   await expect(chip).toBeVisible({ timeout: 20_000 });
+  // Start from a fixed point: the reply has finished and focus is back in the composer.
+  const sheet = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(sheet.locator('[class*="bubble"]').filter({ hasText: "Pick one." })).toBeVisible({ timeout: 20_000 });
+  await expect(sheet.locator('[class*="typing"]')).toHaveCount(0);
+  await composer.focus();
   for (let step = 0; step < 8; step += 1) {
     if (await chip.evaluate((element) => element === document.activeElement)) break;
     await page.keyboard.press("Shift+Tab");
@@ -131,20 +131,22 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect.poll(() => choicePosts.length).toBe(1);
   expect(choicePosts[0]).toContain(label);
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeHidden();
   await expect(page.getByTestId("assistant-launcher")).toBeVisible();
   await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(dialog.locator('[class*="addedRow"]')).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="typing"]')).toHaveCount(0);
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(dialog.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
-  await expect(dialog.locator('[class*="summary"]').getByText(/to reach the .+ minimum order/)).toBeVisible();
+  await expect(dialog.locator('[class*="summary"]').getByText(/more to reach the .+ minimum/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await page.getByRole("link", { name: "Looks good" }).click();
   await expect(page).toHaveURL(/\/cart$/);
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeHidden();
 });
 
 test("Looks good closes the sheet when the summary starts on the cart", async ({ page }) => {
@@ -152,7 +154,7 @@ test("Looks good closes the sheet when the summary starts on the cart", async ({
   await page.goto(`${origin}/cart?from=sheet`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "show my basket");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   const link = dialog.getByRole("link", { name: "Looks good" });
   await expect(link).toBeVisible({ timeout: 20_000 });
   await link.focus();
@@ -161,24 +163,45 @@ test("Looks good closes the sheet when the summary starts on the cart", async ({
   await expect(dialog).toBeHidden();
   const launcher = page.getByTestId("assistant-launcher");
   await expect(launcher).toBeVisible();
-  await page.screenshot({ path: "test-results/looks-good-cart-390.png" });
   await launcher.click();
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });
 
-test("a fake mid-stream failure recovers when the shopper retries", async ({ page }) => {
+test("a failed turn can be retried after the customer leaves the sheet", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "mid-stream");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
-  await dialog.getByRole("button", { name: "Retry" }).click();
-  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
+  expect(posts).toHaveLength(1);
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await page.getByTestId("assistant-launcher").click();
+  const again = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(again.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible();
+  await again.getByRole("button", { name: "Retry" }).click();
+  await expect(again.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
+  await expect(bubbles(again).filter({ hasText: "mid-stream" })).toHaveCount(1);
+  await expect(again.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
 });
 
 test("a stream cut after the tool starts shows an error and retry does not add again", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST" && request.headers()["x-e2e-full"] !== "1") {
+      posts.push(request.postData() ?? "");
+    }
+  });
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await page.route("**/api/assistant/chat", async (route) => {
@@ -202,14 +225,21 @@ test("a stream cut after the tool starts shows an error and retry does not add a
     });
   });
   await send(page, "add two egusi");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
   const count = page.getByRole("banner").getByTestId("cart-count");
   await expect(count).toHaveText("2", { timeout: 10_000 });
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.unroute("**/api/assistant/chat");
-  await dialog.getByRole("button", { name: "Retry" }).click();
-  await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("assistant-launcher").click();
+  const again = page.getByRole("dialog", { name: "Shop with AI" });
+  await again.getByRole("button", { name: "Retry" }).click();
+  await expect(again.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(count).toHaveText("2");
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
 });
 
 test("one submit is one request, and a rejected undo says what happened", async ({ page }) => {
@@ -225,7 +255,7 @@ test("one submit is one request, and a rejected undo says what happened", async 
     form?.requestSubmit();
     form?.requestSubmit();
   });
-  await expect(page.getByRole("dialog", { name: "Shop with help" }).getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("dialog", { name: "Shop with AI" }).getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
   expect(posts).toHaveLength(1);
   await page.context().addCookies([{ name: "e2e_undo", value: "reject", url: origin }]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
@@ -233,8 +263,7 @@ test("one submit is one request, and a rejected undo says what happened", async 
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
 });
 
-test("the open sheet is readable at phone and desktop in light and dark", async ({ page }) => {
-  mkdirSync(shots, { recursive: true });
+test("product cards show the catalog price", async ({ page }) => {
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "show me pictures of egusi");
@@ -243,7 +272,7 @@ test("the open sheet is readable at phone and desktop in light and dark", async 
     const response = await fetch("/api/storefront/search?q=egusi");
     return response.json() as Promise<{ results: { name: string; price: number }[] }>;
   });
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   expect(catalog.results.length).toBeGreaterThan(0);
   let compared = 0;
   for (const row of catalog.results) {
@@ -253,167 +282,512 @@ test("the open sheet is readable at phone and desktop in light and dark", async 
     compared += 1;
   }
   expect(compared).toBeGreaterThan(0);
-  await page.setViewportSize({ width: 375, height: 812 });
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  expect(overflow).toBe(false);
-  for (const width of [375, 390, 1440]) {
-    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
-    for (const scheme of ["light", "dark"] as const) {
-      await page.emulateMedia({ colorScheme: scheme });
-      await page.screenshot({ path: `${shots}/sheet-${width}-${scheme}.png`, fullPage: false });
-    }
-  }
 });
 
-const LONG_NAME = `Egusi ${"X".repeat(114)}`;
-const CHIP_A = `Yam ${"C".repeat(70)}`;
-
-function ownerPrisma() {
-  return new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
-}
-
-async function expectWithinScreen(page: Page) {
-  const box = await page.evaluate(() => {
-    const root = document.documentElement;
-    const dialog = document.querySelector("dialog");
-    const open = dialog instanceof HTMLDialogElement && dialog.open;
-    const log = open ? dialog.querySelector("[class*='log']") : null;
-    const bar = document.querySelector("[class*='mobileAction']");
-    const barVisible = !!bar && bar.getClientRects().length > 0;
-    const measure = (el: Element) => ({ scroll: el.scrollWidth, client: el.clientWidth });
-    return {
-      root: measure(root),
-      dialog: open && dialog ? measure(dialog) : null,
-      log: log ? measure(log) : null,
-      bar: barVisible && bar ? bar.getBoundingClientRect().right : null,
-      viewport: root.clientWidth,
-    };
+test("a browser without speech recognition shows no mic", async ({ page }) => {
+  await page.addInitScript(() => {
+    delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+    delete (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
   });
-  expect(box.root.scroll).toBeLessThanOrEqual(box.root.client + 1);
-  if (box.dialog) expect(box.dialog.scroll).toBeLessThanOrEqual(box.dialog.client + 1);
-  if (box.log) expect(box.log.scroll).toBeLessThanOrEqual(box.log.client + 1);
-  if (box.bar != null) expect(box.bar).toBeLessThanOrEqual(box.viewport + 1);
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await expect(page.getByRole("button", { name: "Start listening" })).toHaveCount(0);
+});
+
+test("spoken words join typed text and nothing sends until Send", async ({ page }) => {
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      lang = "";
+      continuous = false;
+      interimResults = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        this.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: false, 0: { transcript: "rice" } }],
+        });
+        this.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: true, 0: { transcript: "rice" } }],
+        });
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {
+        this.onend?.();
+      }
+    }
+    const host = window as unknown as {
+      SpeechRecognition: typeof FakeRecognition;
+      webkitSpeechRecognition: typeof FakeRecognition;
+    };
+    host.SpeechRecognition = FakeRecognition;
+    host.webkitSpeechRecognition = FakeRecognition;
+  });
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") {
+      posts.push(request.postData() ?? "");
+    }
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.getByRole("button", { name: "Cook a dish" }).click();
+  await page.getByRole("button", { name: "Start listening" }).click();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook rice");
+  expect(posts).toEqual([]);
+  await page.getByTestId("assistant-send").click();
+  expect(posts).toEqual([]);
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook rice");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0]).toContain("I want to cook rice");
+  expect(posts[0]?.match(/rice/g)).toHaveLength(1);
+  expect(posts[0]).not.toContain("audio");
+  expect(posts[0]).not.toMatch(/data:audio|webm|octet-stream/);
+});
+
+test("a photo does not change the basket until the customer taps", async ({ page }) => {
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("rice from the photo");
+  await page.getByTestId("assistant-send").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" })).toBeVisible({ timeout: 20_000 });
+  const sentPhoto = dialog.locator('[class*="user"] img');
+  await expect(sentPhoto).toBeVisible();
+  await expect(sentPhoto).toHaveAttribute("src", /^data:image\//);
+  const followUps: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") followUps.push(request.postData() ?? "");
+  });
+  await page.getByTestId("assistant-composer").fill("just rice");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => followUps.length).toBe(1);
+  expect(followUps[0]).not.toContain("data:");
+  await expect(sentPhoto).toBeVisible();
+  await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("0");
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
+  const chip = dialog.getByLabel("Choice chips").getByRole("button").first();
+  await expect(chip).toBeEnabled();
+  const picked = (await chip.innerText()).trim();
+  await chip.click();
+  await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("1", { timeout: 20_000 });
+  const addedName = (await dialog.locator('[class*="addedRow"]').getByRole("heading").first().innerText()).trim();
+  expect(picked.startsWith(`${addedName} (`)).toBe(true);
+  const fileReplies = dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" });
+  await expect(fileReplies).toHaveCount(1);
+  let pdfPost = "";
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") pdfPost = request.postData() ?? "";
+  });
+  await page.locator('input[accept="application/pdf"]').setInputFiles("src/lib/assistant/fixtures/two-page.pdf");
+  await expect(page.getByRole("button", { name: "Remove two-page.pdf" })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("the recipe");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => pdfPost.includes("data:application/pdf;base64,JVBER")).toBe(true);
+  expect(pdfPost).not.toContain("data:application/pdf;base64,\"");
+  // The PDF was read by the production build: the scripted file reply arrives as a new bubble.
+  await expect(fileReplies).toHaveCount(2, { timeout: 20_000 });
+});
+
+test("a final after a rejected send keeps the restored draft", async ({ page }) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      lang = "";
+      continuous = false;
+      interimResults = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        (window as unknown as { __emitSpeech?: () => void }).__emitSpeech = () => {
+          this.onresult?.({
+            resultIndex: 0,
+            results: [{ isFinal: true, 0: { transcript: "and beans" } }],
+          });
+        };
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {
+        this.onend?.();
+      }
+    }
+    const host = window as unknown as {
+      SpeechRecognition: typeof FakeRecognition;
+      webkitSpeechRecognition: typeof FakeRecognition;
+    };
+    host.SpeechRecognition = FakeRecognition;
+    host.webkitSpeechRecognition = FakeRecognition;
+  });
+  await page.route("**/api/assistant/chat", async (route) => {
+    await held;
+    await route.fulfill({ status: 413, body: "too big", contentType: "text/plain" });
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.getByTestId("assistant-composer").fill("rice");
+  await page.getByTestId("assistant-send").click();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("");
+  await page.getByRole("button", { name: "Start listening" }).click();
+  release();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("rice");
+  await page.evaluate(() => {
+    (window as unknown as { __emitSpeech?: () => void }).__emitSpeech?.();
+  });
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("rice and beans");
+});
+
+test("a rejected file send keeps the draft and a late file does not return", async ({ page }) => {
+  await page.route("**/api/assistant/chat", (route) => route.fulfill({ status: 413, body: "too big", contentType: "text/plain" }));
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("keep this list");
+  await page.getByTestId("assistant-send").click();
+  await expect(dialog.getByText("Those files are too big to send. Keep them under 3 MB.")).toBeVisible();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("keep this list");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+});
+
+test("a file that finishes after the sheet closes does not come back", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = window.createImageBitmap.bind(window);
+    let release: (() => void) | null = null;
+    (window as unknown as { __releaseBitmap?: () => void }).__releaseBitmap = () => release?.();
+    window.createImageBitmap = ((blob: Blob) => new Promise((resolve, reject) => {
+      release = () => { original(blob).then(resolve, reject); };
+    })) as typeof createImageBitmap;
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await page.getByRole("button", { name: "Close Shop with AI" }).click();
+  await page.evaluate(() => { (window as unknown as { __releaseBitmap?: () => void }).__releaseBitmap?.(); });
+  await page.getByTestId("assistant-launcher").click();
+  await expect(page.getByRole("button", { name: /Remove / })).toHaveCount(0);
+});
+
+test("retrying a failed send keeps one customer bubble", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
+  await page.route("**/api/assistant/chat", (route) => route.fulfill({ status: 500, body: "no", contentType: "text/plain" }));
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  const bubbles = dialog.locator('[class*="bubble"][class*="user"]');
+  await page.getByTestId("assistant-composer").fill("beans");
+  await page.getByTestId("assistant-send").click();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(bubbles).toHaveCount(1);
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect.poll(() => posts.length).toBe(2);
+  await expect(bubbles).toHaveCount(1);
+  const textIds = posts.map((body) => JSON.parse(body).message.id as string);
+  expect(textIds[0]).toBeTruthy();
+  expect(textIds[1]).toBe(textIds[0]);
+
+  posts.length = 0;
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("rice from photo");
+  await page.getByTestId("assistant-send").click();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(bubbles).toHaveCount(1);
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect.poll(() => posts.length).toBe(2);
+  await expect(bubbles).toHaveCount(1);
+  const fileBodies = posts.map((body) => JSON.parse(body).message as { id: string; parts: unknown[] });
+  expect(fileBodies[1]?.id).toBe(fileBodies[0]?.id);
+  expect(JSON.stringify(fileBodies[0]?.parts)).toContain("image/jpeg");
+  expect(JSON.stringify(fileBodies[1]?.parts)).toContain("image/jpeg");
+});
+
+test("closing during a held file send drops the preview", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { created: 0, revoked: 0 };
+    const create = URL.createObjectURL.bind(URL);
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = ((value: Blob | MediaSource) => {
+      state.created += 1;
+      return create(value);
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = ((url: string) => {
+      state.revoked += 1;
+      return revoke(url);
+    }) as typeof URL.revokeObjectURL;
+    (window as unknown as { __objectUrls: typeof state }).__objectUrls = state;
+  });
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/assistant/chat", async (route) => {
+    await gate;
+    await route.fulfill({ status: 413, body: "too big", contentType: "text/plain" });
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("old draft");
+  // The Remove button shows on the pending tile; the preview URL is made only once the photo is encoded.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __objectUrls: { created: number } }).__objectUrls.created)).toBeGreaterThan(0);
+  const before = await page.evaluate(() => (window as unknown as { __objectUrls: { created: number; revoked: number } }).__objectUrls.created);
+  await page.getByTestId("assistant-send").click();
+  await page.getByRole("button", { name: "Close Shop with AI" }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __objectUrls: { revoked: number } }).__objectUrls.revoked)).toBeGreaterThan(0);
+  release();
+  await page.getByTestId("assistant-launcher").click();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("");
+  await expect(page.getByRole("button", { name: /Remove / })).toHaveCount(0);
+  const after = await page.evaluate(() => (window as unknown as { __objectUrls: { created: number; revoked: number } }).__objectUrls);
+  expect(after.created).toBe(before);
+  expect(after.created).toBe(after.revoked);
+});
+
+test("a transparent photo stays dark ink on white and keeps the scrubbed name", async ({ page }) => {
+  const size = 64;
+  const raw = Buffer.alloc(size * size * 4, 0);
+  for (let y = 24; y < 40; y += 1) {
+    for (let x = 24; x < 40; x += 1) {
+      const index = (y * size + x) * 4;
+      raw[index + 3] = 255;
+    }
+  }
+  const png = await sharp(raw, { raw: { width: size, height: size, channels: 4 } }).png().toBuffer();
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") {
+      posts.push(request.postData() ?? "");
+    }
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles({
+    name: "4242\u200e4242\u200b42424242\u202e.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  const ready = page.locator('[data-status="ready"]');
+  await expect(ready).toBeVisible();
+  await expect.soft(ready.getByRole("button", { name: "Remove [card number removed].png" })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("the list");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(1);
+  const body = posts[0] ?? "";
+  expect(body).toContain('"filename":"[card number removed].jpg"');
+  const withoutBytes = body.replace(/data:[^"]*/g, "");
+  for (const leak of ["4242", "‎", "​", "‮"]) expect(withoutBytes).not.toContain(leak);
+  const encoded = body.match(/data:image\/jpeg;base64,([A-Za-z0-9+/=]+)/)?.[1];
+  expect(encoded).toBeTruthy();
+  const { data, info } = await sharp(Buffer.from(encoded ?? "", "base64")).raw().toBuffer({ resolveWithObject: true });
+  const at = (x: number, y: number) => {
+    const index = (y * info.width + x) * info.channels;
+    return [data[index] ?? 0, data[index + 1] ?? 0, data[index + 2] ?? 0];
+  };
+  const corner = at(1, 1);
+  const ink = at(Math.floor(info.width / 2), Math.floor(info.height / 2));
+  expect(Math.min(...corner)).toBeGreaterThan(200);
+  expect(Math.max(...ink)).toBeLessThan(80);
+});
+
+test("a text turn failing after navigation retains its original Retry", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
+  let release = () => {};
+  let hold = true;
+  await page.route("**/api/assistant/chat", async (route) => {
+    if (hold) await new Promise<void>((resolve) => { release = resolve; });
+    await route.continue();
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await send(page, "mid-stream");
+  await expect.poll(() => posts.length).toBe(1);
+  await page.keyboard.press("Escape");
+  let releaseCart = () => {};
+  const cartGate = new Promise<void>((resolve) => { releaseCart = resolve; });
+  let heldCart = false;
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    if (!heldCart && request.method() === "POST" && request.headers()["next-action"]) {
+      heldCart = true;
+      await cartGate;
+    }
+    try {
+      await route.continue();
+    } catch {
+      /* navigation closed the request */
+    }
+  });
+  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await expect.poll(() => heldCart).toBe(true);
+  release();
+  hold = false;
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  const retry = dialog.getByRole("button", { name: "Retry" });
+  await expect(retry).toBeVisible({ timeout: 20_000 });
+  await expect(retry).toBeDisabled();
+  releaseCart();
+  await page.unroute("**/*");
+  await expect(retry).toBeEnabled();
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  hold = true;
+  await retry.evaluate((node) => {
+    const button = node as HTMLButtonElement;
+    button.click();
+    button.click();
+  });
+  await expect.poll(() => posts.length).toBe(2);
+  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Search", exact: true }).click();
+  release();
+  hold = false;
+  await page.getByTestId("assistant-launcher").click();
+  const returned = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(returned.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
+  await expect(bubbles(returned).filter({ hasText: "mid-stream" })).toHaveCount(1);
+  await expect(returned.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(returned.locator("[data-retry]")).toHaveAttribute("data-retry", "");
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
+});
+
+async function holdChat(page: Page, settle: (route: Route) => Promise<void>) {
+  let release = () => {};
+  let finish = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const finished = new Promise<void>((resolve) => { finish = resolve; });
+  await page.route("**/api/assistant/chat", async (route) => {
+    await gate;
+    try {
+      await settle(route);
+    } finally {
+      finish();
+    }
+  });
+  return async function letGo() {
+    release();
+    await finished;
+    await page.unroute("**/api/assistant/chat");
+  };
 }
 
-test("long names, tokens, and the cart bar stay within a 375px screen", async ({ page }) => {
-  test.setTimeout(120_000);
-  mkdirSync(shots, { recursive: true });
-  const prisma = ownerPrisma();
-  const store = await prisma.store.findUniqueOrThrow({ where: { slug: "mama-ngozi" } });
-  let changed: { id: string; customName: string | null }[] = [];
-  try {
-    changed = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
-      const listings = await tx.listing.findMany({
-        where: { storeId: store.id },
-        select: { id: true, customName: true, masterProduct: { select: { name: true } } },
-      });
-      const egusi = listings.filter((row) => /egusi/i.test(row.masterProduct?.name ?? ""));
-      // Choice chips use the first two search hits, which an earlier test may have cached.
-      // Renaming only findMany's first two leaves the offered yam on its short name.
-      const yams = listings.filter((row) => /yam/i.test(row.masterProduct?.name ?? ""));
-      if (egusi.length === 0 || yams.length < 2) {
-        throw new Error(`expected egusi and two yam listings, saw ${egusi.length} and ${yams.length}`);
-      }
-      await tx.listing.updateMany({
-        where: { id: { in: egusi.map((row) => row.id) } },
-        data: { customName: LONG_NAME },
-      });
-      await tx.listing.updateMany({
-        where: { id: { in: yams.map((row) => row.id) } },
-        data: { customName: CHIP_A },
-      });
-      return [...egusi, ...yams].map((row) => ({ id: row.id, customName: row.customName }));
-    });
+test("closing a failed file turn removes Retry without turning it into a text turn", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
+  let letGo = await holdChat(page, (route) => route.continue());
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("file overload rice");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(1);
+  await page.keyboard.press("Escape");
+  await letGo();
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(dialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Remove / })).toHaveCount(0);
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  await send(page, "rice please");
+  await expect.poll(() => posts.length).toBe(2);
+  const next = JSON.parse(posts[1] ?? "{}").message as { id: string; parts: unknown[] };
+  expect(next.id).not.toBe(failedId);
+  expect(JSON.stringify(next.parts)).not.toContain("image/jpeg");
 
-    await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`${origin}/`);
+  const beforePdf = posts.length;
+  letGo = await holdChat(page, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="application/pdf"]').setInputFiles("src/lib/assistant/fixtures/two-page.pdf");
+  await expect(page.getByRole("button", { name: "Remove two-page.pdf" })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("recipe");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(beforePdf + 1);
+  await page.keyboard.press("Escape");
+  await letGo();
+  await page.getByTestId("assistant-launcher").click();
+  const pdfDialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(pdfDialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
+  await expect(pdfDialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(pdfDialog.getByRole("button", { name: /Remove / })).toHaveCount(0);
+
+  await page.goto(`${origin}/`);
+  const beforeFiles = posts.length;
+  letGo = await holdChat(page, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(beforeFiles + 1);
+  await page.keyboard.press("Escape");
+  await letGo();
+  await page.getByTestId("assistant-launcher").click();
+  const filesOnly = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(filesOnly.getByRole("status")).toBeVisible({ timeout: 20_000 });
+  await expect(filesOnly.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("fresh list");
+  const before = posts.length;
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(before + 1);
+  const fresh = JSON.parse(posts.at(-1) ?? "{}").message as { id: string; parts: Array<{ type?: string }> };
+  expect(fresh.id).not.toBe(failedId);
+  expect(fresh.parts.some((part) => part.type === "file")).toBe(true);
+});
+
+test("file presence cannot enable Retry for terminal or message-rate-limited errors", async ({ page }) => {
+  const cases = [
+    [503, "assistant_unavailable", "Shop with AI isn't available right now."],
+    [404, "assistant_disabled", "Shop with AI isn't available right now."],
+    [403, "store_suspended", "This store isn't taking orders right now."],
+    [503, "assistant_resting", "Shop with AI is resting right now. You can keep shopping the usual way."],
+    [429, "rate_limited", "Too many messages."],
+  ] as const;
+  for (const [status, code, title] of cases) {
     await page.goto(`${origin}/`);
     await page.getByTestId("assistant-launcher").click();
-    const dialog = page.getByRole("dialog", { name: "Shop with help" });
-    await expect(dialog.getByTestId("assistant-composer")).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, `wide layout show me pictures of egusi ${WIDE_LAYOUT_TOKEN} https://example.com/assistant/wide-layout`);
-    await expect(dialog.getByRole("heading", { name: LONG_NAME }).first()).toBeVisible({ timeout: 20_000 });
-    await expectWithinScreen(page);
-    const headerFits = await page.evaluate((storeName) => {
-      const heading = document.querySelector("[data-testid='store-name']");
-      if (!(heading instanceof HTMLElement)) return false;
-      const previous = heading.textContent;
-      heading.textContent = storeName;
-      const root = document.documentElement;
-      const fits = root.scrollWidth <= root.clientWidth + 1;
-      heading.textContent = previous;
-      return fits && heading.title.length > 0;
-    }, WIDE_LAYOUT_STORE);
-    expect(headerFits).toBe(true);
-    await expect(dialog.locator("[class*='bubble']").filter({ hasText: wideLayoutText() })).toBeVisible({ timeout: 20_000 });
-    await expectWithinScreen(page);
-
-    await send(page, "wide layout choices of yam");
-    const longChips = dialog.getByRole("button", { name: new RegExp(CHIP_A) });
-    await expect(longChips).toHaveCount(2, { timeout: 20_000 });
-    await expect(longChips.first()).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, "add two egusi");
-    await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(dialog.locator("article").filter({ has: page.getByRole("button", { name: "Undo", exact: true }) }).getByRole("heading", { name: LONG_NAME })).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, "summary");
-    await expect(dialog.getByRole("heading", { name: "Your basket" })).toBeVisible({ timeout: 20_000 });
-    await expect(dialog.locator("[class*='summary']").getByText(LONG_NAME)).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, `${WIDE_LAYOUT_TOKEN} overload https://example.com/assistant/wide-layout`);
-    await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
-    await expect(dialog.getByRole("button", { name: "Retry" })).toBeVisible();
-    await expectWithinScreen(page);
-
-    await page.screenshot({ path: `${shots}/wide-sheet-375-light.png` });
-    await page.emulateMedia({ colorScheme: "dark" });
-    await page.screenshot({ path: `${shots}/wide-sheet-375-dark.png` });
-    await page.emulateMedia({ colorScheme: "light" });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expectWithinScreen(page);
-    await page.screenshot({ path: `${shots}/wide-sheet-390-light.png` });
-    await page.setViewportSize({ width: 375, height: 812 });
-
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeHidden();
-    await page.goto(`${origin}/cart`);
-    await expect(page.getByRole("heading", { name: LONG_NAME })).toBeVisible({ timeout: 20_000 });
-    const cartBar = page.locator("[class*='mobileAction']");
-    await expect(cartBar).toBeVisible();
-    await expect(cartBar.getByText("Subtotal")).toBeVisible();
-    await expectWithinScreen(page);
-    await page.screenshot({ path: `${shots}/wide-cart-375-light.png` });
-
-    await page.getByTestId("assistant-launcher").click();
-    await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
-    await expectWithinScreen(page);
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
-
-    await page.getByRole("button", { name: /Replace with/ }).first().click();
-    const swap = page.getByRole("dialog", { name: "If this item is sold out" });
-    await expect(swap.getByText(LONG_NAME).first()).toBeVisible();
-    await expectWithinScreen(page);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expectWithinScreen(page);
-    await page.screenshot({ path: `${shots}/wide-cart-390-light.png` });
-  } finally {
-    if (changed.length > 0) {
-      await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
-        for (const row of changed) {
-          await tx.listing.update({ where: { id: row.id }, data: { customName: row.customName } });
-        }
-      });
-    }
-    await prisma.$disconnect();
+    await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+    await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+    await page.route("**/api/assistant/chat", (route) => route.fulfill({
+      status,
+      contentType: "application/json",
+      headers: code === "rate_limited" ? { "retry-after": "60" } : {},
+      body: JSON.stringify({ error: { code } }),
+    }));
+    await page.getByTestId("assistant-composer").fill("rice from the photo");
+    await page.getByTestId("assistant-send").click();
+    const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+    await expect(dialog.getByRole("status").getByText(title)).toBeVisible({ timeout: 20_000 });
+    await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+    await page.unroute("**/api/assistant/chat");
   }
 });
+

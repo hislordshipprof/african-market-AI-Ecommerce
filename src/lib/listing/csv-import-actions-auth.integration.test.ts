@@ -39,13 +39,13 @@ import { authPrisma, healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
 import { csvCommitAction, csvPreviewAction } from "./csv-import-actions";
 import type { CommitSelection, CsvPreviewResult } from "./csv-import";
+import { AUTH_BASE, authGet, authPost, verifyUrlFromEmail } from "../test-auth";
 
 // DATABASE_URL absent: the suite skips. Lane and hosted CI set it, so a real run skips 0.
 // APP_RUNTIME_PASSWORD absent is not a skip: under NODE_ENV=test the app falls back to the
 // owner URL and the current_user assertion fails. AUTH_RATE_LIMIT_RELAXED is set above,
 // before auth is imported. next/navigation stays real.
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t222-${Date.now()}`;
 const password = "ImportAuth-222!";
 const USER_KEYS = [
@@ -314,20 +314,8 @@ interface AuthView {
   session: { id: string; twoFactorVerified: boolean };
 }
 
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const requestHeaders: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) requestHeaders.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(body) }));
-}
-
-async function authGet(url: string, cookies?: string): Promise<Response> {
-  const requestHeaders: Record<string, string> = {};
-  if (cookies) requestHeaders.cookie = cookies;
-  return auth.handler(new Request(url, { headers: requestHeaders, redirect: "manual" }));
-}
-
 async function readSession(cookies: string): Promise<AuthView | null> {
-  const res = await authGet(`${BASE}/get-session`, cookies || undefined);
+  const res = await authGet(`${AUTH_BASE}/get-session`, cookies || undefined);
   const text = await res.text();
   if (!text || text === "null") return null;
   let body: {
@@ -580,7 +568,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect(sent.status).toBe(200);
     const message = getTestSentEmails().find((item) => item.to === emails.customer);
     expect(message?.html).toBeTruthy();
-    const href = message!.html.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+    const href = verifyUrlFromEmail(message!.html);
     expect(href).toBeTruthy();
     const jar = new CookieJar();
     const verify = await authGet(href!);
@@ -1341,6 +1329,65 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect(auditA?.actorEmail).toBe(emails.ownerA);
     expect(auditB?.actorId).toBe(ids.ownerB);
     expect(auditB?.actorEmail).toBe(emails.ownerB);
+
+    const sharedName = `Shared Exact ${RUN}`;
+    const product = await platformAdmin.masterProduct.create({
+      data: { name: sharedName, status: "active", frozen: false, perishable: false, weightG: 180 },
+    });
+    const existingA = await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        masterProductId: product.id,
+        price: 250,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+    try {
+      const fileFor = (price: string) =>
+        new File([`name,price\n${sharedName},${price}\n`], "shared.csv", { type: "text/csv" });
+      const [sharedA, sharedB] = await Promise.all([
+        inStore(headersA, () => csvPreviewAction(formWith(fileFor("2.00")))),
+        inStore(headersB, () => csvPreviewAction(formWith(fileFor("3.00")))),
+      ]);
+      expect(sharedA.preview?.alreadyListed.map((row) => row.masterProductId)).toEqual([product.id]);
+      expect(sharedA.preview?.matches).toEqual([]);
+      expect(sharedB.preview?.matches[0]).toMatchObject({ masterProductId: product.id, matchType: "exact" });
+      const beforeA = await storeScoped(storeAId).listing.findUnique({ where: { id: existingA.id } });
+      const committedB = await inStore(headersB, () => csvCommitAction(sharedB.preview!.importToken, {
+        matchedRows: [sharedB.preview!.matches[0]!.row],
+        newItemRows: [],
+        ambiguousResolutions: [],
+        matchedIdentities: [{ row: sharedB.preview!.matches[0]!.row, masterProductId: product.id }],
+      }));
+      expect(committedB.error).toBeUndefined();
+      expect(committedB.result?.createdCount).toBe(1);
+      const listingB = await storeScoped(storeBId).listing.findFirst({
+        where: { masterProductId: product.id },
+        include: { variants: true },
+      });
+      expect(listingB?.id).toBe(committedB.result?.listingIds[0]);
+      expect(listingB?.price).toBe(300);
+      expect(listingB?.variants[0]?.weightG).toBe(180);
+      const sharedAudit = await storeScoped(storeBId).auditLog.findFirst({
+        where: { action: "catalog.csv_import", entityId: listingB!.id },
+      });
+      expect(sharedAudit?.actorId).toBe(ids.ownerB);
+      expect(sharedAudit?.actorEmail).toBe(emails.ownerB);
+      expect(await storeScoped(storeBId).listing.findFirst({ where: { id: existingA.id } })).toBeNull();
+      expect((await storeScoped(storeBId).listing.updateMany({
+        where: { id: existingA.id },
+        data: { price: 1 },
+      })).count).toBe(0);
+      expect(await storeScoped(storeAId).listing.findUnique({ where: { id: existingA.id } })).toEqual(beforeA);
+    } finally {
+      for (const storeId of [storeAId, storeBId]) {
+        const scoped = storeScoped(storeId);
+        await scoped.stockEvent.deleteMany({ where: { listing: { masterProductId: product.id } } });
+        await scoped.listing.deleteMany({ where: { masterProductId: product.id } });
+      }
+      await platformAdmin.masterProduct.delete({ where: { id: product.id } });
+    }
   });
 
   it("pending tokens stay under the cap and are read by id", async () => {

@@ -6,6 +6,8 @@ import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
 import { effectiveMaxPerOrder } from "../cart/limits";
+import type { ShopperNeed } from "../catalog/attributes";
+import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
@@ -273,6 +275,13 @@ export interface SearchResult {
   weightG?: number;
 }
 
+export type CatalogMatch = "name" | "synonym" | "near";
+
+export interface SearchHit extends SearchResult {
+  match: CatalogMatch;
+  matchedTerm?: string;
+}
+
 interface RawSearchRow {
   id: string;
   custom_name: string | null;
@@ -290,12 +299,15 @@ interface RawSearchRow {
   weight_g: number | null;
   frozen: boolean;
   perishable: boolean;
+  match: string;
+  matched_term: string | null;
 }
 
 async function readSearchListings(
   storeId: string,
   query: string,
-): Promise<SearchResult[]> {
+  need: ShopperNeed | null = null,
+): Promise<SearchHit[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
 
@@ -305,30 +317,70 @@ async function readSearchListings(
     SELECT l.id, l.custom_name, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
       l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
       pack.price AS min_variant_price, pack.id AS variant_id,
-      pack.label AS pack_label, pack.weight_g
+      pack.label AS pack_label, pack.weight_g,
+      CASE
+        WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 'name'
+        WHEN synonym_hit.term IS NOT NULL THEN 'synonym'
+        ELSE 'near'
+      END AS match,
+      CASE
+        WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN NULL
+        ELSE synonym_hit.term
+      END AS matched_term
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
     LEFT JOIN categories c ON mp.category_id = c.id
+    ${need ? effectiveAttributesSql : Prisma.empty}
     LEFT JOIN LATERAL (
       SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
       WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id COLLATE "C" LIMIT 1
     ) pack ON true
+    LEFT JOIN LATERAL (
+      SELECT string_agg(lv.label, ' ') AS blob
+      FROM listing_variants lv
+      WHERE lv.listing_id = l.id
+    ) labels ON true
+    CROSS JOIN LATERAL (
+      SELECT unaccent(coalesce(l.custom_name, '') || ' ' || coalesce(mp.name, '')) AS title,
+             unaccent(coalesce(l.custom_name, '') || ' ' || coalesce(mp.name, '') || ' ' || coalesce(labels.blob, '')) AS doc
+    ) name_doc
+    LEFT JOIN LATERAL (
+      SELECT ps.term
+      FROM product_synonyms ps
+      WHERE ps.product_id = mp.id
+        AND (
+          lower(unaccent(ps.term)) = lower(unaccent(${trimmed}))
+          OR to_tsvector('english', unaccent(ps.term)) @@ plainto_tsquery('english', unaccent(${trimmed}))
+        )
+      ORDER BY (lower(unaccent(ps.term)) = lower(unaccent(${trimmed}))) DESC, length(ps.term) DESC, ps.term
+      LIMIT 1
+    ) synonym_hit ON true
     CROSS JOIN LATERAL (
       SELECT MIN(CASE
-        WHEN LOWER(term) = LOWER(${trimmed}) THEN 0
-        WHEN STARTS_WITH(LOWER(term), LOWER(${trimmed})) THEN 1
-        WHEN to_tsvector('english', term) @@ plainto_tsquery('english', ${trimmed}) THEN 2
+        WHEN lower(unaccent(term)) = lower(unaccent(${trimmed})) THEN 0
+        WHEN starts_with(lower(unaccent(term)), lower(unaccent(${trimmed}))) THEN 1
+        WHEN to_tsvector('english', unaccent(term)) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 2
         ELSE 3 END) AS rank,
-        MAX(similarity(LOWER(${trimmed}), LOWER(term))) AS fuzzy
+        MAX(search_similarity(lower(unaccent(${trimmed})), lower(unaccent(term)))) AS fuzzy
       FROM (
         SELECT l.custom_name AS term UNION ALL SELECT mp.name
         UNION ALL SELECT ps.term FROM product_synonyms ps WHERE ps.product_id = mp.id
-        UNION ALL SELECT word FROM regexp_split_to_table(COALESCE(mp.name, '') || ' ' || COALESCE(l.custom_name, ''), '[^[:alnum:]]+') word
-        WHERE length(word) >= GREATEST(3, length(${trimmed}) - 1)
-      ) terms WHERE term IS NOT NULL
+      ) terms WHERE term IS NOT NULL AND term <> ''
     ) relevance
-    WHERE l.active = true AND ${notE2eListingSql} AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND relevance.fuzzy > 0.3))
-    ORDER BY relevance.rank, relevance.fuzzy DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
+    CROSS JOIN LATERAL (
+      SELECT search_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.doc)) AS score,
+             search_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.title)) AS title_score
+    ) typo
+    WHERE l.active = true AND ${notE2eListingSql}
+      AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND typo.score > 0.3))
+      AND NOT ${need ? needExcludesSql(need) : Prisma.sql`false`}
+    ORDER BY
+      CASE
+        WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 0
+        WHEN synonym_hit.term IS NOT NULL THEN 1
+        ELSE 2
+      END,
+      relevance.rank, GREATEST(relevance.fuzzy, typo.title_score) DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
     LIMIT 50
     `,
   );
@@ -353,6 +405,8 @@ async function readSearchListings(
         qty: row.qty,
         status: row.status,
       } satisfies StockBadgeInput),
+      match: row.match === "name" || row.match === "synonym" ? row.match : "near",
+      ...(row.matched_term ? { matchedTerm: row.matched_term } : {}),
     };
   });
 }
@@ -475,6 +529,16 @@ export interface StoreProfile {
   prepTimeMinutes: number;
 }
 
+const DEFAULT_DELIVERY_RADIUS_MI = 8;
+
+/** A Decimal, number or numeric string as a finite number; anything else is the schema default. */
+function deliveryRadiusOrDefault(raw: unknown): number {
+  if (raw === null || raw === undefined) return DEFAULT_DELIVERY_RADIUS_MI;
+  const text = String(raw).trim();
+  const n = text === "" ? NaN : Number(text);
+  return Number.isFinite(n) ? n : DEFAULT_DELIVERY_RADIUS_MI;
+}
+
 export function extractStoreProfile(store: {
   ownerName: string | null;
   ownerStory: string | null;
@@ -494,7 +558,7 @@ export function extractStoreProfile(store: {
     deliveryInfo: store.deliveryInfo,
     hours: store.hours,
     pickupEnabled: store.pickupEnabled,
-    deliveryRadiusMi: Number(store.deliveryRadiusMi),
+    deliveryRadiusMi: deliveryRadiusOrDefault(store.deliveryRadiusMi),
     prepTimeMinutes: store.prepTimeMinutes,
   };
 }
@@ -553,8 +617,29 @@ export function getListingDetail(storeId: string, listingId: string) {
   return cachedStorefrontRead(storeId, JSON.stringify(["getListingDetail", listingId]), () => readGetListingDetail(storeId, listingId));
 }
 
+function loadSearch(storeId: string, query: string) {
+  return cachedStorefrontRead(
+    storeId,
+    JSON.stringify(["searchListings", query]),
+    () => readSearchListings(storeId, query),
+  );
+}
+
+function withoutMatch(row: SearchHit): SearchResult {
+  const { match, matchedTerm, ...rest } = row;
+  void match;
+  void matchedTerm;
+  return rest;
+}
+
 export function searchListings(storeId: string, query: string) {
-  return cachedStorefrontRead(storeId, JSON.stringify(["searchListings", query]), () => readSearchListings(storeId, query));
+  return loadSearch(storeId, query).then((rows) => rows.map(withoutMatch));
+}
+
+/** The assistant's search. A need filters in SQL before ranking: an excluded listing never comes back. */
+export function searchCatalogHits(storeId: string, query: string, need: ShopperNeed | null = null) {
+  // Attribute reviews do not revalidate store caches, so a need always reads fresh.
+  return need ? readSearchListings(storeId, query, need) : loadSearch(storeId, query);
 }
 
 export function getActiveListings(storeId: string) {

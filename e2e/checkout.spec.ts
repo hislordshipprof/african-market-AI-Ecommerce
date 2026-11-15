@@ -41,7 +41,7 @@ test.describe("Guest checkout flow", () => {
     await addItemToCart(page);
     await page.goto(`${base}/checkout`);
 
-    await page.getByRole("button", { name: /Place demo order|Pay/ }).click();
+    await page.getByRole("button", { name: /Place demo order|Place order/ }).click();
 
     await expect(
       page.getByText("Enter the name for your order"),
