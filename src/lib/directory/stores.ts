@@ -15,6 +15,7 @@ export const DIRECTORY_STORE_FIELDS = {
   brandColor: true,
   city: true,
   state: true,
+  neighborhood: true,
   hours: true,
   timezone: true,
   pickupEnabled: true,

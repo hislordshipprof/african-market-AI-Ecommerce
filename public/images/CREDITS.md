@@ -4,13 +4,14 @@
 
 | File | Description | Author | Source | License |
 |------|-------------|--------|--------|---------|
-| `story/bodija-wide.webp`, `story/bodija-mid.webp`, `story/bodija-tall.webp` | Tomato and pepper stall at Bodija Market, Ibadan, Nigeria. Story surface background, cropped to the hands and produce and resized. Shows a real market, not a store on this platform or its owner. | Tunde Buremo | [Unsplash](https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00) | [Unsplash License](https://unsplash.com/license) |
+| `story/bodija-wide.webp`, `story/bodija-mid.webp`, `story/bodija-tall.webp` | Tomato and pepper stall at Bodija Market, Ibadan, Nigeria. Story surface background and the directory home hero (#690), cropped to the hands and produce and resized. Shows a real market, not a store on this platform or its owner. | Tunde Buremo | [Unsplash](https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00) | [Unsplash License](https://unsplash.com/license) |
 
 ## Programmatic Assets
 
 | Asset | Source | License |
 |-------|--------|---------|
 | `story/bodija-wide-depth.webp` | Depth map of `story/bodija-wide.webp`, generated offline by `scripts/images/story-depth.py` with [Depth Anything V2 Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) (Apache-2.0). The model is not shipped. | Derivative of the photograph above, under the [Unsplash License](https://unsplash.com/license) |
+| `directory/store-admin-orders.webp` | Screenshot of the store admin's Orders screen at phone width, taken from the local demo store (Mama Ngozi African Market) with its seeded test orders and customer (#690). Shown on the directory home's "For store owners" section. | N/A (our own product screen; demo data) |
 | `product-placeholder.svg` | Designed SVG grocery bag placeholder for products without photos | N/A (original work) |
 | `categories/*.svg` | Designed SVG food illustrations for 9 category cards (tubers, grains, spices, oils, vegetables, fish & meat, snacks, drinks, pantry) | N/A (original work) |
 | `banners/*.svg` | Designed SVG hero banner backgrounds for demo stores (6 banners) | N/A (original work) |

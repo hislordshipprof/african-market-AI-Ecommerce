@@ -74,7 +74,7 @@ A card the customer agreed to keep on their account, shown as brand and last fou
 _Avoid_: Wallet, payment profile
 
 **Store directory**:
-The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there. Each store card shows open now or when it opens, pickup and delivery, the owner's face and story, and after a near me search the distance and whether the store delivers to you (its own radius only; a courier is only "may be available").
+The public site listing stores by state and location, linking each to its storefront. Its state and city pages (`/stores/texas/houston`) exist only while a listed store is there. Each store card shows the owner's photo (the logo otherwise), the neighbourhood or city, cuisine tags, open now or when it opens, pickup and delivery, the owner's name and story, a "Visit <store name>" button, and after a near me search the distance and whether the store delivers to you (its own radius only; a courier is only "may be available"). The home (#690) leads with a market photo, the search and true counts of listed stores, then cuisine chips ("Browse by where home is") that filter the cards, how it works, up to three owners' own stories, and the pitch to store owners.
 _Avoid_: Marketplace, combined app
 
 **Directory listing**:
