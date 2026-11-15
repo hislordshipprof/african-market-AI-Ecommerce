@@ -1,6 +1,6 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../auth";
 import { getStore } from "../get-store";
@@ -27,6 +27,7 @@ import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform, storeScoped } from "../db";
 import { loadCheckoutDraft } from "../assistant/checkout-draft";
 import type { PickupSlot } from "../order/pickup-slots";
+import { ATTRIBUTION_COOKIE, acquisitionSource } from "../directory/attribution";
 
 const contactSchema = z.strictObject({
   name: z.string().max(200),
@@ -303,6 +304,7 @@ export async function placeOrderAction(
       payment.data,
       resolved.userId,
       request?.leaveAtDoor ?? false,
+      acquisitionSource((await cookies()).get(ATTRIBUTION_COOKIE)?.value),
     );
     return { ok: true, token: result.trackingToken ?? result.token };
   } catch (e) {

@@ -3,13 +3,15 @@ import { storeUnreadCount } from "@/lib/support/thread";
 import { getStoreBilling } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
 import { PLAN_NAMES, planAllows } from "@/lib/billing/plan";
+import { directoryOrderCount } from "@/lib/directory/directory-orders";
 import { StoreAdminDashboard } from "./dashboard";
 
 export default async function StoreAdminPage() {
   const session = await requireStoreMember();
-  const [unreadMessages, billing] = await Promise.all([
+  const [unreadMessages, billing, directoryOrders] = await Promise.all([
     storeUnreadCount(session.store.id),
     getStoreBilling(session.store.id),
+    directoryOrderCount(session.store.id),
   ]);
   const usage = session.membership.role === "owner" ? await assistantChatUsage(session.store.id, billing.plan) : null;
 
@@ -21,6 +23,7 @@ export default async function StoreAdminPage() {
       role={session.membership.role}
       stripeOnboardingStatus={session.store.stripeOnboardingStatus}
       unreadMessages={unreadMessages}
+      directoryOrders={directoryOrders}
       plan={{
         name: PLAN_NAMES[billing.plan],
         status: billing.status,

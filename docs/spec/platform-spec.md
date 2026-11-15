@@ -448,7 +448,7 @@ StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|counter_sale|sho
 
 Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id, source[manual|ai])
 Order(id, tenant_id, number, customer_id, status, fulfillment[delivery|pickup], address, totals..., 
-      payment_intent_id, captured_amount, tip, platform_fee, delivery_fee, notes)
+      payment_intent_id, captured_amount, tip, platform_fee, delivery_fee, notes, acquisition_source?[directory])
 OrderLine(id, order_id, variant_id, qty_ordered, qty_picked, unit_price, swap_rule, status, substituted_variant_id, substituted_unit_price)
 SubstitutionRequest(id, store_id, order_id, order_line_id unique, proposed_variant_id?, proposed_unit_price?, qty, status[pending|approved|declined|timed_out], expires_at, answered_at)  # RLS on store_id
 Delivery(id, order_id, provider, external_id, status, quote_fee, actual_fee, tracking_url, courier_json, proof_url, pin)
@@ -467,6 +467,7 @@ OwnerReportItem(id, report_id, store_id, extracted_name, extracted_qty?, unit?, 
 AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
 AssistantSpendDay(day, cost_micros, cap_alerted_at) — platform ledger, no store id; retention never deletes it
 OwnerWhatsAppLink(id, store_id, user_id, phone_number, wa_id, verified, opt_in_alerts, opt_in_digest, verification_code_hash?, verification_expires_at?, verification_attempts, verified_at?) — the Linked WhatsApp number (#143); one per membership, at most one verified per wa_id platform-wide
+StoreWhatsAppNumber(id, store_id unique, waba_id, phone_number_id unique platform-wide among pending and registered rows (a failed or disconnected row frees the number for another store), display_number?, status[pending|registered|failed|disconnected], coexistence, business_token?, failure_code?) — the Store WhatsApp number (#558). business_token is AES-256-GCM ciphertext under WHATSAPP_TOKEN_KEY, bound to (store_id, phone_number_id), never logged or sent to the browser. One link runs per store at a time: a second link while one is pending (under 2 minutes old) gets the already-linked error, a retry of the same ids once registered returns success without calling Meta and keeps the token, and a link reports success only when its own pending row became registered. The webhook routes by metadata.phone_number_id: the platform number to the owner path, a registered store number to that store's customer handler, any other number dropped with a hashed log line. A customer-handler failure releases the message's claim so Meta's redelivery is handled. Not built: Meta's coexistence contact and history sync (`POST /<PHONE_NUMBER_ID>/smb_app_data`, due within 24 hours of onboarding) and the App Dashboard webhook fields it needs (`history`, `smb_app_state_sync`, `smb_message_echoes`, `account_update`).
 AssistantFileTurn(id, key, at_ms) — platform rate-limit row, no store id and no RLS (same pattern as rate_limits; GRANT to app_user).
       Key `assistant:files:cart:<cartId>`; 10 file turns per cart per rolling hour. Under pg_advisory_xact_lock(hashtextextended(key, 0))
       it deletes rows with at_ms <= now - window, counts the rest, and inserts one row if under the limit. The check runs before
@@ -556,7 +557,7 @@ Phase 2 started on 2026-11-14, alongside the Phase 1 tail (Build Board decision 
 
 - Onboard 4 more markets; AI photo-to-listing onboarding.
 - Store copilot, rest of it: weekly reports, sales trends, inventory movement, reorder suggestions.
-- WhatsApp ordering for customers on the store's own number (ADR-0010).
+- WhatsApp ordering for customers on the store's own number (ADR-0010). Number registration and inbound routing are built against the fake (#558); the customer handler logs only until the Shopper assistant takes it, and the Embedded Signup popup waits for the Meta app keys.
 - Store directory (search stores by state / near me → storefront; ADR-0007, #447), built in this order:
   - D0 (#448): amend ADR-0007, ADR-0001 and this spec to the owner decisions of 2026-11-11.
   - D1 (#449): directory foundation: the root domain, a listed flag on the store, and a public store projection.
