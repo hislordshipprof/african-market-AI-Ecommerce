@@ -58,24 +58,17 @@ import sharp from "sharp";
 import { generateTOTP } from "../../../e2e/totp";
 import { createFakeAnthropicFetch, type FakeAnthropic } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
-import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { isServableCatalogKey } from "../r2";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { dismissListingDrafts, publishListingDrafts, uploadShelfPhoto } from "./photo-draft-actions";
 import { PHOTOS_PER_HOUR, PHOTO_ITEMS_MAX, listPendingDrafts } from "./photo-drafts";
+import { authPost } from "../test-auth";
 
-const BASE = "http://localhost:3000/api/auth";
 const RUN = `t552-${Date.now()}`;
 const TAG = `zq${Date.now().toString(36)}`;
 const password = "Photo-Drafts-552!";
 const hasDb = !!process.env.DATABASE_URL;
-
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cookies) headers.cookie = cookies;
-  return auth.handler(new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
-}
 
 function cookiesOf(response: Response, jar: Map<string, string>): string {
   for (const raw of response.headers.getSetCookie?.() ?? []) {

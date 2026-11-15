@@ -18,17 +18,19 @@ export default async function AccountPage({
     syncCustomerForRequest(),
     getRequestSession(),
   ]);
-  // After the sync: the history must include orders the sync just claimed.
-  const [accountBook, accountOrders] = customer
-    ? await Promise.all([
-        session?.user?.id ? loadAccountBook(session.user.id) : null,
-        listAccountOrders(store.id, customer.id),
-      ])
-    : [null, null];
   if (!customer && (params.error || !enabled)) {
     const query = params.error ? `?error=${encodeURIComponent(params.error)}` : "";
     redirect(`/account/sign-in${query}`);
   }
+  // After the sync: the history must include orders the sync just claimed.
+  const [accountBook, accountOrders] = customer
+    ? await Promise.all([
+        session?.user?.id ? loadAccountBook(session.user.id) : null,
+        listAccountOrders(store.id, customer.id).then((orders) =>
+          orders.map((order) => accountOrderRow(order, store.timezone)),
+        ),
+      ])
+    : [null, null];
   return (
     <StorefrontShell store={store}>
       <AccountFlow
@@ -37,7 +39,7 @@ export default async function AccountPage({
         enabled={enabled}
         customer={customer}
         accountBook={accountBook}
-        accountOrders={accountOrders?.map((order) => accountOrderRow(order, store.timezone)) ?? null}
+        accountOrders={accountOrders}
       />
     </StorefrontShell>
   );
