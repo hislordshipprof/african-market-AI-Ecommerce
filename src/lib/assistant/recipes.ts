@@ -6,7 +6,7 @@ import { platform } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { WEB_SEARCH_MICROS, billedSearches, callCostMicros, tokenUsageOf } from "./cost";
 import { assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
-import { dishKey } from "./recipe-base";
+import { dishKey, dishKeys } from "./recipe-base";
 import { recordSpend, utcDay } from "./spend";
 
 /** Web lookups each store may start per UTC day (owner guardrail, #25). */
@@ -18,6 +18,8 @@ const LOOKUP_TURNS = 2;
 
 export interface RecipeRow {
   name: string;
+  /** "curated" for the seeded base, "lookup" for a dish saved from an online lookup. */
+  origin: string;
   servings: number | null;
   sourceUrl: string | null;
   ingredients: Array<{ name: string; masterProductId: string | null; qty: number | null; unit: string | null }>;
@@ -35,10 +37,19 @@ export interface LookupResult {
   costMicros: bigint;
 }
 
-/** Order when a name matches several rows: exact key, then curated, then the oldest. */
+/**
+ * Order when a name matches several rows: exact key, then curated, then the oldest.
+ * A name no row answers is tried again up to its first " with ": "jollof with tomato paste" is still jollof (#607).
+ */
 export async function findRecipe(dish: string): Promise<RecipeRow | null> {
-  const key = dishKey(dish);
-  if (!key) return null;
+  for (const key of dishKeys(dish)) {
+    const recipe = await recipeByKey(key);
+    if (recipe) return recipe;
+  }
+  return null;
+}
+
+async function recipeByKey(key: string): Promise<RecipeRow | null> {
   const rows = await platform.recipe.findMany({
     where: { OR: [{ key }, { aliases: { has: key } }] },
     include: { ingredients: { orderBy: { position: "asc" } } },
@@ -48,6 +59,7 @@ export async function findRecipe(dish: string): Promise<RecipeRow | null> {
   if (!recipe) return null;
   return {
     name: recipe.name,
+    origin: recipe.origin,
     servings: recipe.servings,
     sourceUrl: recipe.sourceUrl,
     ingredients: recipe.ingredients.map((row) => ({
