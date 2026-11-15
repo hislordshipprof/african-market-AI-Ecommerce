@@ -340,6 +340,8 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "masterProduct",
   "masterProductIngredient",
   "order",
+  "paymentDispute",
+  "paymentDisputeEvent",
   "platformSettings",
   "productSynonym",
   "refundRequest",
@@ -405,6 +407,7 @@ const STORE_SCOPED_TX_MODELS = [
   "orderPushSubscription",
   "ownerReport",
   "ownerReportItem",
+  "paymentDispute",
   "paymentIntentRelease",
   "pickBatch",
   "platformSettings",
@@ -2396,6 +2399,26 @@ export async function claimStripeBillingEvent(
     ON CONFLICT (id) DO NOTHING
     RETURNING id`;
   return rows.length > 0;
+}
+
+/** Records a charge.dispute.* event id (#539). False means it was already applied. */
+export async function claimPaymentDisputeEvent(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  eventId: string,
+  stripeDisputeId: string,
+  type: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO payment_dispute_events (id, stripe_dispute_id, type)
+    VALUES (${eventId}, ${stripeDisputeId}, ${type})
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+/** Locks a dispute's row until the transaction ends, so two of its events apply one after the other. */
+export async function lockPaymentDispute(tx: Pick<PrismaClient, "$queryRaw">, stripeDisputeId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM payment_disputes WHERE stripe_dispute_id = ${stripeDisputeId} FOR UPDATE`;
 }
 
 /** Adds one assistant chat to the store's month unless it is at `cap`. Null when capped. */

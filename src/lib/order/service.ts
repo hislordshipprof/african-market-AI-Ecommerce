@@ -17,6 +17,7 @@ import { captureCharge } from "./substitution-pricing";
 import { finalizeTaxForCapture, recordTaxTransaction, type FinalTax } from "../tax/capture-tax";
 import { TaxLocationError, TaxUnavailableError } from "../tax/calculator";
 import { recordCapture } from "./capture-record";
+import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -353,6 +354,12 @@ export async function getStoreOrders(storeId: string) {
       select: { entityId: true },
     });
     const platformRefundedIds = platformRefunded.map((row) => row.entityId);
+    // #539: an order with an open card dispute stays in the inbox, badged, whatever its status.
+    const openDisputes = await tx.paymentDispute.findMany({
+      where: { orderId: { not: null }, status: { notIn: [...CLOSED_DISPUTE_STATUSES] } },
+      select: { orderId: true },
+    });
+    const disputedIds = openDisputes.map((row) => row.orderId!);
     const rows = await tx.order.findMany({
       where: {
         OR: [
@@ -364,6 +371,7 @@ export async function getStoreOrders(storeId: string) {
           ...(platformRefundedIds.length > 0
             ? [{ id: { in: platformRefundedIds }, status: { in: PLATFORM_REFUNDED_STATUSES } }]
             : []),
+          ...(disputedIds.length > 0 ? [{ id: { in: disputedIds } }] : []),
         ],
       },
       include: ORDER_WITH_LINES,
@@ -372,6 +380,7 @@ export async function getStoreOrders(storeId: string) {
     return rows.map((row) => ({
       ...row,
       refundedByPlatform: platformRefundedIds.includes(row.id) && (PLATFORM_REFUNDED_STATUSES as string[]).includes(row.status),
+      disputed: disputedIds.includes(row.id),
     }));
   });
   // This payload reaches a client component. A user id is the same at every store, so it

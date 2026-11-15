@@ -48,6 +48,21 @@ export interface WebhookInvoice {
   storeId: string | null;
 }
 
+/** A card dispute on a platform charge (#539). `evidenceDueBy` is Unix seconds. */
+export interface WebhookDispute {
+  id: string;
+  chargeId: string;
+  paymentIntentId: string | null;
+  amountCents: number;
+  currency: string;
+  reason: string;
+  status: string;
+  evidenceDueBy: number | null;
+  livemode: boolean;
+  /** Stripe's dispute fees net of any returned, summed over the dispute's balance transactions. */
+  feeCents: number;
+}
+
 export interface WebhookEvent {
   type: string;
   accountId: string;
@@ -59,6 +74,7 @@ export interface WebhookEvent {
   paymentIntent?: WebhookPaymentIntent;
   subscription?: WebhookSubscription;
   invoice?: WebhookInvoice;
+  dispute?: WebhookDispute;
 }
 
 export interface CaptureResult {
