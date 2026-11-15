@@ -1478,6 +1478,7 @@ model CourierIncidentNote {
   author User  @relation(fields: [authorId], references: [id], onDelete: Restrict)
 
   @@index([storeId, orderId, createdAt])
+  @@index([authorId])
   @@map("courier_incident_notes")
 }
 

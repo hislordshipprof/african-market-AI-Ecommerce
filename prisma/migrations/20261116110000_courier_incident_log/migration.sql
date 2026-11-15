@@ -6,6 +6,11 @@ ALTER TABLE "delivery_events" ADD CONSTRAINT "delivery_events_type_check"
 
 CREATE INDEX "delivery_events_type_created_at_idx" ON "delivery_events"("type", "created_at");
 
+-- A failover or both-fail with no delivery row (a create error) is keyed on the order, so a replayed step writes it once.
+-- The unique on (delivery_id, external_event_id) cannot do it: NULL delivery ids are distinct.
+CREATE UNIQUE INDEX "delivery_events_order_id_external_event_id_key" ON "delivery_events"("order_id", "external_event_id")
+    WHERE "delivery_id" IS NULL AND "external_event_id" IS NOT NULL;
+
 CREATE TABLE "courier_incident_notes" (
     "id" TEXT NOT NULL,
     "store_id" TEXT NOT NULL,
@@ -21,6 +26,7 @@ CREATE TABLE "courier_incident_notes" (
 );
 
 CREATE INDEX "courier_incident_notes_store_id_order_id_created_at_idx" ON "courier_incident_notes"("store_id", "order_id", "created_at");
+CREATE INDEX "courier_incident_notes_author_id_idx" ON "courier_incident_notes"("author_id");
 
 ALTER TABLE "courier_incident_notes"
     ADD CONSTRAINT "courier_incident_notes_store_id_fkey"
@@ -45,5 +51,5 @@ CREATE POLICY courier_incident_notes_platform_admin ON "courier_incident_notes"
     USING (current_setting('app.is_platform_admin', true) = 'true')
     WITH CHECK (current_setting('app.is_platform_admin', true) = 'true');
 
--- Notes are append-only: no UPDATE.
-GRANT SELECT, INSERT, DELETE ON "courier_incident_notes" TO app_user;
+-- Notes are append-only: no UPDATE or DELETE. They go with their order (cascade).
+GRANT SELECT, INSERT ON "courier_incident_notes" TO app_user;

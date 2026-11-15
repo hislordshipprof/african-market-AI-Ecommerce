@@ -192,7 +192,8 @@ async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDe
 
 /**
  * Failover and both-fail also land on the order's delivery events, so the courier incident log reads them from the
- * database (#536). Keyed on the replaced delivery when there is one, so a replayed step writes it once.
+ * database (#536). Keyed like their Inngest event ids: on the replaced delivery for a timeout, else on the order (and
+ * the refusing courier for a create error), so a replayed step writes each once.
  */
 async function recordCourierEvent(
   storeId: string,
@@ -202,7 +203,7 @@ async function recordCourierEvent(
   payload: Record<string, unknown>,
 ): Promise<void> {
   await storeScoped(storeId).deliveryEvent.createMany({
-    data: [{ storeId, orderId, deliveryId, externalEventId: deliveryId ? type : null, type, payload: payload as object }],
+    data: [{ storeId, orderId, deliveryId, externalEventId: deliveryId || type === "both_failed" ? type : `${type}:${payload.fromProvider}`, type, payload: payload as object }],
     skipDuplicates: true,
   });
 }

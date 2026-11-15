@@ -372,13 +372,14 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     return rows.sort((a, b) => a.type.localeCompare(b.type));
   }
 
-  it("#536: a create error's failover and a both-fail are recorded on the order's delivery events", async () => {
+  it("#536: a create error's failover and a both-fail are recorded once on the order's delivery events, even when the step runs again", async () => {
     const ids = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
     const uber = new StubProvider("uber", 749);
     uber.failCreate = true;
     const doordash = new StubProvider("doordash", 899);
     doordash.failCreate = true;
 
+    await selectAndDispatch({ ...ids, request }, { providers: [doordash, uber], emit, settings });
     await selectAndDispatch({ ...ids, request }, { providers: [doordash, uber], emit, settings });
 
     expect(await incidentEvents(ids)).toEqual([
