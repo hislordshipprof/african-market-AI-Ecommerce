@@ -28,8 +28,12 @@ A person who works for a store and picks and hands off orders.
 _Avoid_: Picker (a picker is staff doing a pick, not a separate role)
 
 **Platform admin**:
-A member of our team who sets up stores and supports them.
+A member of our team who approves store applications, sets up stores and supports them.
 _Avoid_: Platform team (only the customer-facing label on a platform admin's support reply)
+
+**Store application**:
+A request to join the platform from the public "Sell on African Markets" page on the root domain: business name, kind of store, address, owner name, email, phone, a web or social link, and whether the store offers pickup or delivery today. A platform admin approves it, which creates the store in setup and invites the owner, or rejects it with an internal reason the applicant never sees. Rejected applications are deleted 12 months after the decision.
+_Avoid_: Sign-up, lead, merchant application
 
 **Customer**:
 A person who buys from a store, whether or not they have an account.
@@ -313,6 +317,9 @@ The platform-wide numbers a platform admin sets at `/admin/settings/ai-onboardin
 
 **Assignment timeout**:
 How long a booked courier delivery may wait for a courier before failover cancels it and books the other courier. 5 to 20 minutes; 10 by default.
+
+**Courier incident**:
+A courier order where something went wrong: failover, both couriers failed, the courier company cancelled, the order came back to the store or the return failed, a courier was assigned after the assignment timeout, or it was delivered with no proof. One per order. Listed for platform admins at `/admin/couriers/incidents`; worked out from the delivery events each time the page opens, never stored. Only an admin's notes, and whether it is resolved, are stored. A newer incident event reopens a resolved one.
 
 **Courier**:
 A driver from a courier company. Not a user of the platform.

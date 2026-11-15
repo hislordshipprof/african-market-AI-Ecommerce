@@ -62,9 +62,9 @@ export default async function StoreListPage() {
                   <td className="px-4 py-3">
                     <span
                       className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        store.status === "active"
-                          ? "bg-muted text-foreground"
-                          : "bg-destructive/10 text-destructive"
+                        store.status === "suspended"
+                          ? "bg-destructive/10 text-destructive"
+                          : "bg-muted text-foreground"
                       }`}
                     >
                       {store.status}
