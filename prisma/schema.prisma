@@ -1535,6 +1535,14 @@ model PlatformSettings {
   courierAssignmentTimeoutS Int @default(600) @map("courier_assignment_timeout_s")
   doordashEnabled      Boolean  @default(true) @map("doordash_enabled")
   uberEnabled          Boolean  @default(true) @map("uber_enabled")
+  /// AI and onboarding settings (#561). Active listings with a price a store needs before Go live (#555), 1 to 200.
+  goLiveListingFloor   Int      @default(20) @map("go_live_listing_floor")
+  /// Random shopper and copilot chats per store per day in the AI review list (#544), 0 to 20.
+  aiDailySamplePerStore Int     @default(5) @map("ai_daily_sample_per_store")
+  /// An AI turn costing more than this many cents is auto-flagged for review (#544), 1 to 100.
+  aiTurnCostFlagCents  Int      @default(2) @map("ai_turn_cost_flag_cents")
+  /// Months a rejected store application is kept before the retention job deletes it (#554), 1 to 24.
+  rejectedApplicationRetentionMonths Int @default(12) @map("rejected_application_retention_months")
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")

@@ -35,7 +35,7 @@ import {
   ASSISTANT_DISABLED_STATUS,
   assistantChatEnabled,
 } from "./contract";
-import { TURN_COST_FLAG_MICROS } from "../admin/ai-review";
+import { readAiOnboardingSettings, turnCostFlagMicros } from "../admin/ai-onboarding-settings";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
 import { acceptanceForTurn, shownProductIds } from "./shown";
@@ -464,8 +464,12 @@ async function persistTurn(args: {
     await releaseLease(args.storeId, args.conversationId);
     return;
   }
-  // AI oversight (#544) flags a costly turn for platform review.
-  if (cost > BigInt(TURN_COST_FLAG_MICROS)) {
+  // AI oversight (#544) flags a costly turn for platform review; the threshold is a platform setting (#561).
+  const threshold = await readAiOnboardingSettings().then(turnCostFlagMicros, (error: unknown) => {
+    console.error("[assistant] cost threshold not read", args.conversationId, error);
+    return null;
+  });
+  if (threshold !== null && cost > BigInt(threshold)) {
     await storeScoped(args.storeId).aiAction.create({
       data: {
         storeId: args.storeId,

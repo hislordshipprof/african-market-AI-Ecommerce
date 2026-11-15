@@ -765,7 +765,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger"];
+  const MENU = ["Home", "Stores", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger", "Courier settings", "AI and onboarding"];
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -787,13 +787,16 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin/ai/conversations", "AI conversations"],
       ["/admin/ai/eval-spend", "AI eval and spend"],
       ["/admin/billing/ledger", "Fee ledger"],
+      ["/admin/settings/couriers", "Courier settings"],
+      ["/admin/settings/ai-onboarding", "AI and onboarding"],
     ];
     for (const [path, current] of pages) {
       await page.goto(path);
       const menu = page.getByRole("navigation", { name: "Admin" });
       await expect(menu.getByRole("link")).toHaveText(MENU);
       await expect(menu.locator("[aria-current='page']")).toHaveText(current);
-      await expect(page.getByText("admin@platform.test", { exact: true })).toBeVisible();
+      // Scoped to the shell: the settings page also names the admin in its last-changed line.
+      await expect(page.locator("header").getByText(ADMIN_EMAIL)).toBeVisible();
     }
   });
 
@@ -897,6 +900,47 @@ test.describe("Courier settings (#535)", () => {
           },
         });
         await tx.auditLog.deleteMany({ where: { entityType: "platform_settings", createdAt: { gte: startedAt } } });
+      });
+    }
+  });
+});
+
+test.describe("AI and onboarding settings (#561)", () => {
+  test("signed out, /admin/settings/ai-onboarding redirects to sign-in", async ({ page }) => {
+    await page.goto("/admin/settings/ai-onboarding");
+    await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  test("a platform admin changes the go-live floor, sees who changed it last, and an out-of-range value is refused", async ({ page }) => {
+    const original = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+    const floor = original.goLiveListingFloor === 35 ? 36 : 35;
+    const startedAt = new Date();
+    try {
+      await adminSignIn(page);
+      await page.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "AI and onboarding" }).first().click();
+      await expect(page.locator("h1")).toHaveText("AI and onboarding settings");
+
+      // Only the floor changes: the AI oversight spec reads the sample size at the same time.
+      await page.getByLabel("Listings needed to go live").fill(String(floor));
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(page.getByText(/^Saved\./)).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByLabel("Listings needed to go live")).toHaveValue(String(floor));
+      await expect(page.getByTestId("last-changed")).toContainText(`Last changed by ${ADMIN_EMAIL}`);
+
+      // The browser's own range check is lifted so the server's refusal is what the admin sees.
+      await page.locator("form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.getByLabel("Listings needed to go live").fill("0");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(page.getByText("Enter whole listings from 1 to 200.")).toBeVisible();
+      await expect(page.getByText(/Nothing was saved/)).toBeVisible();
+      const stored = await withPlatformCatalog((tx) => tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" } }));
+      expect(stored.goLiveListingFloor).toBe(floor);
+    } finally {
+      await withPlatformCatalog(async (tx) => {
+        await tx.platformSettings.update({ where: { id: "platform" }, data: { goLiveListingFloor: original.goLiveListingFloor } });
+        await tx.auditLog.deleteMany({ where: { action: "platform.ai_onboarding_settings_update", createdAt: { gte: startedAt } } });
       });
     }
   });

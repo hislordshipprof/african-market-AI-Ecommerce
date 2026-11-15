@@ -13,6 +13,7 @@ import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSen
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { inngest } from "../inngest/client";
 import { COURIER_REGISTRATION_REQUESTED } from "../delivery/courier-registration";
+import { withAiOnboardingSettings } from "../admin/platform-settings-test-lock";
 import {
   approveStoreApplication,
   deleteExpiredRejectedApplications,
@@ -239,7 +240,7 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     expect(await applicationsFor(app.email)).toHaveLength(2);
   });
 
-  it("deletes rejected applications 12 months after the decision and keeps everything else", async () => {
+  it("with the default 12-month retention, deletes rejected applications past it and keeps everything else", async () => {
     const oldRejected = await pending();
     const recentRejected = await pending();
     const oldPending = await pending();
@@ -252,13 +253,30 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     await platformAdmin.storeApplication.update({ where: { id: recentRejected.id }, data: { decidedAt: elevenMonthsAgo } });
     await platformAdmin.storeApplication.update({ where: { id: oldPending.id }, data: { createdAt: thirteenMonthsAgo } });
 
-    const deleted = await deleteExpiredRejectedApplications(now);
+    const deleted = await withAiOnboardingSettings({ rejectedApplicationRetentionMonths: 12 }, () => deleteExpiredRejectedApplications(now));
     expect(deleted).toBeGreaterThanOrEqual(1);
     const ids = (await platformAdmin.storeApplication.findMany({
       where: { id: { in: [oldRejected.id, recentRejected.id, oldPending.id] } },
       select: { id: true },
     })).map((r) => r.id);
     expect(ids.sort()).toEqual([recentRejected.id, oldPending.id].sort());
+  });
+
+  it("reads the retention from the AI and onboarding settings when the job runs (#561)", async () => {
+    const fourMonths = await pending();
+    const twoMonths = await pending();
+    await rejectStoreApplication(fourMonths.id, "Old", actor);
+    await rejectStoreApplication(twoMonths.id, "Recent", actor);
+    const now = new Date(Date.UTC(2030, 5, 15));
+    await platformAdmin.storeApplication.update({ where: { id: fourMonths.id }, data: { decidedAt: new Date(Date.UTC(2030, 1, 15)) } });
+    await platformAdmin.storeApplication.update({ where: { id: twoMonths.id }, data: { decidedAt: new Date(Date.UTC(2030, 3, 15)) } });
+
+    await withAiOnboardingSettings({ rejectedApplicationRetentionMonths: 3 }, () => deleteExpiredRejectedApplications(now));
+    const ids = (await platformAdmin.storeApplication.findMany({
+      where: { id: { in: [fourMonths.id, twoMonths.id] } },
+      select: { id: true },
+    })).map((r) => r.id);
+    expect(ids).toEqual([twoMonths.id]);
   });
 
   it("lists pending applications apart from decided ones", async () => {

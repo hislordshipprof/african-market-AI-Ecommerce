@@ -16,15 +16,19 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { auth } from "../auth";
 import { platformAdminTransaction, storeScoped } from "../db";
 import { isRlsRejection } from "../listing/cross-store-write";
-import { TURN_COST_FLAG_MICROS } from "./ai-review";
 import { listConversationSample, readTranscript } from "./ai-oversight";
 import { labelConversationAction } from "./ai-oversight-actions";
+import { withAiOnboardingSettings } from "./platform-settings-test-lock";
 
 const hasDb = !!process.env.DATABASE_URL;
 const suffix = randomUUID().slice(0, 8);
 const DAY = "2001-02-03";
 const IN_DAY = new Date("2001-02-03T12:00:00.000Z");
 const LAST_MS = new Date("2001-02-03T23:59:59.999Z");
+/** Over any cost threshold another test file sets (1 to 20 cents, see platform-settings-test-lock). */
+const ALWAYS_COSTLY = 1_000_000;
+/** 3 cents: over the 2-cent default, under 20 cents. */
+const MIDDLING = 30_000;
 const NEXT_DAY = new Date("2001-02-04T00:00:00.000Z");
 const DAY_BEFORE = new Date("2001-02-02T10:00:00.000Z");
 
@@ -47,6 +51,8 @@ describe.skipIf(!hasDb)("AI oversight", () => {
   let plainShopper = "";
   let costlyCopilot = "";
   let shopperB = "";
+  let middlingShopper = "";
+  let middlingCopilot = "";
 
   async function shopper(storeId: string, lastMessageAt: Date, messages: unknown[] = [{ id: "u", role: "user", parts: [{ type: "text", text: "hi" }] }]) {
     const cart = await storeScoped(storeId).cart.create({ data: { storeId } });
@@ -89,13 +95,16 @@ describe.skipIf(!hasDb)("AI oversight", () => {
     await action(storeA, flaggedShopper, "grounding_strip", true, {});
     await action(storeA, flaggedShopper, "add_to_cart", true, { ok: true, items: [{ ok: false, code: "variant_not_found" }] });
     await action(storeA, flaggedShopper, "forward_to_store", true, { ok: true });
-    await action(storeA, flaggedShopper, "turn_cost", true, { costMicros: TURN_COST_FLAG_MICROS + 1 });
+    await action(storeA, flaggedShopper, "turn_cost", true, { costMicros: ALWAYS_COSTLY });
+    middlingShopper = await shopper(storeA, IN_DAY);
+    await action(storeA, middlingShopper, "turn_cost", true, { costMicros: MIDDLING });
     // Outside the day: neither sampled nor flagged.
     const before = await shopper(storeA, DAY_BEFORE);
     await action(storeA, before, "grounding_strip", true, {}, DAY_BEFORE);
 
     for (let i = 0; i < 5; i += 1) await copilot(storeA, IN_DAY);
-    costlyCopilot = await copilot(storeA, IN_DAY, TURN_COST_FLAG_MICROS + 1);
+    costlyCopilot = await copilot(storeA, IN_DAY, ALWAYS_COSTLY);
+    middlingCopilot = await copilot(storeA, IN_DAY, MIDDLING);
 
     shopperB = await shopper(storeB, LAST_MS);
     await shopper(storeB, NEXT_DAY);
@@ -119,9 +128,9 @@ describe.skipIf(!hasDb)("AI oversight", () => {
     await raw.$disconnect();
   });
 
-  it("samples at most 5 shopper and 5 copilot chats per store for the UTC day, plus every auto-flagged one", async () => {
+  it("samples at most 5 shopper and 5 copilot chats per store for the UTC day by default, plus every auto-flagged one", async () => {
     signInAs(admin, "platform_admin");
-    const sample = await listConversationSample({ day: DAY, storeId: storeA });
+    const sample = await withAiOnboardingSettings({ aiDailySamplePerStore: 5, aiTurnCostFlagCents: 2 }, () => listConversationSample({ day: DAY, storeId: storeA }));
 
     const sampledShopper = sample.shopper.filter((row) => row.sampled);
     expect(sampledShopper).toHaveLength(5);
@@ -136,6 +145,32 @@ describe.skipIf(!hasDb)("AI oversight", () => {
 
     const again = await listConversationSample({ day: DAY, storeId: storeA });
     expect(again.shopper.map((row) => row.id)).toEqual(sample.shopper.map((row) => row.id));
+  });
+
+  it("AC3 (#561): the daily sample size and the cost threshold are the platform settings, read on every list and view", async () => {
+    signInAs(admin, "platform_admin");
+    const reasonsOf = (rows: Array<{ id: string; reasons: string[] }>, id: string) => rows.find((row) => row.id === id)?.reasons ?? [];
+    const turnCostReasons = async () => (await readTranscript({ kind: "shopper", id: middlingShopper }))?.actions.find((row) => row.tool === "turn_cost")?.reasons;
+
+    await withAiOnboardingSettings({ aiDailySamplePerStore: 2, aiTurnCostFlagCents: 20 }, async () => {
+      const sample = await listConversationSample({ day: DAY, storeId: storeA });
+      expect(sample.samplePerStore).toBe(2);
+      expect(sample.shopper.filter((row) => row.sampled)).toHaveLength(2);
+      expect(sample.copilot.filter((row) => row.sampled)).toHaveLength(2);
+      expect(reasonsOf(sample.shopper, middlingShopper)).toEqual([]);
+      expect(reasonsOf(sample.copilot, middlingCopilot)).toEqual([]);
+      expect(reasonsOf(sample.copilot, costlyCopilot)).toEqual(["costly_turn"]);
+      expect(await turnCostReasons()).toEqual([]);
+    });
+
+    await withAiOnboardingSettings({ aiDailySamplePerStore: 0, aiTurnCostFlagCents: 2 }, async () => {
+      const sample = await listConversationSample({ day: DAY, storeId: storeA });
+      expect(sample.shopper.some((row) => row.sampled)).toBe(false);
+      expect(sample.shopper.every((row) => row.reasons.length > 0)).toBe(true);
+      expect(reasonsOf(sample.shopper, middlingShopper)).toEqual(["costly_turn"]);
+      expect(sample.copilot.map((row) => row.id).sort()).toEqual([costlyCopilot, middlingCopilot].sort());
+      expect(await turnCostReasons()).toEqual(["costly_turn"]);
+    });
   });
 
   it("counts the last millisecond as the day, not the next midnight, and keeps each store's rows apart", async () => {
