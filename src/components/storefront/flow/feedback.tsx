@@ -1,12 +1,20 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   AnimatePresence,
+  LazyMotion,
+  MotionConfig,
+  domAnimation,
   m,
   useReducedMotion,
   type HTMLMotionProps,
 } from "motion/react";
 import { Check, LockKeyhole, X } from "lucide-react";
+
+/** The storefront shell no longer provides motion (#563), so these flow pieces bring their own. */
+function MotionScope({ children }: { children: ReactNode }) {
+  return <LazyMotion features={domAnimation}><MotionConfig reducedMotion="user">{children}</MotionConfig></LazyMotion>;
+}
 
 export function FlowToast({
   message,
@@ -22,7 +30,7 @@ export function FlowToast({
     return () => clearTimeout(timer);
   }, [message, onClose]);
   return (
-    <AnimatePresence>
+    <MotionScope><AnimatePresence>
       {message && (
         <m.div
           className="flow-toast"
@@ -39,7 +47,7 @@ export function FlowToast({
           </button>
         </m.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence></MotionScope>
   );
 }
 export function PayButton({
@@ -53,7 +61,7 @@ export function PayButton({
 } & HTMLMotionProps<"button">) {
   const reduced = useReducedMotion();
   return (
-    <m.button
+    <MotionScope><m.button
       {...props}
       className="sf-button flow-pay"
       disabled={disabled || state !== "idle"}
@@ -78,14 +86,14 @@ export function PayButton({
             ? "Demo order placed"
             : label}
       </span>
-    </m.button>
+    </m.button></MotionScope>
   );
 }
 
 export function SuccessMark() {
   const reduced = useReducedMotion();
   return (
-    <m.span
+    <MotionScope><m.span
       className="flow-success-mark"
       initial={reduced ? false : { scale: 0.6 }}
       animate={{ scale: 1 }}
@@ -96,6 +104,6 @@ export function SuccessMark() {
       }
     >
       <Check size={30} aria-hidden />
-    </m.span>
+    </m.span></MotionScope>
   );
 }
