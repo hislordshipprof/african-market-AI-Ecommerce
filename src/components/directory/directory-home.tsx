@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, MapPin, ReceiptText, Store } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { BODIJA_MARKET, POSTER_MID_MEDIA, POSTER_WIDE_MEDIA } from "@/components/story-surface/scenes";
 import { cuisineChips } from "@/lib/directory/cuisine-filter";
 import { directoryCounts, ownerQuotes, type OwnerQuote } from "@/lib/directory/home-story";
@@ -74,9 +74,9 @@ function Counts({ markets, cities, states }: { markets: number; cities: number; 
 }
 
 const STEPS = [
-  { icon: MapPin, title: "Find your market", body: "Search by ZIP code or city, or browse by where home is." },
-  { icon: Store, title: "Shop on its own site", body: "Each market has its own shop, shelves and prices. Your cart stays with that market." },
-  { icon: ReceiptText, title: "Pay that market directly", body: "The market is the seller, so its name is on your card statement. It packs your order for pickup or delivery." },
+  { title: "Find your market", body: "Search by ZIP code or city, or browse by where home is." },
+  { title: "Shop on its own site", body: "Each market has its own shop, shelves and prices. Your cart stays with that market." },
+  { title: "Pay that market directly", body: "The market is the seller, so its name is on your card statement. It packs your order for pickup or delivery." },
 ];
 
 function HowItWorks() {
@@ -85,12 +85,9 @@ function HowItWorks() {
       <div className={styles.section}>
         <h2 id="how-title" className={styles.sectionTitle}>How it works</h2>
         <ol className={styles.steps}>
-          {STEPS.map(({ icon: Icon, title, body }, index) => (
-            <li key={title} className={styles.step}>
-              <span className={styles.stepMark} aria-hidden="true">
-                <Icon size={20} strokeWidth={1.75} />
-                <span className={styles.stepNumber}>{index + 1}</span>
-              </span>
+          {STEPS.map(({ title, body }, index) => (
+            <li key={title}>
+              <span className={styles.stepNumber} aria-hidden="true">{index + 1}</span>
               <h3 className={styles.stepTitle}>{title}</h3>
               <p className={styles.stepBody}>{body}</p>
             </li>

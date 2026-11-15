@@ -915,7 +915,8 @@ a.wordmark:focus-visible,
   position: absolute;
   bottom: 16px;
   left: max(20px, calc((100% - 1080px) / 2));
-  right: 20px;
+  /* Sized to its text, so it stays over the dark left of the scrim on wide screens. */
+  max-width: min(600px, calc(100% - 40px));
   margin: 0;
   font-size: 13px;
   line-height: 1.3;
@@ -984,25 +985,14 @@ a.wordmark:focus-visible,
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 }
 
-.stepMark {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  color: var(--d-primary);
-}
-
-.stepMark svg {
-  box-sizing: content-box;
-  padding: 10px;
-  border-radius: 999px;
-  background: var(--d-soft);
-}
-
 .stepNumber {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--d-muted);
+  display: block;
+  margin-bottom: 10px;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--d-primary);
   font-variant-numeric: tabular-nums;
 }
 
