@@ -404,6 +404,7 @@ describe("shopper assistant eval gate", () => {
       addsFromTurn: 3,
       excluded: ["onion-paste"],
       dish: {
+        name: "Jollof",
         core: [{ label: "rice", options: ["rice"] }, { label: "tomato paste", options: ["paste-a", "paste-b"] }],
         askServings: true,
       },
