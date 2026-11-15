@@ -435,6 +435,7 @@ export type ScanState = { ok?: boolean; message?: string };
 /** The page's "Find duplicates" button. */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- a form action takes these
 export async function runDuplicateScan(_prev: ScanState, _form: FormData): Promise<ScanState> {
+  await requirePlatformAdmin();
   const result = await scanCatalogDuplicates();
   const found = `${result.found} possible ${result.found === 1 ? "duplicate" : "duplicates"} found.`;
   if (result.resting) return { ok: true, message: `${found} The AI spend limit is reached for today, so ${result.unjudged} ${result.unjudged === 1 ? "pair is" : "pairs are"} not judged yet.` };
