@@ -765,7 +765,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 });
 
 test.describe("Admin shell (authenticated)", () => {
-  const MENU = ["Home", "Stores", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Courier settings", "AI and onboarding"];
+  const MENU = ["Home", "Stores", "Applications", "Store requests", "Products", "Catalog review", "Refunds", "Orders to check", "Courier incidents", "Messages", "AI conversations", "AI eval and spend", "Fee ledger", "Courier settings", "AI and onboarding"];
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -786,6 +786,7 @@ test.describe("Admin shell (authenticated)", () => {
       ["/admin/support", "Messages"],
       ["/admin/ai/conversations", "AI conversations"],
       ["/admin/ai/eval-spend", "AI eval and spend"],
+      ["/admin/billing/ledger", "Fee ledger"],
       ["/admin/settings/couriers", "Courier settings"],
       ["/admin/settings/ai-onboarding", "AI and onboarding"],
     ];
