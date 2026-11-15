@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidateStore } from "../get-store";
-import { platformAdmin, platformAdminTransaction, lockStoreAddress } from "../db";
+import { platformAdmin, platformAdminTransaction, lockStoreAddress, readStorePlanRows } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { addressStamp, coordinatesForStore, insertStore } from "./store-create";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
@@ -12,7 +12,8 @@ import { z } from "zod";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
-import { setPilot } from "../billing/service";
+import { setPilot, setPlanOverride } from "../billing/service";
+import { effectivePlan } from "../billing/plan";
 import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
 import { queueStoreRequestNotices } from "../directory/store-requests";
 import { redirect } from "next/navigation";
@@ -623,17 +624,55 @@ function inDirectory(store: { listed: boolean; status: string }): boolean {
   return store.listed && store.status === "active";
 }
 
+/** Every store with the plan it runs on, a running override included. */
 export async function listStores() {
   await requirePlatformAdmin();
-  return platformAdmin.store.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { subscription: { select: { plan: true, status: true, pilot: true, paymentFailedAt: true, trialEndsAt: true } } },
+  return platformAdminTransaction(async (tx) => {
+    const stores = await tx.store.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { subscription: { select: { status: true, pilot: true, paymentFailedAt: true } } },
+    });
+    const plans = new Map((await readStorePlanRows(tx, stores.map((s) => s.id))).map((row) => [row.storeId, row]));
+    return stores.map((store) => ({ ...store, plan: effectivePlan(plans.get(store.id)) }));
   });
 }
 
+/** The billing row, with the override only while it runs (database clock). */
 export async function getStoreSubscription(storeId: string) {
   await requirePlatformAdmin();
-  return platformAdmin.storeSubscription.findUnique({ where: { storeId } });
+  return platformAdminTransaction(async (tx) => {
+    const row = await tx.storeSubscription.findUnique({ where: { storeId } });
+    const [planRow] = await readStorePlanRows(tx, [storeId]);
+    if (!row) return null;
+    return {
+      ...row,
+      plan: effectivePlan(planRow),
+      stripePlan: row.plan,
+      overridePlan: planRow?.overridePlan ?? null,
+      overrideEndsAt: planRow?.overrideEndsAt ?? null,
+      overrideReason: planRow?.overridePlan ? row.overrideReason : null,
+    };
+  });
+}
+
+/** Platform admin sets a time-boxed plan override with a reason (#547). Never touches Stripe. */
+export async function setPlanOverrideAction(formData: FormData): Promise<void> {
+  const session = await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({
+    storeId: z.string().min(1).max(200),
+    plan: z.enum(["starter", "pro"]),
+    endsOn: z.iso.date(),
+    reason: z.string().max(500),
+  }), readFormFields(formData, ["storeId", "plan", "endsOn", "reason"]));
+  if (!fields.ok) redirect("/admin/stores");
+  const { storeId, plan, endsOn, reason } = fields.data;
+  const result = await setPlanOverride(
+    { storeId, plan, endsAt: new Date(`${endsOn}T00:00:00Z`), reason },
+    { id: session.user.id, email: session.user.email },
+  );
+  revalidatePath(`/admin/stores/${storeId}`);
+  revalidatePath("/admin/billing/subscriptions");
+  redirect(`/admin/stores/${encodeURIComponent(storeId)}${result.ok ? "?override=saved" : `?overrideError=${encodeURIComponent(result.error)}`}`);
 }
 
 /** Platform admin grants or removes the pilot offer (3 free months, at most 5 stores). */

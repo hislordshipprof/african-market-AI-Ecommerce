@@ -96,6 +96,7 @@ describe("storeChatUsage", () => {
     chats,
     subscriptionPlan: sub?.plan ?? null,
     subscriptionStatus: sub?.status ?? null,
+    overridePlan: null,
   });
 
   it("measures each store against its own plan cap and marks stores at 80% or more", () => {

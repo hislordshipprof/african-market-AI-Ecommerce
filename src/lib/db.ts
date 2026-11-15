@@ -2283,14 +2283,90 @@ export async function incrementAssistantChatMonth(
   return rows[0]?.chats ?? null;
 }
 
-export type AssistantChatMonthRow = { storeId: string; storeName: string; chats: number; subscriptionPlan: string | null; subscriptionStatus: string | null };
+export type StorePlanRow = { storeId: string; plan: string; status: string; overridePlan: string | null; overrideEndsAt: Date | null };
+
+/**
+ * The plan gate's input (#547). The override comes back only while it runs, judged by the database
+ * clock, so every gate agrees on the moment it ends. Rows the caller's RLS context hides are skipped.
+ */
+export async function readStorePlanRows(tx: Pick<PrismaClient, "$queryRaw">, storeIds: string[]): Promise<StorePlanRow[]> {
+  if (storeIds.length === 0) return [];
+  return tx.$queryRaw<StorePlanRow[]>`
+    SELECT store_id AS "storeId", plan, status,
+           CASE WHEN override_ends_at > now() THEN override_plan END AS "overridePlan",
+           CASE WHEN override_ends_at > now() THEN override_ends_at END AS "overrideEndsAt"
+    FROM store_subscriptions
+    WHERE store_id = ANY(${storeIds})
+  `;
+}
+
+/** Where a plan override's end falls against the database clock: after now, and within the cap. */
+export async function overrideEndWindow(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  endsAt: Date,
+  maxDays: number,
+): Promise<{ future: boolean; withinMax: boolean }> {
+  const [row] = await tx.$queryRaw<{ future: boolean; withinMax: boolean }[]>`
+    SELECT ${endsAt}::timestamptz > now() AS future,
+           ${endsAt}::timestamptz <= now() + make_interval(days => ${maxDays}) AS "withinMax"`;
+  return row!;
+}
+
+export type SubscriptionOverviewRow = {
+  storeId: string;
+  storeName: string;
+  storeSlug: string;
+  plan: string;
+  status: string;
+  pilot: boolean;
+  trialEndsAt: Date | null;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  paymentFailedAt: Date | null;
+  overridePlan: string | null;
+  overrideEndsAt: Date | null;
+  overrideReason: string | null;
+  /** The pilot's or a trial's free months are still running, by the database clock. */
+  inFreeMonths: boolean;
+};
+
+/** Every store with its billing row, for the platform admin's subscriptions overview (#547). A store that never subscribed shows "none". */
+export async function listSubscriptionOverviewRows(): Promise<SubscriptionOverviewRow[]> {
+  return platformAdminTransaction((tx) =>
+    tx.$queryRaw<SubscriptionOverviewRow[]>`
+      SELECT s.id AS "storeId", s.name AS "storeName", s.slug AS "storeSlug",
+             COALESCE(sub.plan, 'starter') AS plan, COALESCE(sub.status, 'none') AS status,
+             COALESCE(sub.pilot, false) AS pilot,
+             sub.trial_ends_at AS "trialEndsAt", sub.current_period_end AS "currentPeriodEnd",
+             COALESCE(sub.cancel_at_period_end, false) AS "cancelAtPeriodEnd",
+             sub.payment_failed_at AS "paymentFailedAt",
+             CASE WHEN sub.override_ends_at > now() THEN sub.override_plan END AS "overridePlan",
+             CASE WHEN sub.override_ends_at > now() THEN sub.override_ends_at END AS "overrideEndsAt",
+             CASE WHEN sub.override_ends_at > now() THEN sub.override_reason END AS "overrideReason",
+             COALESCE(sub.trial_ends_at > now(), false) AS "inFreeMonths"
+      FROM stores s
+      LEFT JOIN store_subscriptions sub ON sub.store_id = s.id
+      ORDER BY s.name, s.id
+    `,
+  );
+}
+
+export type AssistantChatMonthRow = {
+  storeId: string;
+  storeName: string;
+  chats: number;
+  subscriptionPlan: string | null;
+  subscriptionStatus: string | null;
+  overridePlan: string | null;
+};
 
 /** Every store with chats in the month, with its subscription, for the platform admin (#545). */
 export async function listAssistantChatMonthRows(month: string): Promise<AssistantChatMonthRow[]> {
   return platformAdminTransaction((tx) =>
     tx.$queryRaw<AssistantChatMonthRow[]>`
       SELECT m.store_id AS "storeId", s.name AS "storeName", m.chats,
-             sub.plan AS "subscriptionPlan", sub.status AS "subscriptionStatus"
+             sub.plan AS "subscriptionPlan", sub.status AS "subscriptionStatus",
+             CASE WHEN sub.override_ends_at > now() THEN sub.override_plan END AS "overridePlan"
       FROM assistant_chat_months m
       JOIN stores s ON s.id = m.store_id
       LEFT JOIN store_subscriptions sub ON sub.store_id = m.store_id

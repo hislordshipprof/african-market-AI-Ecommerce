@@ -11,6 +11,7 @@ describe("currentNavHref", () => {
     expect(currentNavHref("/admin/catalog/review")).toBe("/admin/catalog/review");
     expect(currentNavHref("/admin/ai/conversations/shopper/abc123")).toBe("/admin/ai/conversations");
     expect(currentNavHref("/admin/ai/eval-spend")).toBe("/admin/ai/eval-spend");
+    expect(currentNavHref("/admin/billing/subscriptions")).toBe("/admin/billing/subscriptions");
     expect(currentNavHref("/admin/settings/couriers")).toBe("/admin/settings/couriers");
     expect(currentNavHref("/admin/settings/ai-onboarding")).toBe("/admin/settings/ai-onboarding");
     expect(currentNavHref("/admin/settings")).toBe("/admin");

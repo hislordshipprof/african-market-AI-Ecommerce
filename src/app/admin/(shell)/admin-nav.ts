@@ -2,6 +2,7 @@ import {
   BellRing,
   Bot,
   ClipboardCheck,
+  CreditCard,
   FileInput,
   Gauge,
   House,
@@ -19,6 +20,7 @@ import {
 export const ADMIN_NAV = [
   { href: "/admin", label: "Home", icon: House },
   { href: "/admin/stores", label: "Stores", icon: Store },
+  { href: "/admin/billing/subscriptions", label: "Subscriptions", icon: CreditCard },
   { href: "/admin/applications", label: "Applications", icon: FileInput },
   { href: "/admin/store-requests", label: "Store requests", icon: BellRing },
   { href: "/admin/catalog/products", label: "Products", icon: Package },

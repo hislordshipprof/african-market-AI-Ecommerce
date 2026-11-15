@@ -28,6 +28,9 @@ async function setBilling(row: { plan: string; status: string; paymentFailed: bo
       stripeSubscriptionId: subscribed ? "sub_e2e_494" : null,
       stripeCustomerId: subscribed ? "cus_e2e_494" : null,
       currentPeriodEnd: subscribed ? new Date(Date.now() + 20 * 86_400_000) : null,
+      overridePlan: null,
+      overrideEndsAt: null,
+      overrideReason: null,
     };
     await prisma.$transaction([
       prisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -143,5 +146,44 @@ test.describe("store subscriptions (#494)", () => {
     await page.getByRole("button", { name: "Make a pilot store (3 months free)" }).click();
     await expect(page.getByText("This store is a pilot store.")).toBeVisible();
     await shoot(page, "494-admin-store-pilot");
+  });
+
+  test("admin sets a Pro override; the overview, the plan gate and the owner's plan page follow it (#547)", async ({ page, browser }) => {
+    await setBilling({ plan: "starter", status: "active", paymentFailed: false });
+    await page.goto("/admin/sign-in");
+    await page.getByLabel("Email").fill("admin@platform.test");
+    await page.getByLabel("Password").fill(process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!");
+    await page.click("button[type='submit']");
+    await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
+    await page.getByLabel("Verification code").fill(generateTOTP(process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP"));
+    await page.click("button[type='submit']");
+    await page.waitForURL("**/admin", { timeout: 15000 });
+
+    await page.goto("/admin/billing/subscriptions?plan=pro");
+    await expect(page.getByTestId(`subscription-${SLUG}`)).toHaveCount(0);
+    await page.goto("/admin/billing/subscriptions?status=active");
+    await page.getByTestId(`subscription-${SLUG}`).getByRole("link").click();
+
+    const endsOn = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10);
+    await page.getByLabel("Plan", { exact: true }).selectOption("pro");
+    await page.getByLabel("Ends on (UTC)").fill(endsOn);
+    await page.getByLabel("Reason").fill("Launch partner");
+    await page.getByRole("button", { name: "Set override" }).click();
+    await expect(page.getByText("Override saved.")).toBeVisible();
+    await expect(page.getByTestId("override-state")).toContainText("Pro until");
+
+    await page.goto("/admin/billing/subscriptions?plan=pro");
+    const row = page.getByTestId(`subscription-${SLUG}`);
+    await expect(row).toContainText("Pro");
+    await expect(row).toContainText("Override until");
+    await shoot(page, "547-admin-subscriptions");
+
+    const owner = await browser.newPage();
+    await storeOwnerSignIn(owner);
+    await owner.goto(`/store-admin/plan?store=${SLUG}`);
+    await expect(owner.getByRole("heading", { name: "Pro plan" })).toBeVisible();
+    await expect(owner.getByTestId("plan-override")).toContainText("Pro, courtesy of the platform team until");
+    await shoot(owner, "547-plan-override");
+    await owner.close();
   });
 });
