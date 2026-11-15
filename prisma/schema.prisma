@@ -971,6 +971,8 @@ model Cart {
   courierProvider       String?   @map("courier_provider")
   courierQuoteKey       String?   @map("courier_quote_key")
   courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
+  /// The one store coupon code the shopper entered (#557), upper-case. Checked on every quote and at placement.
+  couponCode            String?   @map("coupon_code")
   source                String    @default("manual")
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
@@ -1304,6 +1306,8 @@ model Order {
   couponId                String?   @map("coupon_id")
   /// Goods discount from the coupon, in cents; #557 writes it.
   discountCents           Int       @default(0) @map("discount_cents")
+  /// Who the coupon use counts against: "user:<id>" for an account, otherwise "email:<lower-case email>" (#557).
+  couponCustomerKey       String?   @map("coupon_customer_key")
   /// The store's own driver route this order is on (#566).
   driverRouteId           String?   @map("driver_route_id")
   /// The open pick batch this order is in (#564); cleared when staff leave the batch.
@@ -1332,6 +1336,7 @@ model Order {
   @@unique([id, storeId])
   @@unique([storeId, number])
   @@index([storeId, couponId])
+  @@index([storeId, couponId, couponCustomerKey])
   @@index([storeId, driverRouteId])
   @@index([storeId, pickBatchId])
   @@index([storeId])
@@ -1534,6 +1539,14 @@ model PlatformSettings {
   courierAssignmentTimeoutS Int @default(600) @map("courier_assignment_timeout_s")
   doordashEnabled      Boolean  @default(true) @map("doordash_enabled")
   uberEnabled          Boolean  @default(true) @map("uber_enabled")
+  /// AI and onboarding settings (#561). Active listings with a price a store needs before Go live (#555), 1 to 200.
+  goLiveListingFloor   Int      @default(20) @map("go_live_listing_floor")
+  /// Random shopper and copilot chats per store per day in the AI review list (#544), 0 to 20.
+  aiDailySamplePerStore Int     @default(5) @map("ai_daily_sample_per_store")
+  /// An AI turn costing more than this many cents is auto-flagged for review (#544), 1 to 100.
+  aiTurnCostFlagCents  Int      @default(2) @map("ai_turn_cost_flag_cents")
+  /// Months a rejected store application is kept before the retention job deletes it (#554), 1 to 24.
+  rejectedApplicationRetentionMonths Int @default(12) @map("rejected_application_retention_months")
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")
@@ -1596,6 +1609,8 @@ model OrderLine {
   /// The variant the customer's answer or swap rule put in for the units found short (#13).
   substitutedVariantId      String?  @map("substituted_variant_id")
   substitutedUnitPriceCents Int?     @map("substituted_unit_price_cents")
+  /// This line's share of the order's coupon discount, written at capture (#557); an issue refund deducts it.
+  discountCents             Int      @default(0) @map("discount_cents")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @default(now()) @updatedAt @map("updated_at")
 

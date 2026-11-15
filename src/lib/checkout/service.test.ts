@@ -262,6 +262,56 @@ describe("computeQuote", () => {
     expect(q.holdCents).toBe(6780);
   });
 
+  describe("store coupon (#557)", () => {
+    const SAVE20 = { code: "SAVE20", coupon: { id: "c1", kind: "percent" as const, percentOff: 20, amountOffCents: null, minGoodsCents: 2500 } };
+    const FIVE_OFF = { code: "FIVEOFF", coupon: { id: "c2", kind: "fixed" as const, percentOff: null, amountOffCents: 500, minGoodsCents: 0 } };
+    const STORE_DELIVERY = { enabled: true, feeCents: 500, radiusMi: 5, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor: false };
+
+    it("takes the discount off goods, charges the service fee on discounted goods, and holds the discounted total plus the buffer", () => {
+      // $50.00 goods, 20% off = $10.00. Fee 3% of $40.00 = $1.20. Delivery $5.00 is never discounted.
+      // Total 4000 + 120 + 500 = 4620; buffer 10% of $40.00 = 400; hold 5020.
+      const q = computeQuote(0, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "store-delivery", ADR_0021_SERVICE_FEE, STORE_DELIVERY, null, SAVE20);
+      expect(q.problems).toEqual([]);
+      expect(q.subtotalCents).toBe(5000);
+      expect(q.discountCents).toBe(1000);
+      expect(q.serviceFeeCents).toBe(120);
+      expect(q.deliveryFeeCents).toBe(500);
+      expect(q.totalCents).toBe(4620);
+      expect(q.bufferCents).toBe(400);
+      expect(q.holdCents).toBe(5020);
+      expect(q.coupon).toEqual({ code: "SAVE20", discountCents: 1000 });
+    });
+
+    it("caps a fixed discount at the goods, so fees are never discounted", () => {
+      // $3.20 goods, $5 off → $3.20 off; the fee on $0 goods is 0; the $5 delivery stays.
+      const q = computeQuote(0, [{ price: 320, qty: 1, maxPerOrder: null }], validContact, "store-delivery", ADR_0021_SERVICE_FEE, STORE_DELIVERY, null, FIVE_OFF);
+      expect(q.discountCents).toBe(320);
+      expect(q.serviceFeeCents).toBe(0);
+      expect(q.totalCents).toBe(500);
+      expect(q.holdCents).toBe(500);
+    });
+
+    it("gives no discount below the code's minimum and says how much more to add, without blocking checkout", () => {
+      const q = computeQuote(0, [{ price: 2000, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, SAVE20);
+      expect(q.discountCents).toBe(0);
+      expect(q.serviceFeeCents).toBe(99);
+      expect(q.totalCents).toBe(2099);
+      expect(q.problems).toEqual([]);
+      expect(q.coupon).toEqual({ code: "SAVE20", discountCents: 0, message: "Add $5.00 more to use SAVE20." });
+    });
+
+    it("checks the store minimum order on goods before the discount", () => {
+      const q = computeQuote(5000, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, SAVE20);
+      expect(q.problems.some((p) => p.code === "minimum-order")).toBe(false);
+    });
+
+    it("passes a refused code through with no discount", () => {
+      const q = computeQuote(0, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, { code: "SAVE20", refusal: "This code has reached its limit." });
+      expect(q.discountCents).toBe(0);
+      expect(q.coupon).toEqual({ code: "SAVE20", discountCents: 0, message: "This code has reached its limit." });
+    });
+  });
+
   it("client-supplied price has no effect on server-derived amount", () => {
     const serverLines = [{ price: 1200, qty: 2, maxPerOrder: null }];
     const q = computeQuote(0, serverLines, validContact, "pickup", NO_SERVICE_FEE);

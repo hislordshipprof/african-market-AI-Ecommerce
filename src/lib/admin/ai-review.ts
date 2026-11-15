@@ -22,9 +22,6 @@ export const FLAG_REASON_TEXT: Record<FlagReason, string> = {
   costly_turn: "Costly turn",
 };
 
-/** A turn above $0.02 is flagged; a Haiku turn usually costs about a tenth of a cent. */
-export const TURN_COST_FLAG_MICROS = 20_000;
-
 /** Codes a tool returns when the model named an id that is not in this store or this cart. */
 const MADE_UP_ID_CODES = new Set(["variant_not_found", "line_not_found", "listing_not_found", "not_shown"]);
 /** Codes a tool returns when the shopper's saved needs refused an item. */
@@ -55,15 +52,18 @@ function outputCodes(output: Record<string, unknown>): string[] {
   return codes;
 }
 
-/** The auto-flag reasons one stored assistant action raises, in FLAG_REASONS order. */
-export function actionFlagReasons(action: ReviewedAction): FlagReason[] {
+/**
+ * The auto-flag reasons one stored assistant action raises, in FLAG_REASONS order. The cost threshold is the platform
+ * setting (#561), read by the caller.
+ */
+export function actionFlagReasons(action: ReviewedAction, costFlagMicros: number): FlagReason[] {
   const output = record(action.output) ?? {};
   const reasons = new Set<FlagReason>();
   if (action.tool === "grounding_strip") reasons.add("amount_removed");
   if (action.tool === "forward_to_store") reasons.add("forwarded");
   if (action.tool === "turn_cost") {
     const cost = output.costMicros;
-    if (typeof cost === "number" && cost > TURN_COST_FLAG_MICROS) reasons.add("costly_turn");
+    if (typeof cost === "number" && cost > costFlagMicros) reasons.add("costly_turn");
   }
   const codes = outputCodes(output);
   if (codes.some((code) => MADE_UP_ID_CODES.has(code)) || nonEmptyArray(output.notFound)) reasons.add("made_up_id");

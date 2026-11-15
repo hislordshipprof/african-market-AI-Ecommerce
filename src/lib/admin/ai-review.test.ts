@@ -1,45 +1,50 @@
 import { describe, expect, it } from "vitest";
-import { actionFlagReasons, copilotTranscript, shopperTranscript, TURN_COST_FLAG_MICROS } from "./ai-review";
+import { actionFlagReasons, copilotTranscript, shopperTranscript } from "./ai-review";
+
+/** The default threshold: 2 cents. */
+const T = 20_000;
 
 describe("actionFlagReasons", () => {
   it("flags an amount the grounder removed", () => {
-    expect(actionFlagReasons({ tool: "grounding_strip", ok: true, output: {} })).toEqual(["amount_removed"]);
+    expect(actionFlagReasons({ tool: "grounding_strip", ok: true, output: {} }, T)).toEqual(["amount_removed"]);
   });
 
   it("flags a made-up id a tool refused, at the top level, in add_to_cart items, or in notFound", () => {
-    expect(actionFlagReasons({ tool: "update_cart", ok: false, output: { ok: false, code: "line_not_found" } })).toEqual(["made_up_id"]);
+    expect(actionFlagReasons({ tool: "update_cart", ok: false, output: { ok: false, code: "line_not_found" } }, T)).toEqual(["made_up_id"]);
     expect(actionFlagReasons({
       tool: "add_to_cart",
       ok: true,
       output: { ok: true, items: [{ ok: true, lineId: "l1" }, { ok: false, code: "variant_not_found" }] },
-    })).toEqual(["made_up_id"]);
-    expect(actionFlagReasons({ tool: "show_products", ok: true, output: { ok: true, cards: [], notFound: ["lst_fake"] } })).toEqual(["made_up_id"]);
-    expect(actionFlagReasons({ tool: "show_products", ok: true, output: { ok: true, cards: [], notFound: [] } })).toEqual([]);
+    }, T)).toEqual(["made_up_id"]);
+    expect(actionFlagReasons({ tool: "show_products", ok: true, output: { ok: true, cards: [], notFound: ["lst_fake"] } }, T)).toEqual(["made_up_id"]);
+    expect(actionFlagReasons({ tool: "show_products", ok: true, output: { ok: true, cards: [], notFound: [] } }, T)).toEqual([]);
   });
 
   it("flags a constraint or cannot-confirm refusal", () => {
-    expect(actionFlagReasons({ tool: "add_to_cart", ok: false, output: { ok: false, code: "cannot_confirm" } })).toEqual(["needs_refusal"]);
+    expect(actionFlagReasons({ tool: "add_to_cart", ok: false, output: { ok: false, code: "cannot_confirm" } }, T)).toEqual(["needs_refusal"]);
     expect(actionFlagReasons({
       tool: "add_to_cart",
       ok: true,
       output: { ok: true, items: [{ ok: false, code: "excluded" }, { ok: false, code: "variant_not_found" }] },
-    })).toEqual(["made_up_id", "needs_refusal"]);
-    expect(actionFlagReasons({ tool: "show_products", ok: true, output: { ok: true, cards: [], notFound: [], excluded: [{ listingId: "x" }] } })).toEqual(["needs_refusal"]);
+    }, T)).toEqual(["made_up_id", "needs_refusal"]);
+    expect(actionFlagReasons({ tool: "show_products", ok: true, output: { ok: true, cards: [], notFound: [], excluded: [{ listingId: "x" }] } }, T)).toEqual(["needs_refusal"]);
   });
 
   it("flags every forward_to_store call", () => {
-    expect(actionFlagReasons({ tool: "forward_to_store", ok: true, output: { ok: true } })).toEqual(["forwarded"]);
+    expect(actionFlagReasons({ tool: "forward_to_store", ok: true, output: { ok: true } }, T)).toEqual(["forwarded"]);
   });
 
-  it("flags a turn over the cost threshold only", () => {
-    expect(actionFlagReasons({ tool: "turn_cost", ok: true, output: { costMicros: TURN_COST_FLAG_MICROS + 1 } })).toEqual(["costly_turn"]);
-    expect(actionFlagReasons({ tool: "turn_cost", ok: true, output: { costMicros: TURN_COST_FLAG_MICROS } })).toEqual([]);
+  it("flags a turn over the cost threshold it is given only (#561 platform setting)", () => {
+    expect(actionFlagReasons({ tool: "turn_cost", ok: true, output: { costMicros: 50_001 } }, 50_000)).toEqual(["costly_turn"]);
+    expect(actionFlagReasons({ tool: "turn_cost", ok: true, output: { costMicros: 50_000 } }, 50_000)).toEqual([]);
+    expect(actionFlagReasons({ tool: "turn_cost", ok: true, output: { costMicros: 30_000 } }, 50_000)).toEqual([]);
+    expect(actionFlagReasons({ tool: "turn_cost", ok: true, output: { costMicros: 30_000 } }, 10_000)).toEqual(["costly_turn"]);
   });
 
   it("does not flag ordinary refusals or reads", () => {
-    expect(actionFlagReasons({ tool: "add_to_cart", ok: false, output: { ok: false, code: "unavailable" } })).toEqual([]);
-    expect(actionFlagReasons({ tool: "search_catalog", ok: true, output: { ok: true, items: [{ listingId: "a" }] } })).toEqual([]);
-    expect(actionFlagReasons({ tool: "get_order_status", ok: false, output: { ok: false, code: "order_not_found" } })).toEqual([]);
+    expect(actionFlagReasons({ tool: "add_to_cart", ok: false, output: { ok: false, code: "unavailable" } }, T)).toEqual([]);
+    expect(actionFlagReasons({ tool: "search_catalog", ok: true, output: { ok: true, items: [{ listingId: "a" }] } }, T)).toEqual([]);
+    expect(actionFlagReasons({ tool: "get_order_status", ok: false, output: { ok: false, code: "order_not_found" } }, T)).toEqual([]);
   });
 });
 

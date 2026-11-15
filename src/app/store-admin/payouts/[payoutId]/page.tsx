@@ -9,6 +9,7 @@ import { Notice, StripeDashboardButton, arrivalDate, payoutStatus } from "../pay
 
 const COLUMNS: Array<{ key: keyof PayoutOrderRow; label: string; minus?: boolean }> = [
   { key: "goodsCents", label: "Goods" },
+  { key: "discountCents", label: "Promo discount", minus: true },
   { key: "tipCents", label: "Tip" },
   { key: "taxCents", label: "Tax" },
   { key: "cardFeeCents", label: "Card fee", minus: true },
@@ -73,7 +74,7 @@ export default async function PayoutDetailPage({ params }: { params: Promise<{ p
             </div>
 
             <p className="mb-4 max-w-prose text-sm text-muted-foreground">
-              Net to store is goods, tip and tax, less your card fee and refunds. Goods include your own delivery fee.
+              Net to store is goods, tip and tax, less promo discounts your store funds, your card fee and refunds. Goods include your own delivery fee.
               Stripe&apos;s reconciliation report in your Stripe dashboard shows every transaction.
             </p>
 
@@ -112,12 +113,12 @@ export default async function PayoutDetailPage({ params }: { params: Promise<{ p
                   <tfoot>
                     {detail.breakdown.otherCents !== 0 && (
                       <tr className="border-t border-border">
-                        <th scope="row" colSpan={6} className="py-2 pr-3 text-left font-normal text-muted-foreground">Other Stripe activity</th>
+                        <th scope="row" colSpan={7} className="py-2 pr-3 text-left font-normal text-muted-foreground">Other Stripe activity</th>
                         <td className="py-2 pl-3 text-right tabular-nums text-foreground">{money(detail.breakdown.otherCents)}</td>
                       </tr>
                     )}
                     <tr className="border-t-2 border-border">
-                      <th scope="row" colSpan={6} className="py-2 pr-3 text-left font-semibold text-foreground">Payout total</th>
+                      <th scope="row" colSpan={7} className="py-2 pr-3 text-left font-semibold text-foreground">Payout total</th>
                       <td className="py-2 pl-3 text-right font-semibold tabular-nums text-foreground">{money(detail.breakdown.totalCents)}</td>
                     </tr>
                   </tfoot>

@@ -111,7 +111,9 @@ test.describe.serial("Store payouts dashboard (#548)", () => {
     await page.getByRole("link", { name: "CSV" }).click();
     const file = await (await download).path();
     const { readFileSync } = await import("node:fs");
-    expect(readFileSync(file, "utf8")).toContain("#54801,45.50,3.00,0.00,1.71,10.00,36.79");
+    const csv = readFileSync(file, "utf8");
+    expect(csv).toContain("Order,Goods,Promo discount,Tip,Tax,Card fee,Refunds,Net to store");
+    expect(csv).toContain("#54801,45.50,0.00,3.00,0.00,1.71,10.00,36.79");
 
     await page.route("https://connect.stripe.com/**", (route) => route.fulfill({ body: "stripe express" }));
     await page.getByRole("button", { name: "Open Stripe dashboard" }).click();

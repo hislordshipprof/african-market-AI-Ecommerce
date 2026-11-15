@@ -7,6 +7,7 @@ import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
+import { couponTerms } from "../coupon/discount";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
 import { scheduleCourierCancel, scheduleCourierDispatch, scheduleCourierPacking, scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
@@ -301,6 +302,7 @@ const NAMED_VARIANT = {
 
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
+  coupon: { select: { code: true } },
   // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
   deliveries: {
     where: { status: { not: "cancelled" } },
@@ -962,6 +964,11 @@ export async function markTerminalRefundFailure(input: {
   return { ok: true, action: covered ? "covered" : "refund_failed" };
 }
 
+/** Stripe metadata naming the coupon an order used (#557). */
+function couponMetadata(couponId: string | null | undefined): Record<string, string> | undefined {
+  return couponId ? { coupon_id: couponId } : undefined;
+}
+
 /** The application fee for a stored capture amount; the service fee was stored with it. */
 function applicationFeeFor(
   order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number },
@@ -995,6 +1002,7 @@ export async function markReady(
         paymentIntentId: order.paymentIntentId!,
         totalAuthorizedCents: order.totalAuthorizedCents,
         newStatus: fulfilledStatus(order.fulfillment),
+        couponId: order.couponId,
       };
     }
     if (order.status !== "PICKING") {
@@ -1011,7 +1019,10 @@ export async function markReady(
     }
 
     // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
-    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order) });
+    // The coupon's value cannot change once an order used it (#556), so it is read as placed.
+    const couponRow = order.couponId ? await tx.storeCoupon.findUnique({ where: { id: order.couponId } }) : null;
+    const coupon = couponRow ? couponTerms(couponRow) : null;
+    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order), coupon });
     const capturedAmountCents = charge.amountCents;
 
     if (!order.paymentIntentId) {
@@ -1060,8 +1071,13 @@ export async function markReady(
         capturedAmountCents,
         serviceFeeCents: charge.serviceFeeCents,
         platformFeeCents: split.platformFeeCents,
+        discountCents: charge.discountCents,
       },
     });
+    for (const [index, line] of lines.entries()) {
+      const share = charge.lineDiscountsCents[index];
+      if (line.discountCents !== share) await tx.orderLine.update({ where: { id: line.id }, data: { discountCents: share } });
+    }
 
     return {
       ok: true as const,
@@ -1073,6 +1089,7 @@ export async function markReady(
       voidInsteadOfCapture: false,
       orderId: order.id,
       storeId,
+      couponId: order.couponId,
     };
   });
 
@@ -1146,6 +1163,7 @@ export async function markReady(
       validation.capturedAmountCents,
       captureKey(orderId, captureAttempt),
       validation.applicationFeeAmount,
+      couponMetadata(validation.couponId),
     );
   } catch (err) {
     if (isIdempotencyKeyInUse(err)) {
@@ -1511,6 +1529,7 @@ export async function reconcileStuckOrder(
           amount,
           captureKey(orderId, attempt),
           sweepFee > 0 ? sweepFee : undefined,
+          couponMetadata(order.couponId),
         );
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {

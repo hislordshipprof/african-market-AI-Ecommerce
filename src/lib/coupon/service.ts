@@ -14,7 +14,7 @@ export const COUPON_NOT_FOUND = "Coupon not found.";
 export const COUPON_VALUE_LOCKED = "This code has been used, so its type and value cannot change. Deactivate it and create a new one.";
 
 /** Orders in these states gave no discount: the use was released. */
-const RELEASED_STATUSES = ["CANCELLING", "CANCELLED"];
+export const RELEASED_STATUSES = ["CANCELLING", "CANCELLED"];
 
 const AUDITED = ["code", "kind", "percentOff", "amountOffCents", "minGoodsCents", "startsAt", "endsAt", "totalUses", "usesPerCustomer", "firstOrderOnly"] as const;
 
