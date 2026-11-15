@@ -38,7 +38,7 @@ vi.mock("next/navigation", () => ({
 
 import sharp from "sharp";
 import { addProductSynonym, removeProductSynonym, updateProductSynonym } from "./product-synonyms";
-import { createCategory, deleteCategory, listCategoryTree, moveCategory, updateCategory, uploadCategoryImage } from "./catalog-categories";
+import { createCategory, deleteCategory, getCategoryEditor, listCategoryTree, moveCategory, updateCategory, uploadCategoryImage } from "./catalog-categories";
 import { getMasterProductEditor } from "./master-catalog";
 import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
@@ -354,6 +354,18 @@ describe("master catalog synonyms and categories (real sessions, lane DB)", () =
       expect(tree.some((node) => node.id === child.id)).toBe(false);
     });
 
+    it("loads a category's editor with its counts, and offers only top-level parents other than itself", async () => {
+      const seeds = await getCategoryEditor(categoryA);
+      expect(seeds).toMatchObject({ category: { id: categoryA, name: `${RUN} Seeds`, parentId: null }, productCount: 3, childCount: 1 });
+      // It has a subcategory, so it can take no parent at all.
+      expect(seeds?.parents).toEqual([]);
+      const child = (await categoryRow(`${RUN} Melon seeds`))!;
+      const melon = await getCategoryEditor(child.id);
+      expect(melon?.parents.some((p) => p.id === categoryA)).toBe(true);
+      expect(melon?.parents.some((p) => p.id === child.id)).toBe(false);
+      expect(await getCategoryEditor("no-such-category")).toBeNull();
+    });
+
     it("renames and sets the local name with an audit row, keeps the slug, and revalidates only stores selling in it", async () => {
       const state = await updateCategory({}, form({ categoryId: categoryB, name: `${RUN} Nuts and kernels`, localName: "EPA", parentId: "" }));
       expect(state).toMatchObject({ ok: true });
@@ -408,7 +420,9 @@ describe("master catalog synonyms and categories (real sessions, lane DB)", () =
       for (const [name, value] of Object.entries({ R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "key", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "bucket", R2_PUBLIC_URL: "" })) {
         vi.stubEnv(name, value);
       }
-      onTestFinished(() => vi.unstubAllEnvs());
+      onTestFinished(() => {
+        vi.unstubAllEnvs();
+      });
       const png = await sharp({ create: { width: 40, height: 30, channels: 3, background: "#c84" } }).png().toBuffer();
       const state = await uploadCategoryImage({}, form({ categoryId: categoryB, image: new File([new Uint8Array(png)], "x.png", { type: "image/png" }) }));
       expect(state).toMatchObject({ ok: true });
@@ -436,6 +450,7 @@ describe("master catalog synonyms and categories (real sessions, lane DB)", () =
         await expect(deleteCategory({}, form({ categoryId: categoryB }))).rejects.toThrow(/REDIRECT/);
         await expect(uploadCategoryImage({}, form({ categoryId: categoryB, image: new File([new Uint8Array([1])], "x.png") }))).rejects.toThrow(/REDIRECT/);
         await expect(listCategoryTree()).rejects.toThrow(/REDIRECT/);
+        await expect(getCategoryEditor(categoryB)).rejects.toThrow(/REDIRECT/);
       }
       const after = await asPlatformAdmin((tx) => tx.category.findMany({ where: { name: { startsWith: RUN } }, orderBy: { id: "asc" } }));
       expect(after).toEqual(before);

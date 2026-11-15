@@ -47,6 +47,38 @@ export async function listCategoryTree(): Promise<CategoryNode[]> {
   return top;
 }
 
+export type CategoryEditor = {
+  category: { id: string; name: string; slug: string; localName: string | null; imageUrl: string | null; parentId: string | null };
+  productCount: number;
+  childCount: number;
+  /** Categories it may sit under: top-level ones other than itself, and none once it has subcategories. */
+  parents: Array<{ id: string; name: string }>;
+};
+
+/** The category editor's data, or null for an unknown category. */
+export async function getCategoryEditor(categoryId: string): Promise<CategoryEditor | null> {
+  await requirePlatformAdmin();
+  const id = parseInput(idSchema, categoryId);
+  if (!id.ok) return null;
+  return platformAdminTransaction(async (tx) => {
+    const row = await tx.category.findUnique({
+      where: { id: id.data },
+      select: {
+        id: true, name: true, slug: true, localName: true, imageUrl: true, parentId: true,
+        _count: { select: { masterProducts: true, children: true } },
+      },
+    });
+    if (!row) return null;
+    const { _count, ...category } = row;
+    const parents = _count.children > 0 ? [] : await tx.category.findMany({
+      where: { parentId: null, id: { not: category.id } },
+      orderBy: SIBLING_ORDER,
+      select: { id: true, name: true },
+    });
+    return { category, productCount: _count.masterProducts, childCount: _count.children, parents };
+  });
+}
+
 function refused(field: CategoryField, message: string): CategoryState {
   return { ok: false, message: "Check the highlighted fields", fieldErrors: { [field]: message } };
 }
