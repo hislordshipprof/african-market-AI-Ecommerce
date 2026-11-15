@@ -1286,6 +1286,72 @@ export async function storesListingMasterProduct(tx: Pick<PrismaClient, "$queryR
   return rows.map((row) => row.store_id);
 }
 
+/** Stores with a listing, active or not, on a master product in any of these categories. */
+export async function storesListingCategories(tx: Pick<PrismaClient, "$queryRaw">, categoryIds: string[]): Promise<string[]> {
+  if (categoryIds.length === 0) return [];
+  const rows = await tx.$queryRaw<Array<{ store_id: string }>>`
+    SELECT DISTINCT l.store_id FROM listings l
+    JOIN master_products mp ON mp.id = l.master_product_id
+    WHERE mp.category_id = ANY(${categoryIds}::text[])`;
+  return rows.map((row) => row.store_id);
+}
+
+/** Row-lock categories in id order for the rest of the transaction; callers re-read them afterwards. */
+export async function lockCategoryRows(tx: Pick<PrismaClient, "$queryRaw">, categoryIds: string[]) {
+  await tx.$queryRaw`SELECT 1 FROM categories WHERE id = ANY(${categoryIds}::text[]) ORDER BY id FOR UPDATE`;
+}
+
+/**
+ * Other master products a synonym term already names, through a synonym or their own name.
+ * Terms compare whole, case- and accent-folded, as the search's exact match does; never as a pattern.
+ */
+export async function productsNamedByTerm(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  term: string,
+  exceptProductId: string,
+): Promise<string[]> {
+  const rows = await tx.$queryRaw<Array<{ name: string }>>`
+    SELECT DISTINCT mp.name FROM master_products mp
+    WHERE mp.id <> ${exceptProductId}
+      AND (lower(unaccent(mp.name)) = lower(unaccent(${term}))
+        OR EXISTS (SELECT 1 FROM product_synonyms ps WHERE ps.product_id = mp.id AND lower(unaccent(ps.term)) = lower(unaccent(${term}))))
+    ORDER BY mp.name`;
+  return rows.map((row) => row.name);
+}
+
+/** The product's synonyms with the same folded term, other than `exceptSynonymId`. */
+export async function sameProductSynonymIds(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  productId: string,
+  term: string,
+  exceptSynonymId: string | null,
+): Promise<string[]> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM product_synonyms
+    WHERE product_id = ${productId} AND id IS DISTINCT FROM ${exceptSynonymId}
+      AND lower(unaccent(term)) = lower(unaccent(${term}))`;
+  return rows.map((row) => row.id);
+}
+
+/** A product's synonyms, each with the other master products its term also names. */
+export async function productSynonymsWithSharedNames(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  productId: string,
+): Promise<Array<{ id: string; term: string; language: string | null; region: string | null; alsoNames: string[] }>> {
+  const rows = await tx.$queryRaw<Array<{ id: string; term: string; language: string | null; region: string | null; also_names: string[] }>>`
+    SELECT ps.id, ps.term, ps.language, ps.region,
+      COALESCE((
+        SELECT array_agg(DISTINCT mp.name ORDER BY mp.name) FROM master_products mp
+        WHERE mp.id <> ps.product_id
+          AND (lower(unaccent(mp.name)) = lower(unaccent(ps.term))
+            OR EXISTS (SELECT 1 FROM product_synonyms o WHERE o.product_id = mp.id AND lower(unaccent(o.term)) = lower(unaccent(ps.term))))
+      ), ARRAY[]::text[]) AS also_names
+    FROM product_synonyms ps
+    WHERE ps.product_id = ${productId}
+    ORDER BY lower(ps.term), ps.id`;
+  return rows.map(({ also_names, ...row }) => ({ ...row, alsoNames: also_names }));
+}
+
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
