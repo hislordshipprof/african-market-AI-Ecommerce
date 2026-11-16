@@ -1106,17 +1106,15 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 />
               ) : deliveryEditor ? (
                 <>
-                  {deliveryEditor}
-                  {shipping && (
-                    shipRate ? (
-                      <ShipRate rate={shipRate} />
-                    ) : courierReasons.length > 0 && !quotePending ? (
-                      <p className={styles.shipNote} role="status">
-                        <CircleAlert size={18} aria-hidden />
-                        {courierReasons.join(" ")}
-                      </p>
-                    ) : null
+                  {/* Above the form: a basket that cannot ship says so before any typing. */}
+                  {shipping && !shipRate && courierReasons.length > 0 && !quotePending && (
+                    <p className={styles.shipNote} role="status">
+                      <CircleAlert size={18} aria-hidden />
+                      {courierReasons.join(" ")}
+                    </p>
                   )}
+                  {deliveryEditor}
+                  {shipRate && <ShipRate rate={shipRate} />}
                 </>
               ) : (
                 <>
