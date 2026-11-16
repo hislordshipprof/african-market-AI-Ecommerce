@@ -186,12 +186,12 @@ function buildListingFormData(
 }
 
 const PREPARED_LABELS: Record<string, string> = {
-  none: "Not prepared food",
+  none: "Not prepared",
   hot: "Hot, from the counter",
   cold: "Cold, ready to eat",
 };
 
-const HELD_FOR_ALLERGENS = "Saved, off sale. Prepared food goes on sale once you state its allergens under Attributes, then reactivate it.";
+const HELD_FOR_ALLERGENS = "Saved, off sale. State its allergens under Ingredients and allergens, then reactivate it.";
 
 export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const router = useRouter();
@@ -328,7 +328,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
       if ("error" in result && result.error) {
         toast.error(result.error);
       } else {
-        if ("heldForAllergens" in result && result.heldForAllergens) toast.info(HELD_FOR_ALLERGENS);
+        if ("heldForAllergens" in result && result.heldForAllergens) toast.warning(HELD_FOR_ALLERGENS);
         else toast.success("Listing created");
         setCreateOpen(false);
         resetForm();
@@ -354,7 +354,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
         } else if (moved) {
           toast.warning(`Stock changed from ${moved.from} to ${moved.to} while you edited. Your count of ${typedQty} was saved.`);
         } else if ("heldForAllergens" in result && result.heldForAllergens) {
-          toast.info(HELD_FOR_ALLERGENS);
+          toast.warning(HELD_FOR_ALLERGENS);
         } else {
           toast.success("Listing updated");
         }
@@ -539,10 +539,11 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
           )}
         </div>
         {prepared && (
-          <p className="text-xs text-muted-foreground">
-            Sold as the exact item only, with no swaps. Its prep time adds to the order&rsquo;s ready time
-            {prepared === "hot" ? ", and hot food is never left at the door" : ""}. It goes on sale once you state its allergens.
-          </p>
+          <div className="text-xs text-muted-foreground">
+            <p>Exact item only, no swaps. Prep time adds to the order&rsquo;s ready time.</p>
+            {prepared === "hot" && <p>Hot food is handed over, never left at the door.</p>}
+            <p>On sale once you state its allergens under Ingredients and allergens.</p>
+          </div>
         )}
       </div>
 
