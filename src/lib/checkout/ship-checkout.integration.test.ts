@@ -234,7 +234,7 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     expect(Object.fromEntries(rows.map((row) => [row.id, row.shippingHandlingDays]))).toEqual({ [a.store.id]: 5, [b.store.id]: 2 });
   });
 
-  it("AC2: a listing is marked shippable only when not frozen, not perishable and every size has a real weight; a later disqualifying edit stops it shipping", async () => {
+  it("AC2: a listing is marked shippable only when not frozen, not perishable, not prepared food and every size has a real weight; a later disqualifying edit stops it shipping", async () => {
     const { store, listingId, variantId } = await seed({ shippable: false });
     const shippable = async () => (await storeScoped(store.id).listing.findUniqueOrThrow({ where: { id: listingId } })).shippable;
 
@@ -242,11 +242,16 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     await expect(updateListing({ storeId: store.id, listingId, shippable: true, actor })).rejects.toThrow(/real weight/);
     await storeScoped(store.id).listingVariant.update({ where: { id: variantId }, data: { weightPlaceholder: false } });
     await expect(updateListing({ storeId: store.id, listingId, perishable: true, shippable: true, actor })).rejects.toThrow(/Perishable/);
+    await expect(updateListing({ storeId: store.id, listingId, prepared: "cold", prepMinutes: 10, shippable: true, actor })).rejects.toThrow(/Prepared food/);
     expect(await shippable()).toBe(false);
 
     await updateListing({ storeId: store.id, listingId, perishable: false, shippable: true, actor });
     expect(await shippable()).toBe(true);
     await updateListing({ storeId: store.id, listingId, frozen: true, actor });
+    expect(await shippable()).toBe(false);
+
+    await updateListing({ storeId: store.id, listingId, frozen: false, shippable: true, actor });
+    await updateListing({ storeId: store.id, listingId, prepared: "hot", prepMinutes: 10, actor });
     expect(await shippable()).toBe(false);
   });
 });
