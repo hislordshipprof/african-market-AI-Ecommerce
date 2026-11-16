@@ -248,7 +248,7 @@ export function StoreAdminDashboard({
                     <div>
                       <CardTitle className="text-base">Directory listing</CardTitle>
                       <CardDescription>
-                        Show your store to shoppers nearby
+                        Show your store to shoppers nearby and to AI assistants
                       </CardDescription>
                       <p className="mt-1 text-sm font-medium text-foreground">
                         {directoryOrders === 1 ? "1 order" : `${directoryOrders.toLocaleString("en-US")} orders`} from the directory
