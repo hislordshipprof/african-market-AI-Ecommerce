@@ -32,6 +32,9 @@ const listingFormSchema = z.strictObject({
   shippable: z.string().max(10).nullable(),
   prepared: z.string().max(10).nullable(),
   prepMinutes: z.string().max(20).nullable(),
+  cateringLead: z.string().max(20).nullable(),
+  cateringLeadUnit: z.string().max(10).nullable(),
+  cateringMinQty: z.string().max(20).nullable(),
   maxPerOrder: z.string().max(20).nullable(),
   variants: z.string().max(200_000).nullable(),
   listingId: z.string().max(200).nullable(),
@@ -49,6 +52,9 @@ const LISTING_FIELDS = [
   "shippable",
   "prepared",
   "prepMinutes",
+  "cateringLead",
+  "cateringLeadUnit",
+  "cateringMinQty",
   "maxPerOrder",
   "variants",
   "listingId",
@@ -85,6 +91,24 @@ function readPrepared(
     return { error: `Prep time must be a whole number of minutes, 0 to ${MAX_PREP_MINUTES}` };
   }
   return { value: { prepared, prepMinutes: minutes } };
+}
+
+/**
+ * The form's catering fields (#571): "" lead is not catering; else a whole lead in hours or days
+ * and a minimum quantity. The service checks ranges. Null when the form did not send the field.
+ */
+function readCatering(
+  lead: string | null,
+  unit: string | null,
+  minQty: string | null,
+): { value: { cateringLeadHours: number | null; cateringMinQty: number | null } } | { error: string } | null {
+  if (lead === null) return null;
+  if (!lead.trim()) return { value: { cateringLeadHours: null, cateringMinQty: null } };
+  const amount = Number(lead);
+  const min = Number(minQty ?? "");
+  if (!Number.isInteger(amount) || amount < 1) return { error: "Catering lead time must be a whole number" };
+  if (!minQty?.trim() || !Number.isInteger(min)) return { error: "Catering minimum must be a whole number" };
+  return { value: { cateringLeadHours: unit === "days" ? amount * 24 : amount, cateringMinQty: min } };
 }
 
 /** The storefront and cart charge the variant price, so the listing price is the cheapest variant's. */
@@ -125,6 +149,8 @@ export async function createListingAction(formData: FormData) {
   const qty = stockMode === "counted" ? Number(qtyRaw) : null;
   const prepared = readPrepared(fields.prepared, fields.prepMinutes);
   if (prepared && "error" in prepared) return { error: prepared.error };
+  const catering = readCatering(fields.cateringLead, fields.cateringLeadUnit, fields.cateringMinQty);
+  if (catering && "error" in catering) return { error: catering.error };
 
   try {
     const variants = parseVariantsJson(variantsJson);
@@ -146,6 +172,7 @@ export async function createListingAction(formData: FormData) {
       frozen,
       perishable,
       ...prepared?.value,
+      ...catering?.value,
       maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null,
       variants,
       actor: toActor(session.user),
@@ -198,6 +225,8 @@ export async function updateListingAction(formData: FormData) {
 
   const prepared = readPrepared(fields.prepared, fields.prepMinutes);
   if (prepared && "error" in prepared) return { error: prepared.error };
+  const catering = readCatering(fields.cateringLead, fields.cateringLeadUnit, fields.cateringMinQty);
+  if (catering && "error" in catering) return { error: catering.error };
 
   let parsedVariants: ReturnType<typeof parseVariantsJson> | undefined;
   if (variantsJson !== null) {
@@ -230,6 +259,7 @@ export async function updateListingAction(formData: FormData) {
       ...(perishable !== null && { perishable: perishable === "true" }),
       ...(fields.shippable !== null && { shippable: fields.shippable === "true" }),
       ...prepared?.value,
+      ...catering?.value,
       ...(maxPerOrderRaw !== null && { maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null }),
       actor: toActor(session.user),
       variants: parsedVariants,
