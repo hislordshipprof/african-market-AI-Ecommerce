@@ -60,7 +60,9 @@ import {
   Upload,
   ListChecks,
   Camera,
+  Truck,
 } from "lucide-react";
+import { shippableRefusal } from "@/lib/shipping/eligibility";
 
 interface Variant {
   id: string;
@@ -88,6 +90,8 @@ interface Listing {
   status: string | null;
   frozen: boolean;
   perishable: boolean;
+  /** Ships nationwide (#567). */
+  shippable: boolean;
   active: boolean;
   maxPerOrder: number | null;
   variants: Variant[];
@@ -148,6 +152,8 @@ interface ListingFormFields {
   status: string;
   frozen: boolean;
   perishable: boolean;
+  /** Sent only on update; already false when the listing cannot ship. */
+  shippable: boolean;
   maxPerOrder: string;
   masterProductId: string | null;
 }
@@ -170,6 +176,7 @@ function buildListingFormData(
   if (fields.stockMode === "status") fd.set("status", fields.status);
   fd.set("frozen", String(fields.frozen));
   fd.set("perishable", String(fields.perishable));
+  if (listingId) fd.set("shippable", String(fields.shippable));
   // Update always sends maxPerOrder so clearing it works; create omits it when blank.
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
@@ -193,6 +200,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [status, setStatus] = useState("in_stock");
   const [frozen, setFrozen] = useState(false);
   const [perishable, setPerishable] = useState(false);
+  const [shippable, setShippable] = useState(false);
   const [maxPerOrder, setMaxPerOrder] = useState("");
   const [masterProductId, setMasterProductId] = useState<string | null>(null);
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
@@ -210,6 +218,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setStatus("in_stock");
     setFrozen(false);
     setPerishable(false);
+    setShippable(false);
     setMaxPerOrder("");
     setMasterProductId(null);
     setSelectedMasterOption(null);
@@ -259,6 +268,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setStatus(listing.status ?? "in_stock");
     setFrozen(listing.frozen);
     setPerishable(listing.perishable);
+    setShippable(listing.shippable);
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
     setMasterProductId(listing.masterProductId);
     setVariants(listing.variants.map(loadedVariantRow));
@@ -286,6 +296,13 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     );
   }
 
+  // The rows as they will be saved: a typed weight replaces the import placeholder.
+  const shipRefusal = shippableRefusal(
+    { frozen, perishable },
+    variants
+      .filter((v) => v.id || v.label.trim())
+      .map((v) => ({ weightG: parseInt(v.weightG || "0", 10), weightPlaceholder: false })),
+  );
   const formFields: ListingFormFields = {
     name,
     stockMode,
@@ -293,6 +310,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     status,
     frozen,
     perishable,
+    shippable: shippable && shipRefusal === null,
     maxPerOrder,
     masterProductId,
   };
@@ -481,6 +499,26 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
           </Label>
         </div>
       </div>
+
+      {editListing && (
+        <div className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2.5">
+          <div className="flex min-h-11 items-center justify-between gap-4">
+            <Label htmlFor="listing-shippable" className="flex items-center gap-1.5">
+              <Truck className="size-3.5" aria-hidden /> Ships nationwide
+            </Label>
+            <Switch
+              id="listing-shippable"
+              checked={shippable && shipRefusal === null}
+              disabled={shipRefusal !== null}
+              onCheckedChange={setShippable}
+              aria-describedby="listing-shippable-hint"
+            />
+          </div>
+          <p id="listing-shippable-hint" className="text-sm text-muted-foreground">
+            {shipRefusal ?? "Shoppers outside your delivery area can order it by parcel when your store ships."}
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
