@@ -120,6 +120,9 @@ _Avoid_: Product (when meaning the store's item), SKU
 
 **Prepared food**:
 A listing a grocery store makes and sells ready to eat, hot or cold (jollof, suya, puff-puff), with its prep time. It is taxed as prepared food, sold as the exact item only, never left at the door when hot, and on sale only once the store owner has stated its allergens (ADR-0004 amendment).
+
+**Catering**:
+Prepared food ordered ahead, like a party tray of jollof (#571). The listing carries a lead time (up to 4 days) and a minimum quantity. A cart with catering items takes a scheduled pickup or store delivery time at or past its longest lead time, within 5 days.
 _Avoid_: Restaurant item, menu item, hot food (for cold dishes)
 
 **Listing import**:
