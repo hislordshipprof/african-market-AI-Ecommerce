@@ -35,7 +35,7 @@ const contactSchema = z.strictObject({
   phone: z.string().max(40),
   email: z.string().max(320),
 });
-const fulfillmentSchema = z.enum(["pickup", "store-delivery", "courier"]);
+const fulfillmentSchema = z.enum(["pickup", "store-delivery", "courier", "ship"]);
 const selectionSchema = z.strictObject({
   saveCard: z.boolean().optional(),
   savedCardId: z.string().min(1).max(200).nullable().optional(),
@@ -239,7 +239,8 @@ export async function createPaymentIntentAction(
       );
       if (!cached) return { ok: false, error: "We couldn't find that address" };
       if (!cached.ok) return { ok: false, error: cached.message };
-      if (!cached.withinRadius) {
+      // A shipped order goes anywhere in an allowed state (#567); the radius is for local delivery.
+      if (!cached.withinRadius && input.fulfillment !== "ship") {
         return { ok: false, error: "That address is outside the delivery area" };
       }
       snapshot = {

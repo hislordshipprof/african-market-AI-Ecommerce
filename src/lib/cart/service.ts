@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { lineShips } from "../shipping/eligibility";
 import { findOrCreateCustomer } from "../customer-auth";
 import {
   authPrisma,
@@ -52,6 +53,8 @@ export interface CartLineView {
     label: string;
     price: number;
     weightG: number;
+    /** The line may ship nationwide (#567). */
+    ships: boolean;
       listing: {
       id: string;
       customName: string | null;
@@ -590,6 +593,7 @@ export async function getCartWithLines(
         label: line.variant.label,
         price: line.variant.price,
         weightG: line.variant.weightG,
+        ships: lineShips(line.variant.listing, line.variant),
           listing: {
           id: line.variant.listing.id,
           customName: line.variant.listing.customName,

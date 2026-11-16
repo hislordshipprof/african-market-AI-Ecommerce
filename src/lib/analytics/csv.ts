@@ -7,6 +7,7 @@ export const FULFILLMENT_LABELS: Record<string, string> = {
   pickup: "Pickup",
   store_delivery: "Store delivery",
   courier: "Courier",
+  ship: "Shipping",
 };
 
 /** Cents as dollars with two decimals, so a spreadsheet sums them exactly. */

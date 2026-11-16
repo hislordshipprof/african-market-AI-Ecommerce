@@ -21,7 +21,10 @@ import { reserveOrderStock } from "../order/stock-ledger";
 import { assertLiveModeAllowed } from "./live-mode";
 import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
 import { pinnedCheckoutTax, quoteCheckoutTax, TaxLocationError, TaxUnavailableError, type CheckoutTax, type DeliveryAddressFields } from "../tax/checkout-tax";
-import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type CourierQuoteInput, type QuoteCouponInput, type StoreDeliveryQuote } from "./quote";
+import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type CourierQuoteInput, type QuoteCouponInput, type ShippingQuoteInput, type StoreDeliveryQuote } from "./quote";
+import { cheapestRate, ShippingProviderError, type ShippingProvider } from "../shipping/provider";
+import { lineShips, orderWeightG, shipRefusal, type ShipLine } from "../shipping/eligibility";
+import { readShippingStates, shippingProvider } from "../shipping/settings";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, quoteCourier } from "../delivery/dispatch";
 import { checkCourierEligibility } from "../delivery/eligibility";
@@ -166,6 +169,8 @@ export interface QuoteCheckoutOptions {
   courierSettings?: CourierSettings;
   /** The signed-in shopper, whose account a coupon's per-customer limit counts against (#557). */
   actorUserId?: string | null;
+  /** Defaults to Shippo, or its fake where allowed (#567). */
+  shipping?: ShippingProvider | null;
 }
 
 /**
@@ -266,6 +271,10 @@ async function untaxedQuote(
       : null;
     return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, courier, coupon);
   }
+  if (fulfillment === "ship") {
+    const shipping = cart ? await shippingQuoteFor(store, cart, contact, request ?? null, options) : null;
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, null, coupon, 0, shipping);
+  }
   if (fulfillment !== "store-delivery") {
     return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, null, null, coupon);
   }
@@ -351,6 +360,116 @@ async function courierQuoteFor(
   if (!quoted) return unavailable("No courier can take this order right now. Choose pickup or store delivery.");
   const changed = options.recheckCourier === true && quoted.feeCents !== shown;
   return { ok: true, feeCents: quoted.feeCents, provider: quoted.courierProvider, leaveAtDoor, changed };
+}
+
+const SHIP_ADDRESS_NEEDED = "Enter your shipping address to see the shipping rate.";
+
+/** The rate depends on where the box goes and what it weighs; the key ties a saved rate to both. */
+function shippingKey(state: string, zip: string, weightG: number): string {
+  return JSON.stringify({ state, zip, weightG });
+}
+
+function shipLines(lines: ReadonlyArray<{ qty: number; variant: { weightG: number; ships: boolean } }>): ShipLine[] {
+  return lines.map((line) => ({ ships: line.variant.ships, weightG: line.variant.weightG, qty: line.qty }));
+}
+
+/** ADR-0023: every line ships, the store ships, the state is allowed, at most 50 lb; then the cheapest Shippo rate, kept until it expires. */
+async function shippingQuoteFor(
+  store: CourierStoreRow,
+  cart: NonNullable<Awaited<ReturnType<typeof getCartWithLines>>>,
+  contact: Contact,
+  request: DeliveryRequest | null,
+  options: QuoteCheckoutOptions,
+): Promise<ShippingQuoteInput> {
+  const unavailable = (message: string): ShippingQuoteInput => ({ ok: false, problem: { code: "ineligible", message } });
+  const lines = shipLines(cart.lines);
+  const allowedStates = await readShippingStates();
+  const refusal = shipRefusal({ lines, handlingDays: store.shippingHandlingDays, state: null, allowedStates });
+  if (refusal) return unavailable(refusal);
+  if (!request) return unavailable(SHIP_ADDRESS_NEEDED);
+  if (!store.addressLine1 || !store.city || !store.state || !store.zip || store.lat == null || store.lng == null) {
+    return unavailable("This store isn't set up for shipping yet.");
+  }
+  const confirmed = await lookupConfirmed(
+    { line1: request.line1, city: request.city, state: request.state, zip: request.zip },
+    { lat: store.lat, lng: store.lng, radiusMi: Number(store.deliveryRadiusMi) },
+  );
+  if (!confirmed?.ok) return unavailable("We couldn't find that address");
+  const stateRefusal = shipRefusal({ lines, handlingDays: store.shippingHandlingDays, state: confirmed.match.state, allowedStates });
+  if (stateRefusal) return unavailable(stateRefusal);
+  if (!contact.name.trim()) return unavailable("Add your name to see the shipping rate.");
+
+  const handlingDays = store.shippingHandlingDays as number;
+  const weightG = orderWeightG(lines);
+  const key = shippingKey(confirmed.match.state, confirmed.match.zip, weightG);
+  const scoped = storeScoped(store.id);
+  const saved = await scoped.cart.findUnique({
+    where: { id: cart.id },
+    select: { shippingFeeCents: true, shippingCarrier: true, shippingService: true, shippingDays: true, shippingQuoteKey: true, shippingQuoteExpiresAt: true },
+  });
+  const shown = saved?.shippingQuoteKey === key && saved.shippingFeeCents != null ? saved.shippingFeeCents : null;
+  if (shown != null && saved?.shippingQuoteExpiresAt && saved.shippingQuoteExpiresAt > new Date()) {
+    return { ok: true, feeCents: shown, carrier: saved.shippingCarrier ?? "", service: saved.shippingService ?? "", days: saved.shippingDays, handlingDays };
+  }
+
+  const provider = options.shipping === undefined ? shippingProvider() : options.shipping;
+  if (!provider) return unavailable("Shipping isn't available right now. Choose pickup or delivery.");
+  let rate = null;
+  try {
+    rate = cheapestRate(await provider.rates({
+      from: { name: store.name, line1: store.addressLine1, line2: store.addressLine2, city: store.city, state: store.state, zip: store.zip, phone: store.phone },
+      to: { name: contact.name.trim(), line1: confirmed.match.line1, line2: request.line2 ?? null, city: confirmed.match.city, state: confirmed.match.state, zip: confirmed.match.zip, phone: contact.phone.trim() || null },
+      weightG,
+    }));
+  } catch (error) {
+    if (!(error instanceof ShippingProviderError)) throw error;
+    console.error(JSON.stringify({ event: "shipping_rates_failed", storeId: store.id, status: error.status }));
+  }
+  await scoped.cart.update({
+    where: { id: cart.id },
+    data: {
+      shippingFeeCents: rate?.feeCents ?? null,
+      shippingRateId: rate?.rateId ?? null,
+      shippingCarrier: rate?.carrier ?? null,
+      shippingService: rate?.service ?? null,
+      shippingDays: rate?.days ?? null,
+      shippingQuoteKey: rate ? key : null,
+      shippingQuoteExpiresAt: rate?.expiresAt ?? null,
+    },
+  });
+  if (!rate) return unavailable("No carrier can ship this order right now. Choose pickup or delivery.");
+  // An expired rate that came back different is shown before the shopper pays it.
+  return { ok: true, feeCents: rate.feeCents, carrier: rate.carrier, service: rate.service, days: rate.days, handlingDays, changed: shown != null && rate.feeCents !== shown };
+}
+
+/** Placement charges the rate the shopper last saw, while it is still for this basket, address and state, and unexpired. */
+function shownShipping(
+  cart: {
+    shippingFeeCents: number | null;
+    shippingCarrier: string | null;
+    shippingService: string | null;
+    shippingDays: number | null;
+    shippingQuoteKey: string | null;
+    shippingQuoteExpiresAt: Date | null;
+    deliveryLine1: string | null;
+    deliveryState: string | null;
+    deliveryZip: string | null;
+  },
+  lines: ShipLine[],
+  handlingDays: number | null,
+  allowedStates: readonly string[],
+  now: Date,
+): ShippingQuoteInput {
+  const refusal = shipRefusal({ lines, handlingDays, state: cart.deliveryState, allowedStates });
+  if (refusal) return { ok: false, problem: { code: "ineligible", message: refusal } };
+  if (cart.shippingFeeCents == null || !cart.deliveryLine1 || !cart.deliveryState || !cart.deliveryZip) {
+    return { ok: false, problem: { code: "ineligible", message: SHIP_ADDRESS_NEEDED } };
+  }
+  if (cart.shippingQuoteKey !== shippingKey(cart.deliveryState, cart.deliveryZip, orderWeightG(lines))
+    || !cart.shippingQuoteExpiresAt || cart.shippingQuoteExpiresAt <= now) {
+    return { ok: false, problem: { code: "quote-changed", message: "Your shipping rate needs a refresh. Check the new rate, then place your order." } };
+  }
+  return { ok: true, feeCents: cart.shippingFeeCents, carrier: cart.shippingCarrier ?? "", service: cart.shippingService ?? "", days: cart.shippingDays, handlingDays: handlingDays as number };
 }
 
 /** Placement charges the courier fee the shopper last saw and the hold was sized on; it never asks the couriers again. */
@@ -670,6 +789,15 @@ export async function recordAuthorizedOrder(
         perishable: line.variant.listing.perishable,
       }));
       if (!sameBasket(current, input.lines)) throw new BasketChangedError();
+      const shipping = input.fulfillment === "ship"
+        ? shownShipping(
+            cart,
+            currentLines.map((line) => ({ ships: lineShips(line.variant.listing, line.variant), weightG: line.variant.weightG, qty: line.qty })),
+            lockedStore.shippingHandlingDays,
+            await readShippingStates(tx),
+            now,
+          )
+        : null;
       const point = cart.deliveryLat != null && cart.deliveryLng != null
         ? { lat: cart.deliveryLat, lng: cart.deliveryLng }
         : null;
@@ -696,6 +824,8 @@ export async function recordAuthorizedOrder(
         delivery,
         courier,
         coupon,
+        0,
+        shipping,
       );
       const tax = input.tax ?? UNTAXED;
       if (input.tax) {
@@ -711,6 +841,8 @@ export async function recordAuthorizedOrder(
         throw new BasketChangedError();
       }
       const delivering = (input.fulfillment === "store-delivery" || input.fulfillment === "courier") && point != null;
+      const shipped = input.fulfillment === "ship" ? currentQuote.shipping ?? null : null;
+      const addressed = delivering || shipped != null;
       const distanceMi = delivering && lockedStore.lat != null && lockedStore.lng != null
         ? assessRadius(point, {
             lat: lockedStore.lat,
@@ -774,8 +906,12 @@ export async function recordAuthorizedOrder(
           tipCents: currentQuote.tipCents,
           bufferCents: currentQuote.bufferCents,
           totalAuthorizedCents: currentQuote.holdCents,
-          // A courier order keeps the courier fee here; courierFeeCents() reads it back (#495).
-          deliveryFeeCents: currentQuote.deliveryFeeCents + currentQuote.courierFeeCents,
+          // A courier order keeps the courier fee here; courierFeeCents() reads it back (#495). A shipped order keeps its postage (#567).
+          deliveryFeeCents: currentQuote.deliveryFeeCents + currentQuote.courierFeeCents + (shipped?.feeCents ?? 0),
+          shippingRateId: shipped ? cart.shippingRateId : null,
+          shippingCarrier: shipped?.carrier ?? null,
+          shippingService: shipped?.service ?? null,
+          shippingDays: shipped?.days ?? null,
           totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
@@ -797,11 +933,11 @@ export async function recordAuthorizedOrder(
             courierFeeCents: currentQuote.courierFeeCents,
           }).platformFeeCents,
           notes: input.notes || null,
-          deliveryLine1: delivering ? cart.deliveryLine1 : null,
-          deliveryLine2: delivering ? cart.deliveryLine2 : null,
-          deliveryCity: delivering ? cart.deliveryCity : null,
-          deliveryState: delivering ? cart.deliveryState : null,
-          deliveryZip: delivering ? cart.deliveryZip : null,
+          deliveryLine1: addressed ? cart.deliveryLine1 : null,
+          deliveryLine2: addressed ? cart.deliveryLine2 : null,
+          deliveryCity: addressed ? cart.deliveryCity : null,
+          deliveryState: addressed ? cart.deliveryState : null,
+          deliveryZip: addressed ? cart.deliveryZip : null,
           deliveryLat: delivering ? cart.deliveryLat : null,
           deliveryLng: delivering ? cart.deliveryLng : null,
           deliveryDistanceMi: distanceMi,
@@ -875,6 +1011,8 @@ function cartLinesToOrderLines(
   maxPerOrder: number | null;
   frozen: boolean;
   perishable: boolean;
+  ships: boolean;
+  weightG: number;
 }> {
   return cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -886,6 +1024,8 @@ function cartLinesToOrderLines(
     maxPerOrder: l.variant.listing.maxPerOrder,
     frozen: l.variant.listing.frozen,
     perishable: l.variant.listing.perishable,
+    ships: l.variant.ships,
+    weightG: l.variant.weightG,
   }));
 }
 
@@ -1219,7 +1359,16 @@ export async function placeOrder(
         cart.delivery.leaveAtDoor || leaveAtDoor,
       )
     : null;
-  const untaxed = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier, coupon);
+  const shipping = fulfillment === "ship"
+    ? shownShipping(
+        await storeScoped(storeId).cart.findUniqueOrThrow({ where: { id: cartId } }),
+        orderLineData,
+        storeRow.shippingHandlingDays,
+        await readShippingStates(),
+        new Date(),
+      )
+    : null;
+  const untaxed = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery, courier, coupon, 0, shipping);
   let quote = untaxed;
   let tax: CheckoutTax;
   try {

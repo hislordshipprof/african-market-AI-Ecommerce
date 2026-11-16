@@ -505,6 +505,7 @@ export interface LockedStoreRow {
   pickupEnabled: boolean;
   pickupSlotSettings: unknown;
   storeDeliverySlotSettings: unknown;
+  shippingHandlingDays: number | null;
 }
 
 export interface GeocodeCacheRow {
@@ -631,9 +632,11 @@ export async function lockStoreRow(
     pickup_enabled: boolean;
     pickup_slot_settings: unknown;
     store_delivery_slot_settings: unknown;
+    shipping_handling_days: number | null;
   }>>`
     SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng,
-      hours, timezone, prep_time_minutes, pickup_enabled, pickup_slot_settings, store_delivery_slot_settings
+      hours, timezone, prep_time_minutes, pickup_enabled, pickup_slot_settings, store_delivery_slot_settings,
+      shipping_handling_days
     FROM stores
     WHERE id = ${storeId}
     FOR UPDATE
@@ -652,6 +655,7 @@ export async function lockStoreRow(
     pickupEnabled: row.pickup_enabled,
     pickupSlotSettings: row.pickup_slot_settings,
     storeDeliverySlotSettings: row.store_delivery_slot_settings,
+    shippingHandlingDays: row.shipping_handling_days,
   };
 }
 

@@ -6,7 +6,7 @@ export type SwapRule =
   | { kind: "exact" }
   | { kind: "suggest" }
   | { kind: "chosen"; item: CartItem };
-export type Fulfillment = "pickup" | "store-delivery" | "courier";
+export type Fulfillment = "pickup" | "store-delivery" | "courier" | "ship";
 export type OrderStatus =
   | "AUTHORIZED"
   | "ACCEPTED"
@@ -97,6 +97,8 @@ export interface CheckoutQuote {
   deliveryFeeCents: number;
   courierFeeCents: number;
   courierProvider?: "Uber Direct" | "DoorDash Drive";
+  /** The cheapest parcel rate for a shipped order (#567), included in totalCents. */
+  shipping?: { feeCents: number; carrier: string; service: string; days: number | null; handlingDays: number };
   /** Customer service fee (ADR-0021), included in totalCents. */
   serviceFeeCents: number;
   taxCents: number;

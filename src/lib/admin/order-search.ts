@@ -24,7 +24,7 @@ export const ORDER_STATUSES = [
   "REFUNDED",
 ] as const;
 
-export const ORDER_FULFILLMENTS = ["pickup", "store-delivery", "courier"] as const;
+export const ORDER_FULFILLMENTS = ["pickup", "store-delivery", "courier", "ship"] as const;
 
 export const ORDER_SEARCH_FIELDS = ["storeId", "number", "email", "phone", "status", "fulfillment", "from", "to", "cursor"] as const;
 
