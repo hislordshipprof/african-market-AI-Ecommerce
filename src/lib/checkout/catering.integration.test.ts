@@ -6,6 +6,7 @@ import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider } from "../stripe/fake";
 import { BasketChangedError, computeQuote, recordAuthorizedOrder, type RecordAuthorizedOrderInput } from "./service";
 import { slotOptions, SlotUnavailableError } from "./slots";
+import { pickTimeoutDeadline } from "../inngest/functions";
 import { addLine, CartError, updateLineQty } from "../cart/service";
 import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 import type { SlotSchedule } from "../order/slot-schedule";
@@ -184,5 +185,14 @@ describe.skipIf(!hasDb)("catering pre-orders (#571)", () => {
     const slot = (await slotOptions(storeScoped(storeId), storeId, row, "pickup", new Date(), input.cartId)).slots[0]!.id;
     await expect(recordAuthorizedOrder(storeId, { ...input, pickupSlot: slot })).rejects.toBeInstanceOf(BasketChangedError);
     expect(await storeScoped(storeId).order.count()).toBe(0);
+  });
+});
+
+describe("catering picking starts from the slot (#571 AC3)", () => {
+  it("a slot 4.5 days out, accepted at once, times out a day after its start, inside the hold cap", () => {
+    const createdAt = new Date("2026-11-16T15:00:00.000Z");
+    const slot = new Date(createdAt.getTime() + 108 * HOUR);
+    const deadline = pickTimeoutDeadline({ createdAt, acceptedAt: new Date(createdAt.getTime() + 10 * 60_000), pickupSlot: slot.toISOString() });
+    expect(deadline).toBe(slot.getTime() + 24 * HOUR);
   });
 });
