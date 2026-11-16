@@ -84,6 +84,7 @@ const MESSAGES: Record<string, string> = {
   cannot_confirm: "I can't confirm that item meets the customer's needs.",
   unchecked_swap: "The store's own swap does not check the customer's needs. Name a substitute that meets them, or Exact item only for a refund.",
   over_budget: "Adding this would take the cart's items over the customer's budget.",
+  exact_only_item: "This is prepared food, sold as the exact item only: no swap and no substitute. If the store cannot make it, it is refunded.",
 };
 
 function fail(code: string): ToolFailure {
@@ -886,7 +887,9 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       const flagged = mayBeUnavailable(applied.listing);
       let swapRule = applied.swapRule;
       let substituteVariantId: string | null = null;
-      if (applied.created && flagged) {
+      // #570: prepared food carries no backup; the line is exact item only.
+      const exactItem = applied.listing.prepared != null;
+      if (applied.created && flagged && !exactItem) {
         const backupId = backupRefused(item.backup_variant_id) ? undefined : item.backup_variant_id;
         const backup = await chooseBackup(tx, ctx.storeId, item.variant_id, backupId);
         // The store's own swap checks no needs, so a constrained line with no checked backup is refunded.
@@ -909,7 +912,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         swapRule,
         mayBeUnavailable: flagged,
         ...(substituteVariantId ? { substituteVariantId } : {}),
-        ...(flagged && swapRule !== "named_substitute" ? await swapIdeas(ctx, applied.listing.id) : {}),
+        ...(flagged && !exactItem && swapRule !== "named_substitute" ? await swapIdeas(ctx, applied.listing.id) : {}),
       });
     }
     items.push(...refusedItems);
@@ -1018,8 +1021,10 @@ export async function setSwapRule(ctx: AssistantContext, input: unknown): Promis
       include: { variant: { include: { listing: true } } },
     });
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
+    const exactItem = line.variant.listing.prepared != null;
+    if (exactItem && parsed.rule !== "exact_only") return fail("exact_only_item");
     // ADR-0018: a may-be-unavailable line always carries a backup, unless the customer's needs leave a refund.
-    if (parsed.rule === "exact_only" && !constrained && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
+    if (parsed.rule === "exact_only" && !constrained && !exactItem && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
     if (parsed.rule === "named_substitute") {
       const substituteId = parsed.substitute_variant_id;
       const substitute = substituteId

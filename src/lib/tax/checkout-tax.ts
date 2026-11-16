@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { platform, storeScoped, type StoreScopedClient } from "../db";
 import { allocateLineDiscounts } from "../coupon/discount";
+import { PREPARED_FOOD_TAX_CODE } from "../listing/prepared";
 import type { Fulfillment } from "../customer-flow/contracts";
 import {
   getTaxCalculator,
@@ -31,16 +32,25 @@ export type TaxedLine = { variantId: string; qty: number; price: number };
 
 type ScopedTx = Pick<StoreScopedClient, "listingVariant" | "cart">;
 
-/** Each variant's tax code: its category's, else the parent category's, else null (the account preset). */
+/**
+ * Each variant's tax code: prepared food's (#570), else its category's, else the parent category's,
+ * else null (the account preset).
+ */
 export async function variantTaxCodes(db: ScopedTx, variantIds: string[]): Promise<Map<string, string | null>> {
   const variants = await db.listingVariant.findMany({
     where: { id: { in: variantIds } },
     select: {
       id: true,
-      listing: { select: { masterProduct: { select: { category: { select: { taxCode: true, parent: { select: { taxCode: true } } } } } } } },
+      listing: {
+        select: {
+          prepared: true,
+          masterProduct: { select: { category: { select: { taxCode: true, parent: { select: { taxCode: true } } } } } },
+        },
+      },
     },
   });
   return new Map(variants.map((variant) => {
+    if (variant.listing.prepared != null) return [variant.id, PREPARED_FOOD_TAX_CODE];
     const category = variant.listing.masterProduct?.category;
     return [variant.id, category?.taxCode ?? category?.parent?.taxCode ?? null];
   }));

@@ -10,6 +10,7 @@ import { LIVE_MODE_BLOCKED_MESSAGE, liveModeCheck } from "@/lib/checkout/live-mo
 import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 import { slotOptions } from "@/lib/checkout/slots";
 import { platform, storeHasWhatsAppNumber, storeScoped } from "@/lib/db";
+import { getCartIdFromCookie } from "@/lib/cart/cookies";
 
 export default async function CheckoutRoute() {
   // Before the prefill (which calls Stripe for saved cards) and before any key reaches the browser.
@@ -36,7 +37,7 @@ export default async function CheckoutRoute() {
     ? await Promise.all([platform.store.findUnique({ where: { id: store.id } }), storeHasWhatsAppNumber(store.id)])
     : [null, false];
   const pickupSlots = slotStore
-    ? await slotOptions(storeScoped(store.id), store.id, slotStore, "pickup", new Date())
+    ? await slotOptions(storeScoped(store.id), store.id, slotStore, "pickup", new Date(), await getCartIdFromCookie())
     : undefined;
   const stripeConfig =
     takesPayment

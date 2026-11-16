@@ -82,10 +82,10 @@ function readCheckout(
 }
 
 /** The times checkout offers for this fulfillment, read fresh from the store row (#565). */
-async function checkoutSlotOptions(storeId: string, fulfillment: Fulfillment): Promise<SlotOptions> {
+async function checkoutSlotOptions(storeId: string, fulfillment: Fulfillment, cartId: string | null): Promise<SlotOptions> {
   const store = await platform.store.findUnique({ where: { id: storeId } });
   if (!store) return { required: false, slots: [] };
-  return slotOptions(storeScoped(storeId), storeId, store, fulfillment, new Date());
+  return slotOptions(storeScoped(storeId), storeId, store, fulfillment, new Date(), cartId);
 }
 
 async function signedInUserId(): Promise<string | null> {
@@ -139,7 +139,7 @@ export async function quoteCheckoutAction(
         request,
         { actorUserId },
       ),
-      checkoutSlotOptions(store.id, input.fulfillment),
+      checkoutSlotOptions(store.id, input.fulfillment, resolved.cartId),
     ]);
     if (resume?.kind === "order") {
       return { ok: true, quote, slots, orderedToken: resume.trackingToken ?? resume.token };
@@ -218,7 +218,7 @@ export async function createPaymentIntentAction(
     const fresh = await platform.store.findUnique({ where: { id: store.id } });
     if (!fresh) return { ok: false, error: "Payment setup failed" };
     // No card is held for a time that is already gone; placeOrder reserves it under the store lock.
-    await assertSlotOffered(storeScoped(store.id), store.id, fresh, input.fulfillment, when.data ?? null, new Date());
+    await assertSlotOffered(storeScoped(store.id), store.id, fresh, input.fulfillment, when.data ?? null, new Date(), cartId);
     let snapshot: {
       line1: string;
       line2: string | null;

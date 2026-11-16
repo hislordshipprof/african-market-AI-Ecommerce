@@ -454,6 +454,22 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(await setSwapRule(ctx(), { line_id: line!.id, rule: "store_suggests" })).toMatchObject({ ok: true, swapRule: "store_suggests" });
   });
 
+  it("#570 AC4: a prepared dish is exact item only: no backup on add, and no swap rule but exact_only", async () => {
+    const item = await makeListing(storeA, { name: "Hot Jollof", price: 1200, confidence: 0.4 });
+    const backup = await makeListing(storeA, { name: "Jollof Backup", price: 1100, confidence: 1 });
+    await storeScoped(storeA).listing.update({ where: { id: item.listingId }, data: { prepared: "hot", prepMinutes: 20 } });
+    const added = await addToCart(ctx(), { items: [{ variant_id: item.variantId, qty: 1, backup_variant_id: backup.variantId }] });
+    expect(added).toMatchObject({ ok: true, mayBeUnavailable: true, swapRule: "exact_only" });
+    expect(added).not.toHaveProperty("substituteVariantId");
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    expect(line).toMatchObject({ swapRule: "exact_only", substituteVariantId: null });
+    expect(await setSwapRule(ctx(), { line_id: line!.id, rule: "store_suggests" })).toMatchObject({ ok: false, code: "exact_only_item" });
+    expect(await setSwapRule(ctx(), { line_id: line!.id, rule: "named_substitute", substitute_variant_id: backup.variantId }))
+      .toMatchObject({ ok: false, code: "exact_only_item" });
+    // A may-be-unavailable prepared line is refunded, not swapped, so exact_only needs no backup.
+    expect(await setSwapRule(ctx(), { line_id: line!.id, rule: "exact_only" })).toMatchObject({ ok: true, swapRule: "exact_only" });
+  });
+
   it("confidence 0.5 with a valid backup sets named_substitute", async () => {
     const item = await makeListing(storeA, { name: "Needs Backup", price: 260, confidence: 0.5 });
     const backup = await makeListing(storeA, { name: "Backup Yam Flour", price: 270, confidence: 1 });

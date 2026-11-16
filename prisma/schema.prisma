@@ -588,6 +588,9 @@ model Listing {
   status              String?
   frozen              Boolean  @default(false)
   perishable          Boolean  @default(false)
+  /// #570: "hot" or "cold" for prepared food, null for grocery.
+  prepared            String?
+  prepMinutes         Int?     @map("prep_minutes")
   maxPerOrder         Int?     @map("max_per_order")
   active              Boolean  @default(true)
   confidence          Float    @default(1.0)
