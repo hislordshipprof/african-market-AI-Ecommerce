@@ -28,7 +28,7 @@ import { readShippingStates, shippingProvider } from "../shipping/settings";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, quoteCourier } from "../delivery/dispatch";
 import { checkCourierEligibility } from "../delivery/eligibility";
-import { anyCourierEnabled, readCourierSettings, type CourierSettings } from "../delivery/courier-settings";
+import { anyCourierEnabled, readStoreCourierSettings, type CourierSettings } from "../delivery/courier-settings";
 import { courierOffered } from "../delivery/courier-offered";
 import type { DeliveryProvider } from "../delivery/provider";
 import { validPhone } from "../customer-account/phone";
@@ -262,7 +262,7 @@ async function untaxedQuote(
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
   }
   if (fulfillment === "courier") {
-    const courierSettings = options.courierSettings ?? (await readCourierSettings());
+    const courierSettings = options.courierSettings ?? (await readStoreCourierSettings(storeId));
     if (!anyCourierEnabled(courierSettings, cartId)) {
       const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
       return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };

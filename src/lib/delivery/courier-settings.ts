@@ -11,7 +11,7 @@ export const ASSIGNMENT_TIMEOUT_SECONDS = { min: 300, max: 1200 } as const;
 /** Decision taken in #535: whole pounds, 1 to 100. */
 export const COURIER_WEIGHT_LIMIT_LB = { min: 1, max: 100 } as const;
 
-/** Platform-wide courier settings (#535), one row edited at /admin/settings/couriers. Per-metro overrides wait for #577. */
+/** Platform-wide courier settings (#535), one row edited at /admin/settings/couriers; a metro can override some (#577). */
 export interface CourierSettings {
   selectionMode: CourierSelectionMode;
   assignmentTimeoutSeconds: number;
@@ -42,6 +42,52 @@ export async function readCourierSettings(db: SettingsReader = platform): Promis
     uberEnabled: row.uberEnabled,
     weightLimitLb: row.courierWeightLimitLb,
   };
+}
+
+/** A metro's courier overrides (#577): a null mode or timeout follows the platform. */
+export interface MetroCourierOverrides {
+  selectionMode: CourierSelectionMode | null;
+  assignmentTimeoutSeconds: number | null;
+  doordashEnabled: boolean;
+  uberEnabled: boolean;
+}
+
+/**
+ * The settings for a store in the metro. A courier is on only when both the platform and the metro have it on, so the
+ * platform switch stays the kill switch for an outage (#535 AC3). The weight limit is platform-wide.
+ */
+export function withMetroOverrides(platformWide: CourierSettings, metro: MetroCourierOverrides | null): CourierSettings {
+  if (!metro) return platformWide;
+  return {
+    selectionMode: metro.selectionMode ?? platformWide.selectionMode,
+    assignmentTimeoutSeconds: metro.assignmentTimeoutSeconds ?? platformWide.assignmentTimeoutSeconds,
+    doordashEnabled: platformWide.doordashEnabled && metro.doordashEnabled,
+    uberEnabled: platformWide.uberEnabled && metro.uberEnabled,
+    weightLimitLb: platformWide.weightLimitLb,
+  };
+}
+
+/** Read when checkout quotes and when dispatch and failover run for a store: the platform settings under its metro's. */
+export async function readStoreCourierSettings(storeId: string): Promise<CourierSettings> {
+  const [platformWide, store] = await Promise.all([
+    readCourierSettings(),
+    platform.store.findUnique({
+      where: { id: storeId },
+      select: { metro: { select: { courierSelectionMode: true, courierAssignmentTimeoutS: true, doordashEnabled: true, uberEnabled: true } } },
+    }),
+  ]);
+  const metro = store?.metro;
+  return withMetroOverrides(
+    platformWide,
+    metro
+      ? {
+          selectionMode: metro.courierSelectionMode as CourierSelectionMode | null,
+          assignmentTimeoutSeconds: metro.courierAssignmentTimeoutS,
+          doordashEnabled: metro.doordashEnabled,
+          uberEnabled: metro.uberEnabled,
+        }
+      : null,
+  );
 }
 
 export function providerEnabled(settings: CourierSettings, name: DeliveryProviderName): boolean {

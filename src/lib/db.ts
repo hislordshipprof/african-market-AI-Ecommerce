@@ -342,6 +342,7 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "listing",
   "masterProduct",
   "masterProductIngredient",
+  "metro",
   "order",
   "paymentDispute",
   "paymentDisputeEvent",
@@ -3155,9 +3156,10 @@ export async function findCourierIncidentRows(
               WHERE f.store_id = e.store_id AND f.order_id = e.order_id AND f.delivery_id = e.delivery_id
                 AND (f.type = 'failover_triggered' OR (f.type = 'cancelled' AND f.payload->>'by' = 'platform'))
             ) THEN 'provider_cancelled'
-          -- The deadline the assignment timer uses: the later of the timeout after booking and the ready time.
+          -- The deadline the assignment timer uses: the later of the timeout after booking and the ready time. The
+          -- timeout is the store's metro's when it sets one (#577).
           WHEN e.type = 'courier_assigned'
-            AND e.created_at > GREATEST(d.created_at + make_interval(secs => ps.courier_assignment_timeout_s), d.pickup_ready_at)
+            AND e.created_at > GREATEST(d.created_at + make_interval(secs => COALESCE(m.courier_assignment_timeout_s, ps.courier_assignment_timeout_s)), d.pickup_ready_at)
             THEN 'assigned_late'
           WHEN e.type = 'delivered' AND d.proof_url IS NULL AND d.pin IS NULL THEN 'delivered_no_proof'
         END AS kind
@@ -3165,6 +3167,8 @@ export async function findCourierIncidentRows(
       JOIN orders o ON o.id = e.order_id AND o.store_id = e.store_id
       LEFT JOIN deliveries d ON d.id = e.delivery_id AND d.store_id = e.store_id
       CROSS JOIN (SELECT courier_assignment_timeout_s FROM platform_settings WHERE id = 'platform') ps
+      LEFT JOIN stores st ON st.id = e.store_id
+      LEFT JOIN metros m ON m.id = st.metro_id
       WHERE e.type IN ('failover_triggered', 'both_failed', 'cancelled', 'returned', 'courier_assigned', 'delivered')
         AND o.fulfillment = 'courier'
         ${eventScope[0]} ${eventScope[1]}

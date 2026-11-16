@@ -56,6 +56,8 @@ model Store {
   doordashRegistrationError String?  @map("doordash_registration_error")
   /// Nationwide shipping opt-in (ADR-0023, #567): business days to pack a parcel; null means the store does not ship.
   shippingHandlingDays      Int?     @map("shipping_handling_days")
+  /// The ops metro a platform admin put the store in (#577). Customers never see it.
+  metroId                   String?  @map("metro_id")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 
@@ -127,8 +129,46 @@ model Store {
   driverRoutes          DriverRoute[]
   pickBatches           PickBatch[]
   notifiedStoreRequests DirectoryStoreRequest[]
+  courierQuoteDays      CourierQuoteDay[]
+  metro                 Metro?           @relation(fields: [metroId], references: [id], onDelete: Restrict)
 
+  @@index([metroId])
   @@map("stores")
+}
+
+/// An ops grouping of stores (#577), set by a platform admin. Customers never see it. Its courier overrides layer on
+/// the platform courier settings (#535): a null mode or timeout follows the platform; a courier off here is off.
+model Metro {
+  id                        String   @id @default(cuid())
+  name                      String   @unique
+  states                    String[]
+  centerLat                 Float    @map("center_lat")
+  centerLng                 Float    @map("center_lng")
+  radiusMi                  Int      @map("radius_mi")
+  courierSelectionMode      String?  @map("courier_selection_mode")
+  courierAssignmentTimeoutS Int?     @map("courier_assignment_timeout_s")
+  doordashEnabled           Boolean  @default(true) @map("doordash_enabled")
+  uberEnabled               Boolean  @default(true) @map("uber_enabled")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @default(now()) @updatedAt @map("updated_at")
+
+  stores Store[]
+
+  @@map("metros")
+}
+
+/// Courier quote outcomes per store, courier and UTC day (#577), for the readiness report's quote success rate.
+model CourierQuoteDay {
+  storeId   String   @map("store_id")
+  provider  String
+  day       DateTime @db.Date
+  attempts  Int      @default(0)
+  successes Int      @default(0)
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, provider, day])
+  @@map("courier_quote_days")
 }
 
 /// RLS test fixture: placeholder store-owned table for isolation tests until real entities exist.
@@ -1727,6 +1767,8 @@ model PlatformSettings {
   rejectedApplicationRetentionMonths Int @default(12) @map("rejected_application_retention_months")
   /// States a shipped order may go to (ADR-0023, ADR-0008): each added only after the tax advisor signs off on it.
   shippingStates       String[] @default([]) @map("shipping_states")
+  /// States the tax advisor signed off (ADR-0008, #577): shown on the metro readiness report, gates nothing yet.
+  taxSignedOffStates   String[] @default([]) @map("tax_signed_off_states")
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")

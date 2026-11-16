@@ -55,8 +55,8 @@ export interface DispatchDeps {
   /** Every adapter. The settings decide which may be quoted; a live delivery is cancelled with its own adapter. */
   providers: DeliveryProvider[];
   emit: (event: CourierEvent) => Promise<void>;
-  /** The courier settings (#535), read each time dispatch or failover runs. */
-  settings: () => Promise<CourierSettings>;
+  /** The store's courier settings (#535) under its metro's overrides (#577), read each time dispatch or failover runs. */
+  settings: (storeId: string) => Promise<CourierSettings>;
   now?: () => Date;
 }
 
@@ -124,7 +124,7 @@ export async function quoteCourier(input: QuoteInput, providers: DeliveryProvide
 /** Books the first live quote in the settings' order. A create error moves straight to the next one. */
 export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
   const now = deps.now ?? (() => new Date());
-  const settings = await deps.settings();
+  const settings = await deps.settings(input.storeId);
   const quoteInput = { ...input, referenceId: input.orderId };
   const candidates = anyCourierEnabled(settings, input.orderId)
     ? await liveQuotes(quoteInput, enabledProviders(deps.providers, settings), settings.selectionMode, now)
@@ -497,7 +497,7 @@ export async function runCourierFailover(
   const { storeId, deliveryId } = target;
   // The timeout is read once, when the timer starts; a later settings change does not move this delivery's deadline.
   const plan = (await step.run("courier-timer-plan", async () => {
-    const { assignmentTimeoutSeconds } = await deps.settings();
+    const { assignmentTimeoutSeconds } = await deps.settings(storeId);
     const timeoutMs = assignmentTimeoutSeconds * 1000;
     return { timeoutMs, deadlineIso: await assignmentDeadline(storeId, deliveryId, timeoutMs) };
   })) as { timeoutMs: number; deadlineIso: string | null };
@@ -553,7 +553,7 @@ export async function runCourierFailover(
       await deps.emit({ name: COURIER_DELIVERY_CREATED, data: { storeId, deliveryId: live.id } });
       return;
     }
-    const settings = await deps.settings();
+    const settings = await deps.settings(storeId);
     const alternates = enabledProviders(deps.providers.filter((p) => !used.some((u) => u.provider === p.name)), settings);
     if (alternates.length > 0) {
       const fromProvider = delivery.provider as DeliveryProviderName;
