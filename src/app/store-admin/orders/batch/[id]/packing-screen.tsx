@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, Check, CheckCircle2, Clock, ImageOff, Truck } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Clock, ImageOff, Package, Truck } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -245,6 +245,12 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Truck className="size-3" aria-hidden />
                     {tote.readyEstimateAt && PACKING.includes(tote.status) ? `Ready by ${time(tote.readyEstimateAt)}` : "Courier"}
+                  </p>
+                )}
+                {tote.fulfillment === "ship" && (
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Package className="size-3" aria-hidden />
+                    Shipping
                   </p>
                 )}
               </div>

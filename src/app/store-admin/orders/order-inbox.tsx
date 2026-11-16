@@ -533,6 +533,23 @@ export function OrderInbox({
                     {selectedOrder.leaveAtDoor ? " · Leave at door" : ""}
                   </p>
                 )}
+                {selectedOrder.fulfillment === "ship" && (
+                  <p className="mt-2 flex items-start gap-1.5 text-sm text-foreground">
+                    <Package className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span>
+                      Shipping{selectedOrder.shippingCarrier ? ` · ${[selectedOrder.shippingCarrier, selectedOrder.shippingService].filter(Boolean).join(" ")}` : ""}
+                      {selectedOrder.deliveryLine1 && (
+                        <>
+                          {" to "}
+                          {selectedOrder.deliveryLine1}
+                          {selectedOrder.deliveryLine2 ? `, ${selectedOrder.deliveryLine2}` : ""}
+                          {", "}
+                          {selectedOrder.deliveryCity}, {selectedOrder.deliveryState} {selectedOrder.deliveryZip}
+                        </>
+                      )}
+                    </span>
+                  </p>
+                )}
                 {selectedOrder.status === "REFUND_FAILED" && (
                   <p className="mt-2 text-sm text-destructive">
                     {REFUND_FAILED_STAFF_COPY}
@@ -839,6 +856,7 @@ export function OrderInbox({
                               >
                                 {config?.label ?? order.status}
                               </Badge>
+                              {order.fulfillment === "ship" && <Badge variant="outline">Shipping</Badge>}
                               {order.disputed && <DisputedBadge />}
                               {order.hasAccount && <AccountBadge />}
                             </div>
