@@ -19,7 +19,8 @@ import type { SupplierChannel, SupplierView } from "@/lib/purchasing/suppliers";
 
 type OrderView = Omit<PurchaseOrderView, "sentAt" | "createdAt"> & { sentAt: string | null; createdAt: string };
 
-const INPUT = "min-h-11 w-full rounded-lg border border-border bg-background px-3 text-base text-foreground";
+const FIELD = "min-h-11 rounded-lg border border-border bg-background px-3 text-base text-foreground";
+const INPUT = `${FIELD} w-full`;
 const PILL = "min-h-11 rounded-full px-4";
 const CHANNEL: Record<SupplierChannel, string> = { email: "Email", whatsapp: "WhatsApp", sms: "Text message" };
 const SEND: Record<SupplierChannel, string> = { email: "Send by email", whatsapp: "Send on WhatsApp", sms: "Send by text" };
@@ -106,7 +107,7 @@ function OrderCard({ order }: { order: OrderView }) {
                 placeholder="Qty"
                 value={quantities[line.id] ?? ""}
                 onChange={(e) => setQuantities((current) => ({ ...current, [line.id]: e.target.value }))}
-                className={`${INPUT} w-24 shrink-0 text-right tabular-nums`}
+                className={`${FIELD} w-24 shrink-0 text-right tabular-nums`}
               />
             ) : (
               <span className="shrink-0 text-base font-semibold text-foreground tabular-nums">{line.quantity ?? "No count"}</span>
