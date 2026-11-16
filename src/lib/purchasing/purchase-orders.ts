@@ -121,7 +121,9 @@ export async function editPurchaseOrderLines(
   });
 }
 
-export function purchaseOrderText(order: Pick<PurchaseOrderView, "number" | "lines">, storeName: string): string {
+type MessageOrder = { number: number; lines: Array<{ name: string; quantity: number | null }> };
+
+export function purchaseOrderText(order: MessageOrder, storeName: string): string {
   return [
     `Purchase order ${order.number} from ${storeName}`,
     ...order.lines.map((line) => `${line.name}: ${line.quantity ?? NO_COUNT}`),
@@ -136,7 +138,7 @@ export function shareLink(channel: "whatsapp" | "sms", e164: string, text: strin
   return `sms:${e164}?&body=${encodeURIComponent(text)}`;
 }
 
-function emailHtml(order: Pick<PurchaseOrderView, "number" | "lines">, storeName: string): string {
+function emailHtml(order: MessageOrder, storeName: string): string {
   const rows = order.lines
     .map((line) => `<tr><td style="padding:4px 12px 4px 0">${escapeHtml(line.name)}</td><td style="padding:4px 0;text-align:right">${line.quantity}</td></tr>`)
     .join("");
