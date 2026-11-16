@@ -118,6 +118,10 @@ _Avoid_: Department, collection (a store's own curated list)
 A store's offer of a product: its price, sizes and stock at that store.
 _Avoid_: Product (when meaning the store's item), SKU
 
+**Prepared food**:
+A listing a grocery store makes and sells ready to eat, hot or cold (jollof, suya, puff-puff), with its prep time. It is taxed as prepared food, sold as the exact item only, never left at the door when hot, and on sale only once the store owner has stated its allergens (ADR-0004 amendment).
+_Avoid_: Restaurant item, menu item, hot food (for cold dishes)
+
 **Listing import**:
 A CSV file a store owner uploaded, held for 30 minutes between its preview and the one commit that turns the chosen rows into listings.
 _Avoid_: product import, upload token
@@ -283,7 +287,7 @@ _Avoid_: Abandoned order (ABANDONED is a refund request state)
 A card hold on a cart that never became an order, for example when the shopper closed the tab after confirming the card. It is released 60 minutes after authorization, timed from the charge, not from when the PaymentIntent was created.
 
 **Swap rule**:
-A customer's choice, per order line, of what happens if the item is unavailable: exact item only, let the store suggest, or a named substitute.
+A customer's choice, per order line, of what happens if the item is unavailable: exact item only, let the store suggest, or a named substitute. Prepared food is always exact item only.
 _Avoid_: Substitution preference
 
 **Short**:
@@ -367,7 +371,7 @@ _Avoid_: Time slot, Delivery window
 The straight-line distance, in miles, from the store's confirmed coordinates. An address at exactly that distance is inside the area.
 
 **Leave at door**:
-The customer asked the store to leave the order without a handoff. Frozen items cannot use it.
+The customer asked the store to leave the order without a handoff. Frozen items and hot prepared food cannot use it.
 
 **Out for delivery**:
 A store-delivery order the store's driver has left with. The step between Ready and Delivered.
