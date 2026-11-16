@@ -32,5 +32,5 @@ export async function correctListingAttributesAction(input: z.input<typeof corre
   const result = await correctListingAttributes(session.store.id, toActor(session.user), listingId, correction);
   if (!result.ok) return { error: result.error };
   if (result.heldForAllergens) revalidateStorefront(session.store.id);
-  return { success: true, heldForAllergens: result.heldForAllergens === true };
+  return { success: true, ...(result.heldForAllergens && { heldForAllergens: true }) };
 }

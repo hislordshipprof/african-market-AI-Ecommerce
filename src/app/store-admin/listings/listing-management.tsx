@@ -185,6 +185,12 @@ function buildListingFormData(
   return fd;
 }
 
+const PREPARED_LABELS: Record<string, string> = {
+  none: "Not prepared food",
+  hot: "Hot, from the counter",
+  cold: "Cold, ready to eat",
+};
+
 const HELD_FOR_ALLERGENS = "Saved, off sale. Prepared food goes on sale once you state its allergens under Attributes, then reactivate it.";
 
 export function ListingManagement({ storeName, storeSlug, listings }: Props) {
@@ -508,12 +514,12 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
             <Label>Prepared food</Label>
             <Select value={prepared || "none"} onValueChange={(v) => setPrepared(!v || v === "none" ? "" : v)}>
               <SelectTrigger aria-label="Prepared food">
-                <SelectValue />
+                <SelectValue>{(value: string) => PREPARED_LABELS[value] ?? PREPARED_LABELS.none}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Not prepared food</SelectItem>
-                <SelectItem value="hot">Hot, from the counter</SelectItem>
-                <SelectItem value="cold">Cold, ready to eat</SelectItem>
+                {Object.entries(PREPARED_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

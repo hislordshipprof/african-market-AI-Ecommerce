@@ -149,7 +149,7 @@ export async function createListingAction(formData: FormData) {
       actor: toActor(session.user),
     });
     revalidateStorefront(session.store.id);
-    return { success: true, id: result.id, heldForAllergens: !result.active };
+    return { success: true, id: result.id, ...(result.active === false && { heldForAllergens: true }) };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create listing";
     return { error: message };
@@ -237,7 +237,7 @@ export async function updateListingAction(formData: FormData) {
       success: true,
       id: updated.id,
       qty: updated.qty,
-      heldForAllergens: updated.heldForAllergens,
+      ...(updated.heldForAllergens && { heldForAllergens: true }),
       ...(updated.stockMoved && { stockMoved: updated.stockMoved }),
     };
   } catch (err) {
