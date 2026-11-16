@@ -100,6 +100,8 @@ interface Listing {
 interface Props {
   storeName: string;
   storeSlug: string;
+  /** The store has opted in to shipping (#567). */
+  storeShips: boolean;
   listings: Listing[];
 }
 
@@ -185,7 +187,7 @@ function buildListingFormData(
   return fd;
 }
 
-export function ListingManagement({ storeName, storeSlug, listings }: Props) {
+export function ListingManagement({ storeName, storeSlug, storeShips, listings }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -515,7 +517,17 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
             />
           </div>
           <p id="listing-shippable-hint" className="text-sm text-muted-foreground">
-            {shipRefusal ?? "Shoppers outside your delivery area can order it by parcel when your store ships."}
+            {shipRefusal ??
+              (storeShips ? (
+                "Shoppers outside your delivery area can order it by parcel."
+              ) : (
+                <>
+                  Your store doesn&rsquo;t ship yet.{" "}
+                  <Link href={`/store-admin/shipping?store=${storeParam}`} className="font-medium text-primary underline underline-offset-4">
+                    Turn on shipping
+                  </Link>
+                </>
+              ))}
           </p>
         </div>
       )}
@@ -767,6 +779,9 @@ function ListingRow({
           )}
           {listing.perishable && (
             <Leaf className="size-3.5 shrink-0 text-green-600" aria-label="Perishable" />
+          )}
+          {listing.shippable && (
+            <Truck className="size-3.5 shrink-0 text-muted-foreground" aria-label="Ships nationwide" />
           )}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
