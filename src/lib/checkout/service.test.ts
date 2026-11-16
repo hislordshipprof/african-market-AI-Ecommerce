@@ -14,6 +14,7 @@ vi.mock("../inngest/client", () => ({
 }));
 
 import { computeQuote, placeOrder } from "./service";
+import { HOT_FOOD_HANDOFF } from "./quote";
 import { storeScoped, storeScopedTransaction } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 import { ADR_0021_SERVICE_FEE, NO_SERVICE_FEE } from "../order/platform-fee";
@@ -213,8 +214,8 @@ describe("computeQuote", () => {
     expect(q.totalCents).toBe(4000);
   });
 
-  it("courier refuses leave at door with frozen or perishable items", () => {
-    for (const line of [{ frozen: true }, { perishable: true }]) {
+  it("courier refuses leave at door with frozen, perishable or hot (#570) items", () => {
+    for (const line of [{ frozen: true }, { perishable: true }, { hot: true }]) {
       const q = computeQuote(
         0,
         [{ price: 4000, qty: 1, maxPerOrder: null, ...line }],
@@ -224,6 +225,18 @@ describe("computeQuote", () => {
       );
       expect(q.problems).toEqual([expect.objectContaining({ code: "ineligible" })]);
     }
+  });
+
+  it("#570 AC5: store delivery refuses leave at door with a hot item, and allows it with a cold one", () => {
+    const delivery = (leaveAtDoor: boolean) => ({
+      enabled: true, feeCents: 500, radiusMi: 5, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor,
+    });
+    const quote = (hot: boolean, leaveAtDoor: boolean) => computeQuote(
+      0, [{ price: 4000, qty: 1, maxPerOrder: null, hot }], validContact, "store-delivery", NO_SERVICE_FEE, delivery(leaveAtDoor),
+    );
+    expect(quote(true, true).problems).toEqual([{ code: "ineligible", message: HOT_FOOD_HANDOFF }]);
+    expect(quote(true, false).problems).toEqual([]);
+    expect(quote(false, true).problems).toEqual([]);
   });
 
   it("returns a valid expiration ~15 minutes out", () => {

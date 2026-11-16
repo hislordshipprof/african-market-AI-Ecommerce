@@ -1,5 +1,6 @@
 import { lockListingRow, platformAdmin, storeScopedTransaction } from "../db";
 import type { Actor } from "../listing/service";
+import { preparedSaleBlocked } from "../listing/prepared";
 import { attributeGroup, type Allergen, type AttributeStatus, type DietaryClaim, type ProductAttributes } from "./attributes";
 import { resolveIngredients } from "./ingredients";
 
@@ -18,7 +19,8 @@ export interface ListingAttributesCorrection {
   dietary?: { status: OwnerStatus; values: DietaryClaim[] };
 }
 
-export type CorrectionResult = { ok: true } | { ok: false; error: string };
+/** `heldForAllergens`: the listing is prepared food and went off sale because its allergens are no longer owner-stated (#570). */
+export type CorrectionResult = { ok: true; heldForAllergens?: boolean } | { ok: false; error: string };
 
 type Group<T> = { status: AttributeStatus; values: T[] };
 
@@ -204,6 +206,9 @@ export async function correctListingAttributes(
       });
     }
     const own = listing.attributes;
+    const heldForAllergens = correction.allergens !== undefined && listing.active
+      && preparedSaleBlocked(listing, data.allergensStatus);
+    if (heldForAllergens) await tx.listing.update({ where: { id: listingId }, data: { active: false } });
     await tx.auditLog.create({
       data: {
         storeId,
@@ -220,9 +225,9 @@ export async function correctListingAttributes(
           dietaryClaims: own?.dietaryClaims ?? [],
           dietaryStatus: own?.dietaryStatus ?? null,
         },
-        after: { ...data, ...(ingredientIds ? { ingredientIds } : {}) },
+        after: { ...data, ...(ingredientIds ? { ingredientIds } : {}), ...(heldForAllergens ? { active: false } : {}) },
       },
     });
-    return { ok: true };
+    return heldForAllergens ? { ok: true, heldForAllergens } : { ok: true };
   });
 }

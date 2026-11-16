@@ -5,6 +5,7 @@ import { ALLERGENS, DIETARY_CLAIMS } from "../catalog/attributes";
 import { correctListingAttributes, ownerListingAttributes } from "../catalog/listing-attributes";
 import { parseInput } from "../security/parse-input";
 import { requireStoreOwner } from "../store-admin/session";
+import { revalidateStorefront } from "../storefront/cache";
 import { toActor } from "./service";
 
 const ownerStatus = z.enum(["known", "unknown", "catalog"]);
@@ -29,5 +30,7 @@ export async function correctListingAttributesAction(input: z.input<typeof corre
   if (!parsed.ok) return { error: "Check the attributes and try again" };
   const { listingId, ...correction } = parsed.data;
   const result = await correctListingAttributes(session.store.id, toActor(session.user), listingId, correction);
-  return result.ok ? { success: true } : { error: result.error };
+  if (!result.ok) return { error: result.error };
+  if (result.heldForAllergens) revalidateStorefront(session.store.id);
+  return { success: true, heldForAllergens: result.heldForAllergens === true };
 }

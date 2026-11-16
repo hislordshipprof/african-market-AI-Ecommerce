@@ -22,6 +22,9 @@ export interface StoreDeliveryQuote {
 }
 
 /** A Starter store does not offer courier delivery (ADR-0021). */
+/** #570: hot food is handed over, never left at the door. */
+export const HOT_FOOD_HANDOFF = "Hot food is handed to you, not left at the door. Turn off Leave at door.";
+
 export const COURIER_NOT_OFFERED = "This store does not offer courier delivery.";
 
 /** The cheapest live courier quote (#140 selection), or why courier delivery is unavailable. */
@@ -63,7 +66,7 @@ export function withTax(quote: CheckoutQuote, taxCents: number): CheckoutQuote {
 
 export function computeQuote(
   minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean }>,
+  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean; hot?: boolean }>,
   contact: Contact,
   fulfillment: Fulfillment,
   serviceFee: ServiceFeeSettings,
@@ -127,6 +130,8 @@ export function computeQuote(
       }
       if (courier.leaveAtDoor && cartLines.some((line) => line.frozen || line.perishable)) {
         problems.push({ code: "ineligible", message: "Frozen and perishable items need a hand-to-hand delivery. Turn off Leave at door." });
+      } else if (courier.leaveAtDoor && cartLines.some((line) => line.hot)) {
+        problems.push({ code: "ineligible", message: HOT_FOOD_HANDOFF });
       }
     }
   } else if (fulfillment === "store-delivery") {
@@ -154,6 +159,8 @@ export function computeQuote(
         code: "ineligible",
         message: "Frozen items require handoff.",
       });
+    } else if (delivery?.leaveAtDoor && cartLines.some((line) => line.hot)) {
+      problems.push({ code: "ineligible", message: HOT_FOOD_HANDOFF });
     }
   }
 

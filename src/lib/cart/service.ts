@@ -9,6 +9,7 @@ import {
 } from "../db";
 import { catalogFor } from "../storefront/catalog";
 import type { SwapRuleValue } from "../storefront/cart-store";
+import { PREPARED_EXACT_ONLY } from "../listing/prepared";
 import { shareFirstCart } from "./bootstrap";
 import {
   decideAddQty,
@@ -58,6 +59,8 @@ export interface CartLineView {
       maxPerOrder: number | null;
       frozen: boolean;
       perishable: boolean;
+      prepared: string | null;
+      prepMinutes: number | null;
       masterProduct: { name: string; categoryId: string | null } | null;
     };
   };
@@ -228,6 +231,7 @@ export interface AppliedAddLine {
     status: string | null;
     customName: string | null;
     maxPerOrder: number | null;
+    prepared: string | null;
     masterProduct: { name: string; imageUrl: string | null } | null;
   };
   variant: { id: string; label: string; price: number };
@@ -296,6 +300,7 @@ export async function applyAddLine(
     status: variant.listing.status,
     customName: variant.listing.customName,
     maxPerOrder: variant.listing.maxPerOrder,
+    prepared: variant.listing.prepared,
     masterProduct: variant.listing.masterProduct
       ? { name: variant.listing.masterProduct.name, imageUrl: variant.listing.masterProduct.imageUrl }
       : null,
@@ -420,6 +425,15 @@ export async function updateLineSwapRule(
 ): Promise<void> {
   if (!isCartSwapRule(swapRule)) {
     throw new CartError("Invalid swap rule", "INVALID_SWAP_RULE");
+  }
+  if (swapRule !== "exact_only") {
+    const line = await storeScoped(storeId).cartLine.findUnique({
+      where: { id: lineId },
+      select: { cartId: true, variant: { select: { listing: { select: { prepared: true } } } } },
+    });
+    if (line?.cartId === cartId && line.variant.listing.prepared != null) {
+      throw new CartError(PREPARED_EXACT_ONLY, "INVALID_SWAP_RULE");
+    }
   }
 
   if (swapRule === "named_substitute") {
@@ -596,6 +610,8 @@ export async function getCartWithLines(
           maxPerOrder: line.variant.listing.maxPerOrder,
           frozen: line.variant.listing.frozen,
           perishable: line.variant.listing.perishable,
+          prepared: line.variant.listing.prepared,
+          prepMinutes: line.variant.listing.prepMinutes,
           masterProduct: line.variant.listing.masterProduct
             ? {
                 name: line.variant.listing.masterProduct.name,

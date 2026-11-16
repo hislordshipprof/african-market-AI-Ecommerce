@@ -261,14 +261,21 @@ export function CartPage({
                             quantity.
                           </p>
                         )}
-                        <button
-                          className={styles.swap}
-                          onClick={() => select(line)}
-                        >
-                          Replace with{" "}
-                          <span>{swapRuleLabel(line, catalog)}</span>
-                          <ArrowRight size={15} />
-                        </button>
+                        {item?.prepared ? (
+                          <p className={styles.muted}>
+                            Made fresh · exact item only, refunded if the store
+                            cannot make it
+                          </p>
+                        ) : (
+                          <button
+                            className={styles.swap}
+                            onClick={() => select(line)}
+                          >
+                            Replace with{" "}
+                            <span>{swapRuleLabel(line, catalog)}</span>
+                            <ArrowRight size={15} />
+                          </button>
+                        )}
                         <div className={styles.lineActions}>
                           <QuickAddStepper
                             item={line}

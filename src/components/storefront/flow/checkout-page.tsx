@@ -336,6 +336,9 @@ function RealCheckoutForm({
     item: catalog.find((item) => cartItemKey(item) === cartItemKey(line)),
   }));
   const frozen = metadata.some(({ item }) => item?.frozen);
+  const hot = metadata.some(({ item }) => item?.prepared === "hot");
+  // Frozen and hot food are handed over, never left at the door (#570).
+  const handoff = frozen || hot;
   const weightG = metadata.reduce(
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
@@ -356,7 +359,7 @@ function RealCheckoutForm({
         city: confirmed.city,
         state: confirmed.state,
         zip: confirmed.zip,
-        leaveAtDoor: !frozen && leaveAtDoor,
+        leaveAtDoor: !handoff && leaveAtDoor,
       }
     : undefined;
   const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
@@ -642,7 +645,7 @@ function RealCheckoutForm({
               city,
               state: region,
               zip,
-              leaveAtDoor: !frozen && leaveAtDoor,
+              leaveAtDoor: !handoff && leaveAtDoor,
             }).then((result) => {
               setConfirming(false);
               if (!result.ok) {
@@ -672,7 +675,7 @@ function RealCheckoutForm({
           confirmed={confirmed}
           leaveAtDoor={leaveAtDoor}
           setLeaveAtDoor={setLeaveAtDoor}
-          frozen={frozen}
+          frozen={handoff}
           onEdit={() => {
             setConfirmed(null);
             setSuggestions([]);
@@ -717,6 +720,8 @@ function RealCheckoutForm({
       submitted={submitted}
       payState={payState}
       frozen={frozen}
+      hot={hot}
+      prepMinutes={slotOptions?.prepMinutes}
       weightG={weightG}
       courierEligible={settings.courierOffered}
       onSubmit={pay}
@@ -937,6 +942,10 @@ interface CheckoutLayoutProps {
   signedIn?: boolean;
   identityLocked?: boolean;
   frozen: boolean;
+  /** A hot prepared item is in the basket: no Leave at door (#570). */
+  hot?: boolean;
+  /** The basket's pickup prep minutes, when the server sent them (#570). */
+  prepMinutes?: number;
   weightG: number;
   courierEligible: boolean;
   onSubmit: (e: FormEvent) => void;
@@ -957,7 +966,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     setAppliedPromo, promoMessage, setPromoMessage, coupon,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
-    frozen, weightG, courierEligible,
+    frozen, hot = false, prepMinutes, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     signedIn = false, identityLocked = false, whatsapp,
   } = props;
@@ -1054,6 +1063,11 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   unavailable.
                 </p>
               )}
+              {hot && !frozen && fulfillment !== "pickup" && (
+                <p className={styles.notice}>
+                  Hot food is handed to you. Leave at door is unavailable.
+                </p>
+              )}
               {fulfillment === "pickup" ? (
                 <AddressCard
                   address={settings.address}
@@ -1101,8 +1115,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   <label className={styles.check}>
                     <input
                       type="checkbox"
-                      checked={!frozen && leaveAtDoor}
-                      disabled={frozen}
+                      checked={!(frozen || hot) && leaveAtDoor}
+                      disabled={frozen || hot}
                       onChange={(event) => setLeaveAtDoor(event.target.checked)}
                     />
                     Leave at door
@@ -1137,7 +1151,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 >
                   {settings.closed
                     ? "When the store opens"
-                    : `ASAP · about ${settings.prepTimeMinutes} min`}
+                    : `ASAP · about ${prepMinutes ?? settings.prepTimeMinutes} min`}
                 </Chip>
                 {fulfillment === "pickup" && slots.length > 0 && (
                   <Chip

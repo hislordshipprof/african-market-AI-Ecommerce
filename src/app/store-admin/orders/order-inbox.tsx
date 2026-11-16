@@ -63,6 +63,7 @@ import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { CourierTiming } from "./courier-timing";
 import { BatchPicking, packingHref } from "./batch-picking";
+import { orderPrepMinutes } from "@/lib/listing/prepared";
 
 const STATUS_CONFIG: Record<
   string,

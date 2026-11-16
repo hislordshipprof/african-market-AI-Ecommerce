@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lockListingVariantRows } from "../db";
+import { MAX_PREP_MINUTES, PREPARED_NEEDS_ALLERGENS, preparedSaleBlocked, type PreparedKind } from "./prepared";
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
@@ -129,11 +130,23 @@ export interface CreateListingInput {
   status?: StockStatus | null;
   frozen: boolean;
   perishable: boolean;
+  /** #570: hot or cold prepared food, with its prep minutes; null for grocery. */
+  prepared?: PreparedKind | null;
+  prepMinutes?: number | null;
   maxPerOrder?: number | null;
   variants: CreateVariantInput[];
   actor: Actor;
   /** Where the listing came from, recorded on its audit row (e.g. `photo_draft`). */
   source?: string;
+}
+
+/** Prepared food carries whole prep minutes up to MAX_PREP_MINUTES; grocery carries none. */
+function preparedFields(prepared: PreparedKind | null, prepMinutes: number | null) {
+  if (prepared == null) return { prepared: null, prepMinutes: null };
+  if (prepMinutes == null || !Number.isInteger(prepMinutes) || prepMinutes < 0 || prepMinutes > MAX_PREP_MINUTES) {
+    throw new Error(`Prep time must be a whole number of minutes, 0 to ${MAX_PREP_MINUTES}`);
+  }
+  return { prepared, prepMinutes };
 }
 
 export async function createListing(input: CreateListingInput) {
@@ -148,6 +161,7 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
     qty: input.qty ?? undefined,
     status: input.status ?? undefined,
   });
+  const prepared = preparedFields(input.prepared ?? null, input.prepMinutes ?? null);
 
   const listing = await tx.listing.create({
     data: {
@@ -160,6 +174,9 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
       status: stock.status,
       frozen: input.frozen,
       perishable: input.perishable,
+      ...prepared,
+      // A new listing has no owner-stated allergens yet, so a prepared one waits off sale.
+      active: !preparedSaleBlocked(prepared, null),
       maxPerOrder: input.maxPerOrder ?? null,
     },
   });
@@ -195,6 +212,9 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
         status: listing.status,
         frozen: listing.frozen,
         perishable: listing.perishable,
+        prepared: listing.prepared,
+        prepMinutes: listing.prepMinutes,
+        active: listing.active,
         ...(input.source ? { source: input.source } : {}),
       },
     },
@@ -216,6 +236,9 @@ export interface UpdateListingInput {
   status?: StockStatus | null;
   frozen?: boolean;
   perishable?: boolean;
+  /** Both together: a kind with its prep minutes, or null to make it grocery again. */
+  prepared?: PreparedKind | null;
+  prepMinutes?: number | null;
   maxPerOrder?: number | null;
   actor: Actor;
   variants?: SaveVariantInput[];
@@ -246,6 +269,14 @@ export async function updateListing(input: UpdateListingInput) {
     if (input.frozen !== undefined) data.frozen = input.frozen;
     if (input.perishable !== undefined) data.perishable = input.perishable;
     if (input.maxPerOrder !== undefined) data.maxPerOrder = input.maxPerOrder;
+    let heldForAllergens = false;
+    if (input.prepared !== undefined) {
+      const prepared = preparedFields(input.prepared, input.prepMinutes ?? null);
+      Object.assign(data, prepared);
+      const own = await tx.listingAttributes.findUnique({ where: { listingId: input.listingId }, select: { allergensStatus: true } });
+      heldForAllergens = existing.active && preparedSaleBlocked(prepared, own?.allergensStatus);
+      if (heldForAllergens) data.active = false;
+    }
 
     const resolvedStockMode = input.stockMode ?? existing.stockMode;
 
@@ -278,7 +309,22 @@ export async function updateListing(input: UpdateListingInput) {
       && existing.qty !== null && existing.qty !== input.qtyLoaded
       ? { from: input.qtyLoaded, to: existing.qty }
       : null;
-    const updated = { ...listing, stockMoved };
+    const updated = { ...listing, stockMoved, heldForAllergens };
+
+    if (input.prepared !== undefined && (existing.prepared !== listing.prepared || existing.prepMinutes !== listing.prepMinutes)) {
+      await tx.auditLog.create({
+        data: {
+          storeId: input.storeId,
+          actorId: input.actor.id,
+          actorEmail: input.actor.email,
+          action: "listing.prepared_change",
+          entityType: "listing",
+          entityId: input.listingId,
+          before: { prepared: existing.prepared, prepMinutes: existing.prepMinutes, active: existing.active },
+          after: { prepared: listing.prepared, prepMinutes: listing.prepMinutes, active: listing.active },
+        },
+      });
+    }
 
     if (input.price !== undefined && input.price !== existing.price) {
       await tx.auditLog.create({
@@ -365,7 +411,9 @@ async function setListingActive(
 ) {
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
-    const existing = await tx.listing.findUniqueOrThrow({ where: { id: listingId } });
+    await lockListingRow(tx, listingId);
+    const existing = await tx.listing.findUniqueOrThrow({ where: { id: listingId }, include: { attributes: { select: { allergensStatus: true } } } });
+    if (active && preparedSaleBlocked(existing, existing.attributes?.allergensStatus)) throw new Error(PREPARED_NEEDS_ALLERGENS);
 
     const updated = await tx.listing.update({
       where: { id: listingId },

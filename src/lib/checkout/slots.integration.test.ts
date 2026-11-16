@@ -121,7 +121,7 @@ describe.skipIf(!hasDb)("slot reservation at placeOrder (#565)", () => {
 
   it("lets one of two concurrent orders take a slot's last place, refuses the other with fresh slots, and a cancel releases it", async () => {
     const { storeId, variantId, row } = await makeStore(1);
-    const before = await slotOptions(storeScoped(storeId), storeId, row, "pickup", new Date());
+    const before = await slotOptions(storeScoped(storeId), storeId, row, "pickup", new Date(), null);
     const slot = before.slots[0]!.id;
     const results = await Promise.allSettled([
       recordAuthorizedOrder(storeId, await orderInput(storeId, variantId, "pickup", slot)),
@@ -139,14 +139,14 @@ describe.skipIf(!hasDb)("slot reservation at placeOrder (#565)", () => {
 
     const orderId = (won[0] as PromiseFulfilledResult<{ orderId: string }>).value.orderId;
     expect(await cancelOrder(storeId, orderId, { action: "auto_cancel" })).toEqual({ ok: true });
-    const after = await slotOptions(storeScoped(storeId), storeId, row, "pickup", new Date());
+    const after = await slotOptions(storeScoped(storeId), storeId, row, "pickup", new Date(), null);
     expect(after.slots.map((s) => s.id)).toContain(slot);
     await expect(recordAuthorizedOrder(storeId, await orderInput(storeId, variantId, "pickup", slot))).resolves.toMatchObject({ created: true });
   });
 
   it("a heavy store delivery order carries a slot: ASAP and unoffered times are refused before any write", async () => {
     const { storeId, variantId, row } = await makeStore(3);
-    const options = await slotOptions(storeScoped(storeId), storeId, row, "store-delivery", new Date());
+    const options = await slotOptions(storeScoped(storeId), storeId, row, "store-delivery", new Date(), null);
     expect(options.required).toBe(true);
     const slot = options.slots[0]!.id;
 
@@ -166,9 +166,9 @@ describe.skipIf(!hasDb)("slot reservation at placeOrder (#565)", () => {
   it("counts only this store's orders against a slot", async () => {
     const a = await makeStore(1);
     const b = await makeStore(1);
-    const slot = (await slotOptions(storeScoped(a.storeId), a.storeId, a.row, "pickup", new Date())).slots[0]!.id;
+    const slot = (await slotOptions(storeScoped(a.storeId), a.storeId, a.row, "pickup", new Date(), null)).slots[0]!.id;
     await recordAuthorizedOrder(a.storeId, await orderInput(a.storeId, a.variantId, "pickup", slot));
-    const forB = await slotOptions(storeScoped(b.storeId), b.storeId, b.row, "pickup", new Date());
+    const forB = await slotOptions(storeScoped(b.storeId), b.storeId, b.row, "pickup", new Date(), null);
     expect(forB.slots.map((s) => s.id)).toContain(slot);
     await expect(recordAuthorizedOrder(b.storeId, await orderInput(b.storeId, b.variantId, "pickup", slot))).resolves.toMatchObject({ created: true });
   });

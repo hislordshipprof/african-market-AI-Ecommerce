@@ -4,6 +4,7 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 import { createPaymentIntent, placeOrder, quoteCheckout, saveDeliverySnapshot } from "../checkout/service";
 import { writeGeocodeCache } from "../address/cache";
+import { PREPARED_FOOD_TAX_CODE } from "../listing/prepared";
 import { fakeTaxCalculator, setTaxCalculatorForTests, stripeTaxCalculator, TAX_LOCATION_MESSAGE, TAX_UNAVAILABLE_MESSAGE, type TaxCalculator } from "./calculator";
 
 vi.mock("../inngest/send", () => ({ sendOrderAuthorized: vi.fn().mockResolvedValue(undefined) }));
@@ -178,6 +179,26 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
     expect(order).toMatchObject({ status: "AUTHORIZED", taxCents: 95, totalAuthorizedCents: quote.holdCents });
     const states = fake.calls.map((call) => (call.input as { address: { state: string } }).address.state);
     expect(states).toEqual(["AR"]);
+  });
+
+  it("#570 AC2, AC4: a prepared dish is taxed as prepared food, not exempt grocery, and its order line is exact item only", async () => {
+    const fake = install(fakeTaxCalculator(RATES));
+    const scoped = storeScoped(tx);
+    // Jollof on the exempt food master: the prepared flag, not the category, sets its tax code.
+    const listing = await scoped.listing.create({ data: { storeId: tx, masterProductId: foodMaster, price: 1000, stockMode: "unlimited", prepared: "hot", prepMinutes: 15 } });
+    const jollof = (await scoped.listingVariant.create({ data: { listingId: listing.id, label: "Plate", price: 1000, weightG: 400 } })).id;
+    const cartId = (await scoped.cart.create({ data: { storeId: tx } })).id;
+    // A line written before the owner marked it prepared still carries a swap; placement drops it.
+    await scoped.cartLine.create({ data: { storeId: tx, cartId, variantId: jollof, qty: 1, swapRule: "named_substitute", substituteVariantId: variants.get(tx)!.food } });
+
+    const { order } = await checkout(tx, cartId);
+
+    const call = fake.calls[0]!.input as { lines: Array<{ reference: string; taxCode: string | null }> };
+    expect(call.lines).toEqual([expect.objectContaining({ reference: jollof, taxCode: PREPARED_FOOD_TAX_CODE })]);
+    // $10.00 at 8.25% = 82.5 → 83: prepared food is taxed where grocery food is exempt.
+    expect(order.taxCents).toBe(83);
+    const lines = await scoped.orderLine.findMany({ where: { orderId: order.id } });
+    expect(lines).toEqual([expect.objectContaining({ listingVariantId: jollof, swapRule: "exact_only", substituteVariantId: null })]);
   });
 
   it("AC2: a Montana store collects no tax, and the zero is explained", async () => {
