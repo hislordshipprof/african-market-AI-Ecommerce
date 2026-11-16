@@ -11,6 +11,7 @@ import {
 import { catalogFor } from "../storefront/catalog";
 import type { SwapRuleValue } from "../storefront/cart-store";
 import { PREPARED_EXACT_ONLY } from "../listing/prepared";
+import { cateringMinMessage } from "../listing/catering";
 import { shareFirstCart } from "./bootstrap";
 import {
   decideAddQty,
@@ -64,6 +65,8 @@ export interface CartLineView {
       perishable: boolean;
       prepared: string | null;
       prepMinutes: number | null;
+      cateringLeadHours: number | null;
+      cateringMinQty: number | null;
       masterProduct: { name: string; categoryId: string | null } | null;
     };
   };
@@ -80,6 +83,7 @@ export class CartError extends Error {
     message: string,
     public readonly code:
       | "MAX_PER_ORDER"
+      | "MIN_QTY"
       | "VARIANT_STORE_MISMATCH"
       | "INVALID_SWAP_RULE"
       | "INVALID_SUBSTITUTE"
@@ -283,9 +287,11 @@ export async function applyAddLine(
   // The cart row is already locked. FOR UPDATE cannot lock a missing line, so
   // concurrent first-adds serialize on that cart lock.
   const existing = await lockCartLineByVariant(tx, cartId, variantId);
+  // #571: a catering item goes in at its minimum quantity.
+  const minQty = variant.listing.cateringMinQty ?? 1;
   const decision = decideAddQty({
     existingQty: existing?.qty ?? 0,
-    addQty: qty,
+    addQty: Math.max(qty, minQty - (existing?.qty ?? 0)),
     maxPerOrder: variant.listing.maxPerOrder,
     clampToMax: options?.clampToMax === true,
   });
@@ -403,6 +409,8 @@ export async function updateLineQty(
       throw new CartError("Cart line not found", "CART_NOT_FOUND");
     }
 
+    const minQty = line.variant.listing.cateringMinQty;
+    if (minQty != null && qty < minQty) throw new CartError(cateringMinMessage(minQty), "MIN_QTY");
     const decision = decideLineQty(qty, line.variant.listing.maxPerOrder);
     if (!decision.ok) {
       throw new CartError(
@@ -616,6 +624,8 @@ export async function getCartWithLines(
           perishable: line.variant.listing.perishable,
           prepared: line.variant.listing.prepared,
           prepMinutes: line.variant.listing.prepMinutes,
+          cateringLeadHours: line.variant.listing.cateringLeadHours,
+          cateringMinQty: line.variant.listing.cateringMinQty,
           masterProduct: line.variant.listing.masterProduct
             ? {
                 name: line.variant.listing.masterProduct.name,

@@ -4,8 +4,9 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider } from "../stripe/fake";
-import { computeQuote, recordAuthorizedOrder, type RecordAuthorizedOrderInput } from "./service";
+import { BasketChangedError, computeQuote, recordAuthorizedOrder, type RecordAuthorizedOrderInput } from "./service";
 import { slotOptions, SlotUnavailableError } from "./slots";
+import { addLine, CartError, updateLineQty } from "../cart/service";
 import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 import type { SlotSchedule } from "../order/slot-schedule";
 import type { Fulfillment } from "../customer-flow/contracts";
@@ -103,9 +104,9 @@ describe.skipIf(!hasDb)("catering pre-orders (#571)", () => {
     return cart;
   }
 
-  async function orderInput(storeId: string, variantIds: string[], fulfillment: Fulfillment, pickupSlot: string | null): Promise<RecordAuthorizedOrderInput> {
-    const cart = await cartWith(storeId, variantIds);
-    const quote = computeQuote(0, variantIds.map(() => ({ price: PRICE, qty: 2, maxPerOrder: null })), CONTACT, fulfillment, ADR_0021_SERVICE_FEE);
+  async function orderInput(storeId: string, variantIds: string[], fulfillment: Fulfillment, pickupSlot: string | null, qty = 2): Promise<RecordAuthorizedOrderInput> {
+    const cart = await cartWith(storeId, variantIds, qty);
+    const quote = computeQuote(0, variantIds.map(() => ({ price: PRICE, qty, maxPerOrder: null })), CONTACT, fulfillment, ADR_0021_SERVICE_FEE);
     return {
       cartId: cart.id,
       contact: CONTACT,
@@ -114,7 +115,7 @@ describe.skipIf(!hasDb)("catering pre-orders (#571)", () => {
       notes: null,
       paymentIntentId: cart.paymentIntentId!,
       quote,
-      lines: variantIds.map((variantId) => ({ variantId, qty: 2, price: PRICE, swapRule: "exact_only", substituteVariantId: null })),
+      lines: variantIds.map((variantId) => ({ variantId, qty, price: PRICE, swapRule: "exact_only", substituteVariantId: null })),
     };
   }
 
@@ -164,5 +165,24 @@ describe.skipIf(!hasDb)("catering pre-orders (#571)", () => {
     }
     await expect(recordAuthorizedOrder(storeId, await orderInput(storeId, [tray], "pickup", null)))
       .rejects.toBeInstanceOf(SlotUnavailableError);
+  });
+
+  it("AC1: a catering line starts at its minimum quantity and cannot go below it", async () => {
+    const { storeId, tray } = await makeStore(true);
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId } });
+    await addLine(storeId, cart.id, tray, 1);
+    const line = await storeScoped(storeId).cartLine.findFirstOrThrow({ where: { cartId: cart.id } });
+    expect(line.qty).toBe(2);
+    await expect(updateLineQty(storeId, cart.id, line.id, 1)).rejects.toBeInstanceOf(CartError);
+    await updateLineQty(storeId, cart.id, line.id, 3);
+    expect((await storeScoped(storeId).cartLine.findUniqueOrThrow({ where: { id: line.id } })).qty).toBe(3);
+  });
+
+  it("AC1: placeOrder refuses a catering line below its minimum, even at a valid slot", async () => {
+    const { storeId, row, tray } = await makeStore(true);
+    const input = await orderInput(storeId, [tray], "pickup", null, 1);
+    const slot = (await slotOptions(storeScoped(storeId), storeId, row, "pickup", new Date(), input.cartId)).slots[0]!.id;
+    await expect(recordAuthorizedOrder(storeId, { ...input, pickupSlot: slot })).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(storeId).order.count()).toBe(0);
   });
 });
