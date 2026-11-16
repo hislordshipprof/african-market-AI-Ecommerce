@@ -1,0 +1,254 @@
+import { createHash } from "node:crypto";
+import { storeScoped, storeScopedTransaction } from "../db";
+import { quotedFrom } from "../email/from";
+import { sendEmail } from "../email/send";
+import { escapeHtml } from "../format";
+import { QUANTITY_MAX } from "../copilot/types";
+import { NO_COUNT } from "../copilot/reorder-list";
+import type { Actor, Result, SupplierChannel } from "./suppliers";
+
+export const PO_STATUSES = ["draft", "sent", "received", "cancelled"] as const;
+export type PoStatus = (typeof PO_STATUSES)[number];
+
+/** Received and cancelled are final. Sending is its own step (sendPurchaseOrder). */
+const MOVES: Record<PoStatus, PoStatus[]> = {
+  draft: ["cancelled"],
+  sent: ["received", "cancelled"],
+  received: [],
+  cancelled: [],
+};
+
+export interface PurchaseOrderView {
+  id: string;
+  number: number;
+  status: PoStatus;
+  sentVia: SupplierChannel | null;
+  sentAt: Date | null;
+  createdAt: Date;
+  supplier: { id: string; name: string; channel: SupplierChannel; email: string | null; phone: string | null; leadDays: number };
+  lines: Array<{ id: string; listingId: string; name: string; quantity: number | null }>;
+}
+
+export type DraftResult = { ok: true; drafted: number; unassigned: string[] } | { ok: false; message: string };
+export type SendResult = { ok: true; via: SupplierChannel; link?: string } | { ok: false; message: string };
+
+const audit = (storeId: string, actor: Actor, action: string, entityId: string, before?: object, after?: object) => ({
+  data: { storeId, actorId: actor.id, actorEmail: actor.email, action, entityType: "purchase_order", entityId, before, after },
+});
+
+/**
+ * Splits the saved reorder list into one draft per supplier. A supplier's existing draft gets the new
+ * lines and keeps its number; sent orders are never touched. Items with no supplier are left out.
+ */
+export async function draftPurchaseOrders(storeId: string, actor: Actor): Promise<DraftResult> {
+  return storeScopedTransaction(storeId, async (tx) => {
+    // Serialises drafting per store so two taps cannot take the same order number.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`purchase-orders:${storeId}`}))`;
+    const list = await tx.reorderList.findUnique({
+      where: { storeId },
+      select: { items: { orderBy: { position: "asc" }, select: { listingId: true, name: true, quantity: true } } },
+    });
+    if (!list || list.items.length === 0) return { ok: false, message: "Save a reorder list first." };
+    const links = await tx.supplierListing.findMany({
+      where: { listingId: { in: list.items.map((item) => item.listingId) }, supplier: { archivedAt: null } },
+      select: { listingId: true, supplierId: true },
+    });
+    const supplierOf = new Map(links.map((link) => [link.listingId, link.supplierId]));
+    const bySupplier = new Map<string, typeof list.items>();
+    const unassigned: string[] = [];
+    for (const item of list.items) {
+      const supplierId = supplierOf.get(item.listingId);
+      if (!supplierId) unassigned.push(item.name);
+      else bySupplier.set(supplierId, [...(bySupplier.get(supplierId) ?? []), item]);
+    }
+    if (bySupplier.size === 0) return { ok: false, message: "No item on the list has a supplier yet. Pick each supplier's items first." };
+
+    const last = await tx.purchaseOrder.aggregate({ where: { storeId }, _max: { number: true } });
+    let next = (last._max.number ?? 0) + 1;
+    for (const [supplierId, items] of bySupplier) {
+      const existing = await tx.purchaseOrder.findFirst({ where: { storeId, supplierId, status: "draft" }, select: { id: true } });
+      const order = existing ?? (await tx.purchaseOrder.create({ data: { storeId, supplierId, number: next++, createdById: actor.id } }));
+      if (existing) {
+        await tx.purchaseOrderLine.deleteMany({ where: { orderId: order.id } });
+        await tx.purchaseOrder.update({ where: { id: order.id }, data: { updatedAt: new Date() } });
+      }
+      await tx.purchaseOrderLine.createMany({
+        data: items.map((item, position) => ({ orderId: order.id, storeId, listingId: item.listingId, name: item.name, quantity: item.quantity, position })),
+      });
+      await tx.auditLog.create(audit(storeId, actor, "purchase_order.draft", order.id, undefined, {
+        supplierId,
+        lines: items.map((item) => ({ listingId: item.listingId, quantity: item.quantity })),
+      }));
+    }
+    return { ok: true, drafted: bySupplier.size, unassigned };
+  });
+}
+
+/** Changes quantities on a draft. 0 removes a line; the last line cannot go (cancel the order instead). */
+export async function editPurchaseOrderLines(
+  storeId: string,
+  orderId: string,
+  edits: Array<{ lineId: string; quantity: number | null }>,
+  actor: Actor,
+): Promise<Result> {
+  for (const edit of edits) {
+    const q = edit.quantity;
+    if (q !== null && (!Number.isInteger(q) || q < 0 || q > QUANTITY_MAX)) return { ok: false, message: `Whole numbers, up to ${QUANTITY_MAX}.` };
+  }
+  return storeScopedTransaction(storeId, async (tx) => {
+    const order = await tx.purchaseOrder.findFirst({
+      where: { id: orderId, storeId },
+      select: { status: true, lines: { select: { id: true, quantity: true } } },
+    });
+    if (!order) return { ok: false, message: "That order is not in your store." };
+    if (order.status !== "draft") return { ok: false, message: "Only a draft can be changed." };
+    const current = new Map(order.lines.map((line) => [line.id, line.quantity]));
+    if (edits.some((edit) => !current.has(edit.lineId))) return { ok: false, message: "A line is no longer on this order. Reload the page." };
+    const removed = edits.filter((edit) => edit.quantity === 0).map((edit) => edit.lineId);
+    if (removed.length >= order.lines.length) return { ok: false, message: "An order needs at least one line. Cancel it instead." };
+    const changed = edits.filter((edit) => current.get(edit.lineId) !== edit.quantity);
+    if (changed.length === 0) return { ok: true };
+    for (const edit of changed) {
+      if (edit.quantity === 0) await tx.purchaseOrderLine.delete({ where: { id: edit.lineId } });
+      else await tx.purchaseOrderLine.update({ where: { id: edit.lineId }, data: { quantity: edit.quantity } });
+    }
+    await tx.purchaseOrder.update({ where: { id: orderId }, data: { updatedAt: new Date() } });
+    await tx.auditLog.create(audit(storeId, actor, "purchase_order.edit", orderId,
+      { lines: changed.map((edit) => ({ lineId: edit.lineId, quantity: current.get(edit.lineId) })) },
+      { lines: changed.map((edit) => ({ lineId: edit.lineId, quantity: edit.quantity })) },
+    ));
+    return { ok: true };
+  });
+}
+
+export function purchaseOrderText(order: Pick<PurchaseOrderView, "number" | "lines">, storeName: string): string {
+  return [
+    `Purchase order ${order.number} from ${storeName}`,
+    ...order.lines.map((line) => `${line.name}: ${line.quantity ?? NO_COUNT}`),
+    "Please confirm what you can supply and when. Thank you.",
+  ].join("\n");
+}
+
+/** A link the owner sends from their own phone. The platform never messages a supplier on WhatsApp or SMS. */
+export function shareLink(channel: "whatsapp" | "sms", e164: string, text: string): string {
+  if (channel === "whatsapp") return `https://wa.me/${e164.replace(/^\+/, "")}?text=${encodeURIComponent(text)}`;
+  // "?&body=" is read by both iOS and Android messages apps.
+  return `sms:${e164}?&body=${encodeURIComponent(text)}`;
+}
+
+function emailHtml(order: Pick<PurchaseOrderView, "number" | "lines">, storeName: string): string {
+  const rows = order.lines
+    .map((line) => `<tr><td style="padding:4px 12px 4px 0">${escapeHtml(line.name)}</td><td style="padding:4px 0;text-align:right">${line.quantity}</td></tr>`)
+    .join("");
+  return [
+    `<p>${escapeHtml(storeName)} would like to order:</p>`,
+    `<table><thead><tr><th style="text-align:left;padding-right:12px">Item</th><th style="text-align:right">Quantity</th></tr></thead><tbody>${rows}</tbody></table>`,
+    `<p>Please reply to confirm what you can supply and when. Purchase order ${order.number}.</p>`,
+  ].join("");
+}
+
+/**
+ * Sends a draft by the supplier's channel. Email goes through Resend from the platform sender with the
+ * store's name; WhatsApp and SMS return a pre-filled link and the order counts as sent once it is opened.
+ */
+export async function sendPurchaseOrder(
+  storeId: string,
+  orderId: string,
+  actor: Actor & { storeName: string },
+): Promise<SendResult> {
+  const order = await storeScoped(storeId).purchaseOrder.findFirst({
+    where: { id: orderId, storeId },
+    select: {
+      number: true,
+      status: true,
+      supplier: { select: { channel: true, email: true, phone: true, archivedAt: true } },
+      lines: { orderBy: { position: "asc" }, select: { name: true, quantity: true } },
+    },
+  });
+  if (!order) return { ok: false, message: "That order is not in your store." };
+  if (order.status !== "draft") return { ok: false, message: "This order was already sent or closed." };
+  if (order.supplier.archivedAt) return { ok: false, message: "This supplier was removed." };
+  const missing = order.lines.find((line) => line.quantity === null);
+  if (missing) return { ok: false, message: `Enter a quantity for ${missing.name}.` };
+
+  const channel = order.supplier.channel as SupplierChannel;
+  let link: string | undefined;
+  if (channel === "email") {
+    const html = emailHtml(order, actor.storeName);
+    // The body is in the key: an edited draft sent again is a new email, the same one is not sent twice.
+    const digest = createHash("sha256").update(html).digest("hex").slice(0, 16);
+    try {
+      await sendEmail({
+        to: order.supplier.email!,
+        from: quotedFrom(actor.storeName, process.env.EMAIL_FROM ?? "onboarding@resend.dev"),
+        replyTo: actor.email,
+        subject: `Purchase order ${order.number} from ${actor.storeName}`.replace(/[\r\n]+/g, " "),
+        html,
+        idempotencyKey: `purchase-order:${orderId}:${digest}`,
+      });
+    } catch {
+      return { ok: false, message: "The email could not be sent. The order is still a draft; try again." };
+    }
+  } else {
+    link = shareLink(channel, order.supplier.phone!, purchaseOrderText(order, actor.storeName));
+  }
+
+  await storeScopedTransaction(storeId, async (tx) => {
+    const now = new Date();
+    const moved = await tx.purchaseOrder.updateMany({
+      where: { id: orderId, storeId, status: "draft" },
+      data: { status: "sent", sentVia: channel, sentAt: now },
+    });
+    if (moved.count === 1) {
+      await tx.auditLog.create(audit(storeId, actor, "purchase_order.send", orderId, { status: "draft" }, { status: "sent", via: channel }));
+    }
+  });
+  return link ? { ok: true, via: channel, link } : { ok: true, via: channel };
+}
+
+/** Draft or sent to cancelled; sent to received. Receiving changes no stock (that is #576). */
+export async function movePurchaseOrder(storeId: string, orderId: string, to: "received" | "cancelled", actor: Actor): Promise<Result> {
+  return storeScopedTransaction(storeId, async (tx) => {
+    const order = await tx.purchaseOrder.findFirst({ where: { id: orderId, storeId }, select: { status: true } });
+    if (!order) return { ok: false, message: "That order is not in your store." };
+    const from = order.status as PoStatus;
+    if (!MOVES[from].includes(to)) return { ok: false, message: `A ${from} order cannot be marked ${to}.` };
+    const now = new Date();
+    const moved = await tx.purchaseOrder.updateMany({
+      where: { id: orderId, storeId, status: from },
+      data: to === "received" ? { status: to, receivedAt: now } : { status: to, cancelledAt: now },
+    });
+    if (moved.count !== 1) return { ok: false, message: "This order just changed. Reload the page." };
+    await tx.auditLog.create(audit(storeId, actor, `purchase_order.${to}`, orderId, { status: from }, { status: to }));
+    return { ok: true };
+  });
+}
+
+const STATUS_RANK: Record<PoStatus, number> = { draft: 0, sent: 1, received: 2, cancelled: 3 };
+
+/** Drafts first, then sent, received and cancelled; up to 100 newest. */
+export async function listPurchaseOrders(storeId: string): Promise<PurchaseOrderView[]> {
+  const rows = await storeScoped(storeId).purchaseOrder.findMany({
+    where: { storeId },
+    orderBy: { number: "desc" },
+    take: 100,
+    select: {
+      id: true,
+      number: true,
+      status: true,
+      sentVia: true,
+      sentAt: true,
+      createdAt: true,
+      supplier: { select: { id: true, name: true, channel: true, email: true, phone: true, leadDays: true } },
+      lines: { orderBy: { position: "asc" }, select: { id: true, listingId: true, name: true, quantity: true } },
+    },
+  });
+  return rows
+    .map((row) => ({
+      ...row,
+      status: row.status as PoStatus,
+      sentVia: row.sentVia as SupplierChannel | null,
+      supplier: { ...row.supplier, channel: row.supplier.channel as SupplierChannel },
+    }))
+    .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.supplier.name.localeCompare(b.supplier.name) || b.number - a.number);
+}
