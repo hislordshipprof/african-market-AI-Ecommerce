@@ -15,6 +15,8 @@ export interface SlotOptions {
   slots: PickupSlot[];
   /** Pickup: the basket's prep minutes, the store's plus its longest prepared item (#570). */
   prepMinutes?: number;
+  /** A catering basket's longest lead (#571); its times start at least this far ahead. */
+  leadMinutes?: number;
 }
 
 type SlotClient = Pick<PrismaClient, "order" | "cartLine">;
@@ -108,7 +110,7 @@ async function cateringSlotOptions(
   const schedule = pickup
     ? (store.pickupEnabled ? readSlotSchedule(store.pickupSlotSettings) : null)
     : fulfillment === "store-delivery" ? readSlotSchedule(store.storeDeliverySlotSettings) : null;
-  const prep = pickup ? { prepMinutes: basket.prepMinutes } : {};
+  const prep = { ...(pickup && { prepMinutes: basket.prepMinutes }), leadMinutes: basket.leadMinutes };
   if (!schedule) return { required: true, slots: [], ...prep };
   const leadMinutes = Math.max(schedule.leadMinutes, basket.leadMinutes, pickup ? basket.prepMinutes : 0);
   const booked = await bookedCounts(client, storeId, fulfillment);

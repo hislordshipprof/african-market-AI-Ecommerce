@@ -39,3 +39,9 @@ export function cateringFields(
   }
   return { cateringLeadHours: leadHours, cateringMinQty: minQty };
 }
+
+/** "2 days" for whole days, else "30 hours". */
+export function cateringLeadText(hours: number): string {
+  if (hours % 24 === 0) return hours === 24 ? "1 day" : `${hours / 24} days`;
+  return hours === 1 ? "1 hour" : `${hours} hours`;
+}

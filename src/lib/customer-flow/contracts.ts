@@ -52,6 +52,8 @@ export interface FlowCatalogItem extends CartItem {
   frozen: boolean;
   /** Prepared food (#570): exact item only; hot is handed over, never left at the door. */
   prepared?: "hot" | "cold" | null;
+  /** Catering (#571): ordered this many hours ahead, at least this many. */
+  catering?: { leadHours: number; minQty: number } | null;
   maxPerOrder: number;
   available: boolean;
 }

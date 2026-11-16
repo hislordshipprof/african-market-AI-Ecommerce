@@ -15,6 +15,7 @@ import { useCart } from "../cart-provider";
 import { Button, Chip, EmptyState } from "../primitives";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { cartItemKey } from "@/lib/storefront/cart-store";
+import { cateringLeadText } from "@/lib/listing/catering";
 import { clearCart } from "@/lib/cart/actions";
 import {
   quoteCheckoutAction,
@@ -730,6 +731,7 @@ function RealCheckoutForm({
       frozen={frozen}
       hot={hot}
       prepMinutes={slotOptions?.prepMinutes}
+      cateringLead={slotOptions?.leadMinutes ? slotOptions.leadMinutes / 60 : undefined}
       weightG={weightG}
       courierEligible={settings.courierOffered}
       onSubmit={pay}
@@ -926,6 +928,8 @@ interface CheckoutLayoutProps {
   slots: { value: string; label: string }[];
   /** Store delivery with a schedule: no ASAP, the order takes a slot (#565). */
   slotRequired?: boolean;
+  /** A catering basket's lead in hours (#571). */
+  cateringLead?: number;
   promo: string;
   setPromo: (v: string) => void;
   appliedPromo: string;
@@ -994,7 +998,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     contact, setContact, address, setAddress, query, setQuery,
     suggestions, setSuggestions, searching, notes, setNotes,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
-    slot, setSlot, slots, slotRequired = false, promo, setPromo,
+    slot, setSlot, slots, slotRequired = false, cateringLead, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage, coupon,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
@@ -1221,8 +1225,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             )}
             {slotRequired && slots.length === 0 && (
               <p className={styles.error} role="status">
-                No delivery times are open right now. Choose pickup, or check back later.
+                {cateringLead
+                  ? `Your catering items need ${cateringLeadText(cateringLead)} notice. This store has no ${fulfillment === "pickup" ? "pickup" : "delivery"} times for that here. Try ${fulfillment === "pickup" ? "delivery" : "pickup"}, or contact the store.`
+                  : "No delivery times are open right now. Choose pickup, or check back later."}
               </p>
+            )}
+            {cateringLead && slots.length > 0 && (
+              <p className={styles.muted}>Your catering items need {cateringLeadText(cateringLead)} notice, so times start then.</p>
             )}
             {((schedule && fulfillment === "pickup") || slotRequired) && slots.length > 0 && (
               <label className={styles.field}>
