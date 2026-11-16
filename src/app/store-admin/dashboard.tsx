@@ -271,7 +271,7 @@ export function StoreAdminDashboard({
                     <div>
                       <CardTitle className="text-base">Shipping</CardTitle>
                       <CardDescription>
-                        Ship dry goods to shoppers nationwide
+                        Ship dry goods to shoppers by parcel
                       </CardDescription>
                     </div>
                   </div>

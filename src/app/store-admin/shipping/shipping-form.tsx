@@ -37,15 +37,19 @@ export function ShippingForm({ storeName, storeSlug, initialHandlingDays, states
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // Says what shoppers can do now, not only that the form saved.
+  function savedText() {
+    if (!ships) return "Saved. Your store no longer ships.";
+    if (!located) return "Saved. Shipping starts once your store address is confirmed.";
+    if (shippableListings === 0) return "Saved. Mark items to ship on Listings before shoppers can choose Ship.";
+    return "Saved. Checkout offers Ship now.";
+  }
+
   function save(event: React.FormEvent) {
     event.preventDefault();
     startTransition(async () => {
       const result = await updateStoreShipping({ handlingDays: ships ? handlingDays : null });
-      setNotice(
-        result.ok
-          ? { ok: true, text: ships ? "Saved. Checkout offers Ship now." : "Saved. Your store no longer ships." }
-          : { ok: false, text: result.message },
-      );
+      setNotice(result.ok ? { ok: true, text: savedText() } : { ok: false, text: result.message });
     });
   }
 
@@ -69,7 +73,7 @@ export function ShippingForm({ storeName, storeSlug, initialHandlingDays, states
         <form onSubmit={save} className="flex flex-col gap-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Ship dry goods nationwide</CardTitle>
+              <CardTitle className="text-base">Ship dry goods by parcel</CardTitle>
               <CardDescription>
                 Shoppers far from your store can order shelf-stable items by parcel. They pay the carrier&rsquo;s own
                 rate, with no markup.
@@ -93,8 +97,8 @@ export function ShippingForm({ storeName, storeSlug, initialHandlingDays, states
                 </div>
                 <p id="ships-state" className="text-sm text-muted-foreground">
                   {ships
-                    ? "On. Checkout offers Ship when every item in the basket can ship."
-                    : "Off. Checkout offers pickup and delivery only."}
+                    ? "Checkout offers Ship when every item in the basket can ship."
+                    : "Checkout offers pickup and delivery only."}
                 </p>
               </div>
 
@@ -143,12 +147,12 @@ export function ShippingForm({ storeName, storeSlug, initialHandlingDays, states
             </CardHeader>
             <CardContent>
               <ul role="list" className="flex flex-col divide-y divide-border text-sm">
-                <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 first:pt-0">
+                <li className="flex flex-wrap items-center justify-between gap-x-4 pb-1">
                   <span className="text-foreground">
                     <span className="font-semibold tabular-nums">{shippableListings}</span>{" "}
                     {shippableListings === 1 ? "listing ships" : "listings ship"} nationwide
                   </span>
-                  <Link href={`/store-admin/listings?store=${storeParam}`} className="font-medium text-primary underline-offset-4 hover:underline">
+                  <Link href={`/store-admin/listings?store=${storeParam}`} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">
                     Choose on Listings
                   </Link>
                 </li>
