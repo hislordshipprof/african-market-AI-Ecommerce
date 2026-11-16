@@ -318,7 +318,7 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     expect(await storeScoped(store.id).order.findUniqueOrThrow({ where: { id: courierPlaced.token } }))
       .toMatchObject({ fulfillment: "courier", pickupSlot: null, deliveryFeeCents: 749 });
 
-    const offered = await slotOptions(storeScoped(store.id), store.id, store, "store-delivery", new Date());
+    const offered = await slotOptions(storeScoped(store.id), store.id, store, "store-delivery", new Date(), null);
     expect(offered.required).toBe(true);
     const slot = offered.slots[0]!.id;
     const scoped = storeScoped(store.id);

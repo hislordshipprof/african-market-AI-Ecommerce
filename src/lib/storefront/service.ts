@@ -9,6 +9,7 @@ import { effectiveMaxPerOrder } from "../cart/limits";
 import type { ShopperNeed } from "../catalog/attributes";
 import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
+import { isPreparedKind } from "../listing/prepared";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
 const notE2eListing = {
@@ -44,6 +45,7 @@ async function readGetFlowCatalog(
       imageUrl: item.imageUrl,
       categoryId: listing.masterProduct?.categoryId ?? "uncategorized",
       frozen: listing.frozen,
+      prepared: isPreparedKind(listing.prepared) ? listing.prepared : null,
       maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
       available:
         !(listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) &&

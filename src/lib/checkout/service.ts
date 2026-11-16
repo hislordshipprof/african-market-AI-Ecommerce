@@ -255,6 +255,7 @@ async function untaxedQuote(
     maxPerOrder: line.variant.listing.maxPerOrder,
     frozen: line.variant.listing.frozen,
     perishable: line.variant.listing.perishable,
+    hot: line.variant.listing.prepared === "hot",
   }));
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
     const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee, null, null, coupon);
@@ -747,7 +748,7 @@ export async function recordAuthorizedOrder(
         : ({ kind: "unavailable" } as const);
       if (availability.kind === "unavailable") throw new StoreNotTakingOrdersError();
       // Under the same lock, so two orders cannot both take a slot's last place (#565).
-      await assertSlotOffered(tx, storeId, lockedStore, input.fulfillment, input.pickupSlot, now);
+      await assertSlotOffered(tx, storeId, lockedStore, input.fulfillment, input.pickupSlot, now, input.cartId);
 
       if (input.lines.length === 0) {
         throw new Error("Order lines are required");
@@ -787,6 +788,7 @@ export async function recordAuthorizedOrder(
         maxPerOrder: line.variant.listing.maxPerOrder,
         frozen: line.variant.listing.frozen,
         perishable: line.variant.listing.perishable,
+        hot: line.variant.listing.prepared === "hot",
       }));
       if (!sameBasket(current, input.lines)) throw new BasketChangedError();
       const shipping = input.fulfillment === "ship"
@@ -948,15 +950,19 @@ export async function recordAuthorizedOrder(
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
-        data: input.lines.map((line) => ({
-          storeId,
-          orderId: order.id,
-          listingVariantId: line.variantId,
-          substituteVariantId: line.substituteVariantId,
-          qtyOrdered: line.qty,
-          unitPriceCents: line.price,
-          swapRule: line.swapRule,
-        })),
+        data: input.lines.map((line) => {
+          // #570: prepared food is the exact item only, whatever the cart line said.
+          const exact = ownedById.get(line.variantId)?.listing.prepared != null;
+          return {
+            storeId,
+            orderId: order.id,
+            listingVariantId: line.variantId,
+            substituteVariantId: exact ? null : line.substituteVariantId,
+            qtyOrdered: line.qty,
+            unitPriceCents: line.price,
+            swapRule: exact ? "exact_only" : line.swapRule,
+          };
+        }),
         select: { id: true, listingVariantId: true, qtyOrdered: true },
       });
       await reserveOrderStock(
@@ -1013,6 +1019,7 @@ function cartLinesToOrderLines(
   perishable: boolean;
   ships: boolean;
   weightG: number;
+  hot: boolean;
 }> {
   return cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -1026,6 +1033,7 @@ function cartLinesToOrderLines(
     perishable: l.variant.listing.perishable,
     ships: l.variant.ships,
     weightG: l.variant.weightG,
+    hot: l.variant.listing.prepared === "hot",
   }));
 }
 
@@ -1337,6 +1345,7 @@ export async function placeOrder(
     maxPerOrder: l.maxPerOrder,
     frozen: l.frozen,
     perishable: l.perishable,
+    hot: l.hot,
   }));
   const [storeRow, serviceFee, coupon] = await Promise.all([
     platform.store.findUnique({ where: { id: storeId } }),

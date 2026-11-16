@@ -15,6 +15,7 @@ import {
   type StockMode,
   type StockStatus,
 } from "./service";
+import { isPreparedKind, MAX_PREP_MINUTES, type PreparedKind } from "./prepared";
 import { parseInput, readFormFields } from "../security/parse-input";
 
 const listingField = z.string().max(500).nullable();
@@ -29,6 +30,8 @@ const listingFormSchema = z.strictObject({
   frozen: z.string().max(10).nullable(),
   perishable: z.string().max(10).nullable(),
   shippable: z.string().max(10).nullable(),
+  prepared: z.string().max(10).nullable(),
+  prepMinutes: z.string().max(20).nullable(),
   maxPerOrder: z.string().max(20).nullable(),
   variants: z.string().max(200_000).nullable(),
   listingId: z.string().max(200).nullable(),
@@ -44,6 +47,8 @@ const LISTING_FIELDS = [
   "frozen",
   "perishable",
   "shippable",
+  "prepared",
+  "prepMinutes",
   "maxPerOrder",
   "variants",
   "listingId",
@@ -62,6 +67,24 @@ function quantityError(raw: string | null): string | null {
   const q = Number(raw);
   if (!Number.isInteger(q) || q < 0) return "Quantity must be a whole number, 0 or more";
   return null;
+}
+
+/**
+ * The form's prepared fields: "" is grocery, "hot" or "cold" with whole prep minutes is prepared food.
+ * Null when the form did not send the field.
+ */
+function readPrepared(
+  prepared: string | null,
+  prepMinutes: string | null,
+): { value: { prepared: PreparedKind | null; prepMinutes: number | null } } | { error: string } | null {
+  if (prepared === null) return null;
+  if (prepared === "") return { value: { prepared: null, prepMinutes: null } };
+  if (!isPreparedKind(prepared)) return { error: "Prepared food must be hot or cold" };
+  const minutes = Number(prepMinutes ?? "");
+  if (!prepMinutes?.trim() || !Number.isInteger(minutes) || minutes < 0 || minutes > MAX_PREP_MINUTES) {
+    return { error: `Prep time must be a whole number of minutes, 0 to ${MAX_PREP_MINUTES}` };
+  }
+  return { value: { prepared, prepMinutes: minutes } };
 }
 
 /** The storefront and cart charge the variant price, so the listing price is the cheapest variant's. */
@@ -100,6 +123,8 @@ export async function createListingAction(formData: FormData) {
   const qtyError = stockMode === "counted" ? quantityError(qtyRaw) : null;
   if (qtyError) return { error: qtyError };
   const qty = stockMode === "counted" ? Number(qtyRaw) : null;
+  const prepared = readPrepared(fields.prepared, fields.prepMinutes);
+  if (prepared && "error" in prepared) return { error: prepared.error };
 
   try {
     const variants = parseVariantsJson(variantsJson);
@@ -120,12 +145,13 @@ export async function createListingAction(formData: FormData) {
       status: stockMode === "status" ? ((status as StockStatus) ?? "in_stock") : null,
       frozen,
       perishable,
+      ...prepared?.value,
       maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null,
       variants,
       actor: toActor(session.user),
     });
     revalidateStorefront(session.store.id);
-    return { success: true, id: result.id };
+    return { success: true, id: result.id, ...(result.active === false && { heldForAllergens: true }) };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create listing";
     return { error: message };
@@ -170,6 +196,9 @@ export async function updateListingAction(formData: FormData) {
     return { error: "Quantity must be a whole number, 0 or more" };
   }
 
+  const prepared = readPrepared(fields.prepared, fields.prepMinutes);
+  if (prepared && "error" in prepared) return { error: prepared.error };
+
   let parsedVariants: ReturnType<typeof parseVariantsJson> | undefined;
   if (variantsJson !== null) {
     try {
@@ -200,6 +229,7 @@ export async function updateListingAction(formData: FormData) {
       ...(frozen !== null && { frozen: frozen === "true" }),
       ...(perishable !== null && { perishable: perishable === "true" }),
       ...(fields.shippable !== null && { shippable: fields.shippable === "true" }),
+      ...prepared?.value,
       ...(maxPerOrderRaw !== null && { maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null }),
       actor: toActor(session.user),
       variants: parsedVariants,
@@ -210,6 +240,7 @@ export async function updateListingAction(formData: FormData) {
       success: true,
       id: updated.id,
       qty: updated.qty,
+      ...(updated.heldForAllergens && { heldForAllergens: true }),
       ...(updated.stockMoved && { stockMoved: updated.stockMoved }),
     };
   } catch (err) {

@@ -63,6 +63,7 @@ import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { CourierTiming } from "./courier-timing";
 import { BatchPicking, packingHref } from "./batch-picking";
+import { orderPrepMinutes } from "@/lib/listing/prepared";
 
 const STATUS_CONFIG: Record<
   string,
@@ -231,7 +232,8 @@ export function OrderInbox({
 
   function handleAcceptClick(orderId: string) {
     setAcceptingOrderId(orderId);
-    setPrepMinutes(String(defaultPrepMinutes));
+    const order = orders.find((o) => o.id === orderId);
+    setPrepMinutes(String(orderPrepMinutes(defaultPrepMinutes, order?.lines.map((l) => l.listingVariant.listing) ?? [])));
     setAcceptDialogOpen(true);
   }
 

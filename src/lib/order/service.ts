@@ -18,6 +18,7 @@ import { finalizeTaxForCapture, recordTaxTransaction, type FinalTax } from "../t
 import { TaxLocationError, TaxUnavailableError } from "../tax/calculator";
 import { recordCapture } from "./capture-record";
 import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
+import { orderPrepMinutes } from "../listing/prepared";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -331,6 +332,8 @@ const ORDER_WITH_LINES = {
               customName: true,
               frozen: true,
               perishable: true,
+              prepared: true,
+              prepMinutes: true,
               masterProduct: { select: { name: true } },
             },
           },
@@ -393,6 +396,15 @@ export async function getStoreOrders(storeId: string) {
 }
 
 export type StoreOrderRow = Awaited<ReturnType<typeof getStoreOrders>>[number];
+
+/** The prep estimate an auto-accepted order gets: the store's prep plus its longest prepared item (#570). */
+export async function defaultPrepEstimate(storeId: string, orderId: string, storePrepMinutes: number): Promise<number> {
+  const lines = await storeScoped(storeId).orderLine.findMany({
+    where: { orderId },
+    select: { listingVariant: { select: { listing: { select: { prepared: true, prepMinutes: true } } } } },
+  });
+  return orderPrepMinutes(storePrepMinutes, lines.map((line) => line.listingVariant.listing));
+}
 
 export async function acceptOrder(
   storeId: string,

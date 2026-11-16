@@ -592,6 +592,9 @@ model Listing {
   perishable          Boolean  @default(false)
   /// Ships nationwide (ADR-0023, #567); set only while not frozen, not perishable and every variant has a real weight.
   shippable           Boolean  @default(false)
+  /// #570: "hot" or "cold" for prepared food, null for grocery.
+  prepared            String?
+  prepMinutes         Int?     @map("prep_minutes")
   maxPerOrder         Int?     @map("max_per_order")
   active              Boolean  @default(true)
   confidence          Float    @default(1.0)

@@ -12,12 +12,15 @@ export interface ShippableVariant {
 export interface ShippableListing {
   frozen: boolean;
   perishable: boolean;
+  /** Prepared food (#570) is not a shelf-stable dry good. */
+  prepared: string | null;
 }
 
 /** Why a listing cannot be marked shippable, or null when it can. */
 export function shippableRefusal(listing: ShippableListing, variants: readonly ShippableVariant[]): string | null {
   if (listing.frozen) return "Frozen items cannot ship.";
   if (listing.perishable) return "Perishable items cannot ship.";
+  if (listing.prepared != null) return "Prepared food cannot ship.";
   if (variants.length === 0 || variants.some((v) => v.weightPlaceholder || !(v.weightG > 0))) {
     return "Add a real weight to every size before shipping this item.";
   }

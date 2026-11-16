@@ -92,6 +92,8 @@ interface Listing {
   perishable: boolean;
   /** Ships nationwide (#567). */
   shippable: boolean;
+  prepared: string | null;
+  prepMinutes: number | null;
   active: boolean;
   maxPerOrder: number | null;
   variants: Variant[];
@@ -156,6 +158,9 @@ interface ListingFormFields {
   perishable: boolean;
   /** Sent only on update; already false when the listing cannot ship. */
   shippable: boolean;
+  /** "" for grocery, else "hot" or "cold" prepared food (#570). */
+  prepared: string;
+  prepMinutes: string;
   maxPerOrder: string;
   masterProductId: string | null;
 }
@@ -179,6 +184,8 @@ function buildListingFormData(
   fd.set("frozen", String(fields.frozen));
   fd.set("perishable", String(fields.perishable));
   if (listingId) fd.set("shippable", String(fields.shippable));
+  fd.set("prepared", fields.prepared);
+  if (fields.prepared) fd.set("prepMinutes", fields.prepMinutes);
   // Update always sends maxPerOrder so clearing it works; create omits it when blank.
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
@@ -186,6 +193,14 @@ function buildListingFormData(
   fd.set("variants", serializeVariants(variants));
   return fd;
 }
+
+const PREPARED_LABELS: Record<string, string> = {
+  none: "Not prepared",
+  hot: "Hot, from the counter",
+  cold: "Cold, ready to eat",
+};
+
+const HELD_FOR_ALLERGENS = "Saved, off sale. State its allergens under Ingredients and allergens, then reactivate it.";
 
 export function ListingManagement({ storeName, storeSlug, storeShips, listings }: Props) {
   const router = useRouter();
@@ -203,6 +218,8 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   const [frozen, setFrozen] = useState(false);
   const [perishable, setPerishable] = useState(false);
   const [shippable, setShippable] = useState(false);
+  const [prepared, setPrepared] = useState("");
+  const [prepMinutes, setPrepMinutes] = useState("15");
   const [maxPerOrder, setMaxPerOrder] = useState("");
   const [masterProductId, setMasterProductId] = useState<string | null>(null);
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
@@ -221,6 +238,8 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
     setFrozen(false);
     setPerishable(false);
     setShippable(false);
+    setPrepared("");
+    setPrepMinutes("15");
     setMaxPerOrder("");
     setMasterProductId(null);
     setSelectedMasterOption(null);
@@ -271,6 +290,8 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
     setFrozen(listing.frozen);
     setPerishable(listing.perishable);
     setShippable(listing.shippable);
+    setPrepared(listing.prepared ?? "");
+    setPrepMinutes(String(listing.prepMinutes ?? 15));
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
     setMasterProductId(listing.masterProductId);
     setVariants(listing.variants.map(loadedVariantRow));
@@ -300,7 +321,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
 
   // The rows as they will be saved: a typed weight replaces the import placeholder.
   const shipRefusal = shippableRefusal(
-    { frozen, perishable },
+    { frozen, perishable, prepared: prepared || null },
     variants
       .filter((v) => v.id || v.label.trim())
       .map((v) => ({ weightG: parseInt(v.weightG || "0", 10), weightPlaceholder: false })),
@@ -313,6 +334,8 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
     frozen,
     perishable,
     shippable: shippable && shipRefusal === null,
+    prepared,
+    prepMinutes,
     maxPerOrder,
     masterProductId,
   };
@@ -325,7 +348,8 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
       if ("error" in result && result.error) {
         toast.error(result.error);
       } else {
-        toast.success("Listing created");
+        if ("heldForAllergens" in result && result.heldForAllergens) toast.warning(HELD_FOR_ALLERGENS);
+        else toast.success("Listing created");
         setCreateOpen(false);
         resetForm();
         router.refresh();
@@ -349,6 +373,8 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
           toast.warning(`Stock changed from ${moved.from} to ${moved.to} since you opened this, so it stays ${moved.to}. Edit again to set a new count.`);
         } else if (moved) {
           toast.warning(`Stock changed from ${moved.from} to ${moved.to} while you edited. Your count of ${typedQty} was saved.`);
+        } else if ("heldForAllergens" in result && result.heldForAllergens) {
+          toast.warning(HELD_FOR_ALLERGENS);
         } else {
           toast.success("Listing updated");
         }
@@ -531,6 +557,45 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
           </p>
         </div>
       )}
+
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-40 flex-1 flex-col gap-2">
+            <Label>Prepared food</Label>
+            <Select value={prepared || "none"} onValueChange={(v) => setPrepared(!v || v === "none" ? "" : v)}>
+              <SelectTrigger aria-label="Prepared food">
+                <SelectValue>{(value: string) => PREPARED_LABELS[value] ?? PREPARED_LABELS.none}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(PREPARED_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {prepared && (
+            <div className="flex w-32 flex-col gap-2">
+              <Label htmlFor="listing-prep-minutes">Prep time (min)</Label>
+              <Input
+                id="listing-prep-minutes"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={120}
+                value={prepMinutes}
+                onChange={(e) => setPrepMinutes(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+        {prepared && (
+          <div className="text-xs text-muted-foreground">
+            <p>Exact item only, no swaps. Prep time adds to the order&rsquo;s ready time.</p>
+            {prepared === "hot" && <p>Hot food is handed over, never left at the door.</p>}
+            <p>On sale once you state its allergens under Ingredients and allergens.</p>
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
@@ -782,6 +847,11 @@ function ListingRow({
           )}
           {listing.shippable && (
             <Truck className="size-3.5 shrink-0 text-muted-foreground" aria-label="Ships nationwide" />
+          )}
+          {listing.prepared && (
+            <Badge variant="outline" className="shrink-0">
+              {listing.prepared === "hot" ? "Hot food" : "Cold food"} · {listing.prepMinutes} min
+            </Badge>
           )}
         </div>
         <div className="flex items-center gap-2 mt-0.5">

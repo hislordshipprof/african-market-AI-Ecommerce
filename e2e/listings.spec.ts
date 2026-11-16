@@ -272,6 +272,43 @@ test.describe("Listing management (authenticated)", () => {
     expect(resaved.variants[0]?.price).toBe(950);
   });
 
+  test("#570: a hot prepared dish is saved off sale and goes on sale once its owner states its allergens", async ({ page }) => {
+    const uniqueName = `E2E Jollof ${Date.now()}`;
+    createdNames.push(uniqueName);
+    await page.goto(LISTINGS_URL);
+    await page.click("text=Add listing");
+    await page.getByLabel("Product name").fill(uniqueName);
+    await page.getByLabel("Quantity in stock").fill("10");
+    await page.getByRole("combobox", { name: "Prepared food" }).click();
+    await page.getByRole("option", { name: "Hot, from the counter" }).click();
+    await page.getByLabel("Prep time (min)").fill("20");
+    await page.locator("input[placeholder='Label (e.g. 1kg)']").first().fill("Plate");
+    await page.locator("input[placeholder='Price']").first().fill("12.00");
+    await page.locator("input[placeholder='Weight (g)']").first().fill("400");
+    await page.click("text=Create listing");
+    await expect(page.getByText(/Saved, off sale/)).toBeVisible({ timeout: 10000 });
+
+    await page.goto(LISTINGS_URL);
+    const inactive = section(page, "Inactive listings");
+    await expect(inactive.getByText(uniqueName)).toBeVisible({ timeout: 10000 });
+    await expect(listingRow(page, uniqueName).getByText("Hot food · 20 min")).toBeVisible();
+    await page.locator(`[aria-label="Reactivate ${uniqueName}"]`).click();
+    await expect(page.getByText("State this item's allergens before it goes on sale.")).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("button", { name: `Ingredients and allergens for ${uniqueName}` }).click();
+    const dialog = page.getByRole("dialog");
+    const allergens = dialog.locator("section", { has: page.getByRole("heading", { name: "Allergens", exact: true }) });
+    await allergens.getByRole("switch").click();
+    await allergens.getByRole("button", { name: "Peanuts" }).click();
+    await dialog.getByRole("button", { name: "Save attributes" }).click();
+    await expect(page.getByText("Attributes saved")).toBeVisible({ timeout: 10000 });
+
+    await page.locator(`[aria-label="Reactivate ${uniqueName}"]`).click();
+    await expect(page.getByText("Listing reactivated")).toBeVisible({ timeout: 10000 });
+    await page.goto(LISTINGS_URL);
+    await expect(section(page, "Active listings").getByText(uniqueName)).toBeVisible({ timeout: 10000 });
+  });
+
   test("deactivate listing excludes it from active list", async ({ page }) => {
     const uniqueName = `E2E Deactivate ${Date.now()}`;
     await createListingViaUI(page, { name: uniqueName, price: "4.00" });
