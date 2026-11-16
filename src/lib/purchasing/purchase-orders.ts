@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { storeScoped, storeScopedTransaction } from "../db";
+import { lockPurchaseOrders, storeScoped, storeScopedTransaction } from "../db";
 import { quotedFrom } from "../email/from";
 import { sendEmail } from "../email/send";
 import { escapeHtml } from "../format";
@@ -42,8 +42,7 @@ const audit = (storeId: string, actor: Actor, action: string, entityId: string, 
  */
 export async function draftPurchaseOrders(storeId: string, actor: Actor): Promise<DraftResult> {
   return storeScopedTransaction(storeId, async (tx) => {
-    // Serialises drafting per store so two taps cannot take the same order number.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`purchase-orders:${storeId}`}))`;
+    await lockPurchaseOrders(tx, storeId);
     const list = await tx.reorderList.findUnique({
       where: { storeId },
       select: { items: { orderBy: { position: "asc" }, select: { listingId: true, name: true, quantity: true } } },

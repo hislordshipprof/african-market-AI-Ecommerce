@@ -13,7 +13,7 @@ import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
 import { GoLiveCard } from "./go-live-card";
-import { AlertCircle, Camera, ChartColumn, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck } from "lucide-react";
+import { AlertCircle, Camera, ChartColumn, ClipboardList, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -329,6 +329,26 @@ export function StoreAdminDashboard({
                       <CardTitle className="text-base">Copilot</CardTitle>
                       <CardDescription>
                         Report stock in a sentence
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && (
+            <Link href={`/store-admin/purchase-orders?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <ClipboardList className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Purchase orders</CardTitle>
+                      <CardDescription>
+                        Order from your wholesalers
                       </CardDescription>
                     </div>
                   </div>

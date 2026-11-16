@@ -266,6 +266,14 @@ export async function lockCopilotPush(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('copilot-push'), hashtext(${storeId}))`;
 }
 
+/** Serializes purchase order drafting for one store, so two taps cannot take the same order number. */
+export async function lockPurchaseOrders(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  storeId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('purchase-orders'), hashtext(${storeId}))`;
+}
+
 /** Advisory lock, insert-if-missing, then row lock. Caller is already inside customerScopedTransaction. */
 export async function lockCustomerProfileRow(
   tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">,
