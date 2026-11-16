@@ -88,6 +88,8 @@ interface Listing {
   status: string | null;
   frozen: boolean;
   perishable: boolean;
+  prepared: string | null;
+  prepMinutes: number | null;
   active: boolean;
   maxPerOrder: number | null;
   variants: Variant[];
@@ -148,6 +150,9 @@ interface ListingFormFields {
   status: string;
   frozen: boolean;
   perishable: boolean;
+  /** "" for grocery, else "hot" or "cold" prepared food (#570). */
+  prepared: string;
+  prepMinutes: string;
   maxPerOrder: string;
   masterProductId: string | null;
 }
@@ -170,6 +175,8 @@ function buildListingFormData(
   if (fields.stockMode === "status") fd.set("status", fields.status);
   fd.set("frozen", String(fields.frozen));
   fd.set("perishable", String(fields.perishable));
+  fd.set("prepared", fields.prepared);
+  if (fields.prepared) fd.set("prepMinutes", fields.prepMinutes);
   // Update always sends maxPerOrder so clearing it works; create omits it when blank.
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
@@ -177,6 +184,8 @@ function buildListingFormData(
   fd.set("variants", serializeVariants(variants));
   return fd;
 }
+
+const HELD_FOR_ALLERGENS = "Saved, off sale. Prepared food goes on sale once you state its allergens under Attributes, then reactivate it.";
 
 export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const router = useRouter();
@@ -193,6 +202,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [status, setStatus] = useState("in_stock");
   const [frozen, setFrozen] = useState(false);
   const [perishable, setPerishable] = useState(false);
+  const [prepared, setPrepared] = useState("");
+  const [prepMinutes, setPrepMinutes] = useState("15");
   const [maxPerOrder, setMaxPerOrder] = useState("");
   const [masterProductId, setMasterProductId] = useState<string | null>(null);
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
@@ -210,6 +221,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setStatus("in_stock");
     setFrozen(false);
     setPerishable(false);
+    setPrepared("");
+    setPrepMinutes("15");
     setMaxPerOrder("");
     setMasterProductId(null);
     setSelectedMasterOption(null);
@@ -259,6 +272,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setStatus(listing.status ?? "in_stock");
     setFrozen(listing.frozen);
     setPerishable(listing.perishable);
+    setPrepared(listing.prepared ?? "");
+    setPrepMinutes(String(listing.prepMinutes ?? 15));
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
     setMasterProductId(listing.masterProductId);
     setVariants(listing.variants.map(loadedVariantRow));
@@ -293,6 +308,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     status,
     frozen,
     perishable,
+    prepared,
+    prepMinutes,
     maxPerOrder,
     masterProductId,
   };
@@ -305,7 +322,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
       if ("error" in result && result.error) {
         toast.error(result.error);
       } else {
-        toast.success("Listing created");
+        if ("heldForAllergens" in result && result.heldForAllergens) toast.info(HELD_FOR_ALLERGENS);
+        else toast.success("Listing created");
         setCreateOpen(false);
         resetForm();
         router.refresh();
@@ -329,6 +347,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
           toast.warning(`Stock changed from ${moved.from} to ${moved.to} since you opened this, so it stays ${moved.to}. Edit again to set a new count.`);
         } else if (moved) {
           toast.warning(`Stock changed from ${moved.from} to ${moved.to} while you edited. Your count of ${typedQty} was saved.`);
+        } else if ("heldForAllergens" in result && result.heldForAllergens) {
+          toast.info(HELD_FOR_ALLERGENS);
         } else {
           toast.success("Listing updated");
         }
@@ -480,6 +500,44 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
             <Leaf className="size-3.5" /> Perishable
           </Label>
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-40 flex-1 flex-col gap-2">
+            <Label>Prepared food</Label>
+            <Select value={prepared || "none"} onValueChange={(v) => setPrepared(!v || v === "none" ? "" : v)}>
+              <SelectTrigger aria-label="Prepared food">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Not prepared food</SelectItem>
+                <SelectItem value="hot">Hot, from the counter</SelectItem>
+                <SelectItem value="cold">Cold, ready to eat</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {prepared && (
+            <div className="flex w-32 flex-col gap-2">
+              <Label htmlFor="listing-prep-minutes">Prep time (min)</Label>
+              <Input
+                id="listing-prep-minutes"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={120}
+                value={prepMinutes}
+                onChange={(e) => setPrepMinutes(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+        {prepared && (
+          <p className="text-xs text-muted-foreground">
+            Sold as the exact item only, with no swaps. Its prep time adds to the order&rsquo;s ready time
+            {prepared === "hot" ? ", and hot food is never left at the door" : ""}. It goes on sale once you state its allergens.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -729,6 +787,11 @@ function ListingRow({
           )}
           {listing.perishable && (
             <Leaf className="size-3.5 shrink-0 text-green-600" aria-label="Perishable" />
+          )}
+          {listing.prepared && (
+            <Badge variant="outline" className="shrink-0">
+              {listing.prepared === "hot" ? "Hot food" : "Cold food"} · {listing.prepMinutes} min
+            </Badge>
           )}
         </div>
         <div className="flex items-center gap-2 mt-0.5">

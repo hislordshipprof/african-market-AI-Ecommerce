@@ -171,8 +171,8 @@ export async function autoAcceptOrderAction(orderId: string) {
   if (!store?.autoAcceptOrders) {
     return { ok: false as const, error: "Auto-accept is not enabled for this store" };
   }
-  return runStaffAction("acceptOrder", id.data, () =>
-    acceptOrder(session.store.id, id.data, store.prepTimeMinutes),
+  return runStaffAction("acceptOrder", id.data, async () =>
+    acceptOrder(session.store.id, id.data, await defaultPrepEstimate(session.store.id, id.data, store.prepTimeMinutes)),
   );
 }
 

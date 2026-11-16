@@ -21,6 +21,8 @@ export default async function ListingsPage() {
         status: l.status,
         frozen: l.frozen,
         perishable: l.perishable,
+        prepared: l.prepared,
+        prepMinutes: l.prepMinutes,
         active: l.active,
         maxPerOrder: l.maxPerOrder,
         variants: l.variants.map((v) => ({

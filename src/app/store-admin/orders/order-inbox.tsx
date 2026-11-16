@@ -232,7 +232,8 @@ export function OrderInbox({
 
   function handleAcceptClick(orderId: string) {
     setAcceptingOrderId(orderId);
-    setPrepMinutes(String(defaultPrepMinutes));
+    const order = orders.find((o) => o.id === orderId);
+    setPrepMinutes(String(orderPrepMinutes(defaultPrepMinutes, order?.lines.map((l) => l.listingVariant.listing) ?? [])));
     setAcceptDialogOpen(true);
   }
 
