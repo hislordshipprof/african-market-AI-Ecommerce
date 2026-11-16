@@ -4,6 +4,7 @@ import { pushToStoreMembers } from "./store-members";
 function fulfillmentLabel(fulfillment: string): string {
   if (fulfillment === "pickup") return "Pickup";
   if (fulfillment === "store-delivery") return "Store delivery";
+  if (fulfillment === "ship") return "Shipping";
   return "Delivery";
 }
 

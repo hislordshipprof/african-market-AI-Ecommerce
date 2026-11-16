@@ -10,6 +10,7 @@ export default async function ListingsPage() {
     <ListingManagement
       storeName={session.store.name}
       storeSlug={session.store.slug}
+      storeShips={session.store.shippingHandlingDays != null}
       listings={listings.map((l) => ({
         id: l.id,
         masterProductId: l.masterProductId,
@@ -21,6 +22,7 @@ export default async function ListingsPage() {
         status: l.status,
         frozen: l.frozen,
         perishable: l.perishable,
+        shippable: l.shippable,
         prepared: l.prepared,
         prepMinutes: l.prepMinutes,
         active: l.active,

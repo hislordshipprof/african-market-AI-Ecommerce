@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { shippableRefusal } from "../shipping/eligibility";
 import { storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lockListingVariantRows } from "../db";
 import { MAX_PREP_MINUTES, PREPARED_NEEDS_ALLERGENS, preparedSaleBlocked, type PreparedKind } from "./prepared";
 
@@ -236,6 +237,8 @@ export interface UpdateListingInput {
   status?: StockStatus | null;
   frozen?: boolean;
   perishable?: boolean;
+  /** Ships nationwide (#567); refused unless the listing qualifies after this edit. */
+  shippable?: boolean;
   /** Both together: a kind with its prep minutes, or null to make it grocery again. */
   prepared?: PreparedKind | null;
   prepMinutes?: number | null;
@@ -397,6 +400,31 @@ export async function updateListing(input: UpdateListingInput) {
         variants: input.variants,
         actor: input.actor,
       });
+    }
+
+    // After the variants, so their weights are the ones checked. An edit that disqualifies a shipped listing stops it shipping.
+    let shippable = false;
+    if (input.shippable ?? existing.shippable) {
+      const variants = await tx.listingVariant.findMany({ where: { listingId: input.listingId }, select: { weightG: true, weightPlaceholder: true } });
+      const refusal = shippableRefusal(listing, variants);
+      if (refusal && input.shippable === true) throw new Error(refusal);
+      shippable = refusal === null;
+    }
+    if (shippable !== existing.shippable) {
+      await tx.listing.update({ where: { id: input.listingId }, data: { shippable } });
+      await tx.auditLog.create({
+        data: {
+          storeId: input.storeId,
+          actorId: input.actor.id,
+          actorEmail: input.actor.email,
+          action: "listing.shipping_change",
+          entityType: "listing",
+          entityId: input.listingId,
+          before: { shippable: existing.shippable },
+          after: { shippable },
+        },
+      });
+      return { ...updated, shippable };
     }
 
     return updated;

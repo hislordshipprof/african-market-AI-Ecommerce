@@ -54,6 +54,8 @@ model Store {
   uberRegistrationError     String?  @map("uber_registration_error")
   /// Why the last DoorDash Drive registration failed; set means the store needs a retry (#526).
   doordashRegistrationError String?  @map("doordash_registration_error")
+  /// Nationwide shipping opt-in (ADR-0023, #567): business days to pack a parcel; null means the store does not ship.
+  shippingHandlingDays      Int?     @map("shipping_handling_days")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 
@@ -588,6 +590,8 @@ model Listing {
   status              String?
   frozen              Boolean  @default(false)
   perishable          Boolean  @default(false)
+  /// Ships nationwide (ADR-0023, #567); set only while not frozen, not perishable and every variant has a real weight.
+  shippable           Boolean  @default(false)
   /// #570: "hot" or "cold" for prepared food, null for grocery.
   prepared            String?
   prepMinutes         Int?     @map("prep_minutes")
@@ -1097,6 +1101,14 @@ model Cart {
   courierProvider       String?   @map("courier_provider")
   courierQuoteKey       String?   @map("courier_quote_key")
   courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
+  /// The cheapest parcel rate last shown at checkout (#567), for the basket and address in shippingQuoteKey.
+  shippingFeeCents      Int?      @map("shipping_fee_cents")
+  shippingRateId        String?   @map("shipping_rate_id")
+  shippingCarrier       String?   @map("shipping_carrier")
+  shippingService       String?   @map("shipping_service")
+  shippingDays          Int?      @map("shipping_days")
+  shippingQuoteKey      String?   @map("shipping_quote_key")
+  shippingQuoteExpiresAt DateTime? @map("shipping_quote_expires_at")
   /// The Stripe Tax calculation last shown at checkout (#65), for the basket and address in taxQuoteKey.
   taxCents              Int?      @map("tax_cents")
   taxLines              Json?     @map("tax_lines")
@@ -1419,6 +1431,11 @@ model Order {
   deliveryLat             Float?    @map("delivery_lat")
   deliveryLng             Float?    @map("delivery_lng")
   deliveryDistanceMi      Float?    @map("delivery_distance_mi")
+  /// Shipped orders (#567): the parcel rate the shopper accepted; its fee is in deliveryFeeCents.
+  shippingRateId          String?   @map("shipping_rate_id")
+  shippingCarrier         String?   @map("shipping_carrier")
+  shippingService         String?   @map("shipping_service")
+  shippingDays            Int?      @map("shipping_days")
   leaveAtDoor             Boolean   @default(false) @map("leave_at_door")
   totalCents              Int       @default(0) @map("total_cents")
   notes                   String?
@@ -1708,6 +1725,8 @@ model PlatformSettings {
   aiTurnCostFlagCents  Int      @default(2) @map("ai_turn_cost_flag_cents")
   /// Months a rejected store application is kept before the retention job deletes it (#554), 1 to 24.
   rejectedApplicationRetentionMonths Int @default(12) @map("rejected_application_retention_months")
+  /// States a shipped order may go to (ADR-0023, ADR-0008): each added only after the tax advisor signs off on it.
+  shippingStates       String[] @default([]) @map("shipping_states")
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")

@@ -60,7 +60,9 @@ import {
   Upload,
   ListChecks,
   Camera,
+  Truck,
 } from "lucide-react";
+import { shippableRefusal } from "@/lib/shipping/eligibility";
 
 interface Variant {
   id: string;
@@ -88,6 +90,8 @@ interface Listing {
   status: string | null;
   frozen: boolean;
   perishable: boolean;
+  /** Ships nationwide (#567). */
+  shippable: boolean;
   prepared: string | null;
   prepMinutes: number | null;
   active: boolean;
@@ -98,6 +102,8 @@ interface Listing {
 interface Props {
   storeName: string;
   storeSlug: string;
+  /** The store has opted in to shipping (#567). */
+  storeShips: boolean;
   listings: Listing[];
 }
 
@@ -150,6 +156,8 @@ interface ListingFormFields {
   status: string;
   frozen: boolean;
   perishable: boolean;
+  /** Sent only on update; already false when the listing cannot ship. */
+  shippable: boolean;
   /** "" for grocery, else "hot" or "cold" prepared food (#570). */
   prepared: string;
   prepMinutes: string;
@@ -175,6 +183,7 @@ function buildListingFormData(
   if (fields.stockMode === "status") fd.set("status", fields.status);
   fd.set("frozen", String(fields.frozen));
   fd.set("perishable", String(fields.perishable));
+  if (listingId) fd.set("shippable", String(fields.shippable));
   fd.set("prepared", fields.prepared);
   if (fields.prepared) fd.set("prepMinutes", fields.prepMinutes);
   // Update always sends maxPerOrder so clearing it works; create omits it when blank.
@@ -193,7 +202,7 @@ const PREPARED_LABELS: Record<string, string> = {
 
 const HELD_FOR_ALLERGENS = "Saved, off sale. State its allergens under Ingredients and allergens, then reactivate it.";
 
-export function ListingManagement({ storeName, storeSlug, listings }: Props) {
+export function ListingManagement({ storeName, storeSlug, storeShips, listings }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -208,6 +217,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [status, setStatus] = useState("in_stock");
   const [frozen, setFrozen] = useState(false);
   const [perishable, setPerishable] = useState(false);
+  const [shippable, setShippable] = useState(false);
   const [prepared, setPrepared] = useState("");
   const [prepMinutes, setPrepMinutes] = useState("15");
   const [maxPerOrder, setMaxPerOrder] = useState("");
@@ -227,6 +237,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setStatus("in_stock");
     setFrozen(false);
     setPerishable(false);
+    setShippable(false);
     setPrepared("");
     setPrepMinutes("15");
     setMaxPerOrder("");
@@ -278,6 +289,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setStatus(listing.status ?? "in_stock");
     setFrozen(listing.frozen);
     setPerishable(listing.perishable);
+    setShippable(listing.shippable);
     setPrepared(listing.prepared ?? "");
     setPrepMinutes(String(listing.prepMinutes ?? 15));
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
@@ -307,6 +319,13 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     );
   }
 
+  // The rows as they will be saved: a typed weight replaces the import placeholder.
+  const shipRefusal = shippableRefusal(
+    { frozen, perishable, prepared: prepared || null },
+    variants
+      .filter((v) => v.id || v.label.trim())
+      .map((v) => ({ weightG: parseInt(v.weightG || "0", 10), weightPlaceholder: false })),
+  );
   const formFields: ListingFormFields = {
     name,
     stockMode,
@@ -314,6 +333,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     status,
     frozen,
     perishable,
+    shippable: shippable && shipRefusal === null,
     prepared,
     prepMinutes,
     maxPerOrder,
@@ -507,6 +527,36 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
           </Label>
         </div>
       </div>
+
+      {editListing && (
+        <div className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2.5">
+          <div className="flex min-h-11 items-center justify-between gap-4">
+            <Label htmlFor="listing-shippable" className="flex items-center gap-1.5">
+              <Truck className="size-3.5" aria-hidden /> Ships nationwide
+            </Label>
+            <Switch
+              id="listing-shippable"
+              checked={shippable && shipRefusal === null}
+              disabled={shipRefusal !== null}
+              onCheckedChange={setShippable}
+              aria-describedby="listing-shippable-hint"
+            />
+          </div>
+          <p id="listing-shippable-hint" className="text-sm text-muted-foreground">
+            {shipRefusal ??
+              (storeShips ? (
+                "Shoppers outside your delivery area can order it by parcel."
+              ) : (
+                <>
+                  Your store doesn&rsquo;t ship yet.{" "}
+                  <Link href={`/store-admin/shipping?store=${storeParam}`} className="font-medium text-primary underline underline-offset-4">
+                    Turn on shipping
+                  </Link>
+                </>
+              ))}
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-end gap-3">
@@ -794,6 +844,9 @@ function ListingRow({
           )}
           {listing.perishable && (
             <Leaf className="size-3.5 shrink-0 text-green-600" aria-label="Perishable" />
+          )}
+          {listing.shippable && (
+            <Truck className="size-3.5 shrink-0 text-muted-foreground" aria-label="Ships nationwide" />
           )}
           {listing.prepared && (
             <Badge variant="outline" className="shrink-0">

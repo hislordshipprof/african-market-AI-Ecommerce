@@ -14,7 +14,7 @@ import { rangeDays, type AnalyticsRange } from "./range";
  *   than that fee across all the order's refunds, so the store bears the amount less that share; otherwise all of it.
  */
 
-export const FULFILLMENTS = ["pickup", "store_delivery", "courier"] as const;
+export const FULFILLMENTS = ["pickup", "store_delivery", "courier", "ship"] as const;
 export type Fulfillment = (typeof FULFILLMENTS)[number];
 
 export interface SalesTotals {

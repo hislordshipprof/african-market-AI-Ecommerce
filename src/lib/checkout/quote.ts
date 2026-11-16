@@ -32,6 +32,11 @@ export type CourierQuoteInput =
   | { ok: true; feeCents: number; provider: "Uber Direct" | "DoorDash Drive"; leaveAtDoor: boolean; changed?: boolean }
   | { ok: false; problem: FlowProblem };
 
+/** The cheapest parcel rate the shopper was shown (#567), or why the basket cannot ship. */
+export type ShippingQuoteInput =
+  | { ok: true; feeCents: number; carrier: string; service: string; days: number | null; handlingDays: number; changed?: boolean }
+  | { ok: false; problem: FlowProblem };
+
 /** The cart's code, with the coupon it names when the store accepts it here, or why not (#557). */
 export type QuoteCouponInput =
   | { code: string; coupon: CouponTerms & { id: string; minGoodsCents: number } }
@@ -74,6 +79,7 @@ export function computeQuote(
   courier?: CourierQuoteInput | null,
   coupon?: QuoteCouponInput | null,
   taxCents = 0,
+  shipping?: ShippingQuoteInput | null,
 ): CheckoutQuote {
   const problems: FlowProblem[] = [];
   let subtotalCents = 0;
@@ -116,6 +122,7 @@ export function computeQuote(
   let deliveryFeeCents = 0;
   let courierFeeCents = 0;
   let courierProvider: CheckoutQuote["courierProvider"];
+  let shippingFee: CheckoutQuote["shipping"];
   if (fulfillment === "courier") {
     if (!courier) {
       problems.push({ code: "ineligible", message: "Only pickup is available for this store." });
@@ -132,6 +139,18 @@ export function computeQuote(
         problems.push({ code: "ineligible", message: "Frozen and perishable items need a hand-to-hand delivery. Turn off Leave at door." });
       } else if (courier.leaveAtDoor && cartLines.some((line) => line.hot)) {
         problems.push({ code: "ineligible", message: HOT_FOOD_HANDOFF });
+      }
+    }
+  } else if (fulfillment === "ship") {
+    if (!shipping) {
+      problems.push({ code: "ineligible", message: "This store doesn't ship orders." });
+    } else if (!shipping.ok) {
+      problems.push(shipping.problem);
+    } else {
+      // The carrier's rate, no markup (ADR-0006, ADR-0023).
+      shippingFee = { feeCents: shipping.feeCents, carrier: shipping.carrier, service: shipping.service, days: shipping.days, handlingDays: shipping.handlingDays };
+      if (shipping.changed) {
+        problems.push({ code: "quote-changed", message: `Shipping is now ${money(shipping.feeCents)}. Check your new total, then place your order.` });
       }
     }
   } else if (fulfillment === "store-delivery") {
@@ -169,7 +188,7 @@ export function computeQuote(
   const discountCents = applied?.discountCents ?? 0;
   const goodsCents = subtotalCents - discountCents;
   const serviceFeeCentsQuoted = serviceFeeCents(goodsCents, serviceFee);
-  const totalCents = goodsCents + taxCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents + courierFeeCents;
+  const totalCents = goodsCents + taxCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents + courierFeeCents + (shippingFee?.feeCents ?? 0);
   const bufferCents = holdBufferCents(goodsCents, taxCents);
   const holdCents = totalCents + bufferCents;
 
@@ -179,6 +198,7 @@ export function computeQuote(
     deliveryFeeCents,
     courierFeeCents,
     ...(courierProvider ? { courierProvider } : {}),
+    ...(shippingFee ? { shipping: shippingFee } : {}),
     serviceFeeCents: serviceFeeCentsQuoted,
     taxCents,
     tipCents,

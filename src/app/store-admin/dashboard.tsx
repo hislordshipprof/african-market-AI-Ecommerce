@@ -13,7 +13,7 @@ import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
 import { GoLiveCard } from "./go-live-card";
-import { AlertCircle, Camera, ChartColumn, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent } from "lucide-react";
+import { AlertCircle, Camera, ChartColumn, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -253,6 +253,26 @@ export function StoreAdminDashboard({
                       <p className="mt-1 text-sm font-medium text-foreground">
                         {directoryOrders === 1 ? "1 order" : `${directoryOrders.toLocaleString("en-US")} orders`} from the directory
                       </p>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && (
+            <Link href={`/store-admin/shipping?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <Truck className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Shipping</CardTitle>
+                      <CardDescription>
+                        Ship dry goods to shoppers by parcel
+                      </CardDescription>
                     </div>
                   </div>
                 </CardHeader>

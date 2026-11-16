@@ -4,6 +4,7 @@ export const FULFILLMENT_LABELS: Record<string, string> = {
   pickup: "Pickup",
   "store-delivery": "Store delivery",
   courier: "Courier",
+  ship: "Shipping",
   delivery: "Store delivery",
 };
 

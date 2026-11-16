@@ -84,6 +84,9 @@ export default async function OrderPage({
           <FlowCard title="Order details">
             <p><strong>Status:</strong> {customerStatusLabel(realOrder.status)}</p>
             <p><strong>Fulfillment:</strong> {FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment}</p>
+            {realOrder.fulfillment === "ship" && realOrder.shippingCarrier && (
+              <p><strong>Carrier:</strong> {[realOrder.shippingCarrier, realOrder.shippingService].filter(Boolean).join(" ")} · {money(realOrder.deliveryFeeCents)}</p>
+            )}
             {realOrder.customer && (
               <p><strong>Customer:</strong> {realOrder.customer.name}</p>
             )}

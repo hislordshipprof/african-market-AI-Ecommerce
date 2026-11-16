@@ -6,7 +6,7 @@ export type SwapRule =
   | { kind: "exact" }
   | { kind: "suggest" }
   | { kind: "chosen"; item: CartItem };
-export type Fulfillment = "pickup" | "store-delivery" | "courier";
+export type Fulfillment = "pickup" | "store-delivery" | "courier" | "ship";
 export type OrderStatus =
   | "AUTHORIZED"
   | "ACCEPTED"
@@ -35,6 +35,8 @@ export interface FlowStore {
   insulatedPackaging: boolean;
   /** A Pro store registered with a courier, with a pickup point (#527). Each order's eligibility comes with its quote. */
   courierOffered: boolean;
+  /** The store ships parcels: it set handling days (#567). Each basket's eligibility comes with its quote. */
+  shippingOffered?: boolean;
   /** Closed now, and an order placed now is queued for the next opening. */
   closed: boolean;
   /** "Wed 9:00 AM CT" while closed, else empty. */
@@ -99,6 +101,8 @@ export interface CheckoutQuote {
   deliveryFeeCents: number;
   courierFeeCents: number;
   courierProvider?: "Uber Direct" | "DoorDash Drive";
+  /** The cheapest parcel rate for a shipped order (#567), included in totalCents. */
+  shipping?: { feeCents: number; carrier: string; service: string; days: number | null; handlingDays: number };
   /** Customer service fee (ADR-0021), included in totalCents. */
   serviceFeeCents: number;
   taxCents: number;

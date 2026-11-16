@@ -19,7 +19,7 @@ A multi-tenant e-commerce platform for independent African grocery markets in th
 - Owning inventory or warehouses (Oja UK failed this way).
 - Running our own driver fleet.
 - Alcohol, tobacco, or age-restricted items.
-- Nationwide parcel shipping (phase 3 candidate for dry goods).
+- Nationwide parcel shipping of anything but shelf-stable goods. Since ADR-0023 (#567) a store may ship shippable dry goods to allowlisted states (§11.6).
 - Restaurant ordering (phase 3 candidate). A grocery store may sell prepared food from its counter since #570 (ADR-0004 amendment); restaurants still cannot join.
 - Native mobile apps at launch: responsive web + PWA first.
 
@@ -416,6 +416,15 @@ Built in #134: staff in the order inbox mark a store-delivery order Out for deli
 
 Built in #566: the **driver route**. On the Orders page the store texts one slot's Ready store-delivery orders to a driver by name and US mobile. The SMS goes through the notification `SmsSender` (Telnyx; the in-memory sender in tests) and carries `/driver/<token>` on the store's host: a 32-byte random token, of which only the sha256 hash is stored (`driver_routes`, RLS per store). The link works until midnight at the end of the store day of the later of now and the slot, and the store can revoke it. If the SMS is not accepted, the route is revoked at once and its orders are free for another driver; a route never marked sent does not hold its orders. The page needs no login and is never indexed (`noindex` meta and `X-Robots-Tag`, `private, no-store`; the page's `no-referrer` meta and the site's `strict-origin-when-cross-origin` keep the token out of any referrer). It lists the route's orders nearest-next from the store's coordinates (greedy, straight-line; orders without coordinates last), with address, customer first name, notes, leave-at-door and a Frozen flag, and a Navigate button that opens Google Maps directions to the address. Out for delivery and Delivered run the same #134 transitions and customer notifications as staff. The token opens only its own route's orders: another store's host, a revoked or expired link, or an order off the route is 404 or "link no longer works". No Onfleet, no paid routing API, no live GPS (#566 decisions).
 
+### 11.6 Parcel shipping of dry goods (ADR-0023)
+
+Built in #567. **Ship** is a fourth fulfillment (`orders.fulfillment = "ship"`), beside pickup, store delivery and courier.
+- A listing is shippable only when the store marks it and it is not frozen, not perishable and every size has a real weight; an edit that breaks the rule turns it off. The store opts in on the Shipping page with 1 to 10 handling days.
+- Checkout offers Ship when every line ships, the store ships, the confirmed destination's state is on `platform_settings.shipping_states` (each state added after tax advisor sign-off, ADR-0008) and the order weighs at most 50 lb, in one 12 × 10 × 8 in box. The delivery radius does not apply.
+- Rates come through `ShippingProvider` (`src/lib/shipping/`): Shippo `POST /shipments` with `async: false`, or its fake outside production (`E2E_FAKE_SHIPPO=1`). Checkout shows only the cheapest rate, with carrier, service and transit days plus the store's handling days, at the carrier's price with no markup. The rate is saved on the cart (`shipping_*`, keyed on state, ZIP and weight) and reused until it expires 7 days later; an expired rate that comes back different is shown before the hold. Placement charges the saved rate, refuses an expired one, and re-checks every line and the state under the store lock.
+- Tax is computed at the destination address. Hold and capture are the existing flow; capture is at Ready. The order keeps the postage in `delivery_fee_cents`, with `shipping_rate_id`, carrier, service and days. Until #568 buys labels, the postage is part of the store's share of the capture.
+- Not built here: labels, tracking, the Shipped state and moving postage to a platform pass-through (#568); returns; multi-box orders; an admin screen for the state allowlist.
+
 ---
 
 ## 12. Notifications
@@ -602,7 +611,7 @@ Phase 2 started on 2026-11-14, alongside the Phase 1 tail (Build Board decision 
 - Reports & payouts dashboard; platform admin console.
 
 ### Phase 3: Scale
-Second metro, native apps, scheduled van slots, nationwide shipping for dry goods, hot food/catering, agentic commerce (MCP/ACP), store reorder from wholesalers.
+Second metro, native apps, scheduled van slots, nationwide shipping for dry goods (rates at checkout built in #567, ADR-0023; labels and tracking #568), hot food/catering, agentic commerce (MCP/ACP), store reorder from wholesalers.
 
 ---
 

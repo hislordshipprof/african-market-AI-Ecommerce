@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, MapPin, ShoppingBag, Truck } from "lucide-react";
+import { CircleAlert, Clock, MapPin, Package, ShoppingBag, Truck } from "lucide-react";
 import { loadStripe, type Appearance, type Stripe as StripeJs } from "@stripe/stripe-js";
 import {
   Elements,
@@ -181,6 +181,7 @@ function StoreDeliveryFields({
   leaveAtDoor,
   setLeaveAtDoor,
   frozen,
+  shipping,
   onEdit,
 }: {
   line1: string;
@@ -201,6 +202,8 @@ function StoreDeliveryFields({
   leaveAtDoor: boolean;
   setLeaveAtDoor: (value: boolean) => void;
   frozen: boolean;
+  /** A shipped order: no delivery radius and no leave at door (#567). */
+  shipping: boolean;
   onEdit: () => void;
 }) {
   return (
@@ -254,20 +257,24 @@ function StoreDeliveryFields({
       {confirmed && (
         <p role="status">
           {confirmed.formatted}
-          {confirmed.withinRadius
-            ? ` · ${confirmed.distanceMi.toFixed(1)} mi`
-            : ` — ${confirmed.message}`}
+          {shipping
+            ? ""
+            : confirmed.withinRadius
+              ? ` · ${confirmed.distanceMi.toFixed(1)} mi`
+              : ` — ${confirmed.message}`}
         </p>
       )}
-      <label className={styles.check}>
-        <input
-          type="checkbox"
-          checked={!frozen && leaveAtDoor}
-          disabled={frozen}
-          onChange={(event) => setLeaveAtDoor(event.target.checked)}
-        />
-        Leave at door
-      </label>
+      {!shipping && (
+        <label className={styles.check}>
+          <input
+            type="checkbox"
+            checked={!frozen && leaveAtDoor}
+            disabled={frozen}
+            onChange={(event) => setLeaveAtDoor(event.target.checked)}
+          />
+          Leave at door
+        </label>
+      )}
     </div>
   );
 }
@@ -359,7 +366,7 @@ function RealCheckoutForm({
         city: confirmed.city,
         state: confirmed.state,
         zip: confirmed.zip,
-        leaveAtDoor: !handoff && leaveAtDoor,
+        leaveAtDoor: fulfillment !== "ship" && !handoff && leaveAtDoor,
       }
     : undefined;
   const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
@@ -447,7 +454,7 @@ function RealCheckoutForm({
       return;
     }
     if (fulfillment !== "pickup" && !delivery) {
-      setError("Confirm your delivery address.");
+      setError(fulfillment === "ship" ? "Confirm your shipping address." : "Confirm your delivery address.");
       return;
     }
     if (payState !== "idle") return;
@@ -676,6 +683,7 @@ function RealCheckoutForm({
           leaveAtDoor={leaveAtDoor}
           setLeaveAtDoor={setLeaveAtDoor}
           frozen={handoff}
+          shipping={fulfillment === "ship"}
           onEdit={() => {
             setConfirmed(null);
             setSuggestions([]);
@@ -956,6 +964,30 @@ interface CheckoutLayoutProps {
   deliveryEditor?: React.ReactNode;
 }
 
+/** Handling plus carrier transit, in business days (#567). */
+function shipArrival(rate: NonNullable<CheckoutQuote["shipping"]>): string {
+  const pack = `${rate.handlingDays} business ${rate.handlingDays === 1 ? "day" : "days"}`;
+  if (rate.days == null) return `Packed within ${pack}, then on its way with ${rate.carrier}.`;
+  const total = rate.handlingDays + rate.days;
+  return `Arrives in about ${total} business days: packed within ${pack}, then ${rate.days} in transit.`;
+}
+
+function ShipRate({ rate }: { rate: NonNullable<CheckoutQuote["shipping"]> }) {
+  return (
+    <div className={styles.shipRate} role="status">
+      <Package size={20} aria-hidden />
+      <div>
+        <p className={styles.shipRateTitle}>
+          <span>{rate.carrier} {rate.service}</span>
+          <strong>{money(rate.feeCents)}</strong>
+        </p>
+        <p>{shipArrival(rate)}</p>
+        <p>This is the carrier&rsquo;s own rate, with no markup.</p>
+      </div>
+    </div>
+  );
+}
+
 function CheckoutLayout(props: CheckoutLayoutProps) {
   const {
     settings, lines, fulfillment, setFulfillment,
@@ -976,6 +1008,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     .filter((problem) => problem.code === "ineligible" || problem.code === "outside-radius")
     .map((problem) => problem.message);
   const courierQuoted = Boolean(quote?.courierProvider) && !quotePending;
+  const shipping = fulfillment === "ship";
+  const shipRate = shipping && !quotePending ? quote?.shipping ?? null : null;
 
   return (
     <div className={styles.page}>
@@ -1035,10 +1069,21 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                       : "Courier"}
                   </Chip>
                 )}
+                {isRealPayment && settings.shippingOffered && (
+                  <Chip
+                    type="button"
+                    selected={shipping}
+                    onClick={() => setFulfillment("ship")}
+                  >
+                    <Package size={18} />
+                    {shipRate ? `Ship · ${money(shipRate.feeCents)}` : "Ship"}
+                  </Chip>
+                )}
               </div>
               <p className={styles.muted}>
-                Order weight: {(weightG / 453.592).toFixed(1)} lb. Delivery
-                radius: {settings.deliveryRadiusMi} miles.
+                {shipping
+                  ? `Order weight: ${(weightG / 453.592).toFixed(1)} lb. Shipped orders can weigh up to 50 lb.`
+                  : `Order weight: ${(weightG / 453.592).toFixed(1)} lb. Delivery radius: ${settings.deliveryRadiusMi} miles.`}
               </p>
               {!isRealPayment && !courierEligible && (
                 <p className={styles.error}>
@@ -1057,13 +1102,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   <p className={styles.error} role="status">{courierReasons.join(" ")}</p>
                 ) : null
               )}
-              {frozen && (
+              {frozen && !shipping && (
                 <p className={styles.notice}>
                   Frozen food needs a hand-to-hand delivery. Leave at door is
                   unavailable.
                 </p>
               )}
-              {hot && !frozen && fulfillment !== "pickup" && (
+              {hot && !frozen && fulfillment !== "pickup" && !shipping && (
                 <p className={styles.notice}>
                   Hot food is handed to you. Leave at door is unavailable.
                 </p>
@@ -1074,7 +1119,17 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   title="Collect from the market"
                 />
               ) : deliveryEditor ? (
-                deliveryEditor
+                <>
+                  {/* Above the form: a basket that cannot ship says so before any typing. */}
+                  {shipping && !shipRate && courierReasons.length > 0 && !quotePending && (
+                    <p className={styles.shipNote} role="status">
+                      <CircleAlert size={18} aria-hidden />
+                      {courierReasons.join(" ")}
+                    </p>
+                  )}
+                  {deliveryEditor}
+                  {shipRate && <ShipRate rate={shipRate} />}
+                </>
               ) : (
                 <>
                   <label className={styles.field}>
@@ -1129,8 +1184,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               )}
             </FlowCard>
           </div>
-          <FlowCard title="When works for you?">
-            {settings.closed && (
+          <FlowCard title={shipping ? "Notes for the store" : "When works for you?"}>
+            {settings.closed && !shipping && (
               <div className={styles.queueNotice}>
                 <Clock size={18} aria-hidden />
                 <p>
@@ -1142,7 +1197,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </p>
               </div>
             )}
-            {!slotRequired && (
+            {!slotRequired && !shipping && (
               <div className={styles.options}>
                 <Chip
                   type="button"
@@ -1186,7 +1241,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 value={notes}
                 maxLength={1000}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder={fulfillment === "pickup" ? "A note for your shopper" : "Apartment, gate code, or a note for your shopper"}
+                placeholder={fulfillment === "pickup" || shipping ? "A note for your shopper" : "Apartment, gate code, or a note for your shopper"}
               />
             </label>
           </FlowCard>
@@ -1259,7 +1314,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               )}
             </FlowCard>
           </div>
-          {fulfillment !== "pickup" && (
+          {fulfillment !== "pickup" && !shipping && (
             <FlowCard title="A thank-you for your driver">
               <p className={styles.muted}>
                 100% of your tip goes to the courier. No tip is added unless
