@@ -789,6 +789,23 @@ async function seedDemoOrders() {
   console.log(`Seeded ${demoOrders.length} demo orders for mama-ngozi`);
 }
 
+/** One store ships (#567): handling days, two dry listings with real weights, and one state open for shipping. */
+async function seedShipping() {
+  const store = await prisma.store.update({ where: { slug: "mama-ngozi" }, data: { shippingHandlingDays: 2 } });
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+    await tx.listing.updateMany({ where: { storeId: store.id, id: { in: ["mn_garri_white", "mn_egusi"] } }, data: { shippable: true } });
+  });
+  // Maryland: the e2e address book's 8505 Fenton St, Silver Spring.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    await tx.platformSettings.update({ where: { id: "platform" }, data: { shippingStates: ["MD"] } });
+  });
+  console.log("Seeded shipping: mama-ngozi ships White Garri and Egusi to MD");
+}
+
 async function observeSeedConnection(): Promise<DatabaseIdentity> {
   const rows = await prisma.$queryRaw<Array<{ database: string; host: string; port: string }>>`
     SELECT current_database() AS database,
@@ -828,6 +845,7 @@ export async function runSeed(deps: SeedMasterCatalogDeps = {}) {
     await seedTestAdmin();
     await seedStoreOwner();
     await seedDemoOrders();
+    await seedShipping();
   }
   await revalidateSeededStores(await prisma.store.findMany({ where: { slug: { in: ["mama-ngozi", "tante-marie"] } }, select: { id: true, slug: true } }));
 }
