@@ -207,6 +207,10 @@ _Avoid_: Confirm card (the parked 2026-11-04 design; replaced 2026-11-14)
 **Cancel window**:
 Not used. The assistant-only 10-minute cancel window was dropped on 2026-11-14 (#247), because assistant orders are placed by normal checkout.
 
+**Catalog endpoint**:
+A store host's read-only catalog for outside AI assistants such as ChatGPT or Claude, at `/api/mcp` over MCP (#572): `search_catalog`, `get_product`, `get_store_info` and `check_delivery_area`, answering with storefront links, prices and stock badges. No customer data, no cart or checkout, no sign-in; 60 calls a minute per IP. It answers only for an open store whose owner turned on "Let AI assistants read my catalog" (off by default); otherwise 404. Not the Shopper assistant, which runs on the storefront.
+_Avoid_: Agent API, AI API
+
 **Store copilot**:
 The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp.
 _Avoid_: Store AI, store assistant
