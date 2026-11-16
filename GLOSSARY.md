@@ -354,7 +354,24 @@ A customer's one report of a problem with a finished order, made from the tracki
 Order statuses after delivery, set only from money: Partly refunded while the succeeded refunds are below the capture, Refunded when they equal it. A reported problem alone does not change the order's status. A failed issue refund marks the issue refund failed and alerts the store and the platform; the order never becomes Refund failed, which is only for cancellations.
 
 **Fulfillment option**:
-How a customer gets an order: store delivery, courier delivery, or pickup.
+How a customer gets an order: store delivery, courier delivery, pickup, or shipping.
+
+**Shipping**:
+A parcel sent by a carrier (USPS, UPS) to an address anywhere in an allowed state (ADR-0023, #567). Only shippable listings, from a store that ships, at most 50 lb in one box. The customer pays the carrier's cheapest rate with no markup.
+_Avoid_: Delivery (that is local: store delivery or courier delivery)
+
+**Shippable**:
+A listing the store marked to ship. Never frozen, never perishable, and every size has a real weight; an edit that breaks this turns it off.
+_Avoid_: Dry goods (a description, not the flag)
+
+**Handling days**:
+Business days a store takes to pack a shipped order before the carrier has it, 1 to 10. Setting them is how a store opts in to shipping.
+
+**Shipping states**:
+The platform's list of states a shipped order may go to. A state is added only after the tax advisor signs off on it (ADR-0008).
+
+**Shipping rate**:
+The cheapest carrier price for an order's box, shown at checkout with carrier, service and days, and locked on the cart until it expires (7 days).
 
 **Store delivery**:
 Delivery done by the store's own driver, at a fee the store sets.
