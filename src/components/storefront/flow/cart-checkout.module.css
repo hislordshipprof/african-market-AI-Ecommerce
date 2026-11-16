@@ -330,6 +330,55 @@
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
+/* The carrier's rate for a shipped order (#567): neutral ground, colour only on the icon. */
+.shipRate,
+.shipNote {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  margin: 14px 0;
+  border-radius: 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-line);
+  color: var(--color-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.shipRate > svg,
+.shipNote > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-primary-text);
+}
+.shipRate > div {
+  flex: 1;
+  min-width: 0;
+}
+.shipRate p {
+  margin: 0;
+}
+.shipRate p + p {
+  margin-top: 4px;
+}
+.shipRateTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--color-ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.shipRateTitle strong {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.shipNote {
+  color: var(--color-ink);
+  align-items: flex-start;
+}
 /* Breaks between the opening and the ready time, so the dot never starts a line. */
 .queueNotice strong span {
   display: inline-block;

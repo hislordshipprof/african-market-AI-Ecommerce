@@ -41,6 +41,7 @@ export const getFlowContext = cache(async () => {
     courierOffered: courierOffered(store)
       && (await storeMayUse(store.id, "courier-delivery"))
       && anyCourierEnabled(await readCourierSettings(), store.id),
+    shippingOffered: store.shippingHandlingDays != null,
     closed: availability.kind === "queued",
     opensAt: queue?.opensAt ?? "",
     readyAt: queue?.readyAt ?? "",
