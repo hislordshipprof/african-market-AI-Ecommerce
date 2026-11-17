@@ -111,6 +111,7 @@ function ReceiveForm({ order, onReceived, onClose }: { order: OrderView; onRecei
             {line.stockMode === "counted" ? (
               <input
                 aria-label={`Quantity of ${line.name} received`}
+                autoComplete="off"
                 inputMode="numeric"
                 placeholder="Qty"
                 disabled={!ticked.has(line.id)}
