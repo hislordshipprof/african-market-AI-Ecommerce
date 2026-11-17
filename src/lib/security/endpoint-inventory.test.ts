@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const root = process.cwd();
@@ -16,6 +17,53 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/directory/request-actions.ts",
 ]);
 const GUARDS = ["requireStoreOwner", "requireStoreMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
+const ROUTE_GUARDS = [...GUARDS, "platformAdminApiDenial"];
+/** Route methods with no session guard. Each is public or checks its own secret, signature or token. */
+const PUBLIC_ROUTES = new Map<string, string>([
+  ["src/app/api/acp/checkout_sessions/[id]/cancel/route.ts POST", "acpGate: ACP_API_KEY bearer"],
+  ["src/app/api/acp/checkout_sessions/[id]/complete/route.ts POST", "acpGate: ACP_API_KEY bearer"],
+  ["src/app/api/acp/checkout_sessions/[id]/route.ts GET", "acpGate: ACP_API_KEY bearer"],
+  ["src/app/api/acp/checkout_sessions/[id]/route.ts POST", "acpGate: ACP_API_KEY bearer"],
+  ["src/app/api/acp/checkout_sessions/route.ts POST", "acpGate: ACP_API_KEY bearer"],
+  ["src/app/api/address/suggest/route.ts GET", "public, rate limited"],
+  ["src/app/api/assistant/chat/route.ts POST", "public shopper chat, same origin, rate limited"],
+  ["src/app/api/auth/[...all]/route.ts GET", "Better Auth"],
+  ["src/app/api/auth/[...all]/route.ts POST", "Better Auth"],
+  ["src/app/api/catalog-image/[...key]/route.ts GET", "public catalog images"],
+  ["src/app/api/checkout-link/[token]/route.ts GET", "holder of the checkout link token"],
+  ["src/app/api/delivery-proof/[token]/route.ts GET", "holder of the tracking token"],
+  ["src/app/api/directory/near/route.ts GET", "public, rate limited"],
+  ["src/app/api/e2e/fake-confirm/route.ts POST", "testOnlyRoutesAllowed"],
+  ["src/app/api/e2e/magic-link-token/route.ts GET", "testOnlyRoutesAllowed"],
+  ["src/app/api/health/route.ts GET", "public probe"],
+  ["src/app/api/inngest/route.ts GET", "Inngest signing key"],
+  ["src/app/api/inngest/route.ts POST", "Inngest signing key"],
+  ["src/app/api/inngest/route.ts PUT", "Inngest signing key"],
+  ["src/app/api/invite/accept/route.ts POST", "session and 2FA checked inline"],
+  ["src/app/api/invite/password/route.ts POST", "holder of the invite token"],
+  ["src/app/api/mcp/route.ts POST", "public read-only catalog, rate limited"],
+  ["src/app/api/order-messages/[token]/route.ts GET", "holder of the tracking token"],
+  ["src/app/api/storefront/listings/[id]/route.ts GET", "public storefront"],
+  ["src/app/api/storefront/revalidate/route.ts POST", "bearer secret"],
+  ["src/app/api/storefront/search/route.ts GET", "public storefront, rate limited"],
+  ["src/app/api/stripe/connect/route.ts POST", "session, 2FA and owner checked inline"],
+  ["src/app/api/stripe/return/route.ts GET", "session checked inline"],
+  ["src/app/api/webhooks/doordash/route.ts POST", "DoorDash authorization header"],
+  ["src/app/api/webhooks/shippo/route.ts POST", "Shippo signature"],
+  ["src/app/api/webhooks/stripe/route.ts POST", "Stripe signature"],
+  ["src/app/api/webhooks/uber-direct/route.ts POST", "Uber signature"],
+  ["src/app/api/webhooks/whatsapp/route.ts GET", "Meta verify token"],
+  ["src/app/api/webhooks/whatsapp/route.ts POST", "Meta signature"],
+  ["src/app/manifest.webmanifest/route.ts GET", "public web app manifest"],
+  ["src/app/pwa-icons/[name]/route.ts GET", "public app icons"],
+  ["src/app/store-admin/manifest.webmanifest/route.ts GET", "public web app manifest"],
+]);
+/** Routes that read input without parse-input; each checks it against a fixed list or owner-only lookup. */
+const UNPARSED_ROUTE_INPUT = new Map<string, string>([
+  ["src/app/pwa-icons/[name]/route.ts GET", "name must be a PWA_ICONS key"],
+  ["src/app/store-admin/analytics/export/route.ts GET", "owner only; view must be in ANALYTICS_VIEWS, range through resolveRange"],
+  ["src/app/store-admin/payouts/[payoutId]/csv/route.ts GET", "owner only; the id is looked up on the owner's own Stripe account"],
+]);
 const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 function walk(dir: string, acc: string[] = []): string[] {
@@ -59,7 +107,7 @@ function actions(): Array<{ file: string; name: string; source: string }> {
 
 function routes(): Array<{ file: string; name: string; source: string }> {
   const found = [];
-  for (const file of walk(path.join(root, "src", "app", "api"))) {
+  for (const file of walk(path.join(root, "src", "app"))) {
     if (!file.endsWith(`${path.sep}route.ts`)) continue;
     const source = readFileSync(file, "utf8");
     const fileRel = rel(file);
@@ -97,6 +145,17 @@ function takesArguments(source: string, name: string): boolean {
     }
   }
   return false;
+}
+
+/** True when the export's own body calls one of the guards. */
+export function callsGuard(source: string, name: string, guards: readonly string[]): boolean {
+  const body = functionBody(withoutComments(source), name);
+  return guards.some((guard) => new RegExp(`\\b${guard}\\s*\\(`).test(body));
+}
+
+function withoutComments(source: string): string {
+  const file = ts.createSourceFile("endpoint.tsx", source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TSX);
+  return ts.createPrinter({ removeComments: true }).printFile(file);
 }
 
 function functionBody(source: string, name: string): string {
@@ -149,9 +208,19 @@ describe("endpoint inventory", () => {
   it('every "use server" export calls a guard or is on the public allow-list', () => {
     const missing = actions()
       .filter((item) => !PUBLIC_ACTIONS.has(item.file))
-      .filter((item) => !GUARDS.some((guard) => functionBody(item.source, item.name).includes(guard)))
+      .filter((item) => !callsGuard(item.source, item.name, GUARDS))
       .map((item) => `${item.file} ${item.name}`);
     expect(missing).toEqual([]);
+  });
+
+  it("every route method calls a guard or is on the public allow-list", () => {
+    const keys = routes().map((item) => `${item.file} ${item.name}`);
+    const missing = routes()
+      .filter((item) => !PUBLIC_ROUTES.has(`${item.file} ${item.name}`))
+      .filter((item) => !callsGuard(item.source, item.name, ROUTE_GUARDS))
+      .map((item) => `${item.file} ${item.name}`);
+    expect(missing).toEqual([]);
+    expect([...PUBLIC_ROUTES.keys()].filter((key) => !keys.includes(key))).toEqual([]);
   });
 
   it("every input-taking endpoint imports the shared parse helper", () => {
@@ -164,10 +233,28 @@ describe("endpoint inventory", () => {
     }
     for (const item of routes()) {
       if (!routeReadsInput(item.file, item.source)) continue;
+      if (UNPARSED_ROUTE_INPUT.has(`${item.file} ${item.name}`)) continue;
       const implementation = item.source.includes("createChatHandler") ? hopSource(item.source) : item.source;
       if (!implementation.includes("parse-input")) missing.push(`${item.file} ${item.name}`);
     }
     expect(missing).toEqual([]);
+  });
+
+  it("does not count a guard named only in a comment", () => {
+    const source = [
+      `"use server";`,
+      `export async function save(input: unknown) {`,
+      `  // requireStoreOwner() runs in the caller`,
+      `  /* requireStoreMember(); */`,
+      `  return input;`,
+      `}`,
+      `export async function load() {`,
+      `  const { store } = await requireStoreOwner();`,
+      `  return store;`,
+      `}`,
+    ].join("\n");
+    expect(callsGuard(source, "save", GUARDS)).toBe(false);
+    expect(callsGuard(source, "load", GUARDS)).toBe(true);
   });
 
   it("counts an exported async arrow as an endpoint", () => {
