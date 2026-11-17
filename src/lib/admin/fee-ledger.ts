@@ -8,8 +8,8 @@ import { captureSplit, courierFeeCents, platformTaxCents } from "@/lib/order/pla
  * - A capture row comes from the order's capture record (confirmed_capture_cents, capture_confirmed_at), which a
  *   trigger writes once when the capture is confirmed and nothing clears: a cancel, a full refund or a manual
  *   repayment leaves it as it was. A capture whose cancel refund failed stays a capture row, marked refund failed.
- * - Application fee = the stored platform fee (service fee + the store's card fee) + the courier fee, capped at
- *   the capture, as sent to Stripe. Card fee share = the platform's part of the card-fee split.
+ * - Application fee = the stored platform fee (service fee + the store's card fee) + the courier fee or the postage of
+ *   a shipped order (#568), capped at the capture, as sent to Stripe. Card fee share = the platform's part of the card-fee split.
  *   Net = application fee − courier fee − the store's card fee − the platform's card fee share.
  * - A refund row is dated when the refund succeeded and shown only when it returns fee: a refund with
  *   refund_application_fee returns the fee in proportion, never more than the fee across the order's refunds
@@ -57,6 +57,8 @@ type OrderFacts = {
   platformFeeCents: number | null;
   serviceFeeCents: number;
   deliveryFeeCents: number;
+  /** Postage a shipped order passed through (#568); absent on rows built before it. */
+  shippingPostageCents?: number | null;
   taxCents: number;
   taxLiableParty: string;
 };
@@ -113,7 +115,7 @@ function orderMoney(order: OrderFacts, capturedCents: number) {
     courierFeeCents: courier,
     applicationFeeCents: applicationFee,
     platformCardFeeCents: split.platformCardFeeCents,
-    // Courier fees and the tax the platform collects pass through; only their card fees are its cost.
+    // Courier fees, postage and the tax the platform collects pass through; only their card fees are its cost.
     platformNetCents: applicationFee - courier - platformTax - storeCardFee - split.platformCardFeeCents,
   };
 }
@@ -284,7 +286,7 @@ export function ordersLabel(orders: number): string {
 export const AMOUNT_COLUMNS: Array<[keyof LedgerAmounts, string]> = [
   ["capturedCents", "Captured"],
   ["serviceFeeCents", "Service fee"],
-  ["courierFeeCents", "Courier fee passed through"],
+  ["courierFeeCents", "Courier fee or postage passed through"],
   ["platformCardFeeCents", "Card fee share (platform)"],
   ["applicationFeeCents", "Application fee"],
   ["feeRefundedCents", "Fee refunded"],

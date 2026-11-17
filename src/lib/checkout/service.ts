@@ -911,6 +911,7 @@ export async function recordAuthorizedOrder(
           // A courier order keeps the courier fee here; courierFeeCents() reads it back (#495). A shipped order keeps its postage (#567).
           deliveryFeeCents: currentQuote.deliveryFeeCents + currentQuote.courierFeeCents + (shipped?.feeCents ?? 0),
           shippingRateId: shipped ? cart.shippingRateId : null,
+          shippingRateExpiresAt: shipped ? cart.shippingQuoteExpiresAt : null,
           shippingCarrier: shipped?.carrier ?? null,
           shippingService: shipped?.service ?? null,
           shippingDays: shipped?.days ?? null,

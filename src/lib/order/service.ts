@@ -20,6 +20,7 @@ import { recordCapture } from "./capture-record";
 import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
 import { orderPrepMinutes } from "../listing/prepared";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
+import { buyShippingLabel, fixPostage, type LabelDeps } from "../shipping/label";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -1018,7 +1019,7 @@ function couponMetadata(couponId: string | null | undefined): Record<string, str
 
 /** The application fee for a stored capture amount; the service fee was stored with it. */
 function applicationFeeFor(
-  order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number; taxCents: number; taxLiableParty: string },
+  order: { fulfillment: string; deliveryFeeCents: number; shippingPostageCents: number | null; serviceFeeCents: number; taxCents: number; taxLiableParty: string },
   capturedCents: number,
 ): number {
   return captureSplit({
@@ -1069,8 +1070,14 @@ async function readyTax(storeId: string, orderId: string): Promise<{ ok: true; t
 export async function markReady(
   storeId: string,
   orderId: string,
-): Promise<{ ok: true; capturedAmountCents: number; voided?: boolean } | { ok: false; error: string }> {
-  // Phase 0: final tax on the picked lines; never capture untaxed (#65).
+  options: { confirmPostageCents?: number; label?: LabelDeps } = {},
+): Promise<
+  | { ok: true; capturedAmountCents: number; voided?: boolean; labelError?: string }
+  | { ok: false; error: string; confirmPostageCents?: number }
+> {
+  // Phase 0: a shipped order's postage, re-quoted when its rate expired (#568); then final tax on the picked lines; never capture untaxed (#65).
+  const postage = await fixPostage(storeId, orderId, options.confirmPostageCents, options.label);
+  if (!postage.ok) return postage;
   const finalTax = await readyTax(storeId, orderId);
   if (!finalTax.ok) return finalTax;
 
@@ -1293,6 +1300,7 @@ export async function markReady(
   // Persist Stripe's amount_received, not the requested amount (M2)
   let notifyReady = false;
   let courierReady = false;
+  let shipReady = false;
   const finalize = await storeScopedTransaction(storeId, async (tx) => {
     notifyReady = false;
     courierReady = false;
@@ -1324,6 +1332,7 @@ export async function markReady(
     await settleCapturedStock(tx, storeId, orderId);
     notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
     courierReady = order.fulfillment === "courier";
+    shipReady = order.fulfillment === "ship";
     return { ok: true as const, capturedAmountCents: captureResult.amountCaptured };
   }, LEDGER_TRANSACTION);
 
@@ -1332,8 +1341,10 @@ export async function markReady(
   if (courierReady) scheduleCourierDispatch(storeId, orderId);
   // Outside any transaction; a failure leaves it pending for the sweep (E10).
   await recordTaxTransaction(storeId, orderId);
+  // A label that fails is bought again from the order (Buy label); the capture stands.
+  const label = shipReady ? await buyShippingLabel(storeId, orderId, options.label) : null;
 
-  return { ok: true, capturedAmountCents: finalize.capturedAmountCents };
+  return { ok: true, capturedAmountCents: finalize.capturedAmountCents, ...(label && !label.ok && { labelError: label.error }) };
 }
 
 export async function completePickup(
