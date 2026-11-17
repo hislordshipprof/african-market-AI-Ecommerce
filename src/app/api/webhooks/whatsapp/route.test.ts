@@ -15,6 +15,9 @@ import { handleStoreInboundMessage } from "@/lib/whatsapp/store-inbound";
 import { GET, POST } from "./route";
 
 const SECRET = "route-test-app-secret";
+const signatureEvents = (warn: { mock: { calls: unknown[][] } }) =>
+  warn.mock.calls.map((call) => JSON.parse(String(call[0]))).filter((e) => e.event === "webhook_signature_invalid");
+
 const VERIFY = "route-test-verify-token";
 const PHONE_ID = "1029384756";
 const URL_BASE = "http://localhost:3000/api/webhooks/whatsapp";
@@ -74,6 +77,7 @@ describe("WhatsApp webhook route", () => {
     const reserialised = JSON.stringify(JSON.parse(raw));
     expect(reserialised).not.toBe(raw);
 
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const rejected = [
       await post(raw),
       await post(raw, "sha256=nothex"),
@@ -82,6 +86,10 @@ describe("WhatsApp webhook route", () => {
       await post(raw, signWhatsAppBody(raw, SECRET).replace("sha256=", "sha1=")),
     ];
     for (const res of rejected) expect(res.status).toBe(401);
+    expect(signatureEvents(warn)).toHaveLength(5);
+    expect(signatureEvents(warn)[0]).toEqual({ event: "webhook_signature_invalid", provider: "whatsapp", ip: expect.stringMatching(/^[0-9a-f]{16}$/) });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(signWhatsAppBody(raw, "another-secret"));
+    warn.mockRestore();
     expect(handleInboundMessage).not.toHaveBeenCalled();
 
     const accepted = await post(raw, signWhatsAppBody(raw, SECRET));

@@ -68,7 +68,7 @@ export function proxy(request: NextRequest) {
 
   // State and city pages are cached for every host, so only the root domain may reach them (#451).
   if (isDirectoryOnlyPath(request.nextUrl.pathname) && headers.get("x-platform-root") !== "1") {
-    const response = NextResponse.rewrite(new URL("/_directory-not-here", request.url));
+    const response = NextResponse.rewrite(new URL("/_directory-not-here", request.url), { request: { headers } });
     stampSecurity(headers, response);
     return response;
   }

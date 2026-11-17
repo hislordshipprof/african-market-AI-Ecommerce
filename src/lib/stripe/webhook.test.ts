@@ -54,17 +54,25 @@ describe("Stripe webhook handler", () => {
     });
     const { NextRequest } = await import("next/server");
     const nextReq = new NextRequest(req);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await POST(nextReq);
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toMatch(/missing/i);
+    expect(warn.mock.calls.map((call) => JSON.parse(String(call[0])).event)).toEqual(["webhook_signature_invalid"]);
+    warn.mockRestore();
   });
 
   it("returns 400 when signature is invalid", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await callWebhook("{}", "bad_signature");
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toMatch(/invalid/i);
+    const events = warn.mock.calls.map((call) => JSON.parse(String(call[0]))).filter((e) => e.event === "webhook_signature_invalid");
+    expect(events).toEqual([{ event: "webhook_signature_invalid", provider: "stripe", ip: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("bad_signature");
+    warn.mockRestore();
   });
 
   it("unsigned 400", async () => {
