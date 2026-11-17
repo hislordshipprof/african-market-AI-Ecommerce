@@ -301,14 +301,14 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       const token = getTestSentEmails().at(-1)!.html.match(/\/invite\/([^?"]+)/)![1];
       expect((await passwordSignIn(email)).status).not.toBe(200);
 
-      expect(await setInviteePassword(token, password)).toEqual({ ok: true });
+      expect(await setInviteePassword(token, password, "C1 Shopper")).toEqual({ ok: true });
       const signedIn = await passwordSignIn(email);
       expect(signedIn.status, await signedIn.clone().text()).toBe(200);
 
       // An account that has a password keeps it: the invite link cannot replace it.
-      expect(await setInviteePassword(token, "Other-Pass-456!")).toEqual({ ok: true });
+      expect(await setInviteePassword(token, "Other-Pass-456!", "C1 Shopper")).toEqual({ ok: true });
       expect((await authPost("/sign-in/email", { email, password: "Other-Pass-456!" })).status).not.toBe(200);
-      expect(await setInviteePassword("not-a-token", password)).toEqual({ ok: false, error: "Invalid invitation link" });
+      expect(await setInviteePassword("not-a-token", password, "C1 Shopper")).toEqual({ ok: false, error: "Invalid invitation link" });
     } finally {
       await authPrisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -316,6 +316,48 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
         await tx.$executeRaw`DELETE FROM store_invites WHERE email = ${email}`;
         await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id = ${storeId}`;
         await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+      });
+      await removeAuthFixtures([email], []);
+    }
+  });
+
+  it("public email sign-up is refused and creates no account", async () => {
+    const email = `c1-walk-in-${suffix}@test.example`;
+    const res = await authPost("/sign-up/email", { email, password, name: "Walk In" });
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(collectCookies(res)).not.toContain("session_token");
+    expect(await authPrisma.user.count({ where: { email } })).toBe(0);
+  });
+
+  it("a staff invite to a new address creates a verified account with the invitee's name and password", async () => {
+    const email = `c1-new-invitee-${suffix}@test.example`;
+    try {
+      clearTestSentEmails();
+      await createInvite({
+        storeId,
+        email,
+        role: "staff",
+        invitedById: ownerId,
+        actorEmail: ownerEmail,
+        baseUrl: "http://localhost:3000",
+        storeSlug,
+        storeName: "C1 Store",
+      });
+      const token = getTestSentEmails().at(-1)!.html.match(/\/invite\/([^?"]+)/)![1];
+      expect(await setInviteePassword("not-a-token", password, "Nobody")).toEqual({ ok: false, error: "Invalid invitation link" });
+      expect(await authPrisma.user.count({ where: { email } })).toBe(0);
+
+      expect(await setInviteePassword(token, password, "Ngozi Staff")).toEqual({ ok: true });
+      const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
+      expect(user).toMatchObject({ name: "Ngozi Staff", emailVerified: true, role: "customer", twoFactorEnabled: false });
+      const signedIn = await passwordSignIn(email);
+      expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+    } finally {
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM store_invites WHERE email = ${email}`;
+        await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id = ${storeId}`;
       });
       await removeAuthFixtures([email], []);
     }

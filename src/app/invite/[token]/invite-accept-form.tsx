@@ -49,52 +49,30 @@ export function InviteAcceptForm({
     setLoading(true);
 
     try {
-      const signUpResult = await authClient.signUp.email({
+      // The invite creates the account server-side (public sign-up is closed), or adds a
+      // password to a magic-link shopper's account. It never replaces an existing password.
+      const added = await fetch("/api/invite/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, password, name }),
+      });
+      if (!added.ok) {
+        const data = (await added.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "Sign-up failed");
+        return;
+      }
+      const signInResult = await authClient.signIn.email({
         email,
         password,
-        name,
       });
-
-      if (signUpResult.error) {
-        if (
-          signUpResult.error.message?.includes("already") ||
-          signUpResult.error.code === "USER_ALREADY_EXISTS"
-        ) {
-          // A magic-link shopper has no password yet; the invite adds one (never replaces one).
-          const added = await fetch("/api/invite/password", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, password }),
-          });
-          if (!added.ok) {
-            const data = (await added.json().catch(() => ({}))) as { error?: string };
-            setError(data.error ?? "Sign-in failed");
-            return;
-          }
-          const signInResult = await authClient.signIn.email({
-            email,
-            password,
-          });
-          if (signInResult.error) {
-            setError(signInResult.error.message ?? "Sign-in failed");
-            return;
-          }
-          if (
-            (signInResult.data as Record<string, unknown>)?.twoFactorRedirect
-          ) {
-            setStep("totp-verify");
-            return;
-          }
-          const existingEnrollResult = await authClient.twoFactor.enable({ password });
-          if (existingEnrollResult.error) {
-            setError("Failed to set up two-factor authentication");
-            return;
-          }
-          setTotpUri((existingEnrollResult.data as Record<string, unknown>)?.totpURI as string ?? "");
-          setStep("totp-enroll");
-          return;
-        }
-        setError(signUpResult.error.message ?? "Sign-up failed");
+      if (signInResult.error) {
+        setError(signInResult.error.message ?? "Sign-in failed");
+        return;
+      }
+      if (
+        (signInResult.data as Record<string, unknown>)?.twoFactorRedirect
+      ) {
+        setStep("totp-verify");
         return;
       }
 
@@ -197,6 +175,7 @@ export function InviteAcceptForm({
                   id="name"
                   type="text"
                   required
+                  maxLength={80}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   autoComplete="name"

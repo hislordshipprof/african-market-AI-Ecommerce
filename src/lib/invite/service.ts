@@ -186,13 +186,14 @@ export async function validateInviteToken(rawToken: string): Promise<ValidatedIn
 }
 
 /**
- * A shopper who only signed in by magic link has no password, so the invite's password
- * sign-in can never succeed. The invite token was mailed to that address, which proves the
- * mailbox as a magic link does: add a password to an account that has none. Never replaces one.
+ * Public sign-up is closed, so the invite makes the invitee's account. The token was mailed to
+ * that address, which proves the mailbox as a magic link does: a new account starts verified,
+ * and a shopper who only signed in by magic link gets a password added. Never replaces one.
  */
 export async function setInviteePassword(
   rawToken: string,
   password: string,
+  name: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const invite = await validateInviteToken(rawToken);
   if ("error" in invite) return { ok: false, error: invite.error };
@@ -201,17 +202,15 @@ export async function setInviteePassword(
   if (password.length < minPasswordLength || password.length > maxPasswordLength) {
     return { ok: false, error: `Use a password of ${minPasswordLength} to ${maxPasswordLength} characters.` };
   }
+  const email = normalizeEmail(invite.email);
   const user = await authPrisma.user.findFirst({
-    where: { email: normalizeEmail(invite.email) },
+    where: { email },
     select: { id: true, accounts: { where: { providerId: "credential" }, select: { id: true } } },
   });
-  if (!user || user.accounts.length > 0) return { ok: true };
-  await ctx.internalAdapter.linkAccount({
-    userId: user.id,
-    providerId: "credential",
-    accountId: user.id,
-    password: await ctx.password.hash(password),
-  });
+  if (user && user.accounts.length > 0) return { ok: true };
+  const hash = await ctx.password.hash(password);
+  const userId = user?.id ?? (await ctx.internalAdapter.createUser({ email, name, emailVerified: true }, { method: "email-password" })).id;
+  await ctx.internalAdapter.linkAccount({ userId, providerId: "credential", accountId: userId, password: hash });
   return { ok: true };
 }
 

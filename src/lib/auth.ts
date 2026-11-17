@@ -215,6 +215,8 @@ export const auth = betterAuth({
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
+    // Accounts come from magic links (shoppers) or staff invites (/api/invite/password), never open sign-up.
+    disableSignUp: true,
     // Account recovery (ADR-0015): a reset never skips the second step, and ends every session.
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
