@@ -43,7 +43,7 @@ export function ListingCard({
               packLabel: listing.packLabel,
               maxPerOrder: listing.maxPerOrder,
             }}
-            disabled={listing.badge === "ask-store"}
+            blockedReason={listing.badge === "ask-store" ? "Ask store first" : undefined}
           />
         </div>
       </div>

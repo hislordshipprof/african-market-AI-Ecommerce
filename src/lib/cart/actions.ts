@@ -8,6 +8,7 @@ import { getStore } from "../get-store";
 import { readBrowserId } from "./browser";
 import { getCartIdFromCookie, setCartIdCookie } from "./cookies";
 import { SWAP_RULES } from "./limits";
+import { readCartAlternatives } from "../storefront/service";
 import { parseInput } from "../security/parse-input";
 import {
   getOrCreateCart,
@@ -86,7 +87,17 @@ export async function getServerCart(): Promise<CartWithLines | null> {
   }
   const resolved = await resolveShopperCart();
   if (!resolved) return null;
-  return getCartWithLines(resolved.storeId, resolved.cartId);
+  const cart = await getCartWithLines(resolved.storeId, resolved.cartId);
+  if (!cart) return null;
+  // Same-aisle picks for lines the store no longer sells, so the drawer can offer them (#717 AC2).
+  const wanted = cart.lines.flatMap((line) =>
+    !line.variant.listing.available && line.variant.listing.masterProduct?.categoryId
+      ? [{ lineId: line.id, categoryId: line.variant.listing.masterProduct.categoryId }]
+      : [],
+  );
+  if (!wanted.length) return cart;
+  const picks = await readCartAlternatives(resolved.storeId, wanted, cart.lines.map((line) => line.variant.listing.id));
+  return { ...cart, lines: cart.lines.map((line) => (picks.has(line.id) ? { ...line, alternatives: picks.get(line.id) } : line)) };
 }
 
 export async function addToCart(

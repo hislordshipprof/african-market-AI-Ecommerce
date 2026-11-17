@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ShoppingBag, Trash2 } from "lucide-react";
+import { CircleAlert, ShoppingBag, Trash2 } from "lucide-react";
 import {
   cartItemKey,
   EMPTY_CART,
@@ -85,6 +85,16 @@ function serverLineToClient(sl: CartLineView): CartLine {
     imageUrl: sl.imageUrl,
     packLabel: sl.variant.label,
     maxPerOrder: effectiveMaxPerOrder(sl.variant.listing.maxPerOrder),
+    available: sl.variant.listing.available,
+    alternatives: sl.alternatives?.map((alt) => ({
+      listingId: alt.listingId,
+      variantId: alt.variantId,
+      name: alt.name,
+      price: alt.price,
+      imageUrl: alt.imageUrl,
+      packLabel: alt.packLabel,
+      maxPerOrder: alt.maxPerOrder,
+    })),
     quantity: sl.qty,
     serverLineId: sl.id,
     swapRule: sl.swapRule,
@@ -347,7 +357,10 @@ export function CartProvider({
       price: item.price,
       imageUrl: item.imageUrl,
       packLabel: item.packLabel,
-      maxPerOrder: item.maxPerOrder ?? previous?.maxPerOrder,
+      // The server line's limit and availability are fresher than the page's copy of the listing.
+      maxPerOrder: previous?.maxPerOrder ?? item.maxPerOrder,
+      available: previous?.available ?? item.available,
+      alternatives: previous?.alternatives,
       quantity: qty,
       serverLineId: previous?.serverLineId,
       swapRule: previous?.swapRule,
@@ -822,6 +835,11 @@ export function CartProvider({
     adjust(item, delta, max) {
       const key = cartItemKey(item);
       const previous = intentQty(key);
+      // Nothing the server could add is never shown as added (#708 P1).
+      if (delta > 0 && !item.variantId) {
+        notify(`${item.name} can\u2019t be added online yet.`);
+        return;
+      }
       const next = stepCartQuantity(previous, delta, max);
       if (next === null || rejectStale()) return;
       noteGesture(key);
@@ -917,6 +935,11 @@ export function CartProvider({
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.price, 0);
   const minimum = Math.max(0, minimumOrderCents);
   const gate = minimumOrderGate(subtotal, minimum);
+  const needsChange = lines.some(
+    (line) => line.available === false || (line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder),
+  );
+  // Why checkout is not open yet, beside the link that still lets the shopper review the basket.
+  const blockReason = needsChange ? "Remove or change the items marked below to check out." : gate.met ? null : gate.message;
 
   return (
     <Context.Provider
@@ -956,39 +979,28 @@ export function CartProvider({
                 <strong>{money(subtotal)}</strong>
               </div>
               {minimum > 0 && (
-                <>
-                  <progress
-                    className={styles.progress}
-                    max={minimum}
-                    value={Math.min(minimum, subtotal)}
-                    aria-label="Minimum order progress"
-                  />
-                  {gate.met ? (
-                    <p className={styles.muted}>Minimum order reached</p>
-                  ) : (
-                    // The reason sits outside the button, so the label stays stable (#708 AC3).
-                    <p className={styles.muted} id="cart-gate-reason">{gate.message}</p>
-                  )}
-                </>
+                <progress
+                  className={styles.progress}
+                  max={minimum}
+                  value={Math.min(minimum, subtotal)}
+                  aria-label="Minimum order progress"
+                />
               )}
-              {gate.met ? (
-                <Link
-                  className={styles.primaryButton}
-                  href="/cart"
-                  onClick={closeCart}
-                >
-                  Review basket & checkout
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  className={styles.primaryButton}
-                  disabled
-                  aria-describedby={minimum > 0 ? "cart-gate-reason" : undefined}
-                >
-                  Review basket & checkout
-                </button>
-              )}
+              {blockReason ? (
+                // The reason sits outside the link, so the label stays stable (#708 AC3).
+                <p className={styles.gateReason} id="cart-gate-reason">{blockReason}</p>
+              ) : minimum > 0 ? (
+                <p className={styles.muted}>Minimum order reached</p>
+              ) : null}
+              {/* Reviewing the basket is always allowed; the basket page holds checkout until it is ready. */}
+              <Link
+                className={styles.primaryButton}
+                href="/cart"
+                onClick={closeCart}
+                aria-describedby={blockReason ? "cart-gate-reason" : undefined}
+              >
+                Review basket & checkout
+              </Link>
             </div>
           ) : undefined
         }
@@ -1035,8 +1047,18 @@ export function CartProvider({
           </div>
         ) : (
           <ul className={styles.lines}>
-            {lines.map((line) => (
-              <li className={styles.line} key={cartItemKey(line)}>
+            {lines.map((line) => {
+              const key = cartItemKey(line);
+              const unavailable = line.available === false;
+              const overLimit = !unavailable && line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder;
+              const issueId = `cart-line-issue-${line.serverLineId ?? line.listingId}`;
+              return (
+              <li
+                className={styles.line}
+                key={key}
+                data-unavailable={unavailable || undefined}
+                aria-describedby={unavailable || overLimit ? issueId : undefined}
+              >
                 <div className={`${styles.photo} sf-cart-photo`}>
                   <ProductImage
                     src={line.imageUrl}
@@ -1064,19 +1086,60 @@ export function CartProvider({
                           : "Exact item only";
                     })()}
                   </Link>
+                  {(unavailable || overLimit) && (
+                    <p className={styles.lineIssue} id={issueId}>
+                      <CircleAlert size={16} aria-hidden />
+                      {unavailable
+                        ? "No longer available. Remove it to check out."
+                        : `Limit ${line.maxPerOrder} per order. Reduce it to check out.`}
+                    </p>
+                  )}
                   <div className={styles.lineActions}>
-                    <QuickAddStepper item={line} />
-                    <button
-                      className={styles.iconButton}
-                      aria-label={`Remove ${line.name} from cart`}
-                      onClick={() => store.remove(cartItemKey(line))}
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    {!unavailable && <QuickAddStepper item={line} />}
+                    {unavailable ? (
+                      <button
+                        type="button"
+                        className={styles.removeButton}
+                        aria-label={`Remove ${line.name} from basket`}
+                        onClick={() => store.remove(key)}
+                      >
+                        <Trash2 size={18} aria-hidden />
+                        Remove
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.iconButton}
+                        aria-label={`Remove ${line.name} from basket`}
+                        onClick={() => store.remove(key)}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    )}
                   </div>
+                  {unavailable && !!line.alternatives?.length && (
+                    <div className={styles.alternatives}>
+                      <p>Try instead</p>
+                      <ul aria-label={`Instead of ${line.name}`}>
+                        {line.alternatives.map((alt) => (
+                          <li key={cartItemKey(alt)}>
+                            <div className={`${styles.altPhoto} sf-cart-photo`}>
+                              <ProductImage src={alt.imageUrl} name={alt.name} sizes="48px" />
+                            </div>
+                            <span>
+                              {alt.name}
+                              <small>{money(alt.price)}{alt.packLabel && ` / ${alt.packLabel}`}</small>
+                            </span>
+                            <QuickAddStepper item={alt} />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </Sheet>

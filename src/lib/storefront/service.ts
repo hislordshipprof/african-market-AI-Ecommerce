@@ -1,7 +1,7 @@
 import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { orderPacks } from "./pack-order";
-import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
+import { listingAvailable, stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
@@ -9,6 +9,7 @@ import { effectiveMaxPerOrder } from "../cart/limits";
 import type { ShopperNeed } from "../catalog/attributes";
 import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
+import type { CartAlternative } from "../cart/service";
 import { isPreparedKind } from "../listing/prepared";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
@@ -50,9 +51,7 @@ async function readGetFlowCatalog(
         ? { leadHours: listing.cateringLeadHours, minQty: listing.cateringMinQty }
         : null,
       maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
-      available:
-        !(listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) &&
-        !(listing.stockMode === "status" && listing.status === "out_of_stock"),
+      available: listingAvailable(listing),
     };
     return variants.length
       ? variants.map((variant) => ({
@@ -64,6 +63,53 @@ async function readGetFlowCatalog(
         }))
       : [{ ...base, price: listing.price, packLabel: "Each", weightG: 500 }];
   });
+}
+
+/**
+ * Up to `perLine` in-stock listings from each unavailable line's aisle, for the
+ * drawer's "Try instead" row (#717 AC2). One read, only when a line is unavailable.
+ */
+export async function readCartAlternatives(
+  storeId: string,
+  wanted: { lineId: string; categoryId: string }[],
+  excludeListingIds: string[],
+  perLine = 3,
+): Promise<Map<string, CartAlternative[]>> {
+  const result = new Map<string, CartAlternative[]>();
+  if (!wanted.length) return result;
+  const listings = await storeScoped(storeId).listing.findMany({
+    where: {
+      active: true,
+      ...notE2eListing,
+      id: { notIn: excludeListingIds },
+      masterProduct: { categoryId: { in: [...new Set(wanted.map((entry) => entry.categoryId))] } },
+    },
+    include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
+    orderBy: { createdAt: "desc" },
+    take: 60,
+  });
+  const inStock = listings.filter((listing) => listingAvailable(listing) && listing.variants.length > 0);
+  for (const { lineId, categoryId } of wanted) {
+    result.set(
+      lineId,
+      inStock
+        .filter((listing) => listing.masterProduct?.categoryId === categoryId)
+        .slice(0, perLine)
+        .map((listing) => {
+          const card = projectStorefrontListing(listing);
+          return {
+            listingId: card.id,
+            variantId: card.variantId!,
+            name: card.displayName,
+            price: card.startingPrice,
+            imageUrl: card.imageUrl,
+            packLabel: card.packLabel ?? "Each",
+            maxPerOrder: card.maxPerOrder,
+          };
+        }),
+    );
+  }
+  return result;
 }
 
 export async function listCategories() {

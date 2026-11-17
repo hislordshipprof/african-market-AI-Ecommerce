@@ -855,6 +855,54 @@ test.describe("quick add limits and recovery", () => {
     await expect(page.locator("main").getByRole("listitem").filter({ hasText: "Thyme" }).getByTestId("stepper-qty")).toHaveText("1");
   });
 
+  test("an unavailable line in the drawer keeps Remove and offers same-aisle picks (#717)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_thyme", thymeStock);
+    await revalidateMama(page);
+    await page.goto(spices);
+    await thyme(page).getByTestId("quick-add-btn").click();
+    await expect(thyme(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await writeListingStock("mama-ngozi", "mn_thyme", { ...thymeStock, stockMode: "status", status: "out_of_stock", qty: null });
+    await revalidateMama(page);
+    await page.reload();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
+    const sheet = page.getByRole("dialog");
+    const line = sheet.locator("li[data-unavailable]");
+    await expect(line).toContainText("Thyme");
+    await expect(line).toContainText("No longer available. Remove it to check out.");
+    const picks = line.getByRole("list", { name: /Instead of/ }).getByRole("listitem");
+    await expect(picks.first()).toBeVisible();
+    expect(await picks.count()).toBeLessThanOrEqual(3);
+    await expect(picks.filter({ hasText: "Thyme" })).toHaveCount(0);
+    // Reviewing the basket stays open; the reason sits beside the link.
+    const review = sheet.getByRole("link", { name: "Review basket & checkout" });
+    await expect(review).toBeEnabled();
+    await expect(sheet.locator("#cart-gate-reason")).toContainText("Remove or change the items marked below");
+    await line.getByRole("button", { name: /^Remove Thyme/ }).click();
+    await expect(sheet.locator("li[data-unavailable]")).toHaveCount(0);
+    await settle(page);
+  });
+
+  test("a card stepper at its limit stops plus only and shows why (#717)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 2 });
+    await revalidateMama(page);
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("2");
+    await expect(curry(page).getByTestId("stepper-plus")).toBeDisabled();
+    await expect(curry(page).getByTestId("stepper-minus")).toBeEnabled();
+    const why = curry(page).getByTestId("stepper-limit");
+    await expect(why).toBeVisible();
+    await expect(why).toHaveText("Limit 2 per order");
+    const describedBy = await curry(page).getByTestId("stepper-plus").getAttribute("aria-describedby");
+    expect(describedBy).toBe(await why.getAttribute("id"));
+    await settle(page);
+    await curry(page).getByTestId("stepper-minus").click();
+    await curry(page).getByTestId("stepper-minus").click();
+    await settle(page);
+  });
+
   test("a saved first add shows after reload when the cart cookie reached this host", async ({ page }) => {
     await openGrains(page);
     let setCookie = "";

@@ -58,7 +58,8 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
     listingId: listing.id,
     name: listing.displayName,
     imageUrl: listing.imageUrl,
-    maxPerOrder: listing.maxPerOrder,
+    // The fetched detail is fresher than the card's copy of the listing.
+    maxPerOrder: detail?.maxPerOrder ?? listing.maxPerOrder,
     listPacks: listing.packOptions ?? [],
     listBasePrice: listing.startingPrice,
     defaultVariantId: listing.variantId,

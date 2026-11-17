@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stockBadge } from "./stock-badge";
+import { listingAvailable, stockBadge } from "./stock-badge";
 
 describe("stockBadge", () => {
   it("returns in-stock for high confidence counted with qty", () => {
@@ -50,5 +50,23 @@ describe("stockBadge", () => {
   it("returns ask-store just below 0.3 threshold", () => {
     expect(stockBadge({ confidence: 0.29, stockMode: "counted", qty: 5, status: null }))
       .toBe("ask-store");
+  });
+});
+
+const listing = { active: true, stockMode: "unlimited", qty: null, status: null };
+
+describe("listing availability, shared by the basket page and cart lines (#717 AC2)", () => {
+  it("sells an active listing with unlimited stock", () => {
+    expect(listingAvailable(listing)).toBe(true);
+  });
+
+  it("stops selling a listing the store switched off", () => {
+    expect(listingAvailable({ ...listing, active: false })).toBe(false);
+  });
+
+  it("stops selling counted stock at zero, and a status listing marked out of stock", () => {
+    expect(listingAvailable({ ...listing, stockMode: "counted", qty: 0 })).toBe(false);
+    expect(listingAvailable({ ...listing, stockMode: "counted", qty: 3 })).toBe(true);
+    expect(listingAvailable({ ...listing, stockMode: "status", status: "out_of_stock" })).toBe(false);
   });
 });

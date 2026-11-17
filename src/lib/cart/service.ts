@@ -9,6 +9,7 @@ import {
   lockCartLineByVariant,
 } from "../db";
 import { catalogFor } from "../storefront/catalog";
+import { listingAvailable } from "../storefront/stock-badge";
 import type { SwapRuleValue } from "../storefront/cart-store";
 import { PREPARED_EXACT_ONLY } from "../listing/prepared";
 import { cateringMinMessage } from "../listing/catering";
@@ -50,6 +51,8 @@ export interface CartLineView {
   swapRule: SwapRuleValue;
   substituteVariantId: string | null;
   imageUrl: string | undefined;
+  /** In-stock picks from the same aisle, only on an unavailable line and only on the storefront read (#717 AC2). */
+  alternatives?: CartAlternative[];
   variant: {
     id: string;
     label: string;
@@ -61,6 +64,8 @@ export interface CartLineView {
       id: string;
       customName: string | null;
       maxPerOrder: number | null;
+      /** The storefront still sells it (listingAvailable): switched on and in stock (#717 AC2). */
+      available: boolean;
       frozen: boolean;
       perishable: boolean;
       prepared: string | null;
@@ -70,6 +75,16 @@ export interface CartLineView {
       masterProduct: { name: string; categoryId: string | null } | null;
     };
   };
+}
+
+export interface CartAlternative {
+  listingId: string;
+  variantId: string;
+  name: string;
+  price: number;
+  imageUrl?: string;
+  packLabel: string;
+  maxPerOrder: number;
 }
 
 export interface MinimumOrderResult {
@@ -620,6 +635,7 @@ export async function getCartWithLines(
           id: line.variant.listing.id,
           customName: line.variant.listing.customName,
           maxPerOrder: line.variant.listing.maxPerOrder,
+          available: listingAvailable(line.variant.listing),
           frozen: line.variant.listing.frozen,
           perishable: line.variant.listing.perishable,
           prepared: line.variant.listing.prepared,

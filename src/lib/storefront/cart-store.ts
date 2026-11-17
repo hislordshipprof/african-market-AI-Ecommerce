@@ -17,6 +17,8 @@ export interface CartItem {
 }
 export interface CartLine extends CartItem {
   quantity: number;
+  /** In-stock picks from the same aisle when this line is no longer sold (#717 AC2). */
+  alternatives?: CartItem[];
   serverLineId?: string;
   swapRule?: SwapRuleValue;
   substituteVariantId?: string | null;
