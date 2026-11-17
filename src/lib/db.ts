@@ -156,6 +156,8 @@ const STORE_SCOPED_MODELS = [
   "ownerWhatsAppLink",
   "pickBatch",
   "productProposal",
+  "purchaseOrder",
+  "purchaseOrderLine",
   "pushSubscription",
   "refundRequest",
   "reorderList",
@@ -171,6 +173,8 @@ const STORE_SCOPED_MODELS = [
   "storeMembership",
   "storeSubscription",
   "substitutionRequest",
+  "supplier",
+  "supplierListing",
   "supportMessage",
   "supportThread",
   "whatsAppCheckoutLink",
@@ -260,6 +264,14 @@ export async function lockCopilotPush(
   storeId: string,
 ): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('copilot-push'), hashtext(${storeId}))`;
+}
+
+/** Serializes purchase order drafting for one store, so two taps cannot take the same order number. */
+export async function lockPurchaseOrders(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  storeId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('purchase-orders'), hashtext(${storeId}))`;
 }
 
 /** Advisory lock, insert-if-missing, then row lock. Caller is already inside customerScopedTransaction. */
@@ -420,6 +432,8 @@ const STORE_SCOPED_TX_MODELS = [
   "pickBatch",
   "platformSettings",
   "productProposal",
+  "purchaseOrder",
+  "purchaseOrderLine",
   "pushSubscription",
   "refundRequest",
   "reorderList",
@@ -429,6 +443,8 @@ const STORE_SCOPED_TX_MODELS = [
   "storeCoupon",
   "storeSubscription",
   "substitutionRequest",
+  "supplier",
+  "supplierListing",
   "supportMessage",
   "supportThread",
   "whatsAppCheckoutLink",

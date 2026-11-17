@@ -6,6 +6,8 @@ export interface EmailMessage {
   html: string;
   /** Display name plus address. Falls back to the sender default. */
   from?: string;
+  /** Where a reply goes, when not the sender. */
+  replyTo?: string;
   /** Resend keeps this for 24 hours. The same key and body replay the same id. */
   idempotencyKey?: string;
 }
@@ -37,6 +39,7 @@ export class ResendSender implements EmailSender {
         to: message.to,
         subject: message.subject,
         html: message.html,
+        ...(message.replyTo ? { reply_to: message.replyTo } : {}),
       }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -66,6 +69,7 @@ function emailBody(message: EmailMessage): string {
     subject: message.subject,
     html: message.html,
     from: message.from ?? null,
+    replyTo: message.replyTo ?? null,
   });
 }
 
