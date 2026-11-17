@@ -1,7 +1,5 @@
 import { expect, test, chromium } from "@playwright/test";
 
-const port = process.env.E2E_PORT || "3200";
-
 function violationsOf(page: import("@playwright/test").Page): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp ?? []);
 }
@@ -58,7 +56,8 @@ test("storefront, admin sign-in, checkout, api and static carry headers with zer
   expect(assetResponse.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
 });
 
-test("non-platform host (chromium --host-resolver-rules) loads with zero violations", async () => {
+test("non-platform host (chromium --host-resolver-rules) loads with zero violations", async ({ baseURL }) => {
+  const port = new URL(baseURL!).port;
   const browser = await chromium.launch({
     args: ["--host-resolver-rules=MAP mama-ngozi.example.test 127.0.0.1"],
   });
