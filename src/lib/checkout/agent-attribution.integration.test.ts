@@ -7,20 +7,21 @@ import { fakeStripeProvider } from "../stripe/fake";
 import { computeQuote, recordAuthorizedOrder, type RecordAuthorizedOrderInput } from "./service";
 import { slotOptions } from "./slots";
 import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
-import type { SlotSchedule } from "../order/slot-schedule";
+import { slotScheduleSchema } from "../order/slot-schedule";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT = { name: "Ada Buyer", phone: "+15551234567", email: "ada@t573.test" };
 const PRICE = 1200;
 const ALL_DAY = [{ start: 0, end: 1440 }];
-const SCHEDULE: SlotSchedule = {
+// Parsed, so an invalid schedule fails here; the store would otherwise drop it and offer only today's open hours.
+const SCHEDULE = slotScheduleSchema.parse({
   slotMinutes: 60,
-  leadMinutes: 60,
+  leadMinutes: 120,
   capacity: 20,
   daysAhead: 2,
   closedDates: [],
   windows: [ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY],
-};
+});
 
 describe.skipIf(!hasDb)("orders from agent checkout links are attributed (#573)", () => {
   let raw: PrismaClient;
