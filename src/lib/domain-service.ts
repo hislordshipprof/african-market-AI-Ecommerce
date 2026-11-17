@@ -5,10 +5,19 @@ import { revalidateStore } from "./get-store";
 
 export type DomainActor = { id: string; email: string };
 
-/** Sets or clears the domain and writes its audit row in one transaction (#712). */
-async function saveCustomDomain(storeId: string, before: string | null, after: string | null, actor: DomainActor) {
+/** Sets or clears the domain and writes its audit row in one transaction (#712). A new domain starts unverified unless Vercel says otherwise (#711). */
+async function saveCustomDomain(
+  storeId: string,
+  before: string | null,
+  after: string | null,
+  actor: DomainActor,
+  verified = false,
+) {
   await platformAdminTransaction(async (tx) => {
-    await tx.store.update({ where: { id: storeId }, data: { customDomain: after } });
+    await tx.store.update({
+      where: { id: storeId },
+      data: { customDomain: after, customDomainVerifiedAt: after && verified ? new Date() : null },
+    });
     await tx.auditLog.create({
       data: {
         storeId,
@@ -70,7 +79,7 @@ export async function addDomainToStore(
     const result = await adapter.addDomain(domain);
 
     try {
-      await saveCustomDomain(storeId, store.customDomain, domain, actor);
+      await saveCustomDomain(storeId, store.customDomain, domain, actor, result.verified);
     } catch (dbErr) {
       if (
         dbErr instanceof Prisma.PrismaClientKnownRequestError &&
@@ -111,6 +120,13 @@ export async function getDomainStatus(
   if ("ok" in adapter) return adapter;
   try {
     const config = await adapter.getDomainConfig(store.customDomain);
+    // Magic links follow this record (#711); a domain whose DNS moved away loses it here.
+    if (config.verified !== Boolean(store.customDomainVerifiedAt)) {
+      await platformAdmin.store.updateMany({
+        where: { id: storeId, customDomain: store.customDomain },
+        data: { customDomainVerifiedAt: config.verified ? new Date() : null },
+      });
+    }
     return { ok: true, domain: config.domain, verified: config.verified, cname: config.cname };
   } catch (e) {
     if (e instanceof VercelApiError) {
