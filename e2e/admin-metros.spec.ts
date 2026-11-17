@@ -50,7 +50,6 @@ test.describe("metros (#577)", () => {
     await form.getByLabel("Centre latitude").fill("38.9");
     await form.getByLabel("Centre longitude").fill("-77.03");
     await form.getByLabel("Radius in miles").fill("40");
-    await form.getByLabel("DoorDash first").check();
     await form.getByRole("button", { name: "Add metro" }).click();
     await page.waitForURL(/\/admin\/metros\/[^/]+$/);
     await expect(page.getByRole("heading", { level: 1, name: NAME })).toBeVisible();
