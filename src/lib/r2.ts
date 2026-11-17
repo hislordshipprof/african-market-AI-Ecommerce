@@ -245,6 +245,31 @@ export async function streamDeliveryProof(
   return getObject(bucket, key);
 }
 
+const SHIPPING_LABEL_KEY_RE = /^shipping-label\/[a-z0-9]+\/[A-Za-z0-9_]+\.pdf$/;
+
+/** A shipping label PDF (#568): private, in the proof bucket, read by the store's members only. */
+export function shippingLabelKey(orderId: string, labelId: string): string {
+  return `shipping-label/${orderId}/${labelId.replace(/[^A-Za-z0-9_]/g, "_")}.pdf`;
+}
+
+export function isShippingLabelKey(key: string): boolean {
+  return SHIPPING_LABEL_KEY_RE.test(key);
+}
+
+export async function uploadShippingLabel(key: string, body: Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isShippingLabelKey(key)) throw new Error("not a shipping-label key");
+  await getR2Client().send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "application/pdf" }));
+}
+
+/** Read through the store-member shipping-label route only. */
+export async function streamShippingLabel(key: string): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !isShippingLabelKey(key)) return null;
+  return getObject(bucket, key);
+}
+
 /** Read through the store-member issue-photo route only. */
 export async function streamIssuePhoto(
   key: string,

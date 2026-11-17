@@ -393,6 +393,16 @@ The platform's list of states a shipped order may go to. A state is added only a
 **Shipping rate**:
 The cheapest carrier price for an order's box, shown at checkout with carrier, service and days, and locked on the cart until it expires (7 days).
 
+**Shipping label**:
+The carrier label the platform buys at Ready on its Shippo account (#568), a 4×6 PDF only the store's members can open. The store prints it and hands the box to the carrier.
+
+**Postage**:
+What the label cost. It passes through to the platform like a courier fee. When an expired rate is quoted again higher, the store pays up to $2 of the rise and staff confirm anything more.
+_Avoid_: Shipping fee (that is what the shopper paid at checkout)
+
+**Shipped / In transit**:
+A shipped order's statuses after Ready (#568): Shipped at the carrier's first scan, In transit at a later scan, then Delivered. Only the carrier's tracking webhooks set them. Before the first scan the store can still cancel and the label is voided.
+
 **Store delivery**:
 Delivery done by the store's own driver, at a fee the store sets.
 

@@ -9,7 +9,7 @@
  * - Card fee: Stripe's 2.9% + 30¢, which destination charges debit from the platform.
  *   The store bears it on the part it keeps (goods, tax, tip, store delivery) and the fixed
  *   30¢ goes with that part. The platform bears 2.9% on the service fee and on the courier
- *   fee, each part rounded on its own.
+ *   fee or postage, each part rounded on its own.
  */
 import { goodsDiscountCents, type CouponTerms } from "../coupon/discount";
 
@@ -155,8 +155,17 @@ export function captureSplit(input: {
   };
 }
 
-/** The courier fee the platform passes to the courier. Store delivery keeps its fee. */
-export function courierFeeCents(order: { fulfillment: string; deliveryFeeCents: number }): number {
+/** Fulfillments whose delivery fee the platform pays out and passes through: the courier, and postage (#568). */
+export function passesThroughDeliveryFee(fulfillment: string): boolean {
+  return fulfillment === "courier" || fulfillment === "ship";
+}
+
+/**
+ * The courier fee or postage the platform passes through. Postage is what the label cost, which the store tops up
+ * when a re-quote rose (#568); until it is fixed at Ready it is what the shopper paid. Store delivery keeps its fee.
+ */
+export function courierFeeCents(order: { fulfillment: string; deliveryFeeCents: number; shippingPostageCents?: number | null }): number {
+  if (order.fulfillment === "ship") return Math.max(0, order.shippingPostageCents ?? order.deliveryFeeCents);
   return order.fulfillment === "courier" ? Math.max(0, order.deliveryFeeCents) : 0;
 }
 
@@ -170,6 +179,7 @@ export function capturedPayout(order: {
   serviceFeeCents: number;
   fulfillment: string;
   deliveryFeeCents: number;
+  shippingPostageCents?: number | null;
   taxCents: number;
   taxLiableParty: string;
 }): { storeCardFeeCents: number; storeReceivesCents: number } {
@@ -198,6 +208,7 @@ export function capturedApplicationFee(order: {
   serviceFeeCents: number;
   fulfillment: string;
   deliveryFeeCents: number;
+  shippingPostageCents?: number | null;
   taxCents: number;
   taxLiableParty: string;
 }): number | null {

@@ -208,14 +208,14 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     setStripeProvider(fakeStripeProvider);
     setAuthorizedAmount(paymentIntentId, quote.holdCents);
 
-    const result = await markReady(store.id, placed.token);
+    const result = await markReady(store.id, placed.token, { label: { provider, hasStorage: () => true, upload: async () => {} } });
 
     expect(result).toEqual({ ok: true, capturedAmountCents: quote.totalCents });
     expect(capturedPayments.get(paymentIntentId)).toBe(2400 + 99 + 1305 + 156);
     const order = await scoped.order.findUniqueOrThrow({ where: { id: placed.token } });
     expect(order).toMatchObject({ status: "READY", capturedAmountCents: quote.totalCents });
-    // Postage stays with the store's part until #568 buys labels on the platform's account: platform fee = service fee + store card fee.
-    expect(order.platformFeeCents).toBe(99 + Math.round((2400 + 1305) * 0.029) + 30);
+    // Postage passes through to the platform, which buys the label (#568): the store's card fee is on the goods only.
+    expect(order.platformFeeCents).toBe(99 + Math.round(2400 * 0.029) + 30);
   });
 
   it("isolation: one store's quote never reads or writes another store's cart, and a store's shipping setting changes only that store", async () => {

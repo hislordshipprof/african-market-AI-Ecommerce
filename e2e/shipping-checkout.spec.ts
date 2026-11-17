@@ -2,8 +2,9 @@ import { expect, test } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
+import { signShippoWebhook } from "../src/lib/shipping/shippo";
 
-test("a shopper ships dry goods to another state at the carrier's rate (#567)", async ({ page }) => {
+test("a shopper ships dry goods to another state at the carrier's rate (#567), and the carrier's first scan ships it (#568)", async ({ page }) => {
   test.setTimeout(120_000);
   const slug = `ship-${Date.now().toString(36)}`;
   const items = [`Ship Egusi ${slug}`, `Ship Garri ${slug}`];
@@ -97,11 +98,42 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567)", 
     const order = await scoped((tx) => tx.order.findFirst({ where: { storeId: store.id } }));
     expect(order).toMatchObject({ fulfillment: "ship", shippingCarrier: "USPS", deliveryState: "MD" });
     expect(order?.deliveryFeeCents).toBe(Math.round(Number(fee?.slice(1)) * 100));
+
+    // #568: the label was bought at Ready (the e2e server has no proof bucket, so the row stands in for it); the
+    // carrier's first scan arrives as a signed Shippo webhook and the shopper's page reads Shipped with the carrier link.
+    const labelId = `txn_e2e_${slug.replace(/[^a-z0-9]/g, "")}`;
+    const trackingUrl = "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223197428490";
+    await scoped((tx) => tx.order.update({
+      where: { id: order!.id },
+      data: { status: "READY", shippingLabelStatus: "bought", shippingLabelId: labelId, shippingTrackingNumber: "9400111899223197428490", shippingTrackingUrl: trackingUrl },
+    }));
+    const body = JSON.stringify({ event: "track_updated", test: true, data: { transaction: labelId, tracking_status: { object_id: `ts_${slug}`, status: "TRANSIT" } } });
+    const unsigned = await page.request.post("/api/webhooks/shippo", { data: body, headers: { "content-type": "application/json" } });
+    expect(unsigned.status()).toBe(401);
+    const signed = await page.request.post("/api/webhooks/shippo", {
+      data: body,
+      headers: { "content-type": "application/json", "shippo-auth-signature": signShippoWebhook(body, process.env.SHIPPO_WEBHOOK_SECRET ?? "e2e-shippo-webhook") },
+    });
+    expect(await signed.json()).toEqual({ received: true, recorded: true });
+    await page.reload();
+    await expect(page.getByText("Status: Shipped")).toBeVisible();
+    await expect(page.getByRole("link", { name: "9400111899223197428490" })).toHaveAttribute("href", trackingUrl);
+    const proof = process.env.PROOF_DIR;
+    if (proof) {
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        for (const width of [390, 1280]) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.screenshot({ path: `${proof}/order-shipped-${width}-${scheme}.png`, fullPage: true });
+        }
+      }
+    }
   } finally {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.notificationLog.deleteMany({ where: { storeId: store.id } });
+      await tx.deliveryEvent.deleteMany({ where: { storeId: store.id } });
       await tx.orderLine.deleteMany({ where: { storeId: store.id } });
       await tx.order.deleteMany({ where: { storeId: store.id } });
       await tx.customer.deleteMany({ where: { storeId: store.id } });
