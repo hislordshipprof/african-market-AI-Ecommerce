@@ -17,7 +17,7 @@ Design for about **1,000 stores, 1M customer accounts and 20k orders a day** wit
 
 Measured on the local lane database (Postgres 18, Apple silicon), never Neon, with a synthetic seed
 (`scripts/scale-check/run.sh seed`): 300 stores, 2,000 listings each (600,000), and 10,000 orders a day for
-the 30 days of October 2026 (300,000 orders, 1.2M order lines, 1.15M stock events, 100,000 courier
+the 30 days of October 2026 (300,000 orders, 1.2M order lines, 1.45M stock events, 99,900 courier
 deliveries with 290,000 delivery events, 6,000 refunds). Every store shares one zone and digest hour, the
 worst case for the hourly crons. `scripts/scale-check/run.sh measure` prints the timings and EXPLAIN plans.
 
@@ -61,8 +61,8 @@ Read its figure as runs only.
 **Revisit triggers, kept from this measurement:**
 
 - The courier incident log reads the whole `delivery_events` history on every load. It takes about 310 ms
-  for 30 days at this load and grows with retained history, so it reaches about 2 s near 1.2M courier
-  events (about six months at this load). Before then, give it a default date window or keep incidents in
+  for 30 days at this load and grows with retained history, so, growing linearly, it reaches about 2 s
+  near 1.9M courier events (about six months at this load). Before then, give it a default date window or keep incidents in
   a table.
 - The fee ledger loads every row of the month into memory and pages after. It grows with orders a month
   (452 ms at 288,000). Move totals to a monthly rollup and page rows in SQL before about 1M captured orders

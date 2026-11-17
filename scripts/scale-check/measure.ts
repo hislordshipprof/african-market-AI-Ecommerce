@@ -179,14 +179,17 @@ async function main() {
 
   say("## Subscriptions list (/admin/billing/subscriptions)");
   say();
+  const loadSubs = async () => subscriptionTotals(await listSubscriptionOverviewRows());
   recording = true;
   log.length = 0;
-  const subs = await timed(async () => subscriptionTotals(await listSubscriptionOverviewRows()));
+  await loadSubs();
   recording = false;
+  const subsQueries = log.splice(0);
+  const subs = await timed(loadSubs);
   say(`- ${subs.result.stores} stores, MRR ${(subs.result.mrrCents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" })}, ${ms(subs.median)}`);
   pages.push({ path: "Subscriptions list", target: 2000, ms: subs.median });
   say();
-  await breakdown("Subscriptions", log.splice(0, log.length / 4));
+  await breakdown("Subscriptions", subsQueries);
 
   const resetClaims = () => asAdmin(async (tx) => {
     await tx.$executeRaw`DELETE FROM copilot_digests WHERE store_id LIKE 'scale578-%'`;
