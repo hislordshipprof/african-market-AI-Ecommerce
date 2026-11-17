@@ -2,8 +2,10 @@
 export const ATTRIBUTION_COOKIE = "came_from";
 export const ATTRIBUTION_MAX_AGE = 60 * 60 * 24 * 30;
 export const DIRECTORY_REF = "directory";
+/** The cart source of a cart an AI agent built over MCP, and the order placed from it (#573). Wins over a directory visit. */
+export const AGENT_REF = "agent";
 
-export type AcquisitionSource = typeof DIRECTORY_REF;
+export type AcquisitionSource = typeof DIRECTORY_REF | typeof AGENT_REF;
 
 /** A storefront link from the directory, tagged so the store's site can set the cookie. */
 export function directoryLink(href: string): string {

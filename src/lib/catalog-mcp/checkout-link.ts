@@ -1,10 +1,8 @@
 import { applyAddLine } from "../cart/service";
 import { CHECKOUT_LINK_TTL_MS, checkoutLinkPath, createCheckoutLink } from "../cart/checkout-link";
 import { lockCart, storeScopedTransaction } from "../db";
+import { AGENT_REF } from "../directory/attribution";
 import { takeRateLimit } from "../rate-limit/app-limiter";
-
-/** Agent-built carts carry this source, and the order placed from one is attributed to it (#573). */
-export const AGENT_CART_SOURCE = "agent";
 
 const LINKS_PER_HOUR = 10;
 const HOUR_MS = 60 * 60 * 1000;
@@ -46,7 +44,7 @@ export async function createAgentCheckoutLink(
   const now = new Date();
   try {
     return await storeScopedTransaction(storeId, async (tx) => {
-      const cart = await tx.cart.create({ data: { storeId, userId: null, customerId: null, source: AGENT_CART_SOURCE } });
+      const cart = await tx.cart.create({ data: { storeId, userId: null, customerId: null, source: AGENT_REF } });
       await lockCart(tx, cart.id);
       const lines = new Map<string, { qty: number; priceCents: number }>();
       for (const item of items) {
