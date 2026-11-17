@@ -11,6 +11,8 @@ model Store {
   slug                      String   @unique
   name                      String
   customDomain              String?  @unique @map("custom_domain")
+  /// Set when Vercel reports the custom domain verified; magic links go to the domain only then (#711).
+  customDomainVerifiedAt    DateTime? @map("custom_domain_verified_at")
   logoUrl                   String?  @map("logo_url")
   brandColor                String?  @map("brand_color")
   themePreset               String   @default("palm-and-shea") @map("theme_preset")

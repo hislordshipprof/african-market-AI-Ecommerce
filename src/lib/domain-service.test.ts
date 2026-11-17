@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockFindUnique = vi.fn();
 const mockUpdate = vi.fn();
+const mockUpdateMany = vi.fn();
 const mockAudit = vi.fn();
 const actor = { id: "admin-1", email: "admin@example.test" };
 
@@ -9,6 +10,7 @@ vi.mock("./db", () => ({
   platformAdmin: {
     store: {
       findUnique: (...args: unknown[]) => mockFindUnique(...args),
+      updateMany: (...args: unknown[]) => mockUpdateMany(...args),
     },
   },
   platformAdminTransaction: (fn: (tx: unknown) => unknown) =>
@@ -84,7 +86,23 @@ describe("domain-service", () => {
       });
       expect(mockUpdate).toHaveBeenCalledWith({
         where: { id: "store-a" },
-        data: { customDomain: "shop.mamasmarket.com" },
+        data: { customDomain: "shop.mamasmarket.com", customDomainVerifiedAt: null },
+      });
+    });
+
+    it("records the verification when Vercel reports the new domain verified", async () => {
+      mockFindUnique.mockResolvedValueOnce(storeA).mockResolvedValueOnce(null);
+      vi.spyOn(fakeAdapter, "addDomain").mockResolvedValueOnce({
+        domain: "shop.mamasmarket.com",
+        verified: true,
+        cname: "cname.vercel-dns.com",
+      });
+
+      await addDomainToStore("store-a", "shop.mamasmarket.com", actor);
+
+      expect(mockUpdate).toHaveBeenCalledWith({
+        where: { id: "store-a" },
+        data: { customDomain: "shop.mamasmarket.com", customDomainVerifiedAt: expect.any(Date) },
       });
     });
 
@@ -196,6 +214,34 @@ describe("domain-service", () => {
         verified: true,
         cname: "cname.vercel-dns.com",
       });
+      expect(mockUpdateMany).toHaveBeenCalledWith({
+        where: { id: "store-a", customDomain: "shop.mamasmarket.com" },
+        data: { customDomainVerifiedAt: expect.any(Date) },
+      });
+    });
+
+    it("clears a recorded verification when Vercel no longer reports the domain verified", async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        ...storeA,
+        customDomain: "shop.mamasmarket.com",
+        customDomainVerifiedAt: new Date("2026-11-01"),
+      });
+      await fakeAdapter.addDomain("shop.mamasmarket.com");
+
+      const result = await getDomainStatus("store-a");
+      expect(result).toMatchObject({ ok: true, verified: false });
+      expect(mockUpdateMany).toHaveBeenCalledWith({
+        where: { id: "store-a", customDomain: "shop.mamasmarket.com" },
+        data: { customDomainVerifiedAt: null },
+      });
+    });
+
+    it("leaves an unchanged verification alone", async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...storeA, customDomain: "shop.mamasmarket.com" });
+      await fakeAdapter.addDomain("shop.mamasmarket.com");
+
+      await getDomainStatus("store-a");
+      expect(mockUpdateMany).not.toHaveBeenCalled();
     });
 
     it("returns 404 when store has no domain", async () => {
@@ -239,7 +285,7 @@ describe("domain-service", () => {
       });
       expect(mockUpdate).toHaveBeenCalledWith({
         where: { id: "store-a" },
-        data: { customDomain: null },
+        data: { customDomain: null, customDomainVerifiedAt: null },
       });
     });
 
