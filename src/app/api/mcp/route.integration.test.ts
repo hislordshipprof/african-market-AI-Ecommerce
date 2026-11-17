@@ -4,7 +4,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { fakeAddressBackend, setAddressProvider } from "@/lib/address/provider";
+import { NextRequest } from "next/server";
 import { POST } from "./route";
+import { GET as openCheckoutLink } from "../checkout-link/[token]/route";
 
 let currentSlug = "";
 const hasDb = !!process.env.DATABASE_URL;
@@ -61,6 +63,7 @@ async function callTool(slug: string, name: string, args: object, ip?: string) {
 describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
   let prisma: PrismaClient;
   const ids: Record<string, string> = {};
+  const variantOf: Record<string, string> = {};
 
   const scoped = (storeId: string) => [
     prisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -77,10 +80,11 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
       prisma.listing.create({ data: { storeId, customName: name, price, stockMode: "counted", qty: 7, frozen: false, perishable: false, confidence: 0.9, ...extra } }),
     ]);
     const id = (listing as { id: string }).id;
-    await prisma.$transaction([
+    const [, , variant] = await prisma.$transaction([
       ...scoped(storeId),
       prisma.listingVariant.create({ data: { listingId: id, label: "1 bag", price, weightG: 500 } }),
     ]);
+    variantOf[id] = (variant as { id: string }).id;
     return id;
   }
 
@@ -88,6 +92,8 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
     const stores = await prisma.store.findMany({ where: { slug: { startsWith: "t572-mcp-" } }, select: { id: true } });
     const storeIds = stores.map((s) => s.id);
     if (storeIds.length === 0) return;
+    // A cart's lines and checkout links go with it; lines hold their variants.
+    await prisma.$transaction([...asAdmin(), prisma.cart.deleteMany({ where: { storeId: { in: storeIds } } })]);
     await prisma.$transaction([...asAdmin(), prisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: storeIds } } } })]);
     await prisma.$transaction([...asAdmin(), prisma.listing.deleteMany({ where: { storeId: { in: storeIds } } })]);
     await prisma.store.deleteMany({ where: { id: { in: storeIds } } });
@@ -120,6 +126,8 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
     ids.listingA = await addListing(a.id, "Mcptest Egusi Seeds", 899);
     ids.injectionA = await addListing(a.id, INJECTION, 650);
     ids.listingB = await addListing(b.id, "Mcptest Egusi Seeds", 1299);
+    ids.hiddenA = await addListing(a.id, "Mcptest Hidden Ogiri", 400, { active: false });
+    ids.limitedA = await addListing(a.id, "Mcptest Palm Oil", 1500, { maxPerOrder: 3 });
     await addListing(off.id, "Mcptest Egusi Seeds", 500);
     await addListing(setup.id, "Mcptest Egusi Seeds", 500);
     await addListing(suspended.id, "Mcptest Egusi Seeds", 500);
@@ -143,7 +151,13 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
     expect(initialized.status).toBe(202);
 
     const list = await rpc(await post(slugA, { id: 2, method: "tools/list" }));
-    expect(list.result?.tools?.map((t) => t.name).sort()).toEqual(["check_delivery_area", "get_product", "get_store_info", "search_catalog"]);
+    expect(list.result?.tools?.map((t) => t.name).sort()).toEqual([
+      "check_delivery_area",
+      "create_checkout_link",
+      "get_product",
+      "get_store_info",
+      "search_catalog",
+    ]);
 
     const { data } = await callTool(slugA, "search_catalog", { query: "egusi" });
     expect(data.products).toEqual([
@@ -223,5 +237,98 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
     const res = await post(slugA, Array.from({ length: 100 }, (_, i) => search(i)), `10.57.4.${run}`);
     expect(res.status).toBe(400);
     expect(await res.text()).not.toContain("structuredContent");
+  });
+
+  /** What an agent-built cart left in the database, read as the store. */
+  async function storeRows(storeId: string) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
+      return {
+        carts: await tx.cart.findMany({ where: { storeId }, include: { lines: true } }),
+        orders: await tx.order.count({ where: { storeId } }),
+        listing: await tx.listing.findUnique({ where: { id: ids.listingA }, select: { qty: true } }),
+      };
+    });
+  }
+
+  /** The shopper opens the link on the store's host, with whatever cart cookie their browser holds. */
+  async function openLink(url: string, slug: string, cartCookie?: string) {
+    currentSlug = slug;
+    return openCheckoutLink(
+      new NextRequest(url, {
+        headers: { "x-store-slug": slug, "x-forwarded-proto": "https", ...(cartCookie ? { cookie: `cart_id=${cartCookie}` } : {}) },
+      }),
+      { params: Promise.resolve({ token: url.split("/").pop()! }) },
+    );
+  }
+
+  it("#573 builds a new guest cart and returns a single-use checkout link for 60 minutes, reserving nothing", async () => {
+    const before = await storeRows(ids.a);
+    const startedAt = Date.now();
+    const { raw, data } = await callTool(slugA, "create_checkout_link", { items: [{ variant_id: variantOf[ids.listingA], qty: 2 }] }, `10.57.5.${run}`);
+
+    expect(data.checkout_url).toMatch(new RegExp(`^https://${slugA}\\.example\\.test/api/checkout-link/[A-Za-z0-9_-]{43}$`));
+    const expiresAt = Date.parse(data.expires_at as string);
+    expect(expiresAt - startedAt).toBeGreaterThanOrEqual(59 * 60_000);
+    expect(expiresAt - startedAt).toBeLessThanOrEqual(61 * 60_000);
+    expect(data.items).toEqual([{ variant_id: variantOf[ids.listingA], qty: 2, price: { amount: 899, currency: "USD" } }]);
+    expect(data.subtotal).toEqual({ amount: 1798, currency: "USD" });
+
+    const after = await storeRows(ids.a);
+    const created = after.carts.filter((c) => !before.carts.some((b) => b.id === c.id));
+    expect(created).toHaveLength(1);
+    const [cart] = created;
+    expect(cart).toMatchObject({ userId: null, customerId: null, paymentIntentId: null, source: "agent" });
+    expect(cart.lines.map((l) => [l.variantId, l.qty])).toEqual([[variantOf[ids.listingA], 2]]);
+    expect(raw).not.toContain(cart.id);
+    expect(after.orders).toBe(0);
+    expect(after.listing?.qty).toBe(before.listing?.qty);
+
+    // The link opens the store's normal checkout with that cart, once. Another store's host does not open it.
+    const url = data.checkout_url as string;
+    expect((await openLink(url, slugB)).headers.get("location")).toBe("/checkout/link-expired");
+    const opened = await openLink(url, slugA);
+    expect(opened.status).toBe(303);
+    expect(opened.headers.get("location")).toBe("/checkout");
+    expect(opened.headers.get("set-cookie")).toContain(`cart_id=${cart.id}`);
+    expect((await openLink(url, slugA)).headers.get("location")).toBe("/checkout/link-expired");
+  });
+
+  it("#573 refuses an unknown, another store's or a hidden variant alike, and builds no cart", async () => {
+    const before = (await storeRows(ids.a)).carts.length;
+    const good = { variant_id: variantOf[ids.listingA], qty: 1 };
+    const texts: string[] = [];
+    for (const variantId of ["cmunknownvariant0000000000", variantOf[ids.listingB], variantOf[ids.hiddenA]]) {
+      const { body } = await callTool(slugA, "create_checkout_link", { items: [good, { variant_id: variantId, qty: 1 }] }, `10.57.6.${run}`);
+      expect(body.result?.isError).toBe(true);
+      texts.push(body.result!.content![0].text.replace(variantId, "<id>"));
+    }
+    expect(new Set(texts).size).toBe(1);
+    expect((await storeRows(ids.a)).carts.length).toBe(before);
+    expect(JSON.stringify(await storeRows(ids.b))).not.toContain("agent");
+  });
+
+  it("#573 refuses more than a product's per-order maximum and builds no cart", async () => {
+    const before = (await storeRows(ids.a)).carts.length;
+    const { body } = await callTool(slugA, "create_checkout_link", { items: [{ variant_id: variantOf[ids.limitedA], qty: 4 }] }, `10.57.7.${run}`);
+    expect(body.result?.isError).toBe(true);
+    expect(body.result!.content![0].text).toContain("3");
+    expect((await storeRows(ids.a)).carts.length).toBe(before);
+  });
+
+  it("#573 limits each IP to 10 checkout links an hour, across store hosts", async () => {
+    const ip = `10.57.8.${run}`;
+    for (let i = 0; i < 10; i++) {
+      const { data } = await callTool(slugA, "create_checkout_link", { items: [{ variant_id: variantOf[ids.listingA], qty: 1 }] }, ip);
+      expect(data?.checkout_url, `link ${i + 1}`).toBeTruthy();
+    }
+    const before = (await storeRows(ids.b)).carts.length;
+    const limited = await callTool(slugB, "create_checkout_link", { items: [{ variant_id: variantOf[ids.listingB], qty: 1 }] }, ip);
+    expect(limited.body.result?.isError).toBe(true);
+    expect(limited.raw).not.toContain("checkout_url");
+    expect((await storeRows(ids.b)).carts.length).toBe(before);
+    // Reading the catalog is still allowed.
+    expect((await callTool(slugB, "search_catalog", { query: "egusi" }, ip)).body.result?.isError).toBeFalsy();
   });
 });

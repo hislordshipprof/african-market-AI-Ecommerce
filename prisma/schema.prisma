@@ -1509,7 +1509,8 @@ model Order {
   totalAuthorizedCents    Int       @map("total_authorized_cents")
   paymentIntentId         String?   @unique @map("payment_intent_id")
   sourceCartId            String?   @map("source_cart_id")
-  /// "directory" when the shopper arrived from a Store directory link within 30 days (#454); null otherwise.
+  /// "agent" when the cart was built by an AI agent's checkout link (#573); else "directory" when the shopper
+  /// arrived from a Store directory link within 30 days (#454); null otherwise.
   acquisitionSource       String?   @map("acquisition_source")
   capturedAmountCents     Int?      @map("captured_amount_cents")
   /// What Stripe captured and when (#537). Kept when a refund or cancellation later clears capturedAmountCents.

@@ -26,6 +26,10 @@ describe("assistant import boundary", () => {
     expect(hits).toEqual([]);
   });
 
+  it("#573: the MCP endpoint and its checkout link tool cannot reach Stripe, placeOrder or coupons", () => {
+    expect(findForbiddenImports([path.join(SRC, "app/api/mcp"), path.join(SRC, "lib/catalog-mcp")], SRC)).toEqual([]);
+  });
+
   it("the walker fails when a forbidden import is added", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-boundary-"));
     temps.push(root);
