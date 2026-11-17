@@ -3,9 +3,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { basketLabel, CartTriggerView } from "./cart-trigger";
 
-function render(count: number, loading = false) {
+function render(count: number, loading = false, state: { syncing?: boolean; attention?: boolean } = {}) {
   return renderToStaticMarkup(
-    createElement(CartTriggerView, { count, loading, onOpen: () => {} }),
+    createElement(CartTriggerView, { count, loading, ...state, onOpen: () => {} }),
   );
 }
 
@@ -40,5 +40,29 @@ describe("cart button accessible name (#705)", () => {
     expect(ariaLabel(render(0, true))).toBe("Basket");
     // No real digit while loading, so nothing can be doubled.
     expect(render(0, true)).not.toContain(">0<");
+  });
+});
+
+describe("closed basket sync status (#708 P1)", () => {
+  it("a failed save stays visible on the closed button and in its name", () => {
+    const html = render(3, false, { attention: true });
+    expect(ariaLabel(html)).toBe("Changes not saved. 3 items in basket");
+    expect(html).toMatch(/data-testid="cart-sync-status"[^>]*data-state="failed"/);
+  });
+
+  it("a save still on its way shows as pending", () => {
+    const html = render(3, false, { syncing: true });
+    expect(ariaLabel(html)).toBe("Saving changes. 3 items in basket");
+    expect(html).toMatch(/data-testid="cart-sync-status"[^>]*data-state="pending"/);
+  });
+
+  it("a failure outranks a pending save", () => {
+    expect(ariaLabel(render(3, false, { syncing: true, attention: true }))).toBe("Changes not saved. 3 items in basket");
+  });
+
+  it("clears once the basket is saved", () => {
+    const html = render(3, false, {});
+    expect(ariaLabel(html)).toBe("3 items in basket");
+    expect(html).not.toContain("cart-sync-status");
   });
 });

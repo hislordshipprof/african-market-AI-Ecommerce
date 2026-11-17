@@ -12,6 +12,7 @@
   cursor: pointer;
 }
 .cartTrigger {
+  position: relative;
   gap: 8px;
   border-radius: 999px;
   padding: 0 14px;
@@ -239,6 +240,30 @@
   to {
     transform: scale(1);
   }
+}
+/* Sync status on the closed basket button (#708 P1): a red alert badge on failure, a quiet dot while saving. */
+.syncStatus {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-bg);
+  border-radius: 999px;
+  pointer-events: none;
+}
+.syncStatus[data-state="failed"] {
+  background: var(--color-deal);
+  color: #fff;
+}
+/* Shown only when a save takes long enough to notice, like the per-line "Updating…" (#717 AC4). */
+.syncStatus[data-state="pending"] {
+  width: 14px;
+  height: 14px;
+  background: var(--color-muted);
+  animation: updatingIn 0s linear 300ms both;
 }
 .countLoading {
   display: inline-block;
