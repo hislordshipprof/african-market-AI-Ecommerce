@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { storeMayUse } from "../billing/plan";
-import { storeScoped } from "../db";
+import { Prisma } from "@prisma/client";
+import { storeScoped, storeScopedTransaction } from "../db";
 import { anyCourierEnabled, enabledProviders, preferredProvider, type CourierSelectionMode, type CourierSettings } from "./courier-settings";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
@@ -77,7 +78,7 @@ function externalDeliveryId(referenceId: string, provider: DeliveryProviderName)
   return `${referenceId}-${provider}-${randomUUID().slice(0, 8)}`;
 }
 
-type QuoteInput = { referenceId: string } & Pick<DispatchInput, "request" | "registrations">;
+type QuoteInput = { storeId: string; referenceId: string } & Pick<DispatchInput, "request" | "registrations">;
 type Candidate = { provider: DeliveryProvider; req: DeliveryRequest; quote: DeliveryQuote };
 
 function quoteWith(input: QuoteInput, provider: DeliveryProvider): Promise<Candidate> {
@@ -106,9 +107,29 @@ async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], mode
   );
   const first = preferredProvider(mode);
   const rank = (c: Candidate) => (c.provider.name === first ? 0 : 1);
-  return settled
-    .filter((c): c is Candidate => c !== null && c.quote.expiresAt > now())
-    .sort((a, b) => rank(a) - rank(b) || a.quote.feeCents - b.quote.feeCents);
+  const live = settled.filter((c): c is Candidate => c !== null && c.quote.expiresAt > now());
+  await recordQuoteOutcomes(input.storeId, providers.map((p) => ({ provider: p.name, quoted: live.some((c) => c.provider === p) })));
+  return live.sort((a, b) => rank(a) - rank(b) || a.quote.feeCents - b.quote.feeCents);
+}
+
+/**
+ * Counts each courier asked in one quote round, and whether it came back with a live quote, on the store's row for
+ * the UTC day (#577 readiness report). A failed count is logged and never fails the quote.
+ */
+async function recordQuoteOutcomes(storeId: string, outcomes: Array<{ provider: DeliveryProviderName; quoted: boolean }>): Promise<void> {
+  if (outcomes.length === 0) return;
+  const rows = Prisma.join(outcomes.map((o) => Prisma.sql`(${o.provider}::text, ${o.quoted ? 1 : 0}::int)`));
+  try {
+    await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+      INSERT INTO courier_quote_days (store_id, provider, day, attempts, successes)
+      SELECT s.id, v.provider, (now() AT TIME ZONE 'UTC')::date, 1, v.quoted
+      FROM stores s CROSS JOIN (VALUES ${rows}) AS v(provider, quoted)
+      WHERE s.id = ${storeId}
+      ON CONFLICT (store_id, provider, day) DO UPDATE
+        SET attempts = courier_quote_days.attempts + 1, successes = courier_quote_days.successes + EXCLUDED.successes`);
+  } catch (err) {
+    console.error(JSON.stringify({ event: "courier_quote_count_failed", storeId, message: err instanceof Error ? err.message : "unknown" }));
+  }
 }
 
 export type CheckoutCourierQuote = { provider: DeliveryProviderName; courierProvider: CourierBrand; feeCents: number; expiresAt: Date };

@@ -127,19 +127,19 @@ describe("checkout courier quote (#527, #535)", () => {
     const doordash = new StubProvider("doordash", 899);
     const uber = new StubProvider("uber", 749);
 
-    expect(await quoteCourier({ referenceId: "cart-p1", request }, [doordash, uber], { ...defaults, selectionMode: "doordash_first" })).toMatchObject({ provider: "doordash", feeCents: 899 });
-    expect(await quoteCourier({ referenceId: "cart-p2", request }, [doordash, uber], { ...defaults, selectionMode: "uber_first" })).toMatchObject({ provider: "uber", feeCents: 749 });
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-p1", request }, [doordash, uber], { ...defaults, selectionMode: "doordash_first" })).toMatchObject({ provider: "doordash", feeCents: 899 });
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-p2", request }, [doordash, uber], { ...defaults, selectionMode: "uber_first" })).toMatchObject({ provider: "uber", feeCents: 749 });
     doordash.failQuote = true;
-    expect(await quoteCourier({ referenceId: "cart-p3", request }, [doordash, uber], { ...defaults, selectionMode: "doordash_first" })).toMatchObject({ provider: "uber", feeCents: 749 });
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-p3", request }, [doordash, uber], { ...defaults, selectionMode: "doordash_first" })).toMatchObject({ provider: "uber", feeCents: 749 });
   });
 
   it("#535 AC3: a switched-off provider is never quoted, and with both off nothing is", async () => {
     const doordash = new StubProvider("doordash", 899);
     const uber = new StubProvider("uber", 749);
 
-    expect(await quoteCourier({ referenceId: "cart-off1", request }, [doordash, uber], { ...defaults, uberEnabled: false })).toMatchObject({ provider: "doordash", feeCents: 899 });
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-off1", request }, [doordash, uber], { ...defaults, uberEnabled: false })).toMatchObject({ provider: "doordash", feeCents: 899 });
     expect(uber.quoteCalls).toBe(0);
-    expect(await quoteCourier({ referenceId: "cart-off2", request }, [doordash, uber], { ...defaults, uberEnabled: false, doordashEnabled: false })).toBeNull();
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-off2", request }, [doordash, uber], { ...defaults, uberEnabled: false, doordashEnabled: false })).toBeNull();
     expect(doordash.quoteCalls).toBe(1);
     expect(uber.quoteCalls).toBe(0);
   });
@@ -150,11 +150,11 @@ describe("checkout courier quote (#527, #535)", () => {
     const expired = new StubProvider("uber", 500);
     expired.expiresInMs = -1;
 
-    const quote = await quoteCourier({ referenceId: "cart-1", request }, [doordash, uber], defaults);
+    const quote = await quoteCourier({ storeId: "no-such-store", referenceId: "cart-1", request }, [doordash, uber], defaults);
 
     expect(quote).toMatchObject({ provider: "uber", feeCents: 749, courierProvider: "Uber Direct" });
     expect(doordash.created.size + uber.created.size).toBe(0);
-    expect(await quoteCourier({ referenceId: "cart-1", request }, [expired, doordash], defaults)).toMatchObject({ feeCents: 899 });
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-1", request }, [expired, doordash], defaults)).toMatchObject({ feeCents: 899 });
   });
 
   it("skips a provider that cannot quote, and returns null when none can", async () => {
@@ -162,9 +162,9 @@ describe("checkout courier quote (#527, #535)", () => {
     const uber = new StubProvider("uber", 749);
     uber.failQuote = true;
 
-    expect(await quoteCourier({ referenceId: "cart-2", request }, [doordash, uber], defaults)).toMatchObject({ provider: "doordash", feeCents: 899 });
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-2", request }, [doordash, uber], defaults)).toMatchObject({ provider: "doordash", feeCents: 899 });
     doordash.failQuote = true;
-    expect(await quoteCourier({ referenceId: "cart-2", request }, [doordash, uber], defaults)).toBeNull();
+    expect(await quoteCourier({ storeId: "no-such-store", referenceId: "cart-2", request }, [doordash, uber], defaults)).toBeNull();
   });
 });
 
@@ -514,6 +514,26 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     expect(doordash.created.size).toBe(0);
     expect(await storeScoped(storeId).delivery.count({ where: { orderId, status: { not: "cancelled" } } })).toBe(0);
     expect(events.map((e) => e.name)).toEqual([COURIER_BOTH_FAILED]);
+  });
+
+  it("#577 AC3: every quote round counts, per courier and UTC day, whether it quoted, for that store only; a courier switched off is not asked", async () => {
+    const a = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const b = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const down = new StubProvider("uber", 749);
+    down.failQuote = true;
+
+    await selectAndDispatch({ ...a, request }, { providers: [new StubProvider("doordash", 899), down], emit, settings });
+    await quoteCourier({ storeId: a.storeId, referenceId: `cart-${a.orderId}`, request }, [new StubProvider("doordash", 899), new StubProvider("uber", 749)], defaults);
+    await quoteCourier({ storeId: a.storeId, referenceId: `cart2-${a.orderId}`, request }, [new StubProvider("doordash", 899), new StubProvider("uber", 749)], { ...defaults, uberEnabled: false });
+
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const rows = await storeScoped(a.storeId).courierQuoteDay.findMany({ orderBy: { provider: "asc" } });
+    expect(rows.map(({ provider, day, attempts, successes }) => ({ provider, day, attempts, successes }))).toEqual([
+      { provider: "doordash", day: today, attempts: 3, successes: 3 },
+      { provider: "uber", day: today, attempts: 2, successes: 1 },
+    ]);
+    expect(await storeScoped(b.storeId).courierQuoteDay.count()).toBe(0);
+    expect(await storeScoped(b.storeId).courierQuoteDay.count({ where: { storeId: a.storeId } })).toBe(0);
   });
 
   it("#577 AC2: dispatch and failover read each store's own metro overrides; another metro's and a store with none see none of them", async () => {

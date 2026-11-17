@@ -348,7 +348,7 @@ async function courierQuoteFor(
     tipCents: 0,
     hasFrozenLine: cart.lines.some((line) => line.variant.listing.frozen),
   });
-  const quoted = await quoteCourier({ referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders(), settings);
+  const quoted = await quoteCourier({ storeId: store.id, referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders(), settings);
   await storeScoped(store.id).cart.update({
     where: { id: cart.id },
     data: {
