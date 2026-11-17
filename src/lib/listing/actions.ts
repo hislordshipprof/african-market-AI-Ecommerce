@@ -3,7 +3,7 @@ import { revalidateStorefront } from "../storefront/cache";
 
 import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
-import { parseVariantsJson } from "./parse-variants";
+import { INT4_MAX, ListingInputError, parseVariantsJson } from "./parse-variants";
 import {
   createListing,
   updateListing,
@@ -12,6 +12,7 @@ import {
   listMasterProducts,
   toActor,
   VALID_STOCK_MODES,
+  isStockStatus,
   type StockMode,
   type StockStatus,
 } from "./service";
@@ -60,6 +61,9 @@ const LISTING_FIELDS = [
   "listingId",
 ] as const;
 const MAX_VARIANTS = 50;
+const MAX_PER_ORDER = 999;
+const MAX_PER_ORDER_ERROR = `Max per order must be a whole number, 1 to ${MAX_PER_ORDER}`;
+const PRICE_ERROR = "Valid non-negative price is required";
 
 function readListingForm(formData: FormData) {
   const parsed = parseInput(listingFormSchema, readFormFields(formData, LISTING_FIELDS));
@@ -71,7 +75,7 @@ function readListingForm(formData: FormData) {
 function quantityError(raw: string | null): string | null {
   if (raw === null || !raw.trim()) return "Enter a quantity";
   const q = Number(raw);
-  if (!Number.isInteger(q) || q < 0) return "Quantity must be a whole number, 0 or more";
+  if (!Number.isInteger(q) || q < 0 || q > INT4_MAX) return "Quantity must be a whole number, 0 or more";
   return null;
 }
 
@@ -111,6 +115,25 @@ function readCatering(
   return { value: { cateringLeadHours: unit === "days" ? amount * 24 : amount, cateringMinQty: min } };
 }
 
+/** A price in whole cents that fits the database column. */
+function validPrice(raw: string): boolean {
+  const p = Number(raw);
+  return raw.trim() !== "" && Number.isInteger(p) && p >= 0 && p <= INT4_MAX;
+}
+
+/** Blank is no limit (null); otherwise a whole number from 1 to MAX_PER_ORDER. */
+function readMaxPerOrder(raw: string): { value: number | null } | { error: string } {
+  if (!raw.trim()) return { value: null };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_PER_ORDER) return { error: MAX_PER_ORDER_ERROR };
+  return { value: n };
+}
+
+/** The owner-facing text of a refusal; any other error's text stays on the server. */
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof ListingInputError ? err.message : fallback;
+}
+
 /** The storefront and cart charge the variant price, so the listing price is the cheapest variant's. */
 function cheapestPrice(variants: { price: number }[]): number {
   return Math.min(...variants.map((variant) => variant.price));
@@ -135,12 +158,7 @@ export async function createListingAction(formData: FormData) {
   if (!customName && !masterProductId) {
     return { error: "Product name or master product is required" };
   }
-  if (priceRaw !== null) {
-    const p = Number(priceRaw);
-    if (!priceRaw.trim() || !isFinite(p) || p < 0 || !Number.isInteger(p)) {
-      return { error: "Valid non-negative price is required" };
-    }
-  }
+  if (priceRaw !== null && !validPrice(priceRaw)) return { error: PRICE_ERROR };
   if (!VALID_STOCK_MODES.has(stockMode)) {
     return { error: "Stock mode must be 'counted' or 'status'" };
   }
@@ -151,6 +169,8 @@ export async function createListingAction(formData: FormData) {
   if (prepared && "error" in prepared) return { error: prepared.error };
   const catering = readCatering(fields.cateringLead, fields.cateringLeadUnit, fields.cateringMinQty);
   if (catering && "error" in catering) return { error: catering.error };
+  const maxPerOrder = maxPerOrderRaw ? readMaxPerOrder(maxPerOrderRaw) : { value: null };
+  if ("error" in maxPerOrder) return { error: maxPerOrder.error };
 
   try {
     const variants = parseVariantsJson(variantsJson);
@@ -173,15 +193,14 @@ export async function createListingAction(formData: FormData) {
       perishable,
       ...prepared?.value,
       ...catering?.value,
-      maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null,
+      maxPerOrder: maxPerOrder.value,
       variants,
       actor: toActor(session.user),
     });
     revalidateStorefront(session.store.id);
     return { success: true, id: result.id, ...(result.active === false && { heldForAllergens: true }) };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to create listing";
-    return { error: message };
+    return { error: errorText(err, "Failed to create listing") };
   }
 }
 
@@ -208,10 +227,7 @@ export async function updateListingAction(formData: FormData) {
   if (customName !== null && !customName.trim() && !masterProductId) {
     return { error: "Product name is required" };
   }
-  if (priceRaw !== null) {
-    const p = Number(priceRaw);
-    if (!priceRaw.trim() || !isFinite(p) || p < 0 || !Number.isInteger(p)) return { error: "Valid non-negative price is required" };
-  }
+  if (priceRaw !== null && !validPrice(priceRaw)) return { error: PRICE_ERROR };
   if (stockMode !== null && !VALID_STOCK_MODES.has(stockMode)) {
     return { error: "Stock mode must be 'counted' or 'status'" };
   }
@@ -222,6 +238,11 @@ export async function updateListingAction(formData: FormData) {
   if (qtyLoadedRaw !== null && quantityError(qtyLoadedRaw)) {
     return { error: "Quantity must be a whole number, 0 or more" };
   }
+  if (status !== null && !isStockStatus(status)) {
+    return { error: "Stock status must be in stock, low or out of stock" };
+  }
+  const maxPerOrder = maxPerOrderRaw !== null ? readMaxPerOrder(maxPerOrderRaw) : null;
+  if (maxPerOrder && "error" in maxPerOrder) return { error: maxPerOrder.error };
 
   const prepared = readPrepared(fields.prepared, fields.prepMinutes);
   if (prepared && "error" in prepared) return { error: prepared.error };
@@ -239,8 +260,7 @@ export async function updateListingAction(formData: FormData) {
         return { error: "Too many variants" };
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Invalid variants";
-      return { error: message };
+      return { error: errorText(err, "Invalid variants") };
     }
   }
 
@@ -260,7 +280,7 @@ export async function updateListingAction(formData: FormData) {
       ...(fields.shippable !== null && { shippable: fields.shippable === "true" }),
       ...prepared?.value,
       ...catering?.value,
-      ...(maxPerOrderRaw !== null && { maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null }),
+      ...(maxPerOrder && { maxPerOrder: maxPerOrder.value }),
       actor: toActor(session.user),
       variants: parsedVariants,
     });
@@ -274,8 +294,7 @@ export async function updateListingAction(formData: FormData) {
       ...(updated.stockMoved && { stockMoved: updated.stockMoved }),
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to update listing";
-    return { error: message };
+    return { error: errorText(err, "Failed to update listing") };
   }
 }
 

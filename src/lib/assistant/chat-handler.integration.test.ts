@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { auth } from "../auth";
-import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction } from "../db";
+import { authPrisma, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
@@ -1916,7 +1916,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       expect(conversation.inFlightUntil).toBeNull();
       expect(conversation.costMicros).toBeGreaterThan(WEB_SEARCH_MICROS);
     });
-    await raw.recipe.deleteMany({ where: { key: dish } });
+    await platformAdminTransaction((tx) => tx.recipe.deleteMany({ where: { key: dish } }));
   });
 
   it("a photo list reports what was found and the gaps, and the next yes adds the found items", async () => {

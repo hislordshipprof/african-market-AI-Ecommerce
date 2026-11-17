@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { platformAdmin, platformAdminTransaction } from "../db";
+import { insertStoreApplication, platformAdmin, platformAdminTransaction } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { normalizeEmail } from "../email";
 import { sendEmail, type EmailMessage } from "../email/send";
@@ -124,7 +124,7 @@ export async function submitStoreApplication(
   if (!limit.ok) return { ok: false, rateLimited: true, retryAfter: limit.retryAfter };
 
   try {
-    await platformAdmin.storeApplication.create({ data: parsed.data });
+    await insertStoreApplication(parsed.data);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return { ok: true };
     throw err;

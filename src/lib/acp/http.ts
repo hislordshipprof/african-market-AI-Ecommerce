@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { readRequestBody } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { clientIp } from "../assistant/client-ip";
 import { findStoreForHeaders, type ValidatedStore } from "../get-store";
@@ -57,12 +58,12 @@ export async function acpGate(request: Request): Promise<{ store: ValidatedStore
   return { store, origin };
 }
 
-/** The JSON body, or null when it is missing, too large or not JSON. */
+/** The JSON body, or null when it is missing, too large or not JSON. Reading stops once the body passes the byte cap. */
 export async function readJson(request: Request): Promise<unknown> {
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return null;
+  const body = await readRequestBody(request, MAX_BODY_BYTES);
+  if (body.tooLarge) return null;
   try {
-    return JSON.parse(text);
+    return JSON.parse(body.text);
   } catch {
     return null;
   }
