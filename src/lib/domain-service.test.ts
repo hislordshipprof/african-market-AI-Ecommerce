@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockFindUnique = vi.fn();
 const mockUpdate = vi.fn();
+const mockAudit = vi.fn();
 const actor = { id: "admin-1", email: "admin@example.test" };
 
 vi.mock("./db", () => ({
@@ -10,7 +11,8 @@ vi.mock("./db", () => ({
       findUnique: (...args: unknown[]) => mockFindUnique(...args),
     },
   },
-  setStoreCustomDomainAudited: (...args: unknown[]) => mockUpdate(...args),
+  platformAdminTransaction: (fn: (tx: unknown) => unknown) =>
+    fn({ store: { update: (...args: unknown[]) => mockUpdate(...args) }, auditLog: { create: (...args: unknown[]) => mockAudit(...args) } }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -80,7 +82,10 @@ describe("domain-service", () => {
         verified: false,
         cname: "cname.vercel-dns.com",
       });
-      expect(mockUpdate).toHaveBeenCalledWith("store-a", null, "shop.mamasmarket.com", actor);
+      expect(mockUpdate).toHaveBeenCalledWith({
+        where: { id: "store-a" },
+        data: { customDomain: "shop.mamasmarket.com" },
+      });
     });
 
     it("refuses a second domain while the store still has one, without calling Vercel", async () => {
@@ -232,7 +237,10 @@ describe("domain-service", () => {
         verified: false,
         cname: "cname.vercel-dns.com",
       });
-      expect(mockUpdate).toHaveBeenCalledWith("store-a", "shop.mamasmarket.com", null, actor);
+      expect(mockUpdate).toHaveBeenCalledWith({
+        where: { id: "store-a" },
+        data: { customDomain: null },
+      });
     });
 
     it("returns 404 when store has no domain", async () => {

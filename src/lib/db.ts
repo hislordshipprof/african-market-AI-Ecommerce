@@ -327,32 +327,6 @@ export const platformAdmin = {
   storeApplication: wrapPlatformAdminDelegate(prisma.storeApplication),
 };
 
-/** Sets or clears a store's custom domain and writes its audit row in one transaction (#712). */
-export async function setStoreCustomDomainAudited(
-  storeId: string,
-  before: string | null,
-  after: string | null,
-  actor: { id: string; email: string },
-): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SET LOCAL ROLE app_user`;
-    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    await tx.store.update({ where: { id: storeId }, data: { customDomain: after } });
-    await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: actor.id,
-        actorEmail: actor.email,
-        action: after ? "store.custom_domain_add" : "store.custom_domain_remove",
-        entityType: "store",
-        entityId: storeId,
-        before: { customDomain: before },
-        after: { customDomain: after },
-      },
-    });
-  });
-}
-
 /** A transaction as app_user, with the test session time zone applied when one is set. */
 export async function appUserQuery<T>(
   fn: (tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">) => Promise<T>,
