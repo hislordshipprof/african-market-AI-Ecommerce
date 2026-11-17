@@ -321,6 +321,27 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     }
   });
 
+  it("a squatted unverified account with 2FA gets a magic link, which ends the squatter's password", async () => {
+    const email = `c1-squatted-${suffix}@test.example`;
+    try {
+      const signedIn = await testSignUp({ email, password, name: "Squatter" });
+      const cookies = cookiePairs(signedIn);
+      const secret = await enableTotp(cookies);
+      expect((await verifyTotp(generateTOTP(secret), cookies)).status).toBe(200);
+      expect(await authPrisma.user.findFirstOrThrow({ where: { email } })).toMatchObject({ emailVerified: false, twoFactorEnabled: true });
+
+      clearTestSentEmails();
+      const sent = await authPost("/sign-in/magic-link", { email, callbackURL: "/account" });
+      expect(sent.status).toBe(200);
+      expect(getTestSentEmails()).toHaveLength(1);
+      await authGet(verifyUrlFromEmail(getTestSentEmails().at(-1)!.html)!);
+      expect((await passwordSignIn(email)).status).not.toBe(200);
+      expect(await authPrisma.account.count({ where: { user: { email } } })).toBe(0);
+    } finally {
+      await removeAuthFixtures([email], []);
+    }
+  });
+
   it("public email sign-up is refused and creates no account", async () => {
     const email = `c1-walk-in-${suffix}@test.example`;
     const res = await authPost("/sign-up/email", { email, password, name: "Walk In" });

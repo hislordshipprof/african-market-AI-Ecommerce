@@ -293,7 +293,7 @@ describe("C1: session.create.before hook", () => {
   });
 
   it("blocks magic-link verify for 2FA-enabled users", async () => {
-    mockUserFindUnique.mockResolvedValueOnce({ role: "customer", twoFactorEnabled: true });
+    mockUserFindUnique.mockResolvedValueOnce({ role: "customer", twoFactorEnabled: true, emailVerified: true });
     mockMembershipFindMany.mockResolvedValueOnce([]);
     await expect(
       getHookBefore()({ userId: "user-1" }, { path: "/magic-link/verify" }),
