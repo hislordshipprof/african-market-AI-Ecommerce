@@ -50,14 +50,31 @@ export function FlowToast({
     </AnimatePresence></MotionScope>
   );
 }
+/**
+ * The pay button's text. Real checkout never borrows the demo walkthrough's
+ * wording; the demo keeps it (#708 AC2a).
+ */
+export function payButtonLabel(
+  state: "idle" | "pending" | "success",
+  realPayment: boolean,
+  idleLabel: string,
+): string {
+  if (state === "pending") return realPayment ? "Authorizing payment…" : "Authorizing test hold…";
+  if (state === "success") return realPayment ? "Order placed" : "Demo order placed";
+  return idleLabel;
+}
+
 export function PayButton({
   state,
   label,
+  realPayment = true,
   disabled,
   ...props
 }: {
   state: "idle" | "pending" | "success";
   label: string;
+  /** Real payment by default; the demo walkthrough passes false for its own wording. */
+  realPayment?: boolean;
 } & HTMLMotionProps<"button">) {
   const reduced = useReducedMotion();
   return (
@@ -80,11 +97,7 @@ export function PayButton({
         ) : (
           <LockKeyhole size={18} aria-hidden />
         )}
-        {state === "pending"
-          ? "Authorizing test hold…"
-          : state === "success"
-            ? "Demo order placed"
-            : label}
+        {payButtonLabel(state, realPayment, label)}
       </span>
     </m.button></MotionScope>
   );

@@ -1461,6 +1461,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             <PayButton
               type="submit"
               state={payState}
+              realPayment={isRealPayment}
               disabled={payState !== "idle" || quotePending}
               label={payLabel}
             />
