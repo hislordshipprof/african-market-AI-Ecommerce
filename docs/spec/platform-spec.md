@@ -530,13 +530,13 @@ AuditLog(id, tenant_id, actor, action, entity, before, after, at)
 
 ## 14. Architecture & stack
 
-Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choice's scale limits, cost and best practices are in ADRs 0013-0017.
+Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choice's scale limits, cost and best practices are in ADRs 0013-0017. Revisited at 300 stores in #578 (ADR-0012 amendment, 2026-11-16): every measured page and cron step holds its budget on a seeded 300-store load, and Inngest's Free plan, which counts each step, covers only about 540 orders a month on top of the idle crons.
 
 - **Web:** Next.js (App Router, TypeScript) on Vercel Pro, one app for storefront, admin and API; middleware resolves the store from the host name. Tailwind + shadcn/ui; PWA for store staff (ADR-0013).
 - **Custom domains:** Vercel domains API, queued during onboarding (ADR-0013).
 - **DB:** Neon Postgres via its pooled endpoint, branch per PR; Prisma 7; row-level security per store via a transaction-scoped setting (ADR-0014).
 - **Auth:** Better Auth: phone one-time codes for customers, organizations and roles for stores, 2FA for owners and staff, built-in rate limiting (ADR-0015).
-- **Jobs:** Inngest Cloud free tier for timers and retries (substitution timeout, courier failover, confidence decay, digests) (ADR-0016).
+- **Jobs:** Inngest Cloud for timers and retries (substitution timeout, courier failover, confidence decay, digests): the free tier through the early pilot, then Pro (about 36 executions an order, ADR-0012 amendment 2026-11-16) (ADR-0016).
 - **Live updates:** Web Push + SMS alerts, ~10 s polling on open boards, courier tracking pages; self-hosted Centrifugo later if needed (ADR-0016).
 - **Storage:** Cloudflare R2 + Cloudflare image CDN; proof photos in a separate private bucket `R2_PROOF_BUCKET`, read through the token-checked app route `/api/delivery-proof/<tracking token>`, no signed URLs (ADR-0013, amended 2026-11-09).
 - **Search:** Postgres full-text + pg_trgm + synonym table, per-store indexes; pgvector for AI matching; Typesense only if p95 > 300 ms (ADR-0014).
