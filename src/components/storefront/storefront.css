@@ -1287,10 +1287,7 @@
   font-size: 20px;
 }
 @media (min-width: 768px) {
-  /* The add bar carries the price and unit price beside the add control. */
-  .sf-detail-copy > .sf-price {
-    display: none;
-  }
+  /* Price under the title, then sizes, then the add bar repeating the chosen pack and price (#708 P2). */
   .sf-detail-copy > .sf-add-bar {
     margin-top: 16px;
   }

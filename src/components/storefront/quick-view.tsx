@@ -7,6 +7,7 @@ import type { StorefrontListing, StorefrontListingDetail } from "@/lib/storefron
 import { Sheet } from "./sheet";
 import { ProductImage } from "./product-image";
 import { PriceDisplay } from "./price-display";
+import { formatPrice } from "@/lib/format";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { CartAnnouncement } from "./cart-provider";
 import { selectQuickViewPack, type QuickViewDetailState } from "./quick-view-selection";
@@ -14,6 +15,8 @@ import { selectQuickViewPack, type QuickViewDetailState } from "./quick-view-sel
 export function QuickView({ listing, onClose }: { listing: StorefrontListing; onClose: () => void }) {
   const [detail, setDetail] = useState<StorefrontListingDetail | null>(null);
   const [error, setError] = useState(false);
+  // Bumped by Retry, so a failed detail load can be asked again in place (#708 P2).
+  const [attempt, setAttempt] = useState(0);
   const [chosenVariantId, setChosenVariantId] = useState<string | undefined>();
   const [zoom, setZoom] = useState(false);
   const [open, setOpen] = useState(false);
@@ -48,7 +51,7 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
       active = false;
       controller.abort();
     };
-  }, [listing.id]);
+  }, [listing.id, attempt]);
 
   const detailState: QuickViewDetailState = error
     ? { status: "error" }
@@ -91,6 +94,8 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
         <p className="sf-local-name">{listing.altName}</p>
         <p className="sf-photo-note">Representative ingredient. Packaging may vary.</p>
         <PriceDisplay cents={selection.price} weightG={selection.weightG} />
+        {/* Identity, price, then pack choice, then add (#708 P2). */}
+        <p>{detail?.description ?? "A familiar favorite from your neighborhood shelves."}</p>
         {selection.options.length > 0 && (
           <fieldset className="sf-quick-packs">
             <legend>Choose pack size</legend>
@@ -108,13 +113,35 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
           </fieldset>
         )}
         {selection.statusMessage && (
-          <p className="sf-quick-status" role="status">
-            {selection.statusMessage}
-          </p>
+          <div className="sf-quick-status-row">
+            <p className="sf-quick-status" role="status">
+              {selection.statusMessage}
+            </p>
+            {error && (
+              <button
+                type="button"
+                className="sf-chip"
+                onClick={() => {
+                  setError(false);
+                  setDetail(null);
+                  setAttempt((value) => value + 1);
+                }}
+              >
+                Retry
+              </button>
+            )}
+          </div>
         )}
-        <p>{detail?.description ?? "A familiar favorite from your neighborhood shelves."}</p>
         <div className="sf-quick-view-add">
-          <span>{selection.heading}</span>
+          <span className="sf-quick-view-choice">
+            {selection.heading}
+            {/* The chosen pack and its price, beside the control that adds it. */}
+            {!selection.addDisabled && (
+              <small>
+                {selection.cartItem.packLabel ?? "Each"} · {formatPrice(selection.price)}
+              </small>
+            )}
+          </span>
           <QuickAddStepper disabled={selection.addDisabled} item={selection.cartItem} />
         </div>
         <Link className="sf-text-link" href={`/listings/${listing.id}`} onClick={onClose}>

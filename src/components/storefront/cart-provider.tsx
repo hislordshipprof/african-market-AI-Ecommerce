@@ -69,7 +69,7 @@ const toast = Object.assign(
 
 /** Wall clock for the Undo window; only read from event handlers and timers. */
 const undoClock = () => Date.now();
-const OFFLINE = "Couldn't update your cart. Check your connection and try again.";
+const OFFLINE = "Couldn't update your basket. Check your connection and try again.";
 const STALE_PAGE = "This page is out of date. Reload the market and try again.";
 
 function serverLineToClient(sl: CartLineView): CartLine {

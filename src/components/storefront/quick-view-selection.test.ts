@@ -232,7 +232,8 @@ describe("selectQuickViewPack", () => {
   it("a failed detail load disables add without reporting a vanished pack", () => {
     const result = selectQuickViewPack(input({ chosenVariantId: "v-5lb", detail: { status: "error" } }));
     expect(result.addDisabled).toBe(true);
-    expect(result.statusMessage).toBe("Pack details could not load. Open the product page to try again.");
+    // Quick view now offers Retry beside this message, so it no longer sends the shopper away (#708 P2).
+    expect(result.statusMessage).toBe("Pack details could not load. Try again.");
     expect(result.statusMessage).not.toContain("no longer available");
     expect(result.selectedId).toBe("v-5lb");
     expect(result.heading).toBe("Details unavailable");

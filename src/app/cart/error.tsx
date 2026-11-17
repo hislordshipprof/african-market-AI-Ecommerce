@@ -11,7 +11,7 @@ export default function CartError({
   return (
     <div className="sf-container flow-page">
       <FlowError
-        title="Your cart could not load"
+        title="Your basket could not load"
         message="Your saved basket will be here when you try again."
       >
         <button className="sf-button" onClick={retry}>

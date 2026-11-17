@@ -96,7 +96,7 @@ export function selectQuickViewPack(input: QuickViewSelectionInput): QuickViewSe
       weightG: shown.weightG,
       statusMessage:
         input.detail.status === "error"
-          ? "Pack details could not load. Open the product page to try again."
+          ? "Pack details could not load. Try again."
           : undefined,
       addDisabled: true,
       eachOnly: false,

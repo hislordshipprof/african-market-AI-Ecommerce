@@ -183,6 +183,23 @@ test.describe("Storefront redesign interactions", () => {
     );
   });
 
+  test("the product page asks for the pack before the add (#708 P2)", async ({ page }) => {
+    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.getByTestId("listing-card").filter({ hasText: "Garri" }).first().locator(".sf-product-name").click();
+    const detail = page.getByTestId("product-detail");
+    await expect(detail.getByTestId("pack-option").nth(1)).toBeVisible();
+    const sizesFirst = await detail.evaluate((root) => {
+      const sizes = root.querySelector("[aria-labelledby='variants-heading']");
+      const bar = root.querySelector(".sf-add-bar");
+      return Boolean(sizes && bar && sizes.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(sizesFirst).toBe(true);
+    const second = detail.getByTestId("pack-option").nth(1);
+    const label = (await second.innerText()).split("\n")[0];
+    await second.click();
+    await expect(detail.locator(".sf-add-bar")).toContainText(label);
+  });
+
   test("mobile bottom navigation reaches categories, search, account and home", async ({
     page,
   }) => {

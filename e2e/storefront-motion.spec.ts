@@ -370,9 +370,19 @@ test.describe("Phase 3 motion and depth", () => {
       await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "failed" }) });
     });
     const failed = await openEgusi(page);
-    await expect(failed.dialog.getByRole("status")).toHaveText("Pack details could not load. Open the product page to try again.");
+    await expect(failed.dialog.getByRole("status")).toHaveText("Pack details could not load. Try again.");
     await expect(failed.dialog.getByText("no longer available")).toHaveCount(0);
     await expect(failed.dialog.getByTestId("stepper-plus")).toBeDisabled();
+    // Retry in place (#708 P2): no trip to the product page to recover.
+    await page.unroute("**/api/storefront/listings/**");
+    await failed.dialog.getByRole("button", { name: "Retry" }).click();
+    await expect(failed.dialog.getByText("Add to your basket")).toBeVisible();
+    await expect(failed.dialog.getByRole("status")).toHaveCount(0);
+    await expect(failed.dialog.getByTestId("stepper-plus")).toBeEnabled();
+    // The chosen pack and its price sit beside the add control.
+    const chosen = (await packButtons(page).and(page.locator("[aria-pressed='true']")).innerText()).trim();
+    await expect(failed.dialog.locator(".sf-quick-view-add")).toContainText(chosen);
+    await expect(failed.dialog.locator(".sf-quick-view-add")).toContainText("$");
   });
 
   test("category pack filter reaches the actual quick view default", async ({ page }) => {

@@ -86,6 +86,9 @@
 .sf-quick-packs { display:flex; flex-wrap:wrap; gap:8px; border:0; margin:0; padding:0; min-inline-size:0; }
 .sf-quick-packs legend { font-weight:650; margin-bottom:12px; padding:0; }
 .sf-quick-status { margin:0; max-width:42rem; color:var(--color-ink); font-size:16px; line-height:1.5; }
+.sf-quick-status-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.sf-quick-view-choice { display:grid; gap:4px; min-width:0; }
+.sf-quick-view-choice small { color:var(--color-muted); font-size:13px; font-weight:600; }
 .sf-quick-view-add { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; margin-top:8px; border-top:1px solid var(--color-line); padding-top:24px; font-weight:650; }
 .sf-parallax-frame { position:absolute; inset:0; overflow:hidden; }
 .sf-parallax-image { position:absolute; inset:-24px 0; }
