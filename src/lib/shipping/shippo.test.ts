@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ShippoProvider } from "./shippo";
+import { parseTrackUpdated, ShippoProvider, signShippoWebhook, verifyShippoSignature } from "./shippo";
 import { fakeShippo } from "./shippo-fake";
 import { cheapestRate, ShippingProviderError, type ParcelRequest } from "./provider";
 
@@ -38,5 +38,46 @@ describe("Shippo rates (#567)", () => {
     expect(await refused(provider, { ...REQUEST, to: { ...REQUEST.to, zip: "" } })).toBe(400);
     expect(await refused(provider, { ...REQUEST, weightG: 0 })).toBe(400);
     expect(await refused(new ShippoProvider({ apiKey: "", fetch }), REQUEST)).toBe(0);
+  });
+});
+
+describe("Shippo labels and tracking (#568)", () => {
+  it("buys the quoted rate as a PDF label with its tracking number, and voids it until the carrier scans it", async () => {
+    let now = NOW;
+    const fetch = fakeShippo({ token: TOKEN, now: () => now });
+    const provider = new ShippoProvider({ apiKey: TOKEN, fetch, now: () => now });
+    const [rate] = await provider.rates(REQUEST);
+
+    const label = await provider.buyLabel(rate.rateId, "order1");
+    expect(fetch.calls.at(-1)).toEqual({ rate: rate.rateId, label_file_type: "PDF_4x6", async: false, metadata: "order1" });
+    expect(label).toMatchObject({ labelId: expect.stringMatching(/^txn_/), trackingNumber: expect.any(String), trackingUrl: expect.stringMatching(/^https:/) });
+    expect(new TextDecoder().decode((await provider.downloadLabel(label.labelUrl)).subarray(0, 5))).toBe("%PDF-");
+    expect(await provider.voidLabel(label.labelId)).toBe("voided");
+
+    const [other] = await provider.rates(REQUEST);
+    const scanned = await provider.buyLabel(other.rateId, "order2");
+    fetch.scan(scanned.labelId);
+    expect(await provider.voidLabel(scanned.labelId)).toBe("refused");
+
+    // A rate past Shippo's 7-day window is not sold.
+    const [old] = await provider.rates(REQUEST);
+    now = new Date(NOW.getTime() + 7 * 24 * 60 * 60_000);
+    await expect(provider.buyLabel(old.rateId, "order3")).rejects.toBeInstanceOf(ShippingProviderError);
+  });
+
+  it("accepts only a fresh HMAC signature over the exact body, and reads the transaction and status id from track_updated", () => {
+    const body = JSON.stringify({ event: "track_updated", test: false, data: { transaction: "txn_1", tracking_status: { object_id: "ts_1", status: "TRANSIT" } } });
+    const header = signShippoWebhook(body, "secret", NOW);
+    expect(verifyShippoSignature(body, header, "secret", NOW)).toBe(true);
+    expect(verifyShippoSignature(`${body} `, header, "secret", NOW)).toBe(false);
+    expect(verifyShippoSignature(body, header, "other", NOW)).toBe(false);
+    expect(verifyShippoSignature(body, header, "secret", new Date(NOW.getTime() + 301_000))).toBe(false);
+    expect(verifyShippoSignature(body, null, "secret", NOW)).toBe(false);
+    expect(verifyShippoSignature(body, "t=1,v1=zz", "secret", NOW)).toBe(false);
+
+    expect(parseTrackUpdated(body)).toMatchObject({ eventId: "ts_1", labelId: "txn_1", status: "TRANSIT", test: false });
+    expect(parseTrackUpdated(JSON.stringify({ event: "transaction_created", data: {} }))).toBeNull();
+    expect(parseTrackUpdated(JSON.stringify({ event: "track_updated", data: { transaction: "txn_1", tracking_status: { object_id: "ts_1", status: "LOST" } } }))).toBeNull();
+    expect(parseTrackUpdated("not json")).toBeNull();
   });
 });

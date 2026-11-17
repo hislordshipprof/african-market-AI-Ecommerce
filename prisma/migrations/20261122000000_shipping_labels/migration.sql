@@ -18,6 +18,9 @@ ALTER TABLE "orders" ADD CONSTRAINT "orders_shipping_postage_cents_check"
 -- A label is one Shippo transaction; the tracking webhook finds its order by it.
 CREATE UNIQUE INDEX "orders_shipping_label_id_key" ON "orders"("shipping_label_id");
 
--- Tracking events have no courier delivery: one row per Shippo tracking status, so a retried webhook is a no-op.
-CREATE UNIQUE INDEX "delivery_events_order_external_event_shipping_key"
-  ON "delivery_events"("order_id", "external_event_id") WHERE "delivery_id" IS NULL;
+-- Tracking events have no courier delivery: one row per Shippo tracking status, keyed on the order by
+-- delivery_events_order_id_external_event_id_key, so a retried webhook is a no-op.
+ALTER TABLE "delivery_events" DROP CONSTRAINT "delivery_events_type_check";
+ALTER TABLE "delivery_events" ADD CONSTRAINT "delivery_events_type_check"
+    CHECK ("type" IN ('out_for_delivery', 'delivered', 'courier_assigned', 'picked_up', 'cancelled', 'returned', 'failover_triggered', 'both_failed',
+      'shipping_pre_transit', 'shipping_transit', 'shipping_delivered', 'shipping_returned', 'shipping_failure', 'shipping_unknown'));

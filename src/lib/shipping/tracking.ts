@@ -26,7 +26,7 @@ export async function applyTrackingWebhook(event: TrackingEvent): Promise<Tracki
   const { storeId, orderId } = found;
   const outcome = await storeScopedTransaction(storeId, async (tx) => {
     const inserted = await tx.deliveryEvent.createMany({
-      data: [{ storeId, orderId, deliveryId: null, externalEventId: event.eventId, type: `shipping_${event.status.toLowerCase()}`, payload: event.payload as object }],
+      data: [{ storeId, orderId, deliveryId: null, externalEventId: `shippo:${event.eventId}`, type: `shipping_${event.status.toLowerCase()}`, payload: event.payload as object }],
       skipDuplicates: true,
     });
     if (inserted.count === 0) return { result: "duplicate" as const, notify: null };

@@ -130,7 +130,8 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
     const rate = rates.get(body.rate);
     if (!rate) return reply(400, { rate: ["Invalid pk - object does not exist."] });
     const existing = [...labels.entries()].find(([, label]) => label.rateId === body.rate);
-    const id = existing?.[0] ?? `txn_fake_${labels.size + 1}`;
+    // Shippo object ids are unique across the account, so two fakes never share one.
+    const id = existing?.[0] ?? `txn_fake_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     if (!existing) {
       if (now().getTime() - rate.quotedAt.getTime() >= RATE_WINDOW_MS) {
         return reply(201, { object_id: `txn_fake_err_${labels.size + 1}`, status: "ERROR", messages: [{ text: "Rate has expired. Please create a new shipment." }] });
@@ -141,11 +142,15 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
       object_id: id,
       status: "SUCCESS",
       rate: body.rate,
-      tracking_number: `9400${id.replace(/\D/g, "").padStart(18, "0")}`,
-      tracking_url_provider: `https://tools.usps.com/go/TrackConfirmAction?tLabels=9400${id.replace(/\D/g, "").padStart(18, "0")}`,
+      tracking_number: trackingNumber(id),
+      tracking_url_provider: `https://tools.usps.com/go/TrackConfirmAction?tLabels=${trackingNumber(id)}`,
       label_url: `${FAKE_LABEL_HOST}/labels/${id}.pdf`,
       messages: [],
     });
+  }
+
+  function trackingNumber(id: string): string {
+    return `9400${[...id].map((c) => c.charCodeAt(0) % 10).join("").slice(-18).padStart(18, "0")}`;
   }
 
   function refund(body: Json): Response {
