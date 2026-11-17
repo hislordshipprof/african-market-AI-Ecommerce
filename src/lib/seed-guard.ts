@@ -18,7 +18,7 @@ export function assertNotProduction(env: {
  * observedHost is what Postgres reports (inet_server_addr); urlHost is the connection string's host.
  */
 export function assertTestAdminSeedTarget(
-  env: { SEED_TEST_ADMIN?: string; VERCEL_ENV?: string; GITHUB_ACTIONS?: string },
+  env: Record<string, string | undefined>,
   target: { observedHost: string; urlHost: string | null },
 ) {
   if (env.SEED_TEST_ADMIN !== "1") return;
