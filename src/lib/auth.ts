@@ -307,6 +307,13 @@ export const auth = betterAuth({
       if (ctx.path === "/sign-in/magic-link" && ctx.body?.name) {
         return { context: { body: { ...ctx.body, name: "" } } };
       }
+      // Accounts carry no picture, and a name is at most 80 characters. Edited in place: a returned
+      // body is merged over the original, which would bring a dropped image back.
+      if (ctx.path === "/update-user" && ctx.body && typeof ctx.body === "object") {
+        const body = ctx.body as Record<string, unknown>;
+        delete body.image;
+        if (typeof body.name === "string") body.name = body.name.slice(0, 80);
+      }
     }),
   },
   databaseHooks: {

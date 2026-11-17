@@ -412,6 +412,24 @@ describe("auth integration (real DB, app_runtime)", () => {
     expect(await authPrisma.session.findUnique({ where: { id: sessionId } })).toBeNull();
   });
 
+  it("update-user keeps a name to 80 characters and never sets an image", async () => {
+    await authPost("/sign-in/magic-link", { email: customerEmail, callbackURL: "/account" });
+    const cookies = collectCookies(await authGet(extractVerifyUrl()));
+    expect(cookies).toContain("session_token");
+
+    const updated = await authPost("/update-user", { name: "N".repeat(200), image: "https://tracker.example/pixel.png" }, cookies);
+    expect(updated.status, await updated.clone().text()).toBe(200);
+    let row = await authPrisma.user.findFirstOrThrow({ where: { email: customerEmail } });
+    expect(row.name).toBe("N".repeat(80));
+    expect(row.image).toBeNull();
+
+    const imageOnly = await authPost("/update-user", { image: "https://tracker.example/pixel.png" }, cookies);
+    expect(imageOnly.status).toBe(400);
+    row = await authPrisma.user.findFirstOrThrow({ where: { email: customerEmail } });
+    expect(row.image).toBeNull();
+    expect(row.name).toBe("N".repeat(80));
+  });
+
   it("a first-time magic-link sign-in creates the account, syncs a nameless Customer, and the name fills in", async () => {
     const email = `integ-new-${suffix}@test.example`;
     const host = `${storeSlug}.localhost:3000`;
