@@ -53,10 +53,10 @@ async function openEgusi(page: Page) {
 }
 
 async function settleCart(page: Page) {
-  const cart = page.getByRole("button", { name: "Shopping cart" });
+  const cart = page.getByRole("button", { name: /basket/i });
   await expect(cart).not.toHaveAttribute("data-cart-pending");
   await page.reload();
-  await page.getByRole("button", { name: "Shopping cart" }).click();
+  await page.getByRole("button", { name: /basket/i }).click();
   return page.getByRole("dialog", { name: "Your cart" });
 }
 
@@ -283,7 +283,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(other.getByRole("button", { name: "5 lb bag", exact: true })).toHaveCount(0);
     await other.getByTestId("quick-add-btn").click();
     await expect(other.getByTestId("stepper-qty")).toHaveText("1");
-    await expect(page.getByRole("button", { name: "Shopping cart" })).not.toHaveAttribute("data-cart-pending");
+    await expect(page.getByRole("button", { name: /basket/i })).not.toHaveAttribute("data-cart-pending");
     await other.press("Escape");
     const ofadaCart = await settleCart(page);
     await expect(ofadaCart.getByRole("listitem")).toHaveCount(1);
@@ -313,7 +313,7 @@ test.describe("Phase 3 motion and depth", () => {
     await dialog.getByRole("button", { name: "5 lb bag", exact: true }).click();
     await dialog.getByTestId("quick-add-btn").click();
     await expect(dialog.getByTestId("stepper-qty")).toHaveText("1");
-    const cartButton = page.getByRole("button", { name: "Shopping cart" });
+    const cartButton = page.getByRole("button", { name: /basket/i });
     await expect(cartButton).toHaveAttribute("data-cart-pending", "true");
     await dialog.getByTestId("stepper-plus").click();
     await expect(dialog.getByTestId("stepper-qty")).toHaveText("2");
@@ -331,7 +331,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(again.dialog.getByTestId("stepper-qty")).toHaveText("2");
     await again.dialog.getByTestId("stepper-plus").click();
     await expect(again.dialog.getByTestId("stepper-qty")).toHaveText("3");
-    await expect(page.getByRole("button", { name: "Shopping cart" })).not.toHaveAttribute("data-cart-pending");
+    await expect(page.getByRole("button", { name: /basket/i })).not.toHaveAttribute("data-cart-pending");
     const settled = await settleCart(page);
     await expect(settled.getByRole("listitem")).toHaveCount(1);
     await expect(settled.getByTestId("stepper-qty")).toHaveText("3");
@@ -344,7 +344,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "true");
     await dialog.getByTestId("quick-add-btn").click();
     await expect(dialog.getByTestId("stepper-qty")).toHaveText("1");
-    await expect(page.getByRole("button", { name: "Shopping cart" })).not.toHaveAttribute("data-cart-pending");
+    await expect(page.getByRole("button", { name: /basket/i })).not.toHaveAttribute("data-cart-pending");
     await dialog.press("Escape");
     const release = await holdListingDetail(page);
     const loading = await openEgusi(page);
@@ -438,18 +438,18 @@ test.describe("Phase 3 motion and depth", () => {
     await tante.close();
   });
 
-  test("fly-to-cart updates the accessible badge immediately", async ({ page }) => {
+  test("adding a product updates the accessible badge and announces it", async ({ page }) => {
     await page.goto(`${BASE}/categories/grains-and-flours`);
     await page.waitForTimeout(2000);
     const card = page.getByTestId("listing-card").filter({ has: page.locator('[data-testid="quick-add-btn"]:enabled') }).filter({ hasNot: page.locator(".sf-product-fallback") }).first();
     await expect(card.locator("img")).toBeVisible();
-    await expect.poll(() => card.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     await card.getByTestId("quick-add-btn").click();
-    await expect(page.getByTestId("cart-flight")).toHaveCount(1);
     const header = page.getByTestId("storefront-header");
     await expect(header.getByTestId("cart-count")).toHaveText("1");
-    await expect(header.locator('[aria-live="polite"]')).toContainText("1 item in cart");
-    await expect(page.getByTestId("cart-flight")).toHaveCount(0);
+    // One polite, contextual confirmation from the provider (no per-add toast, no fly-to-cart).
+    const announce = page.getByTestId("cart-announce");
+    await expect(announce).toContainText("added");
+    await expect(announce).toContainText("1 in basket");
   });
 
   test("unknown paths retain store branding with search and aisles", async ({ page }) => {

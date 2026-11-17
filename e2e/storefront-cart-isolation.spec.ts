@@ -173,7 +173,7 @@ test("an http custom host keeps the cart after add and reload", async () => {
 
     await page.reload();
     await expect(header.getByTestId("cart-count")).toHaveText("1");
-    await header.getByRole("button", { name: "Shopping cart" }).click();
+    await header.getByRole("button", { name: /basket/i }).click();
     await expect(page.getByRole("button", { name: /^Remove .*Garri.* from cart$/ })).toBeVisible();
   } finally {
     await browser.close();

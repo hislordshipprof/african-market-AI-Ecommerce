@@ -60,7 +60,7 @@ test.describe("Storefront redesign interactions", () => {
     const header = page.getByTestId("storefront-header");
     await expect(header.getByTestId("cart-count")).toHaveText("2");
     await header
-      .getByRole("button", { name: "Shopping cart", exact: true })
+      .getByRole("button", { name: /basket/i })
       .click();
     const cart = page.getByRole("dialog", { name: "Your cart" });
     await expect(cart).toBeVisible();
@@ -176,7 +176,7 @@ test.describe("Storefront redesign interactions", () => {
     await detail.getByTestId("quick-add-btn").click();
     await page
       .getByTestId("storefront-header")
-      .getByRole("button", { name: "Shopping cart", exact: true })
+      .getByRole("button", { name: /basket/i })
       .click();
     await expect(page.getByRole("dialog", { name: "Your cart" })).toContainText(
       packLabel,
@@ -206,7 +206,7 @@ test.describe("Storefront redesign interactions", () => {
         nav.getByRole("link", { name: label, exact: true }),
       ).toHaveAttribute("aria-current", "page");
     }
-    await nav.getByRole("button", { name: "Shopping cart", exact: true }).click();
+    await nav.getByRole("button", { name: /basket/i }).click();
     const cart = page.getByRole("dialog", { name: "Your cart" });
     await expect(cart).toBeVisible();
     await expect(cart).toContainText("Your next good meal starts here");

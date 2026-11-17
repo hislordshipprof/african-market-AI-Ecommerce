@@ -46,6 +46,7 @@ import {
 } from "@/lib/storefront/cart-undo";
 import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
+import { CartTriggerView } from "./cart-trigger";
 import { Sheet } from "./sheet";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { money } from "@/lib/format";
@@ -152,6 +153,8 @@ export function CartProvider({
 }) {
   const [lines, setLines] = useState<readonly CartLine[]>(EMPTY_CART);
   const [open, setOpen] = useState(false);
+  // One polite announcement for an add, so no two cart triggers announce the same change (#708 AC3).
+  const [announce, setAnnounce] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [attention, setAttention] = useState(false);
@@ -787,11 +790,17 @@ export function CartProvider({
     subscribe: () => () => {},
     adjust(item, delta, max) {
       const key = cartItemKey(item);
-      const next = stepCartQuantity(intentQty(key), delta, max);
+      const previous = intentQty(key);
+      const next = stepCartQuantity(previous, delta, max);
       if (next === null || rejectStale()) return;
       noteGesture(key);
-      bump(key, (intentQty(key) === 0) !== (next === 0));
+      bump(key, (previous === 0) !== (next === 0));
       put(item, next);
+      // Optimistic, contextual confirmation: announced once, from the provider, not per trigger.
+      if (next > previous && mounted.current) {
+        const total = linesRef.current.reduce((sum, line) => sum + line.quantity, 0);
+        setAnnounce(`${item.name} added. ${total} in basket.`);
+      }
       void enqueue(drain, true);
     },
     setQuantity(item, quantity) {
@@ -895,6 +904,15 @@ export function CartProvider({
       }}
     >
       {children}
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="cart-announce"
+      >
+        {announce}
+      </div>
       <Sheet open={open} onClose={closeCart} title="Your cart">
         <p className={styles.muted}>{storeName}</p>
         {open && <AssistantSlot label="Shop with AI" />}
@@ -1016,28 +1034,15 @@ export function CartTrigger({
 }) {
   const { count, openCart, syncing, attention, loading } = useCart();
   return (
-    <button
-      type="button"
-      className={`${styles.cartTrigger} ${className ?? ""}`}
-      onClick={openCart}
-      aria-label="Shopping cart"
-      data-cart-pending={syncing || undefined}
-      data-cart-attention={attention || undefined}
+    <CartTriggerView
+      count={count}
+      loading={loading}
+      syncing={syncing}
+      attention={attention}
+      onOpen={openCart}
+      className={className}
     >
-      <ShoppingBag size={21} />
       {children}
-      {loading ? (
-        // No number until the server cart is read, so the badge never flashes a false 0.
-        <span data-testid="cart-count" data-loading="true" aria-hidden="true" className={styles.countLoading} />
-      ) : (
-        // Remounts on each change, so the bump replays (CSS; reduced motion turns it off).
-        <span key={count} data-testid="cart-count" aria-hidden="true" className={styles.countBump}>
-          {count}
-        </span>
-      )}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {loading ? "" : `${count} ${count === 1 ? "item" : "items"} in cart`}
-      </span>
-    </button>
+    </CartTriggerView>
   );
 }

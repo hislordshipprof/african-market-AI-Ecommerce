@@ -504,7 +504,7 @@ test.describe("quick add limits and recovery", () => {
     await openGrains(page);
     await addGarri(page);
     await burst(garri(page).getByTestId("stepper-plus"), 3);
-    await page.getByRole("button", { name: "Shopping cart" }).click();
+    await page.getByRole("button", { name: /basket/i }).click();
     await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
     await settle(page);
     // The drawer's "Removed Yellow Garri (Ijebu). Undo" bar names the item, so check the lines only.
@@ -922,7 +922,7 @@ test.describe("quick add limits and recovery", () => {
       }
       await route.fallback();
     });
-    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
     const sheet = page.getByRole("dialog", { name: "Your cart" });
     await sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-minus").click();
     await expect.poll(() => held).toBe(true);
@@ -977,7 +977,7 @@ test.describe("quick add limits and recovery", () => {
       }
       await route.fallback();
     });
-    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
     const sheet = page.getByRole("dialog", { name: "Your cart" });
     const curryRow = sheet.getByRole("listitem").filter({ hasText: "Curry Powder" });
     await curryRow.getByTestId("stepper-minus").click();
@@ -1110,7 +1110,7 @@ test.describe("quick add recovery gaps", () => {
     });
     await garri(page).getByTestId("quick-add-btn").click();
     await expect.poll(() => held).toBe(true);
-    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
     await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     release();
@@ -1492,7 +1492,7 @@ async function openSavedYellowCart(page: Page) {
 }
 
 async function openSheet(page: Page) {
-  await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
+  await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
   const sheet = page.getByRole("dialog", { name: "Your cart" });
   await expect(sheet).toBeVisible();
   return sheet;
