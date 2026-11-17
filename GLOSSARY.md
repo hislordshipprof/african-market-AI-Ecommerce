@@ -174,7 +174,7 @@ The owner's saved list of what to buy from a wholesaler, started from the copilo
 A wholesaler the store buys from (#575): name, optional contact person, email or phone, how it takes orders (email, WhatsApp or text) and its lead time. Each listing has at most one supplier. Removing a supplier archives it; its items go back to no supplier.
 
 **Purchase order (PO)**:
-One order to one supplier, drafted from the reorder list. Draft, then sent, then received; a draft or sent order can be cancelled. Email is sent for the store from the platform sender; WhatsApp and text open on the owner's own phone. Receiving it changes no stock yet (#576).
+One order to one supplier, drafted from the reorder list. Draft, then sent, then received; a draft or sent order can be cancelled. Email is sent for the store from the platform sender; WhatsApp and text open on the owner's own phone. Receiving it is one tap that adds what came to stock (#576): the owner ticks the lines that came, at the quantity that came, and each ticked line goes through the copilot's stock write. A photo of the supplier's invoice can fill the quantities first.
 
 **Stock proposal**:
 A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
