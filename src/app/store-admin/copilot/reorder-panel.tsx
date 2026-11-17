@@ -111,6 +111,9 @@ function SavedList({ saved, storeSlug }: { saved: SavedListView; storeSlug: stri
         <button type="button" className={ACTION} onClick={copy}>
           Copy as text
         </button>
+        <Link href={`/store-admin/purchase-orders?store=${store}`} className={ACTION}>
+          Make purchase orders
+        </Link>
         {copied ? <p role="status" className="text-sm text-muted-foreground">{copied}</p> : null}
       </div>
     </section>

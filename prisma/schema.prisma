@@ -72,63 +72,67 @@ model Store {
   /// "Let AI assistants read my catalog" (#572): the store host's read-only catalog MCP endpoint answers only when true. The store owner turns it on.
   aiCatalogReadable Boolean @default(false) @map("ai_catalog_readable")
 
-  rlsFixtures           RlsTestFixture[]
-  auditLogs             AuditLog[]
-  memberships           StoreMembership[]
-  invites               StoreInvite[]
-  listings              Listing[]
-  listingAttributes     ListingAttributes[]
-  listingIngredients    ListingIngredient[]
-  stockEvents           StockEvent[]
-  banners               StoreBanner[]
-  collections           StoreCollection[]
-  carts                 Cart[]
-  customers             Customer[]
-  orders                Order[]
-  coupons               StoreCoupon[]
-  deliveries            Delivery[]
-  refundRequests        RefundRequest[]
-  paymentDisputes       PaymentDispute[]
-  issueReports          IssueReport[]
-  substitutionRequests  SubstitutionRequest[]
-  listingImports        ListingImport[]
-  aiConversations       AiConversation[]
-  aiActions             AiAction[]
-  assistantUndoReceipts AssistantUndoReceipt[]
-  guestBrowserCarts     GuestBrowserCart[]
-  paymentIntentReleases PaymentIntentRelease[]
-  copilotConversations  CopilotConversation[]
-  aiReviewFlags         AiReviewFlag[]
-  copilotClientMessages CopilotClientMessage[]
-  stockProposals        StockProposal[]
-  copilotAlerts         CopilotAlert[]
-  copilotDigests        CopilotDigest[]
-  copilotWeeklyReports  CopilotWeeklyReport[]
-  ownerReports          OwnerReport[]
-  ownerReportItems      OwnerReportItem[]
-  listingDrafts         ListingDraft[]
-  productProposals      ProductProposal[]
-  reorderLists          ReorderList[]
-  reorderListItems      ReorderListItem[]
-  notificationLogs      NotificationLog[]
-  deliveryEvents        DeliveryEvent[]
-  courierIncidentNotes  CourierIncidentNote[]
-  pushSubscriptions     PushSubscription[]
+  rlsFixtures            RlsTestFixture[]
+  auditLogs              AuditLog[]
+  memberships            StoreMembership[]
+  invites                StoreInvite[]
+  listings               Listing[]
+  listingAttributes      ListingAttributes[]
+  listingIngredients     ListingIngredient[]
+  stockEvents            StockEvent[]
+  banners                StoreBanner[]
+  collections            StoreCollection[]
+  carts                  Cart[]
+  customers              Customer[]
+  orders                 Order[]
+  coupons                StoreCoupon[]
+  deliveries             Delivery[]
+  refundRequests         RefundRequest[]
+  paymentDisputes        PaymentDispute[]
+  issueReports           IssueReport[]
+  substitutionRequests   SubstitutionRequest[]
+  listingImports         ListingImport[]
+  aiConversations        AiConversation[]
+  aiActions              AiAction[]
+  assistantUndoReceipts  AssistantUndoReceipt[]
+  guestBrowserCarts      GuestBrowserCart[]
+  paymentIntentReleases  PaymentIntentRelease[]
+  copilotConversations   CopilotConversation[]
+  aiReviewFlags          AiReviewFlag[]
+  copilotClientMessages  CopilotClientMessage[]
+  stockProposals         StockProposal[]
+  copilotAlerts          CopilotAlert[]
+  copilotDigests         CopilotDigest[]
+  copilotWeeklyReports   CopilotWeeklyReport[]
+  ownerReports           OwnerReport[]
+  ownerReportItems       OwnerReportItem[]
+  listingDrafts          ListingDraft[]
+  productProposals       ProductProposal[]
+  reorderLists           ReorderList[]
+  reorderListItems       ReorderListItem[]
+  suppliers              Supplier[]
+  supplierListings       SupplierListing[]
+  purchaseOrders         PurchaseOrder[]
+  purchaseOrderLines     PurchaseOrderLine[]
+  notificationLogs       NotificationLog[]
+  deliveryEvents         DeliveryEvent[]
+  courierIncidentNotes   CourierIncidentNote[]
+  pushSubscriptions      PushSubscription[]
   orderPushSubscriptions OrderPushSubscription[]
-  supportThreads        SupportThread[]
-  supportMessages       SupportMessage[]
-  subscription          StoreSubscription?
-  billingEvents         StripeBillingEvent[]
-  assistantChatMonths   AssistantChatMonth[]
-  ownerWhatsAppLinks    OwnerWhatsAppLink[]
-  application           StoreApplication?
-  whatsAppNumber        StoreWhatsAppNumber?
-  whatsAppOptOuts       WhatsAppOptOut[]
-  whatsAppShopperCarts  WhatsAppShopperCart[]
-  whatsAppCheckoutLinks WhatsAppCheckoutLink[]
-  driverRoutes          DriverRoute[]
-  pickBatches           PickBatch[]
-  notifiedStoreRequests DirectoryStoreRequest[]
+  supportThreads         SupportThread[]
+  supportMessages        SupportMessage[]
+  subscription           StoreSubscription?
+  billingEvents          StripeBillingEvent[]
+  assistantChatMonths    AssistantChatMonth[]
+  ownerWhatsAppLinks     OwnerWhatsAppLink[]
+  application            StoreApplication?
+  whatsAppNumber         StoreWhatsAppNumber?
+  whatsAppOptOuts        WhatsAppOptOut[]
+  whatsAppShopperCarts   WhatsAppShopperCart[]
+  whatsAppCheckoutLinks  WhatsAppCheckoutLink[]
+  driverRoutes           DriverRoute[]
+  pickBatches            PickBatch[]
+  notifiedStoreRequests  DirectoryStoreRequest[]
 
   @@map("stores")
 }
@@ -187,6 +191,7 @@ model User {
   productProposalReviews  ProductProposal[]        @relation("ProductProposalReviewer")
   storeCouponsCreated     StoreCoupon[]
   reorderLists            ReorderList[]            @relation("ReorderListSaver")
+  purchaseOrders          PurchaseOrder[]          @relation("PurchaseOrderCreator")
 
   @@map("users")
 }
@@ -422,9 +427,9 @@ model Category {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  parent         Category?       @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children       Category[]      @relation("CategoryTree")
-  masterProducts MasterProduct[]
+  parent           Category?         @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children         Category[]        @relation("CategoryTree")
+  masterProducts   MasterProduct[]
   productProposals ProductProposal[]
 
   @@index([parentId])
@@ -607,18 +612,20 @@ model Listing {
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  store             Store                    @relation(fields: [storeId], references: [id])
-  masterProduct     MasterProduct?           @relation(fields: [masterProductId], references: [id])
-  variants          ListingVariant[]
-  stockEvents       StockEvent[]
-  ownerReportItems  OwnerReportItem[]
-  draftsListedAs    ListingDraft[]           @relation("ListingDraftExisting")
-  draftsPublishedAs ListingDraft[]           @relation("ListingDraftPublished")
-  productProposal   ProductProposal?
-  reorderListItems  ReorderListItem[]
-  collectionItems   StoreCollectionListing[]
-  attributes        ListingAttributes?
-  ingredients       ListingIngredient[]
+  store              Store                    @relation(fields: [storeId], references: [id])
+  masterProduct      MasterProduct?           @relation(fields: [masterProductId], references: [id])
+  variants           ListingVariant[]
+  stockEvents        StockEvent[]
+  ownerReportItems   OwnerReportItem[]
+  draftsListedAs     ListingDraft[]           @relation("ListingDraftExisting")
+  draftsPublishedAs  ListingDraft[]           @relation("ListingDraftPublished")
+  productProposal    ProductProposal?
+  reorderListItems   ReorderListItem[]
+  supplierListing    SupplierListing?
+  purchaseOrderLines PurchaseOrderLine[]
+  collectionItems    StoreCollectionListing[]
+  attributes         ListingAttributes?
+  ingredients        ListingIngredient[]
 
   @@index([storeId])
   @@index([storeId, active])
@@ -942,6 +949,95 @@ model ReorderListItem {
   @@map("reorder_list_items")
 }
 
+/// A wholesaler the store buys from (#575). Store-owned under RLS; archived, never deleted, once it has orders.
+model Supplier {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  name        String
+  contactName String?   @map("contact_name")
+  email       String?
+  /// E.164.
+  phone       String?
+  /// email | whatsapp | sms
+  channel     String
+  leadDays    Int       @map("lead_days")
+  archivedAt  DateTime? @map("archived_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  store          Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listings       SupplierListing[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([storeId])
+  @@map("suppliers")
+}
+
+/// Which supplier a listing is bought from. One supplier per listing.
+model SupplierListing {
+  id         String @id @default(cuid())
+  supplierId String @map("supplier_id")
+  listingId  String @unique @map("listing_id")
+  storeId    String @map("store_id")
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  listing  Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@index([supplierId])
+  @@index([storeId])
+  @@map("supplier_listings")
+}
+
+/// One order to one supplier, drafted from the reorder list. draft | sent | received | cancelled.
+/// Receiving changes no stock here; that is #576.
+model PurchaseOrder {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  supplierId  String    @map("supplier_id")
+  /// Per store, from 1: "PO 12" in the message to the supplier.
+  number      Int
+  status      String    @default("draft")
+  /// email | whatsapp | sms, set when sent.
+  sentVia     String?   @map("sent_via")
+  sentAt      DateTime? @map("sent_at")
+  receivedAt  DateTime? @map("received_at")
+  cancelledAt DateTime? @map("cancelled_at")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  store     Store               @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  supplier  Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy User                @relation("PurchaseOrderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  lines     PurchaseOrderLine[]
+
+  @@unique([storeId, number])
+  @@index([supplierId])
+  @@index([createdById])
+  @@map("purchase_orders")
+}
+
+/// One line of a purchase order. A null quantity is "reorder (no count)" and must be filled before sending.
+model PurchaseOrderLine {
+  id        String @id @default(cuid())
+  orderId   String @map("order_id")
+  storeId   String @map("store_id")
+  listingId String @map("listing_id")
+  name      String
+  quantity  Int?
+  position  Int
+
+  order   PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  store   Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing Listing       @relation(fields: [listingId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, listingId])
+  @@index([storeId])
+  @@index([listingId])
+  @@map("purchase_order_lines")
+}
+
 /// One item Claude read from a shelf photo (#552), waiting for the owner. Nothing is listed until the
 /// owner confirms a price and publishes; the shelf photo is never a product image.
 model ListingDraft {
@@ -969,12 +1065,12 @@ model ListingDraft {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  store           Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  createdBy       User           @relation("ListingDraftCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  publishedBy     User?          @relation("ListingDraftPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
-  masterProduct   MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
-  existingListing Listing?       @relation("ListingDraftExisting", fields: [existingListingId], references: [id], onDelete: SetNull)
-  listing         Listing?       @relation("ListingDraftPublished", fields: [listingId], references: [id], onDelete: Restrict)
+  store           Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  createdBy       User             @relation("ListingDraftCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  publishedBy     User?            @relation("ListingDraftPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
+  masterProduct   MasterProduct?   @relation(fields: [masterProductId], references: [id], onDelete: Restrict)
+  existingListing Listing?         @relation("ListingDraftExisting", fields: [existingListingId], references: [id], onDelete: SetNull)
+  listing         Listing?         @relation("ListingDraftPublished", fields: [listingId], references: [id], onDelete: Restrict)
   productProposal ProductProposal?
 
   @@index([storeId, status, createdAt])
@@ -1086,47 +1182,47 @@ model StoreCollectionListing {
 }
 
 model Cart {
-  id                    String    @id @default(cuid())
-  storeId               String    @map("store_id")
-  userId                String?   @map("user_id")
-  customerId            String?   @map("customer_id")
-  paymentIntentId       String?   @unique @map("payment_intent_id")
-  paymentAttemptToken   String?   @map("payment_attempt_token")
-  purchaseEpoch         Int       @default(0) @map("purchase_epoch")
-  deliveryLine1         String?   @map("delivery_line1")
-  deliveryLine2         String?   @map("delivery_line2")
-  deliveryCity          String?   @map("delivery_city")
-  deliveryState         String?   @map("delivery_state")
-  deliveryZip           String?   @map("delivery_zip")
-  deliveryLat           Float?    @map("delivery_lat")
-  deliveryLng           Float?    @map("delivery_lng")
-  leaveAtDoor           Boolean   @default(false) @map("leave_at_door")
+  id                     String    @id @default(cuid())
+  storeId                String    @map("store_id")
+  userId                 String?   @map("user_id")
+  customerId             String?   @map("customer_id")
+  paymentIntentId        String?   @unique @map("payment_intent_id")
+  paymentAttemptToken    String?   @map("payment_attempt_token")
+  purchaseEpoch          Int       @default(0) @map("purchase_epoch")
+  deliveryLine1          String?   @map("delivery_line1")
+  deliveryLine2          String?   @map("delivery_line2")
+  deliveryCity           String?   @map("delivery_city")
+  deliveryState          String?   @map("delivery_state")
+  deliveryZip            String?   @map("delivery_zip")
+  deliveryLat            Float?    @map("delivery_lat")
+  deliveryLng            Float?    @map("delivery_lng")
+  leaveAtDoor            Boolean   @default(false) @map("leave_at_door")
   /// The cheapest courier quote last shown at checkout (#527), for the basket and address in courierQuoteKey.
-  courierFeeCents       Int?      @map("courier_fee_cents")
-  courierProvider       String?   @map("courier_provider")
-  courierQuoteKey       String?   @map("courier_quote_key")
-  courierQuoteExpiresAt DateTime? @map("courier_quote_expires_at")
+  courierFeeCents        Int?      @map("courier_fee_cents")
+  courierProvider        String?   @map("courier_provider")
+  courierQuoteKey        String?   @map("courier_quote_key")
+  courierQuoteExpiresAt  DateTime? @map("courier_quote_expires_at")
   /// The cheapest parcel rate last shown at checkout (#567), for the basket and address in shippingQuoteKey.
-  shippingFeeCents      Int?      @map("shipping_fee_cents")
-  shippingRateId        String?   @map("shipping_rate_id")
-  shippingCarrier       String?   @map("shipping_carrier")
-  shippingService       String?   @map("shipping_service")
-  shippingDays          Int?      @map("shipping_days")
-  shippingQuoteKey      String?   @map("shipping_quote_key")
+  shippingFeeCents       Int?      @map("shipping_fee_cents")
+  shippingRateId         String?   @map("shipping_rate_id")
+  shippingCarrier        String?   @map("shipping_carrier")
+  shippingService        String?   @map("shipping_service")
+  shippingDays           Int?      @map("shipping_days")
+  shippingQuoteKey       String?   @map("shipping_quote_key")
   shippingQuoteExpiresAt DateTime? @map("shipping_quote_expires_at")
   /// The Stripe Tax calculation last shown at checkout (#65), for the basket and address in taxQuoteKey.
-  taxCents              Int?      @map("tax_cents")
-  taxLines              Json?     @map("tax_lines")
-  taxLiableParty        String?   @map("tax_liable_party")
-  taxCalculationId      String?   @map("tax_calculation_id")
-  taxQuoteKey           String?   @map("tax_quote_key")
+  taxCents               Int?      @map("tax_cents")
+  taxLines               Json?     @map("tax_lines")
+  taxLiableParty         String?   @map("tax_liable_party")
+  taxCalculationId       String?   @map("tax_calculation_id")
+  taxQuoteKey            String?   @map("tax_quote_key")
   /// The one store coupon code the shopper entered (#557), upper-case. Checked on every quote and at placement.
-  couponCode            String?   @map("coupon_code")
-  source                String    @default("manual")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
+  couponCode             String?   @map("coupon_code")
+  source                 String    @default("manual")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
   /// Last time the orphan-hold sweep found this cart's intent not held; cleared when the shopper reopens payment.
-  orphanCheckedAt       DateTime? @map("orphan_checked_at")
+  orphanCheckedAt        DateTime? @map("orphan_checked_at")
 
   store                 Store                  @relation(fields: [storeId], references: [id])
   user                  User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -1487,8 +1583,8 @@ model Order {
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  store                Store                 @relation(fields: [storeId], references: [id])
-  customer             Customer              @relation(fields: [customerId, storeId], references: [id, storeId])
+  store                Store                   @relation(fields: [storeId], references: [id])
+  customer             Customer                @relation(fields: [customerId, storeId], references: [id, storeId])
   lines                OrderLine[]
   refundRequests       RefundRequest[]
   paymentDisputes      PaymentDispute[]
@@ -1500,9 +1596,9 @@ model Order {
   deliveries           Delivery[]
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
-  coupon               StoreCoupon?          @relation(fields: [couponId, storeId], references: [id, storeId], onDelete: Restrict)
-  driverRoute          DriverRoute?          @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
-  pickBatch            PickBatch?            @relation(fields: [pickBatchId, storeId], references: [id, storeId], onDelete: Restrict)
+  coupon               StoreCoupon?            @relation(fields: [couponId, storeId], references: [id, storeId], onDelete: Restrict)
+  driverRoute          DriverRoute?            @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
+  pickBatch            PickBatch?              @relation(fields: [pickBatchId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
@@ -1524,33 +1620,33 @@ model Order {
 
 /// One refund the app asked Stripe for. Stripe owns the outcome; this row owns the request.
 model RefundRequest {
-  id                   String    @id @default(cuid())
-  storeId              String    @map("store_id")
-  orderId              String    @map("order_id")
-  paymentIntentId      String    @map("payment_intent_id")
-  key                  String    @unique
-  amountCents          Int       @map("amount_cents")
-  refundApplicationFee Boolean   @map("refund_application_fee")
-  state                String
-  providerRefundId     String?   @map("provider_refund_id")
-  providerStatus       String?   @map("provider_status")
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  orderId               String    @map("order_id")
+  paymentIntentId       String    @map("payment_intent_id")
+  key                   String    @unique
+  amountCents           Int       @map("amount_cents")
+  refundApplicationFee  Boolean   @map("refund_application_fee")
+  state                 String
+  providerRefundId      String?   @map("provider_refund_id")
+  providerStatus        String?   @map("provider_status")
   /// #495: on a courier issue refund, the service fee part the platform returns from its application fee.
-  serviceFeeShareCents Int       @default(0) @map("service_fee_share_cents")
+  serviceFeeShareCents  Int       @default(0) @map("service_fee_share_cents")
   /// #65: the sales tax paid on the goods this refund returns.
-  taxShareCents        Int       @default(0) @map("tax_share_cents")
+  taxShareCents         Int       @default(0) @map("tax_share_cents")
   /// #65: on a courier refund of an order whose tax the platform collects, the tax the platform returns from its
   /// application fee with the service fee share, so the store's transfer reversal never pays it.
-  platformTaxShareCents Int      @default(0) @map("platform_tax_share_cents")
+  platformTaxShareCents Int       @default(0) @map("platform_tax_share_cents")
   /// #671: what the Stripe Tax reversal for this refund returns, set when the request is reserved:
   /// { mode: "full" | "flat" | "lines", totalCents, lines?: [{ reference, amountCents, taxCents }] }. Null reverses nothing.
-  taxReversal          Json?     @map("tax_reversal")
+  taxReversal           Json?     @map("tax_reversal")
   /// #671: the Stripe Tax reversal transaction, once made; null with a plan is pending for the sweep.
-  taxReversalId        String?   @map("tax_reversal_id")
-  feeRefundId          String?   @map("fee_refund_id")
+  taxReversalId         String?   @map("tax_reversal_id")
+  feeRefundId           String?   @map("fee_refund_id")
   /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
-  succeededAt          DateTime? @map("succeeded_at")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  lastCheckedAt        DateTime  @default(now()) @map("last_checked_at")
+  succeededAt           DateTime? @map("succeeded_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  lastCheckedAt         DateTime  @default(now()) @map("last_checked_at")
 
   store Store @relation(fields: [storeId], references: [id])
   order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
@@ -1710,29 +1806,29 @@ model DriverRoute {
 
 /// Platform-wide settings, one row with id "platform". Readable by every app user; platform admins write.
 model PlatformSettings {
-  id                   String   @id @default("platform")
-  courierWeightLimitLb Int      @default(50) @map("courier_weight_limit_lb")
+  id                                 String   @id @default("platform")
+  courierWeightLimitLb               Int      @default(50) @map("courier_weight_limit_lb")
   /// Customer service fee (ADR-0021): rate in basis points, held between min and max cents.
-  serviceFeeBps        Int      @default(300) @map("service_fee_bps")
-  serviceFeeMinCents   Int      @default(99) @map("service_fee_min_cents")
-  serviceFeeMaxCents   Int      @default(299) @map("service_fee_max_cents")
+  serviceFeeBps                      Int      @default(300) @map("service_fee_bps")
+  serviceFeeMinCents                 Int      @default(99) @map("service_fee_min_cents")
+  serviceFeeMaxCents                 Int      @default(299) @map("service_fee_max_cents")
   /// Courier settings (#535): cheapest, doordash_first or uber_first.
-  courierSelectionMode String   @default("cheapest") @map("courier_selection_mode")
+  courierSelectionMode               String   @default("cheapest") @map("courier_selection_mode")
   /// Seconds with no courier assigned before failover, 300 to 1200.
-  courierAssignmentTimeoutS Int @default(600) @map("courier_assignment_timeout_s")
-  doordashEnabled      Boolean  @default(true) @map("doordash_enabled")
-  uberEnabled          Boolean  @default(true) @map("uber_enabled")
+  courierAssignmentTimeoutS          Int      @default(600) @map("courier_assignment_timeout_s")
+  doordashEnabled                    Boolean  @default(true) @map("doordash_enabled")
+  uberEnabled                        Boolean  @default(true) @map("uber_enabled")
   /// AI and onboarding settings (#561). Active listings with a price a store needs before Go live (#555), 1 to 200.
-  goLiveListingFloor   Int      @default(20) @map("go_live_listing_floor")
+  goLiveListingFloor                 Int      @default(20) @map("go_live_listing_floor")
   /// Random shopper and copilot chats per store per day in the AI review list (#544), 0 to 20.
-  aiDailySamplePerStore Int     @default(5) @map("ai_daily_sample_per_store")
+  aiDailySamplePerStore              Int      @default(5) @map("ai_daily_sample_per_store")
   /// An AI turn costing more than this many cents is auto-flagged for review (#544), 1 to 100.
-  aiTurnCostFlagCents  Int      @default(2) @map("ai_turn_cost_flag_cents")
+  aiTurnCostFlagCents                Int      @default(2) @map("ai_turn_cost_flag_cents")
   /// Months a rejected store application is kept before the retention job deletes it (#554), 1 to 24.
-  rejectedApplicationRetentionMonths Int @default(12) @map("rejected_application_retention_months")
+  rejectedApplicationRetentionMonths Int      @default(12) @map("rejected_application_retention_months")
   /// States a shipped order may go to (ADR-0023, ADR-0008): each added only after the tax advisor signs off on it.
-  shippingStates       String[] @default([]) @map("shipping_states")
-  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
+  shippingStates                     String[] @default([]) @map("shipping_states")
+  updatedAt                          DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")
 }
