@@ -35,6 +35,12 @@ export async function isPrivilegedUser(userId: string): Promise<boolean> {
   );
 }
 
+/** A staff role or a store membership, whatever the 2FA or email state. */
+export async function isStaffUser(userId: string): Promise<boolean> {
+  const user = await authPrisma.user.findUnique({ where: { id: userId }, select: PRIVILEGE_FIELDS });
+  return isPrivilegedRecord(user && { ...user, twoFactorEnabled: false });
+}
+
 export async function isPrivilegedEmail(email: string): Promise<boolean> {
   return isPrivilegedRecord(
     await authPrisma.user.findFirst({ where: { email }, select: PRIVILEGE_FIELDS }),

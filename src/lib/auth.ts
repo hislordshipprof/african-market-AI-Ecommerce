@@ -3,7 +3,7 @@ import { createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
 import { authPrisma, countMagicLinksForEmail, platform } from "./db";
-import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
+import { isPrivilegedEmail, isPrivilegedUser, isStaffUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
 import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
@@ -162,6 +162,8 @@ async function inboxCapReached(email: string): Promise<boolean> {
 
 const baseUrl = resolveAuthBaseUrl();
 
+const promotedOnVerify = new WeakSet<object>();
+
 function requestHeaders(ctx: unknown): Headers | null {
   if (!ctx || typeof ctx !== "object") return null;
   const record = ctx as { headers?: unknown; request?: { headers?: unknown } };
@@ -317,6 +319,25 @@ export const auth = betterAuth({
     }),
   },
   databaseHooks: {
+    user: {
+      update: {
+        // On /magic-link/verify, Better Auth sets emailVerified only when it promotes an unproven
+        // account (revokeUnprovenAccountAccess), so any 2FA on it was enrolled before the mailbox was
+        // proven: a squatter's. Mark the request here; the after hook has the user id.
+        before: async (data, ctx) => {
+          const path = (ctx as Record<string, unknown> | null)?.path;
+          if (path === "/magic-link/verify" && data.emailVerified === true && ctx) promotedOnVerify.add(ctx);
+        },
+        // Clear the squatter's factor so the mailbox owner can sign in. Staff keep theirs (pre-#710
+        // invitees were never verified); their magic-link session is refused anyway.
+        after: async (user, ctx) => {
+          if (!ctx || !promotedOnVerify.has(ctx) || !user.twoFactorEnabled) return;
+          if (await isStaffUser(user.id)) return;
+          await authPrisma.twoFactor.deleteMany({ where: { userId: user.id } });
+          await authPrisma.user.update({ where: { id: user.id }, data: { twoFactorEnabled: false } });
+        },
+      },
+    },
     session: {
       create: {
         before: async (session, ctx) => {

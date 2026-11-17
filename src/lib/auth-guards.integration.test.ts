@@ -34,7 +34,7 @@ import { clearTestSentEmails, getTestSentEmails } from "./email/send";
 import { syncCustomerForRequest } from "./customer-sync";
 import { createInvite, setInviteePassword } from "./invite/service";
 import { sendSignInLinkAction } from "./customer-sign-in/actions";
-import { AUTH_BASE, authGet, authPost, testSignUp, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
+import { AUTH_BASE, authGet, authPost, createTestUser, testSignUp, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
 import { storeScoped } from "./db";
 
 const suffix = `${Date.now()}-c1`;
@@ -321,7 +321,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     }
   });
 
-  it("a squatted unverified account with 2FA gets a magic link, which ends the squatter's password", async () => {
+  it("the mailbox owner reclaims a squatted account by magic link: the squatter's password and 2FA are gone", async () => {
     const email = `c1-squatted-${suffix}@test.example`;
     try {
       const signedIn = await testSignUp({ email, password, name: "Squatter" });
@@ -335,13 +335,35 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       expect(sent.status).toBe(200);
       expect(getTestSentEmails()).toHaveLength(1);
       const verified = await authGet(verifyUrlFromEmail(getTestSentEmails().at(-1)!.html)!);
+      expect(verified.status, await verified.clone().text()).toBe(302);
+      const ownerCookies = cookiePairs(verified);
+      const session = await (await authGet(`${AUTH_BASE}/get-session`, ownerCookies)).json();
+      expect(session?.user?.email).toBe(email);
+
       expect((await passwordSignIn(email)).status).not.toBe(200);
       expect(await authPrisma.account.count({ where: { user: { email } } })).toBe(0);
-      // Open question on #710: the squatter's 2FA survives Better Auth's cleanup, so the now-verified
-      // account is privileged again and the owner's magic-link session is refused.
+      expect(await authPrisma.user.findFirstOrThrow({ where: { email } })).toMatchObject({ emailVerified: true, twoFactorEnabled: false });
+      expect(await authPrisma.twoFactor.count({ where: { user: { email } } })).toBe(0);
+    } finally {
+      await removeAuthFixtures([email], []);
+    }
+  });
+
+  it("2FA enrolled on an already-verified account survives a magic-link attempt", async () => {
+    const email = `c1-verified-2fa-${suffix}@test.example`;
+    try {
+      await createTestUser({ email, password, name: "Verified Shopper", emailVerified: true });
+      const cookies = cookiePairs(await passwordSignIn(email));
+      const secret = await enableTotp(cookies);
+      expect((await verifyTotp(generateTOTP(secret), cookies)).status).toBe(200);
+
+      clearTestSentEmails();
+      expect((await authPost("/sign-in/magic-link", { email, callbackURL: "/account" })).status).toBe(200);
+      expect(getTestSentEmails()).toHaveLength(0);
+      const verified = await authGet(`${AUTH_BASE}/magic-link/verify?token=${await latestToken(email)}&callbackURL=/account`);
       expect(verified.status).toBe(403);
-      expect(collectCookies(verified)).not.toContain("session_token");
       expect(await authPrisma.user.findFirstOrThrow({ where: { email } })).toMatchObject({ emailVerified: true, twoFactorEnabled: true });
+      expect(await authPrisma.twoFactor.count({ where: { user: { email } } })).toBe(1);
     } finally {
       await removeAuthFixtures([email], []);
     }
@@ -417,6 +439,8 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     ] as const) {
       clearTestSentEmails();
       await authPrisma.session.deleteMany({ where: { userId } });
+      const factorsBefore = await authPrisma.twoFactor.count({ where: { userId } });
+      const enabledBefore = (await authPrisma.user.findUniqueOrThrow({ where: { id: userId } })).twoFactorEnabled;
       const sent = await authPost("/sign-in/magic-link", {
         email,
         callbackURL: "/account",
@@ -430,6 +454,9 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       expect(verifyRes.status).toBe(403);
       expect(collectCookies(verifyRes)).not.toContain("session_token");
       expect(await authPrisma.session.count({ where: { userId } })).toBe(0);
+      // Staff keep their second factor even when their email was never proven (pre-#710 invites).
+      expect(await authPrisma.twoFactor.count({ where: { userId } })).toBe(factorsBefore);
+      expect((await authPrisma.user.findUniqueOrThrow({ where: { id: userId } })).twoFactorEnabled).toBe(enabledBefore);
 
       headerState.set("cookie", "");
       headerState.set("x-store-slug", storeSlug);
