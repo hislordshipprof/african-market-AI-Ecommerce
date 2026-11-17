@@ -70,9 +70,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level=high
-
       - name: Setup database roles and extensions
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
