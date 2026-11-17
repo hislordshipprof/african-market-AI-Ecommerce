@@ -6,6 +6,8 @@ vi.hoisted(() => {
   (process.env as Record<string, string>).NODE_ENV = "production";
   process.env.BETTER_AUTH_SECRET ||= "test-secret-at-least-32-characters-long!!";
   process.env.EMAIL_FROM ||= "Rate Limit Test <signin@test.example>";
+  // A deployment trusts only its own base URL's hosts, never bare localhost (#710).
+  process.env.BETTER_AUTH_URL ||= "http://localhost:3000";
 });
 // Production would pick the live Resend sender: record sends instead.
 const { sent } = vi.hoisted(() => ({ sent: [] as { to: string; html?: string }[] }));
@@ -132,6 +134,9 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
   it("relaxed limits let one IP make more than 100 password sign-ins in one window (a whole e2e run)", async () => {
     const ip = `10.190.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
     process.env.AUTH_RATE_LIMIT_RELAXED = "1";
+    // Relaxed limits apply only to the CI e2e server (CI=true); a deployment ignores them (#710).
+    const ci = process.env.CI;
+    process.env.CI = "true";
     vi.resetModules();
     try {
       const { auth: relaxed } = await import("./auth");
@@ -149,6 +154,8 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
       expect([...statuses]).toEqual([401]);
     } finally {
       delete process.env.AUTH_RATE_LIMIT_RELAXED;
+      if (ci === undefined) delete process.env.CI;
+      else process.env.CI = ci;
       await authPrisma.rateLimit.deleteMany({ where: { key: { startsWith: `${ip}|` } } });
     }
   }, 60_000);
