@@ -24,12 +24,18 @@ test("storefront, admin sign-in, checkout, api and static carry headers with zer
     expect(response?.status(), path).toBe(200);
     if (path.startsWith("/store-admin")) {
       await expect(page.getByText("Sign in to manage your store")).toBeVisible();
+      await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, nofollow");
     }
     const headers = response?.headers() ?? {};
-    expect(headers["content-security-policy"], path).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+    expect(headers["content-security-policy"], path).toContain("default-src 'self'");
+    expect(headers["content-security-policy"], path).toContain("report-uri /api/csp-report");
+    expect(headers["content-security-policy-report-only"], path).toContain("report-uri /api/csp-report");
+    expect(headers["reporting-endpoints"], path).toBe('csp-endpoint="/api/csp-report"');
+    expect(headers["permissions-policy"], path).toBe('camera=(), microphone=(), geolocation=(self), payment=(self "https://js.stripe.com")');
+    expect(headers["x-powered-by"], path).toBeUndefined();
     expect(headers["content-security-policy-report-only"], path).toContain("default-src 'self'");
     expect(headers["x-content-type-options"], path).toBe("nosniff");
-    expect(headers["strict-transport-security"], path).toBe("max-age=63072000");
+    expect(headers["strict-transport-security"], path).toBe("max-age=63072000; includeSubDomains");
     expect(headers["referrer-policy"], path).toBe("strict-origin-when-cross-origin");
     expect(headers["x-frame-options"], path).toBe("DENY");
     expect(headers["content-security-policy-report-only"], path).not.toContain("unsafe-eval");
@@ -40,7 +46,7 @@ test("storefront, admin sign-in, checkout, api and static carry headers with zer
 
   const redirect = await request.get("/?store=mama-ngozi", { maxRedirects: 0 });
   expect(redirect.status()).toBe(307);
-  expect(redirect.headers()["content-security-policy"]).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+  expect(redirect.headers()["content-security-policy"]).toContain("default-src 'self'");
   expect(redirect.headers()["referrer-policy"]).toBe("strict-origin-when-cross-origin");
   expect(redirect.headers()["x-frame-options"]).toBe("DENY");
 
@@ -62,10 +68,10 @@ test("non-platform host (chromium --host-resolver-rules) loads with zero violati
   const response = await page.goto(`http://mama-ngozi.example.test:${port}/`);
   expect(response?.status()).toBe(200);
   await expect(page.getByRole("button", { name: /shopping cart/i })).toBeVisible();
-  expect(response?.headers()["content-security-policy"]).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+  expect(response?.headers()["content-security-policy"]).toContain("default-src 'self'");
   expect(response?.headers()["content-security-policy-report-only"]).toContain("'self'");
   expect(response?.headers()["x-content-type-options"]).toBe("nosniff");
-  expect(response?.headers()["strict-transport-security"]).toBe("max-age=63072000");
+  expect(response?.headers()["strict-transport-security"]).toBe("max-age=63072000; includeSubDomains");
   expect(await violationsOf(page)).toEqual([]);
   await browser.close();
 });
