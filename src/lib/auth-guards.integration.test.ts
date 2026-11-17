@@ -334,9 +334,14 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       const sent = await authPost("/sign-in/magic-link", { email, callbackURL: "/account" });
       expect(sent.status).toBe(200);
       expect(getTestSentEmails()).toHaveLength(1);
-      await authGet(verifyUrlFromEmail(getTestSentEmails().at(-1)!.html)!);
+      const verified = await authGet(verifyUrlFromEmail(getTestSentEmails().at(-1)!.html)!);
       expect((await passwordSignIn(email)).status).not.toBe(200);
       expect(await authPrisma.account.count({ where: { user: { email } } })).toBe(0);
+      // Open question on #710: the squatter's 2FA survives Better Auth's cleanup, so the now-verified
+      // account is privileged again and the owner's magic-link session is refused.
+      expect(verified.status).toBe(403);
+      expect(collectCookies(verified)).not.toContain("session_token");
+      expect(await authPrisma.user.findFirstOrThrow({ where: { email } })).toMatchObject({ emailVerified: true, twoFactorEnabled: true });
     } finally {
       await removeAuthFixtures([email], []);
     }
