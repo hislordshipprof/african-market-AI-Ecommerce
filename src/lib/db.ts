@@ -1975,6 +1975,43 @@ export async function claimImportRow(
   return rows.length > 0;
 }
 
+/**
+ * The public /sell form's one write (#554): a new, undecided application. RLS lets this context insert and nothing
+ * else, so the insert returns no row; a duplicate pending email or phone still raises P2002.
+ */
+export async function insertStoreApplication(data: Omit<Prisma.StoreApplicationCreateManyInput, "id">): Promise<void> {
+  await prisma.$transaction([
+    prisma.$executeRaw`SET LOCAL ROLE app_user`,
+    prisma.storeApplication.createMany({ data: [data] }),
+  ]);
+}
+
+/** The assistant's one recipe write (#25): a looked-up dish with plain ingredient names. RLS allows nothing more here. */
+export async function insertLookedUpRecipe(recipe: {
+  key: string;
+  name: string;
+  aliases: string[];
+  sourceUrl: string;
+  ingredients: string[];
+}): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.recipe_writer', 'lookup', true)`;
+    await tx.recipe.create({
+      data: {
+        key: recipe.key,
+        name: recipe.name,
+        aliases: recipe.aliases,
+        servings: null,
+        sourceUrl: recipe.sourceUrl,
+        origin: "lookup",
+        ingredients: { create: recipe.ingredients.map((name, position) => ({ position, name })) },
+      },
+      select: { id: true },
+    });
+  });
+}
+
 /** A read as the platform admin, for queries Prisma's query API cannot express. */
 export async function platformAdminRawQuery<T>(sql: Prisma.Sql): Promise<T[]> {
   return prisma.$transaction(async (tx) => {
@@ -2012,9 +2049,12 @@ export async function platformSessionUser(): Promise<string> {
   });
 }
 
+/** The database login is not app_runtime, or it could bypass RLS. */
+export class UnsafeDatabaseLoginError extends Error {}
+
 /** Refuses a login that is not app_runtime, or one that bypasses RLS. */
-export async function assertAppRuntimeLogin(): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+export async function assertAppRuntimeLogin(client: Pick<PrismaClient, "$transaction"> = prisma): Promise<void> {
+  await client.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     const rows = await tx.$queryRaw<Array<{ session_user: string; rolsuper: boolean; rolbypassrls: boolean }>>`
       SELECT session_user::text AS session_user, rolsuper, rolbypassrls
@@ -2023,7 +2063,7 @@ export async function assertAppRuntimeLogin(): Promise<void> {
     `;
     const role = rows[0];
     if (!role || role.session_user !== "app_runtime" || role.rolsuper || role.rolbypassrls) {
-      throw new Error("The eval refuses evidence unless the database login is app_runtime.");
+      throw new UnsafeDatabaseLoginError("The database login must be app_runtime, without superuser or BYPASSRLS.");
     }
   });
 }

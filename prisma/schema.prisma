@@ -1494,6 +1494,7 @@ model AssistantSpendCall {
 
 /// Recipe base (#25). Platform-shared like master products: seeded dishes, plus dishes the
 /// shopper assistant looked up online, saved as ingredient names and a source link only.
+/// RLS forced (#713): everyone reads; the platform admin writes; the assistant's lookup writer only adds a looked-up dish.
 model Recipe {
   id        String   @id @default(cuid())
   /// Folded dish name; a request matches this or one of the aliases.
@@ -2255,7 +2256,7 @@ model AssistantChatMonth {
   @@map("assistant_chat_months")
 }
 
-/// An application from the public /sell page (#554). Platform data with no RLS: only platform-admin code reads it.
+/// An application from the public /sell page (#554). Platform data, RLS forced (#713): the /sell path may only insert a new application; the platform admin reads and decides it.
 /// One pending application per email and per phone (partial unique indexes in the migration).
 model StoreApplication {
   id                 String    @id @default(cuid())
