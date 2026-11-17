@@ -1045,6 +1045,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
   } = props;
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
 
+  // Field validity, shared by aria-invalid and the error each field describes (#708 AC3).
+  const nameInvalid = submitted && !contact.name.trim();
+  const phoneInvalid =
+    submitted &&
+    (!/^\+?[\d\s().-]{10,20}$/.test(contact.phone) ||
+      contact.phone.replace(/\D/g, "").length < 10);
+  const emailInvalid = submitted && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim());
+
   const courierReasons = (quote?.problems ?? [])
     .filter((problem) => problem.code === "ineligible" || problem.code === "outside-radius")
     .map((problem) => problem.message);
@@ -1305,12 +1313,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   required
                   readOnly={identityLocked}
                   value={contact.name}
-                  aria-invalid={submitted && !contact.name.trim()}
+                  aria-invalid={nameInvalid}
+                  aria-describedby={nameInvalid ? "contact-name-error" : undefined}
                   onChange={(e) => setContact({ ...contact, name: e.target.value })}
                 />
               </label>
-              {submitted && !contact.name.trim() && (
-                <p className={styles.error}>Enter the name for your order.</p>
+              {nameInvalid && (
+                <p className={styles.error} id="contact-name-error">Enter the name for your order.</p>
               )}
               <label className={styles.field}>
                 Phone number (required)
@@ -1319,17 +1328,17 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   type="tel"
                   required
                   value={contact.phone}
+                  aria-invalid={phoneInvalid}
+                  aria-describedby={phoneInvalid ? "contact-phone-error" : undefined}
                   onChange={(e) => setContact({ ...contact, phone: e.target.value })}
                   placeholder="(555) 123-4567"
                 />
               </label>
-              {submitted &&
-                (!/^\+?[\d\s().-]{10,20}$/.test(contact.phone) ||
-                  contact.phone.replace(/\D/g, "").length < 10) && (
-                  <p className={styles.error}>
-                    Enter a valid phone number with at least 10 digits.
-                  </p>
-                )}
+              {phoneInvalid && (
+                <p className={styles.error} id="contact-phone-error">
+                  Enter a valid phone number with at least 10 digits.
+                </p>
+              )}
               {whatsapp && (
                 <label className={styles.choice}>
                   <input
@@ -1351,12 +1360,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   required
                   readOnly={identityLocked}
                   value={contact.email}
-                  aria-invalid={submitted && !contact.email.trim()}
+                  aria-invalid={emailInvalid}
+                  aria-describedby={emailInvalid ? "contact-email-error" : undefined}
                   onChange={(e) => setContact({ ...contact, email: e.target.value })}
                 />
               </label>
-              {submitted && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim()) && (
-                <p className={styles.error}>Enter a valid email address.</p>
+              {emailInvalid && (
+                <p className={styles.error} id="contact-email-error">Enter a valid email address.</p>
               )}
             </FlowCard>
           </div>

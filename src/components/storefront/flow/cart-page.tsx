@@ -156,7 +156,7 @@ export function CartPage({
   enabled,
   realCheckout,
 }: ShoppingFlowProps & { realCheckout: boolean }) {
-  const { lines, subtotal, count, store, refreshCart, syncing } = useCart();
+  const { lines, subtotal, count, store, refreshCart, syncing, loading, attention } = useCart();
   const ready = useCartReady();
   const demo = useMemo(
     () => createDemoServices(settings, catalog, enabled),
@@ -193,7 +193,8 @@ export function CartPage({
       }
     });
   }
-  if (!ready) return <FlowLoading />;
+  // Skeleton until the server cart read finishes, so "empty" is never shown mid-load (#708 AC3).
+  if (!ready || (loading && !lines.length)) return <FlowLoading />;
   const selectedItem =
     selected &&
     catalog.find((item) => cartItemKey(item) === cartItemKey(selected));
@@ -215,10 +216,18 @@ export function CartPage({
       <AssistantSlot label="Shop with AI" />
       <DemoNotice />
       {!lines.length ? (
-        <EmptyState
-          title="A good meal starts with a full basket"
-          description="Explore your market and bring home something familiar."
-        />
+        attention ? (
+          // Failed-to-load is distinct from a confirmed-empty basket (#708 AC3).
+          <EmptyState
+            title="We couldn't load your basket"
+            description="Check your connection, then refresh the page to try again."
+          />
+        ) : (
+          <EmptyState
+            title="A good meal starts with a full basket"
+            description="Explore your market and bring home something familiar."
+          />
+        )
       ) : (
         <div className={styles.layout}>
           <div className={styles.stack}>
