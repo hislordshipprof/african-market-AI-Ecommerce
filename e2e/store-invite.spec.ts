@@ -74,10 +74,8 @@ test("an invited staff member sets a password, enrols 2FA and lands in store adm
 
     await page.getByLabel("Verification code").fill(generateTOTP(secret));
     await page.getByRole("button", { name: "Verify & join store" }).click();
-    await page.waitForURL((url) => url.pathname === "/store-admin" && url.searchParams.get("store") === "mama-ngozi", {
-      timeout: 15_000,
-    });
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
+    await expect(page.getByRole("heading", { level: 1, name: "Mama Ngozi African Market" })).toBeVisible();
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: `${SHOTS}/710-invite-store-admin.png`, fullPage: true });
 

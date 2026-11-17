@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { storeUrl, E2E_PORT } from "./urls";
 import { test, expect } from "@playwright/test";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
@@ -137,6 +138,10 @@ test("signed-out production account redirects with demo flows disabled", async (
         E2E_STORE_OVERRIDE: "",
         E2E_FAKE_STRIPE: "",
         NODE_ENV: "production",
+        // A deployment trusts only its own base URL's hosts and refuses the committed test secret (#710).
+        BETTER_AUTH_URL: `http://localhost:${port}`,
+        BETTER_AUTH_TRUSTED_ORIGINS: `http://localhost:${port}`,
+        BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
         ...env,
       },
       healthUrl: `http://127.0.0.1:${port}/api/health`,
