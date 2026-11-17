@@ -269,7 +269,9 @@ test("owner adds suppliers, drafts one order per supplier from the reorder list,
 
     // #576: 10 of the 15 ordered came. One tap adds them to stock and receives the order.
     const stockOf = () => asPlatformAdmin((tx) => tx.listing.findUniqueOrThrow({ where: { id: items.firstId }, select: { qty: true, stockMode: true } }));
+    const receiptEvents = () => asPlatformAdmin((tx) => tx.stockEvent.count({ where: { listingId: items.firstId, idempotencyKey: { startsWith: "po-receipt:" } } }));
     const stockBefore = await stockOf();
+    const eventsBefore = await receiptEvents();
     const received = page.getByRole("region", { name: /^Lagos Foods · PO \d+$/ });
     await received.getByRole("button", { name: "Receive delivery" }).click();
     const qty = received.getByLabel(`Quantity of ${items.first} received`);
@@ -283,8 +285,7 @@ test("owner adds suppliers, drafts one order per supplier from the reorder list,
     await expect(received.getByRole("button", { name: "Receive delivery" })).toHaveCount(0);
     const stockAfter = await stockOf();
     expect(stockAfter.qty).toBe((stockBefore.qty ?? 0) + 10);
-    const events = await asPlatformAdmin((tx) => tx.stockEvent.count({ where: { listingId: items.firstId, idempotencyKey: { startsWith: "po-receipt:" } } }));
-    expect(events).toBe(1);
+    expect(await receiptEvents()).toBe(eventsBefore + 1);
     await page.reload();
     await expect(page.getByRole("region", { name: /^Lagos Foods · PO \d+$/ }).getByText("Came in: 10")).toBeVisible();
     await shootPage(page, "576-received", "Orders to wholesalers");
