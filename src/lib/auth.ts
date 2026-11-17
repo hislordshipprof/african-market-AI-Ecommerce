@@ -8,8 +8,23 @@ import { sendEmail } from "./email/send";
 import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { isSlugRoutable, slugFromHost } from "./slug";
+import { testOnlyRoutesAllowed } from "./security/test-only-routes";
 
-const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
+/**
+ * A real deployment: VERCEL set, or NODE_ENV=production without CI=true (the /api/e2e rule).
+ * The CI and e2e server is `next start` with CI=true, so it keeps its test settings.
+ */
+function isDeployment(env: Record<string, string | undefined>): boolean {
+  return !testOnlyRoutesAllowed(env, "1");
+}
+
+export function resolveAuthRateLimitRelaxed(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return testOnlyRoutesAllowed(env, env.AUTH_RATE_LIMIT_RELAXED);
+}
+
+const relaxedAuth = resolveAuthRateLimitRelaxed();
 
 export function resolveAuthBaseUrl(
   env: Record<string, string | undefined> = process.env,
@@ -48,13 +63,14 @@ export function resolveAuthAllowedHosts(
     hosts.push(env.PLATFORM_ROOT_DOMAIN, `*.${env.PLATFORM_ROOT_DOMAIN}`);
   }
 
-  const port = env.PORT ?? "3000";
-  hosts.push(`localhost:${port}`, `*.localhost:${port}`);
-  if (port !== "3000") {
-    hosts.push("localhost:3000", "*.localhost:3000");
+  if (!isDeployment(env)) {
+    const port = env.PORT ?? "3000";
+    hosts.push(`localhost:${port}`, `*.localhost:${port}`);
+    if (port !== "3000") {
+      hosts.push("localhost:3000", "*.localhost:3000");
+    }
+    hosts.push("127.0.0.1:3000", `127.0.0.1:${port}`);
   }
-
-  hosts.push("127.0.0.1:3000", `127.0.0.1:${port}`);
 
   return [...new Set(hosts)];
 }
@@ -76,10 +92,12 @@ export function resolveAuthTrustedOrigins(
     origins.push(`https://${env.VERCEL_URL}`);
   }
 
-  const port = env.PORT ?? "3000";
-  origins.push(`http://localhost:${port}`, `http://*.localhost:${port}`);
-  if (port !== "3000") {
-    origins.push("http://localhost:3000", "http://*.localhost:3000");
+  if (!isDeployment(env)) {
+    const port = env.PORT ?? "3000";
+    origins.push(`http://localhost:${port}`, `http://*.localhost:${port}`);
+    if (port !== "3000") {
+      origins.push("http://localhost:3000", "http://*.localhost:3000");
+    }
   }
 
   return [...new Set(origins)];
@@ -98,6 +116,16 @@ export function validateAuthSecret(
         "Generate one with: openssl rand -base64 32",
     );
   }
+  // The committed CI secret (.env.e2e, ci.yml) is marked do-not-use; the CI server itself still runs on it.
+  if (isDeployment(env) && secret.includes("do-not-use")) {
+    throw new Error("BETTER_AUTH_SECRET is a committed test secret. Generate one with: openssl rand -base64 32");
+  }
+}
+
+export function resolveAuthSecureCookies(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return isDeployment(env) || resolveAuthBaseUrl(env).startsWith("https://");
 }
 
 export const RESEND_SANDBOX_FROM = "onboarding@resend.dev";
@@ -337,7 +365,9 @@ export const auth = betterAuth({
   },
   trustedOrigins: trustedOriginsForRequest,
   advanced: {
-    useSecureCookies: baseUrl.startsWith("https://"),
+    useSecureCookies: resolveAuthSecureCookies(),
+    // Vercel sets the first two; a multi-hop x-forwarded-for alone resolves to no IP (one shared bucket).
+    ipAddress: { ipAddressHeaders: ["x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"] },
   },
 });
 

@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { getIP } from "better-auth/api";
 
 const {
   mockUserFindUnique,
@@ -32,6 +35,8 @@ import {
   auth,
   resolveAuthBaseUrl,
   resolveAuthAllowedHosts,
+  resolveAuthRateLimitRelaxed,
+  resolveAuthSecureCookies,
   resolveAuthTrustedOrigins,
   validateAuthSecret,
 } from "./auth";
@@ -350,5 +355,112 @@ describe("validateAuthSecret", () => {
 
   it("skips validation in test", () => {
     expect(() => validateAuthSecret({ NODE_ENV: "test" })).not.toThrow();
+  });
+});
+
+// The CI and local e2e server is `next start` (NODE_ENV=production) with CI=true and VERCEL unset;
+// a real deployment is VERCEL set, or NODE_ENV=production without CI=true.
+const PROD = { NODE_ENV: "production" };
+const CI_SERVER = { NODE_ENV: "production", CI: "true" };
+const VERCEL_CI = { NODE_ENV: "production", VERCEL: "1", CI: "true" };
+
+describe("AUTH_RATE_LIMIT_RELAXED only outside a deployment", () => {
+  it("is ignored in production and on Vercel, even with CI=true", () => {
+    expect(resolveAuthRateLimitRelaxed({ ...PROD, AUTH_RATE_LIMIT_RELAXED: "1" })).toBe(false);
+    expect(resolveAuthRateLimitRelaxed({ ...VERCEL_CI, AUTH_RATE_LIMIT_RELAXED: "1" })).toBe(false);
+  });
+
+  it("still relaxes the CI e2e server and local runs", () => {
+    expect(resolveAuthRateLimitRelaxed({ ...CI_SERVER, AUTH_RATE_LIMIT_RELAXED: "1" })).toBe(true);
+    expect(resolveAuthRateLimitRelaxed({ NODE_ENV: "test", AUTH_RATE_LIMIT_RELAXED: "1" })).toBe(true);
+    expect(resolveAuthRateLimitRelaxed({ ...CI_SERVER })).toBe(false);
+  });
+});
+
+describe("localhost origins and hosts only outside a deployment", () => {
+  it("production trusts no localhost or 127.0.0.1 origin or host", () => {
+    for (const env of [PROD, VERCEL_CI]) {
+      const hosts = resolveAuthAllowedHosts({ ...env, BETTER_AUTH_URL: "https://markets.example" });
+      expect(hosts.filter((h) => h.includes("localhost") || h.includes("127.0.0.1"))).toEqual([]);
+      expect(hosts).toContain("markets.example");
+      const origins = resolveAuthTrustedOrigins({ ...env, BETTER_AUTH_TRUSTED_ORIGINS: "https://markets.example" });
+      expect(origins.filter((o) => o.includes("localhost") || o.includes("127.0.0.1"))).toEqual([]);
+      expect(origins).toContain("https://markets.example");
+    }
+  });
+
+  it("the CI e2e server keeps its localhost origins and hosts", () => {
+    expect(resolveAuthAllowedHosts({ ...CI_SERVER, PORT: "4710" })).toEqual(
+      expect.arrayContaining(["localhost:4710", "127.0.0.1:4710"]),
+    );
+    expect(resolveAuthTrustedOrigins({ ...CI_SERVER, PORT: "4710" })).toContain("http://localhost:4710");
+  });
+});
+
+describe("client IP for rate limits", () => {
+  function ipOf(headers: Record<string, string>): string | null {
+    return getIP(new Request("http://localhost:3000/api/auth/sign-in/email", { headers }), auth.options);
+  }
+
+  it("a two-hop x-forwarded-for still resolves each client to its own address", () => {
+    expect(ipOf({ "x-vercel-forwarded-for": "198.51.100.7", "x-forwarded-for": "198.51.100.7, 10.1.2.3" })).toBe(
+      "198.51.100.7",
+    );
+    expect(ipOf({ "x-real-ip": "203.0.113.9", "x-forwarded-for": "203.0.113.9, 10.1.2.3" })).toBe("203.0.113.9");
+  });
+});
+
+describe("validateAuthSecret refuses test secrets in a deployment", () => {
+  const committed = (
+    readFileSync(resolve(process.cwd(), ".env.e2e"), "utf8")
+      .split("\n")
+      .find((line) => line.startsWith("BETTER_AUTH_SECRET=")) ?? ""
+  )
+    .slice("BETTER_AUTH_SECRET=".length)
+    .trim();
+
+  it("rejects the committed CI secret and any do-not-use value in production", () => {
+    expect(committed.length).toBeGreaterThanOrEqual(32);
+    expect(() => validateAuthSecret({ ...PROD, BETTER_AUTH_SECRET: committed })).toThrow();
+    expect(() => validateAuthSecret({ ...VERCEL_CI, BETTER_AUTH_SECRET: committed })).toThrow();
+    expect(() => validateAuthSecret({ ...PROD, BETTER_AUTH_SECRET: `${"k".repeat(32)}-do-not-use` })).toThrow();
+  });
+
+  it("lets the CI e2e server boot on the committed secret", () => {
+    expect(() => validateAuthSecret({ ...CI_SERVER, BETTER_AUTH_SECRET: committed })).not.toThrow();
+  });
+});
+
+describe("secure auth cookies", () => {
+  it("are Secure in production even when BETTER_AUTH_URL is http", () => {
+    expect(resolveAuthSecureCookies({ ...PROD, BETTER_AUTH_URL: "http://markets.example" })).toBe(true);
+    expect(resolveAuthSecureCookies({ ...VERCEL_CI, BETTER_AUTH_URL: "http://markets.example" })).toBe(true);
+  });
+
+  it("follow the scheme on the CI e2e server and locally", () => {
+    expect(resolveAuthSecureCookies({ ...CI_SERVER, BETTER_AUTH_URL: "http://localhost:4710" })).toBe(false);
+    expect(resolveAuthSecureCookies({ BETTER_AUTH_URL: "https://markets.example" })).toBe(true);
+    expect(resolveAuthSecureCookies({})).toBe(false);
+  });
+});
+
+describe("the auth config built in production", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("ignores AUTH_RATE_LIMIT_RELAXED and sets Secure cookies on an http base URL", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CI", "");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("AUTH_RATE_LIMIT_RELAXED", "1");
+    vi.stubEnv("BETTER_AUTH_URL", "http://markets.example");
+    vi.stubEnv("BETTER_AUTH_SECRET", "p".repeat(40));
+    vi.resetModules();
+    const built = (await import("./auth")).auth.options;
+    expect(built.rateLimit?.max).toBe(10);
+    expect(built.rateLimit?.customRules?.["/sign-in/email"]).toEqual({ window: 60, max: 5 });
+    expect(built.advanced?.useSecureCookies).toBe(true);
   });
 });
