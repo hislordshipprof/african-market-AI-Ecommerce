@@ -1,5 +1,6 @@
 import { validPhone } from "../customer-account/phone";
 import { money } from "../format";
+import { cateringMinMessage } from "../listing/catering";
 import { serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
 import { goodsDiscountCents, type CouponTerms } from "../coupon/discount";
 import type { CheckoutQuote, Contact, FlowProblem, Fulfillment } from "../customer-flow/contracts";
@@ -71,7 +72,7 @@ export function withTax(quote: CheckoutQuote, taxCents: number): CheckoutQuote {
 
 export function computeQuote(
   minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean; hot?: boolean }>,
+  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean; hot?: boolean; minQty?: number | null }>,
   contact: Contact,
   fulfillment: Fulfillment,
   serviceFee: ServiceFeeSettings,
@@ -97,6 +98,9 @@ export function computeQuote(
         code: "max-quantity",
         message: `Maximum ${line.maxPerOrder} per order for this item.`,
       });
+    }
+    if (line.minQty != null && line.qty < line.minQty) {
+      problems.push({ code: "max-quantity", message: cateringMinMessage(line.minQty) });
     }
     subtotalCents += line.price * line.qty;
   }

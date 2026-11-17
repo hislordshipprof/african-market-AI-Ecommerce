@@ -635,6 +635,9 @@ model Listing {
   /// #570: "hot" or "cold" for prepared food, null for grocery.
   prepared            String?
   prepMinutes         Int?     @map("prep_minutes")
+  /// #571: catering, ordered ahead: lead hours (1-96) and minimum quantity, both or neither. Prepared only.
+  cateringLeadHours   Int?     @map("catering_lead_hours")
+  cateringMinQty      Int?     @map("catering_min_qty")
   maxPerOrder         Int?     @map("max_per_order")
   active              Boolean  @default(true)
   confidence          Float    @default(1.0)

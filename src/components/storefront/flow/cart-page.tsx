@@ -44,6 +44,7 @@ import styles from "./cart-checkout.module.css";
 import { CouponField } from "./coupon-field";
 
 import { money } from "@/lib/format";
+import { cateringLeadText } from "@/lib/listing/catering";
 export { money };
 const subscribe = () => () => {};
 export function useCartReady() {
@@ -259,6 +260,11 @@ export function CartPage({
                           <p className={styles.error}>
                             Maximum {item.maxPerOrder} per order. Reduce the
                             quantity.
+                          </p>
+                        )}
+                        {item?.catering && (
+                          <p className={line.quantity < item.catering.minQty ? styles.error : styles.muted}>
+                            Catering · order {cateringLeadText(item.catering.leadHours)} ahead · minimum {item.catering.minQty}
                           </p>
                         )}
                         {item?.prepared ? (
