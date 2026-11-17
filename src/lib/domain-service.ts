@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
-import { platformAdmin } from "./db";
+import { platformAdmin, setStoreCustomDomainAudited } from "./db";
 import { getVercelDomainsAdapter, VercelApiError, type VercelDomainsAdapter } from "./vercel-domains";
 import { revalidateStore } from "./get-store";
+
+export type DomainActor = { id: string; email: string };
 
 export type DomainResult =
   | { ok: true; domain: string; verified: boolean; cname: string }
@@ -19,6 +21,7 @@ function vercelAdapter(): VercelDomainsAdapter | { ok: false; error: string; sta
 export async function addDomainToStore(
   storeId: string,
   domain: string,
+  actor: DomainActor,
 ): Promise<DomainResult> {
   const store = await platformAdmin.store.findUnique({
     where: { id: storeId },
@@ -48,10 +51,7 @@ export async function addDomainToStore(
     const result = await adapter.addDomain(domain);
 
     try {
-      await platformAdmin.store.update({
-        where: { id: storeId },
-        data: { customDomain: domain },
-      });
+      await setStoreCustomDomainAudited(storeId, store.customDomain, domain, actor);
     } catch (dbErr) {
       if (
         dbErr instanceof Prisma.PrismaClientKnownRequestError &&
@@ -103,6 +103,7 @@ export async function getDomainStatus(
 
 export async function removeDomainFromStore(
   storeId: string,
+  actor: DomainActor,
 ): Promise<DomainResult> {
   const store = await platformAdmin.store.findUnique({
     where: { id: storeId },
@@ -129,10 +130,7 @@ export async function removeDomainFromStore(
     }
   }
 
-  await platformAdmin.store.update({
-    where: { id: storeId },
-    data: { customDomain: null },
-  });
+  await setStoreCustomDomainAudited(storeId, oldDomain, null, actor);
 
   revalidateStore({ id: storeId, slug: store.slug, customDomain: oldDomain });
 
