@@ -59,10 +59,13 @@ export async function toDirectoryStores(rows: DirectoryRow[]): Promise<Directory
 /** Cleared by every store save (revalidateStore), so a listing change shows at once (#450). */
 export const DIRECTORY_CACHE_TAG = "store-directory";
 
+/** The stores the directory shows, and so the stores that make a state or city page (#449, #451). */
+export const DIRECTORY_STORE_WHERE = { listed: true, status: "active", lat: { not: null }, lng: { not: null } } satisfies Prisma.StoreWhereInput;
+
 /** Listed, active stores with a map point, by state, city and name. Uncached: the sitemap reads it per request. */
 export async function queryDirectoryStores(): Promise<DirectoryStore[]> {
   const rows = await platform.store.findMany({
-    where: { listed: true, status: "active", lat: { not: null }, lng: { not: null } },
+    where: DIRECTORY_STORE_WHERE,
     select: DIRECTORY_QUERY_FIELDS,
     orderBy: [{ state: "asc" }, { city: "asc" }, { name: "asc" }],
   });

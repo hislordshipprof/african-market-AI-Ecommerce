@@ -165,6 +165,25 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     warn.mockRestore();
   });
 
+  it("#577: checkout reads the store's metro: a courier off in its metro is never quoted there", async () => {
+    const { store, cart } = await seed();
+    const metro = await platformAdminTransaction((tx) =>
+      tx.metro.create({ data: { name: `Checkout ${store.id}`, states: ["MD"], centerLat: 39, centerLng: -77, radiusMi: 30, uberEnabled: false } }),
+    );
+    await platformAdminTransaction((tx) => tx.store.update({ where: { id: store.id }, data: { metroId: metro.id } }));
+    const uber = new StubCourier("uber", 749);
+    const doordash = new StubCourier("doordash", 899);
+
+    const quote = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [doordash, uber] });
+
+    expect(quote).toMatchObject({ problems: [], courierFeeCents: 899, courierProvider: "DoorDash Drive" });
+    expect(uber.quoteCalls).toBe(0);
+    await platformAdminTransaction(async (tx) => {
+      await tx.store.update({ where: { id: store.id }, data: { metroId: null } });
+      await tx.metro.delete({ where: { id: metro.id } });
+    });
+  });
+
   it("#535: DoorDash first shows DoorDash's fee although Uber quotes less", async () => {
     const { store, cart } = await seed();
     const settings = { selectionMode: "doordash_first" as const, assignmentTimeoutSeconds: 600, doordashEnabled: true, uberEnabled: true, weightLimitLb: 50 };

@@ -6,7 +6,7 @@ import { describeQueue, storeAvailability } from "@/lib/order/store-queue";
 import { demoFlowsEnabled } from "./demo-gate";
 import { storeMayUse } from "@/lib/billing/plan";
 import { courierOffered } from "@/lib/delivery/courier-offered";
-import { anyCourierEnabled, readCourierSettings } from "@/lib/delivery/courier-settings";
+import { anyCourierEnabled, readStoreCourierSettings } from "@/lib/delivery/courier-settings";
 import type { FlowStore } from "./contracts";
 
 export const getFlowContext = cache(async () => {
@@ -40,7 +40,7 @@ export const getFlowContext = cache(async () => {
     insulatedPackaging: store.slug === "mama-ngozi",
     courierOffered: courierOffered(store)
       && (await storeMayUse(store.id, "courier-delivery"))
-      && anyCourierEnabled(await readCourierSettings(), store.id),
+      && anyCourierEnabled(await readStoreCourierSettings(store.id), store.id),
     shippingOffered: store.shippingHandlingDays != null,
     closed: availability.kind === "queued",
     opensAt: queue?.opensAt ?? "",

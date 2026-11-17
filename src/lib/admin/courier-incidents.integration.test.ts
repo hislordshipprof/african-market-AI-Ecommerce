@@ -191,6 +191,27 @@ describe.skipIf(!hasDb)("courier incident log (#536)", () => {
     expect(rows.map((r) => r.openedAt.getTime())).toEqual([...rows.map((r) => r.openedAt.getTime())].sort((a, b) => b - a));
   });
 
+  it("#577: assigned after the timeout uses the store's metro timeout when its metro sets one", async () => {
+    const metro = await platformAdminTransaction((tx) =>
+      tx.metro.create({ data: { name: `Late ${RUN}`, states: ["TX"], centerLat: 29.76, centerLng: -95.37, radiusMi: 40, courierAssignmentTimeoutS: 1200 } }),
+    );
+    const store = await newStore(`Metro Late ${RUN}`);
+    await platformAdminTransaction((tx) => tx.store.update({ where: { id: store.storeId }, data: { metroId: metro.id } }));
+    const assigned = (minutes: number) =>
+      store.order({ deliveries: [{ provider: "uber", status: "delivered", minutes: 0, pin: "1234", events: [{ type: "courier_assigned", minutes }, { type: "delivered", minutes: 60 }] }] });
+    const inTime = await assigned(16);
+    const late = await assigned(25);
+
+    const { rows } = await list({ storeId: store.storeId });
+
+    expect(rows.map((r) => [r.orderNumber, r.kinds])).toEqual([[late.number, ["assigned_late"]]]);
+    expect(rows.some((r) => r.orderNumber === inTime.number)).toBe(false);
+    await platformAdminTransaction(async (tx) => {
+      await tx.store.update({ where: { id: store.storeId }, data: { metroId: null } });
+      await tx.metro.delete({ where: { id: metro.id } });
+    });
+  });
+
   it("AC2: filters by store, provider, kind and UTC date range", async () => {
     const a = await newStore(`Filter A ${RUN}`);
     const b = await newStore(`Filter B ${RUN}`);

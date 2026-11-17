@@ -419,7 +419,11 @@ A 4-digit code the courier must get from the customer at the door. Required for 
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
 
 **Courier settings**:
-The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. A store's Metro can replace the mode and the timeout, and switch a courier off for its stores; it cannot switch on a courier that is off platform-wide.
+
+**Metro**:
+A group of stores in one area that a platform admin sets up for operations (#577): its own courier settings, and a readiness report (stores live and in setup, courier registration, quote success, the median wait for a courier, tax sign-off per state, directory city pages). Customers never see it. A store is in one metro or none.
+_Avoid_: Market, region (to customers)
 
 **AI and onboarding settings**:
 The platform-wide numbers a platform admin sets at `/admin/settings/ai-onboarding` (#561): the go-live listing floor (1 to 200, default 20), the Daily sample size per store (0 to 20, default 5), the Auto-flag cost threshold (1 to 100 cents, default 2) and how long a rejected store application is kept (1 to 24 months, default 12). Out of range is refused, never clamped; every save writes an audit row, and the page shows who changed them last and when.
