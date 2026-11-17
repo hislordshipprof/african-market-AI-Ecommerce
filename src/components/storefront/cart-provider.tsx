@@ -913,9 +913,63 @@ export function CartProvider({
       >
         {announce}
       </div>
-      <Sheet open={open} onClose={closeCart} title="Your cart">
+      <Sheet
+        open={open}
+        onClose={closeCart}
+        title="Your cart"
+        footer={
+          lines.length ? (
+            <div className={styles.summary}>
+              <div className={styles.total}>
+                <span>Subtotal</span>
+                <strong>{money(subtotal)}</strong>
+              </div>
+              {minimum > 0 && (
+                <>
+                  <progress
+                    className={styles.progress}
+                    max={minimum}
+                    value={Math.min(minimum, subtotal)}
+                    aria-label="Minimum order progress"
+                  />
+                  {gate.met ? (
+                    <p className={styles.muted}>Minimum order reached</p>
+                  ) : (
+                    // The reason sits outside the button, so the label stays stable (#708 AC3).
+                    <p className={styles.muted} id="cart-gate-reason">{gate.message}</p>
+                  )}
+                </>
+              )}
+              {gate.met ? (
+                <Link
+                  className={styles.primaryButton}
+                  href="/cart"
+                  onClick={closeCart}
+                >
+                  Review basket & checkout
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  disabled
+                  aria-describedby={minimum > 0 ? "cart-gate-reason" : undefined}
+                >
+                  Review basket & checkout
+                </button>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
         <p className={styles.muted}>{storeName}</p>
         {open && <AssistantSlot label="Shop with AI" />}
+        {attention && (
+          // A transient sync failure shown in the open modal, where the root toast can't be tapped (#708 AC3).
+          <div className={styles.sheetError} role="alert">
+            Some changes couldn&rsquo;t be saved. Check your connection, then try again.
+          </div>
+        )}
         {pendingUndo.length > 0 && (
           <div className={styles.undoBar} role="status">
             <span>{undoMessage(pendingUndo)}</span>
@@ -944,82 +998,50 @@ export function CartProvider({
             </button>
           </div>
         ) : (
-          <>
-            <ul className={styles.lines}>
-              {lines.map((line) => (
-                <li className={styles.line} key={cartItemKey(line)}>
-                  <div className={`${styles.photo} sf-cart-photo`}>
-                    <ProductImage
-                      src={line.imageUrl}
-                      name={line.name}
-                      sizes="76px"
-                    />
-                  </div>
-                  <div className={styles.lineDetails}>
-                    <h3>{line.name}</h3>
-                    <p>
-                      {money(line.price)}
-                      {line.packLabel && ` / ${line.packLabel}`}
-                    </p>
-                    <Link
-                      className={styles.swap}
-                      href="/cart"
-                      onClick={closeCart}
-                    >
-                      {(() => {
-                        const rule = line.swapRule ?? "exact_only";
-                        return rule === "named_substitute"
-                          ? "Named substitute chosen"
-                          : rule === "store_suggests"
-                            ? "Store suggests a swap"
-                            : "Exact item only";
-                      })()}
-                    </Link>
-                    <div className={styles.lineActions}>
-                      <QuickAddStepper item={line} />
-                      <button
-                        className={styles.iconButton}
-                        aria-label={`Remove ${line.name} from cart`}
-                        onClick={() => store.remove(cartItemKey(line))}
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <div className={styles.summary}>
-              <div className={styles.total}>
-                <span>Subtotal</span>
-                <strong>{money(subtotal)}</strong>
-              </div>
-              {minimum > 0 && (
-                <>
-                  <progress
-                    className={styles.progress}
-                    max={minimum}
-                    value={Math.min(minimum, subtotal)}
-                    aria-label="Minimum order progress"
+          <ul className={styles.lines}>
+            {lines.map((line) => (
+              <li className={styles.line} key={cartItemKey(line)}>
+                <div className={`${styles.photo} sf-cart-photo`}>
+                  <ProductImage
+                    src={line.imageUrl}
+                    name={line.name}
+                    sizes="80px"
                   />
-                  {gate.met && <p className={styles.muted}>Minimum order reached</p>}
-                </>
-              )}
-              {gate.met ? (
-                <Link
-                  className={styles.primaryButton}
-                  href="/cart"
-                  onClick={closeCart}
-                >
-                  Review basket & checkout
-                </Link>
-              ) : (
-                <button type="button" className={styles.primaryButton} disabled>
-                  {gate.message}
-                </button>
-              )}
-            </div>
-          </>
+                </div>
+                <div className={styles.lineDetails}>
+                  <h3>{line.name}</h3>
+                  <p>
+                    {money(line.price)}
+                    {line.packLabel && ` / ${line.packLabel}`}
+                  </p>
+                  <Link
+                    className={styles.swap}
+                    href="/cart"
+                    onClick={closeCart}
+                  >
+                    {(() => {
+                      const rule = line.swapRule ?? "exact_only";
+                      return rule === "named_substitute"
+                        ? "Named substitute chosen"
+                        : rule === "store_suggests"
+                          ? "Store suggests a swap"
+                          : "Exact item only";
+                    })()}
+                  </Link>
+                  <div className={styles.lineActions}>
+                    <QuickAddStepper item={line} />
+                    <button
+                      className={styles.iconButton}
+                      aria-label={`Remove ${line.name} from cart`}
+                      onClick={() => store.remove(cartItemKey(line))}
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </Sheet>
     </Context.Provider>
