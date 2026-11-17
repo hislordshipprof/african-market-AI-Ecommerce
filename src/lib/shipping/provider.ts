@@ -49,6 +49,8 @@ export interface ShippingProvider {
   readonly name: "shippo";
   rates(req: ParcelRequest): Promise<ParcelRate[]>;
   buyLabel(rateId: string, orderId: string): Promise<BoughtLabel>;
+  /** A fresh link to a bought label's PDF, for a retry after the first download or upload failed. */
+  labelUrl(labelId: string): Promise<string>;
   downloadLabel(labelUrl: string): Promise<Uint8Array>;
   voidLabel(labelId: string): Promise<VoidOutcome>;
 }

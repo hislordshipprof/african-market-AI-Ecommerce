@@ -745,7 +745,7 @@ export function OrderInbox({
 
                 {selectedOrder.fulfillment === "ship" && ["READY", "SHIPPED", "IN_TRANSIT", "DELIVERED"].includes(selectedOrder.status) && (
                   <div className="mb-4 space-y-3">
-                    {selectedOrder.shippingLabelStatus === "bought" ? (
+                    {selectedOrder.shippingLabelStatus === "bought" && selectedOrder.shippingLabelKey ? (
                       <div className="flex items-center justify-between gap-3 text-sm">
                         <span>
                           Tracking{" "}
@@ -766,9 +766,9 @@ export function OrderInbox({
                           <Printer className="mr-2 size-4" /> Print label
                         </a>
                       </div>
-                    ) : selectedOrder.status === "READY" ? (
+                    ) : selectedOrder.shippingLabelStatus === "bought" || selectedOrder.status === "READY" ? (
                       <Button className="w-full rounded-full" onClick={() => handleBuyLabel(selectedOrder.id)} disabled={isPending}>
-                        <Printer className="mr-2 size-4" /> Buy label
+                        <Printer className="mr-2 size-4" /> {selectedOrder.shippingLabelStatus === "bought" ? "Get the label PDF" : "Buy label"}
                       </Button>
                     ) : null}
                     {selectedOrder.status === "READY" && (

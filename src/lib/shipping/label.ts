@@ -12,6 +12,7 @@ const LABEL_CLAIM_STALE_MS = 5 * 60_000;
 export const LABEL_STORAGE_NOT_SET_UP = "Shipping labels are not set up for this store yet. Contact support";
 export const SHIPPING_UNAVAILABLE = "Shipping isn't available right now. Try again in a few minutes";
 export const LABEL_NOT_BOUGHT = "The label could not be bought. Try again in a few minutes";
+export const LABEL_PDF_NOT_SAVED = "The label is bought but its PDF could not be saved. Try again in a few minutes";
 export const LABEL_BEING_BOUGHT = "The label is being bought";
 export const POSTAGE_ROSE_PREFIX = "Postage went up from ";
 export const SHIPMENT_SCANNED = "The carrier has scanned this parcel, so it can no longer be cancelled";
@@ -89,12 +90,14 @@ export type LabelResult = { ok: true } | { ok: false; error: string };
 
 /**
  * Buys the label for a captured shipped order and keeps its PDF in the private proof bucket. The order is claimed
- * first, so two clicks never buy two labels; a claim lost to a crash is retaken after five minutes.
+ * first, so two clicks never buy two labels; a claim lost to a crash is retaken after five minutes. A sold label is
+ * saved before its PDF, so a failed download or upload never loses it: a retry fetches only the PDF again.
  */
 export async function buyShippingLabel(storeId: string, orderId: string, deps: LabelDeps = {}): Promise<LabelResult> {
   const now = (deps.now ?? (() => new Date()))();
   const scoped = storeScoped(storeId);
   if (!(deps.hasStorage ?? (() => deliveryProofBucket() !== null))()) return { ok: false, error: LABEL_STORAGE_NOT_SET_UP };
+  const provider = deps.provider === undefined ? shippingProvider() : deps.provider;
   const claimed = await scoped.order.updateMany({
     where: {
       id: orderId,
@@ -106,38 +109,48 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
     data: { shippingLabelStatus: "buying", shippingLabelClaimedAt: now },
   });
   if (claimed.count === 0) {
-    const order = await scoped.order.findUnique({ where: { id: orderId }, select: { shippingLabelStatus: true } });
-    if (order?.shippingLabelStatus === "bought") return { ok: true };
+    const order = await scoped.order.findUnique({ where: { id: orderId }, select: { shippingLabelStatus: true, shippingLabelId: true, shippingLabelKey: true } });
+    if (order?.shippingLabelStatus === "bought" && order.shippingLabelId) {
+      if (order.shippingLabelKey) return { ok: true };
+      if (!provider) return { ok: false, error: SHIPPING_UNAVAILABLE };
+      return savePdf(storeId, orderId, order.shippingLabelId, () => provider.labelUrl(order.shippingLabelId as string), provider, deps);
+    }
     return { ok: false, error: order?.shippingLabelStatus === "buying" ? LABEL_BEING_BOUGHT : "This order cannot get a label" };
   }
   const release = () => scoped.order.updateMany({ where: { id: orderId, shippingLabelStatus: "buying" }, data: { shippingLabelStatus: null, shippingLabelClaimedAt: null } });
 
-  const provider = deps.provider === undefined ? shippingProvider() : deps.provider;
   if (!provider) {
     await release();
     return { ok: false, error: SHIPPING_UNAVAILABLE };
   }
   const order = await scoped.order.findUniqueOrThrow({ where: { id: orderId }, select: { shippingRateId: true } });
+  let label;
   try {
-    const label = await provider.buyLabel(order.shippingRateId as string, orderId);
-    const pdf = await provider.downloadLabel(label.labelUrl);
-    const key = shippingLabelKey(orderId, label.labelId);
-    await (deps.upload ?? uploadShippingLabel)(key, pdf);
-    await scoped.order.updateMany({
-      where: { id: orderId, shippingLabelStatus: "buying" },
-      data: {
-        shippingLabelStatus: "bought",
-        shippingLabelId: label.labelId,
-        shippingLabelKey: key,
-        shippingTrackingNumber: label.trackingNumber,
-        shippingTrackingUrl: label.trackingUrl,
-      },
-    });
-    return { ok: true };
+    label = await provider.buyLabel(order.shippingRateId as string, orderId);
   } catch (error) {
     await release();
     if (!(error instanceof ShippingProviderError)) throw error;
     console.error(JSON.stringify({ event: "shipping_label_failed", storeId, orderId, status: error.status, message: error.message.slice(0, 200) }));
     return { ok: false, error: LABEL_NOT_BOUGHT };
+  }
+  // Logged before the write, so a label sold while the database is down can still be found and voided.
+  console.info(JSON.stringify({ event: "shipping_label_bought", storeId, orderId, labelId: label.labelId }));
+  await scoped.order.updateMany({
+    where: { id: orderId, shippingLabelStatus: "buying" },
+    data: { shippingLabelStatus: "bought", shippingLabelId: label.labelId, shippingTrackingNumber: label.trackingNumber, shippingTrackingUrl: label.trackingUrl },
+  });
+  return savePdf(storeId, orderId, label.labelId, async () => label.labelUrl, provider, deps);
+}
+
+async function savePdf(storeId: string, orderId: string, labelId: string, labelUrl: () => Promise<string>, provider: ShippingProvider, deps: LabelDeps): Promise<LabelResult> {
+  try {
+    const pdf = await provider.downloadLabel(await labelUrl());
+    const key = shippingLabelKey(orderId, labelId);
+    await (deps.upload ?? uploadShippingLabel)(key, pdf);
+    await storeScoped(storeId).order.updateMany({ where: { id: orderId, shippingLabelId: labelId }, data: { shippingLabelKey: key } });
+    return { ok: true };
+  } catch (error) {
+    console.error(JSON.stringify({ event: "shipping_label_pdf_failed", storeId, orderId, labelId, message: String(error).slice(0, 200) }));
+    return { ok: false, error: LABEL_PDF_NOT_SAVED };
   }
 }

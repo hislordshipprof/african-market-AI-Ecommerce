@@ -1443,7 +1443,7 @@ model Order {
   shippingRateExpiresAt   DateTime? @map("shipping_rate_expires_at")
   /// The postage the platform pays for the label and passes through at capture; the store absorbs any rise over deliveryFeeCents.
   shippingPostageCents    Int?      @map("shipping_postage_cents")
-  /// "buying" while a label purchase is claimed, "bought", or "voided" after a cancel.
+  /// "buying" while a label purchase is claimed, "bought" once Shippo sold it (its PDF is saved after), or "voided" after a cancel.
   shippingLabelStatus     String?   @map("shipping_label_status")
   shippingLabelClaimedAt  DateTime? @map("shipping_label_claimed_at")
   /// The Shippo transaction the label was bought as.

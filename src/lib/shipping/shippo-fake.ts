@@ -2,8 +2,10 @@
  * Test double for Shippo's POST /shipments, /transactions and /refunds, used when SHIPPO_API_KEY is not set
  * (decision 2026-11-14-05). It refuses what Shippo refuses: a missing or wrong ShippoToken (401), missing address or
  * parcel fields, an unknown unit or a non-positive weight (400), and returns no rates unless async is false.
+ * GET /transactions/{id} returns a bought label again.
  * A label is bought only from a rate it quoted less than 7 days ago [ASSUMPTION: Shippo does not document the error
- * for an older rate; the fake answers ERROR]; a rate already bought returns the same transaction. A refund after
+ * for an older rate; the fake answers ERROR]; a rate already bought returns the same transaction [ASSUMPTION: not
+ * documented by Shippo; the code never relies on it, a retry after a sold label reads it with GET instead]. A refund after
  * `scan()` is an ERROR, as Shippo rejects a scanned label.
  */
 export interface FakeShippoOptions {
@@ -88,6 +90,11 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
     }
     if (!headers.get("authorization")) return reply(401, { detail: "Authentication credentials were not provided." });
     if (headers.get("authorization") !== `ShippoToken ${opts.token}`) return reply(401, { detail: "Token does not exist" });
+    if (init?.method === "GET" && /^\/transactions\/[^/]+$/.test(url.pathname)) {
+      const id = decodeURIComponent(url.pathname.slice("/transactions/".length));
+      const label = labels.get(id);
+      return label ? labelReply(200, id, label.rateId) : reply(404, { detail: "Not found." });
+    }
     if (init?.method !== "POST" || !["/shipments/", "/transactions/", "/refunds/"].includes(url.pathname)) return reply(404, { detail: "Not found." });
     let body: Json;
     try {
@@ -138,10 +145,14 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
       }
       labels.set(id, { rateId: body.rate, scanned: false, refunded: false });
     }
-    return reply(201, {
+    return labelReply(201, id, body.rate);
+  }
+
+  function labelReply(status: number, id: string, rateId: string): Response {
+    return reply(status, {
       object_id: id,
       status: "SUCCESS",
-      rate: body.rate,
+      rate: rateId,
       tracking_number: trackingNumber(id),
       tracking_url_provider: `https://tools.usps.com/go/TrackConfirmAction?tLabels=${trackingNumber(id)}`,
       label_url: `${FAKE_LABEL_HOST}/labels/${id}.pdf`,

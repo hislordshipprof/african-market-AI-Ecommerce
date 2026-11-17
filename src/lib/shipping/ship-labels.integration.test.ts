@@ -8,7 +8,7 @@ import { setStripeProvider } from "../stripe";
 import { capturedFees, capturedPayments, fakeStripeProvider, refundedPayments, setAuthorizedAmount } from "../stripe/fake";
 import { fakeTaxCalculator, setTaxCalculatorForTests } from "../tax/calculator";
 import { cancelShipment, markReady } from "../order/service";
-import { SHIPMENT_SCANNED } from "./label";
+import { buyShippingLabel, LABEL_PDF_NOT_SAVED, SHIPMENT_SCANNED } from "./label";
 import { platformFeeLedger } from "../admin/fee-ledger-query";
 import { createPaymentIntent, placeOrder, quoteCheckout, saveDeliverySnapshot, type DeliveryRequest } from "../checkout/service";
 import { ShippoProvider, signShippoWebhook } from "./shippo";
@@ -264,5 +264,32 @@ describe.skipIf(!hasDb)("shipping labels, tracking and the Shipped state (#568, 
     const calls = scanned.fake.calls.length;
     expect(await cancelShipment(scanned.store.id, scanned.orderId, staff, { provider: scanned.provider })).toEqual({ ok: false, error: SHIPMENT_SCANNED });
     expect(scanned.fake.calls.length).toBe(calls);
+  });
+  it("B1: a label Shippo sold is kept when saving its PDF fails; a retry saves only the PDF and a cancel voids the label", async () => {
+    for (const next of ["retry", "cancel"] as const) {
+      const { store, orderId, paymentIntentId, quote, fake, deps, scoped } = await pickedShipOrder();
+      const failing = { ...deps, upload: async () => { throw new Error("R2 PutObject 503"); } };
+
+      // The capture stands and staff are told the PDF is missing, not that Ready failed.
+      expect(await markReady(store.id, orderId, { label: failing })).toEqual({ ok: true, capturedAmountCents: quote.totalCents, labelError: LABEL_PDF_NOT_SAVED });
+      const [labelId] = [...fake.labels.keys()];
+      expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({
+        status: "READY", shippingLabelStatus: "bought", shippingLabelId: labelId, shippingLabelKey: null, shippingTrackingNumber: expect.stringMatching(/^9400/),
+      });
+
+      if (next === "retry") {
+        expect(await buyShippingLabel(store.id, orderId, deps)).toEqual({ ok: true });
+        const order = await scoped.order.findUniqueOrThrow({ where: { id: orderId } });
+        expect(order).toMatchObject({ shippingLabelStatus: "bought", shippingLabelId: labelId });
+        expect(uploads.get(order.shippingLabelKey as string)).toBeDefined();
+        // No second purchase.
+        expect(fake.calls.filter((call) => "rate" in call && !("parcels" in call))).toHaveLength(1);
+        expect(fake.labels.size).toBe(1);
+      } else {
+        expect(await cancelShipment(store.id, orderId, staff, { provider: deps.provider })).toEqual({ ok: true });
+        expect(fake.labels.get(labelId)?.refunded).toBe(true);
+        expect(refundedPayments.get(paymentIntentId)).toBe(quote.totalCents);
+      }
+    }
   });
 });

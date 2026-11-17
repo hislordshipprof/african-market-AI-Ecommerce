@@ -7,6 +7,9 @@ export const SHIPPO_RATE_PURCHASE_WINDOW_MS = 7 * 24 * 60 * 60_000;
 
 type Json = Record<string, unknown>;
 
+/** Well under the five minutes after which a label claim is retaken, so a hung purchase never overlaps a second one. */
+const SHIPPO_TIMEOUT_MS = 30_000;
+
 export interface ShippoOptions {
   apiKey?: string;
   fetch?: typeof fetch;
@@ -47,14 +50,24 @@ export class ShippoProvider implements ShippingProvider {
   }
 
   private async post(path: string, body: Json): Promise<Json> {
+    return this.request("POST", path, body);
+  }
+
+  private async request(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
     if (!this.apiKey) throw new ShippingProviderError(0, "Shippo is not configured: missing SHIPPO_API_KEY");
-    const res = await this.doFetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: { authorization: `ShippoToken ${this.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await this.doFetch(`${BASE_URL}${path}`, {
+        method,
+        headers: { authorization: `ShippoToken ${this.apiKey}`, "content-type": "application/json" },
+        body: body && JSON.stringify(body),
+        signal: AbortSignal.timeout(SHIPPO_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw new ShippingProviderError(0, `Shippo ${method} ${path} did not answer: ${String(error).slice(0, 200)}`);
+    }
     const json = (await res.json().catch(() => ({}))) as Json;
-    if (!res.ok) throw new ShippingProviderError(res.status, `Shippo POST ${path} failed with ${res.status}: ${JSON.stringify(json).slice(0, 300)}`);
+    if (!res.ok) throw new ShippingProviderError(res.status, `Shippo ${method} ${path} failed with ${res.status}: ${JSON.stringify(json).slice(0, 300)}`);
     return json;
   }
 
@@ -95,6 +108,15 @@ export class ShippoProvider implements ShippingProvider {
       trackingUrl: typeof json.tracking_url_provider === "string" && json.tracking_url_provider.startsWith("https://") ? json.tracking_url_provider : null,
       labelUrl: json.label_url as string,
     };
+  }
+
+  /** GET /transactions/{id} returns the label with a fresh label_url (https://docs.goshippo.com/api-reference/transactions/retrieve-a-shipping-label). */
+  async labelUrl(labelId: string): Promise<string> {
+    const json = await this.request("GET", `/transactions/${encodeURIComponent(labelId)}`);
+    if (json.status !== "SUCCESS" || typeof json.label_url !== "string" || !json.label_url.startsWith("https://")) {
+      throw new ShippingProviderError(422, `Shippo label ${labelId} has no label link (${String(json.status)})`);
+    }
+    return json.label_url;
   }
 
   async downloadLabel(labelUrl: string): Promise<Uint8Array> {
