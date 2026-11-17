@@ -83,7 +83,8 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
       await tx.delivery.create({ data: { storeId: storeA, orderId: o2.id, provider: "doordash", externalId: `${run}-d2`, status: "requested", quoteFeeCents: 899, createdAt: minutes(o2At, 41) } });
 
       const o3At = at("2026-11-05T20:00:00Z");
-      const o3 = await order({ customerId: c1guest.id, fulfillment: "store_delivery", status: "DELIVERED", tipCents: 200, deliveryFeeCents: 500, capturedAmountCents: 3700, platformFeeCents: 137, createdAt: o3At, readyAt: minutes(o3At, 90) });
+      // Placed from an AI agent's checkout link (#573).
+      const o3 = await order({ customerId: c1guest.id, acquisitionSource: "agent", fulfillment: "store_delivery", status: "DELIVERED", tipCents: 200, deliveryFeeCents: 500, capturedAmountCents: 3700, platformFeeCents: 137, createdAt: o3At, readyAt: minutes(o3At, 90) });
       await tx.orderLine.create({ data: { storeId: storeA, orderId: o3.id, listingVariantId: vPalm.id, qtyOrdered: 2, qtyPicked: 2, unitPriceCents: 1500, status: "picked" } });
       const l4 = await tx.orderLine.create({ data: { storeId: storeA, orderId: o3.id, listingVariantId: vEgusi.id, qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 1000, status: "refunded" } });
       await tx.substitutionRequest.create({ data: { storeId: storeA, orderId: o3.id, orderLineId: l4.id, qty: 1, status: "timed_out", expiresAt: minutes(o3At, 15), createdAt: minutes(o3At, 5) } });
@@ -245,7 +246,7 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     ]);
     expect(data.customers).toEqual({
       shoppers: 2, newShoppers: 1, returningShoppers: 1, repeatShoppers: 2, repeatRatePct: 100,
-      orders: 3, assistantOrders: 1, browsingOrders: 2,
+      orders: 3, assistantOrders: 1, agentOrders: 1, browsingOrders: 1,
     });
     expect(data.operations).toEqual({
       readyOrders: 3, medianReadyMinutes: 40, averageReadyMinutes: 50,

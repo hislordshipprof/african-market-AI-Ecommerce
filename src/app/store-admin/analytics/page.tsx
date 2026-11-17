@@ -342,7 +342,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           </dl>
           <div className="mt-5 grid gap-5 md:grid-cols-2">
             <SplitBar label="New and returning shoppers" parts={[{ name: "New", value: customers.newShoppers }, { name: "Returning", value: customers.returningShoppers }]} />
-            <SplitBar label="Orders by how they were built" parts={[{ name: "Shopping assistant", value: customers.assistantOrders }, { name: "Browsing", value: customers.browsingOrders }]} />
+            <SplitBar label="Orders by how they were built" parts={[{ name: "Shopping assistant", value: customers.assistantOrders }, { name: "AI agent links", value: customers.agentOrders }, { name: "Browsing", value: customers.browsingOrders }]} />
           </div>
         </Section>
 

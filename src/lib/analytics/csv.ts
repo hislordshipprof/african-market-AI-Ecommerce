@@ -71,6 +71,7 @@ export function analyticsCsv(view: AnalyticsView, data: StoreAnalytics, chatUsag
         ["Repeat rate %", c.repeatRatePct],
         ["Orders", c.orders],
         ["Orders from the shopping assistant", c.assistantOrders],
+        ["Orders from AI agent links", c.agentOrders],
         ["Orders from browsing", c.browsingOrders],
       ]);
     }
