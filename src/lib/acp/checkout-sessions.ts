@@ -4,7 +4,7 @@ import { applyAddLine, getCartWithLines } from "../cart/service";
 import { lockCart, storeScoped, storeScopedTransaction } from "../db";
 import { AGENT_REF } from "../directory/attribution";
 import { guestPaymentIntentParams } from "../checkout/payment-intent-params";
-import { BasketChangedError, placeOrder, quoteCheckout, StoreNotTakingOrdersError } from "../checkout/service";
+import { BasketChangedError, placeOrder, quoteCheckout, releaseLosingHold, StoreNotTakingOrdersError } from "../checkout/service";
 import { CheckoutProviderError, checkoutPaymentsUseFake, getCheckoutPayments } from "../stripe/checkout-payments";
 import { checkCheckoutReady } from "../stripe/checkout-gate";
 import type { CheckoutQuote, Contact } from "../customer-flow/contracts";
@@ -212,6 +212,7 @@ export async function cancelCheckoutSession(store: ValidatedStore, origin: strin
   const session = await findSession(store.id, id);
   if (!session) return NOT_FOUND;
   if (canceled.count === 0 && session.status !== "canceled") return refuse(409, "session_not_open", `This checkout session is ${session.status}.`);
+  if (canceled.count > 0) await releaseSessionHolds(store.id, session);
   return { ok: true, status: 200, body: await view(store, session, origin) };
 }
 
@@ -282,6 +283,13 @@ export async function completeCheckoutSession(
   }
 }
 
+/** Releases any hold this session authorized that did not become its order, except `keep`. */
+async function releaseSessionHolds(storeId: string, session: AcpCheckoutSession, keep?: string): Promise<void> {
+  const cart = await storeScoped(storeId).cart.findUnique({ where: { id: session.cartId }, select: { paymentIntentId: true } });
+  const held = new Set([session.paymentIntentId, cart?.paymentIntentId].filter((id): id is string => !!id && id !== keep));
+  for (const id of held) await releaseLosingHold(storeId, session.cartId, id);
+}
+
 /** The checkout's guest PaymentIntent, paid by the shared payment token and confirmed at once. Fake only (see acpCheckoutEnabled). */
 async function authorizeWithToken(store: ValidatedStore, session: AcpCheckoutSession, holdCents: number, purchaseEpoch: number, token: string): Promise<string> {
   if (!checkoutPaymentsUseFake()) throw new Error("ACP payments run only on the Stripe fake");
@@ -296,6 +304,8 @@ async function authorizeWithToken(store: ValidatedStore, session: AcpCheckoutSes
   // The same session and token always make the same intent, so a retried complete never authorizes twice.
   const key = `acp:${session.id}:${createHash("sha256").update(token).digest("hex").slice(0, 32)}`;
   const pi = await getCheckoutPayments().createPaymentIntent(params as unknown as Record<string, unknown>, key);
+  // A new token after a failed placement makes a new hold; the earlier one must not stay on the card.
+  await releaseSessionHolds(store.id, session, pi.id);
   await storeScoped(store.id).cart.update({ where: { id: session.cartId }, data: { paymentIntentId: pi.id } });
   return pi.id;
 }

@@ -1,5 +1,18 @@
 vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn, revalidateTag: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers(currentSlug ? { "x-store-slug": currentSlug } : {}) }));
+// A placement that fails for a reason placeOrder does not release the hold for (a DB error in the order write).
+const placement = vi.hoisted(() => ({ failNext: false }));
+vi.mock("@/lib/checkout/service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/checkout/service")>();
+  return {
+    ...actual,
+    placeOrder: (...args: Parameters<typeof actual.placeOrder>) => {
+      if (!placement.failNext) return actual.placeOrder(...args);
+      placement.failNext = false;
+      return Promise.reject(new Error("order write failed"));
+    },
+  };
+});
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
@@ -246,6 +259,44 @@ describe.skipIf(!hasDb)("ACP checkout sessions (#574)", () => {
     expect(crossItem.status).toBe(400);
     // The token was never spent, so store A's own complete still goes through.
     expect((await completeWith("a", session.id, token)).status).toBe(200);
+  });
+
+  async function failedPlacement(sessionId: string) {
+    const { token } = await tokenForHold("a", sessionId);
+    placement.failNext = true;
+    await expect(completeWith("a", sessionId, token)).rejects.toThrow("order write failed");
+    const row = await storeScoped(stores.a.id).acpCheckoutSession.findUniqueOrThrow({ where: { id: sessionId } });
+    expect(row.status).toBe("open");
+    return { token, held: row.paymentIntentId! };
+  }
+  const intentStatus = async (id: string) => (await getCheckoutPayments().retrievePaymentIntent(id)).status;
+
+  it("a retry with a new token after a failed placement releases the first hold: one order, one hold", async () => {
+    const session = await newSession();
+    const { held } = await failedPlacement(session.id);
+    const retried = await completeWith("a", session.id, (await tokenForHold("a", session.id)).token);
+    expect(retried.status).toBe(200);
+    const order = (await ordersAt("a")).find((row) => row.id === retried.body.order.id)!;
+    expect(order.paymentIntentId).not.toBe(held);
+    expect(await intentStatus(held)).toBe("canceled");
+    expect(await intentStatus(order.paymentIntentId!)).toBe("requires_capture");
+  });
+
+  it("a retry with the same token after a failed placement places the order on the same hold", async () => {
+    const session = await newSession();
+    const { token, held } = await failedPlacement(session.id);
+    const retried = await completeWith("a", session.id, token);
+    expect(retried.status).toBe(200);
+    const order = (await ordersAt("a")).find((row) => row.id === retried.body.order.id)!;
+    expect(order.paymentIntentId).toBe(held);
+    expect(await intentStatus(held)).toBe("requires_capture");
+  });
+
+  it("canceling a session after a failed placement releases its hold", async () => {
+    const session = await newSession();
+    const { held } = await failedPlacement(session.id);
+    expect((await cancel(call(stores.a.slug, "POST", `/${session.id}/cancel`, {}), params(session.id))).status).toBe(200);
+    expect(await intentStatus(held)).toBe("canceled");
   });
 
   it("a canceled session cannot be paid", async () => {
