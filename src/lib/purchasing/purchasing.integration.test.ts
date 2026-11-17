@@ -95,6 +95,23 @@ describe.skipIf(!hasDb)("suppliers and purchase orders (lane database)", () => {
     await setSupplierListings(storeA, ids.lagos, [ids.palm, ids.gari], actor);
   });
 
+  it("keeps a hidden item already linked when the owner saves the supplier's items, but never adds a hidden one", async () => {
+    const shown = await listing(storeA, "Ogbono", { stockMode: "counted", qty: 0 });
+    const hidden = await listing(storeA, "Crayfish", { stockMode: "counted", qty: 0 });
+    const added = await listing(storeA, "Stockfish", { stockMode: "counted", qty: 0 });
+    const lekki = await supplier(storeA, { name: "Lekki Wholesale", email: "orders@lekki.example", channel: "email" });
+    expect(await setSupplierListings(storeA, lekki, [shown, hidden], actor)).toEqual({ ok: true });
+    await storeScoped(storeA).listing.update({ where: { id: hidden }, data: { active: false } });
+
+    const linked = (await listSuppliers(storeA)).find((s) => s.id === lekki)!.listingIds;
+    expect(await setSupplierListings(storeA, lekki, [...linked, added], actor)).toEqual({ ok: true });
+    expect((await listSuppliers(storeA)).find((s) => s.id === lekki)!.listingIds.sort()).toEqual([shown, hidden, added].sort());
+
+    const other = await supplier(storeA, { name: "Ikeja Foods", email: "orders@ikeja.example", channel: "email" });
+    expect(await setSupplierListings(storeA, other, [hidden], actor)).toMatchObject({ ok: false });
+    expect((await listSuppliers(storeA)).find((s) => s.id === lekki)!.listingIds).toContain(hidden);
+  });
+
   it("never links another store's listing or supplier", async () => {
     expect(await setSupplierListings(storeA, ids.lagos, [ids.palm, ids.foreign], actor)).toMatchObject({ ok: false });
     const other = await supplier(storeB, { name: "B wholesaler", email: "b@example.com", channel: "email" });

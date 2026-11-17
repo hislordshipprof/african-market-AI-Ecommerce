@@ -102,9 +102,12 @@ export async function setSupplierListings(storeId: string, supplierId: string, l
   return storeScopedTransaction(storeId, async (tx) => {
     const supplier = await tx.supplier.findFirst({ where: { id: supplierId, storeId, archivedAt: null }, select: { id: true } });
     if (!supplier) return { ok: false, message: "That supplier is not in your store." };
-    const found = await tx.listing.count({ where: { id: { in: ids }, storeId, active: true } });
-    if (found !== ids.length) return { ok: false, message: "An item is no longer in your store. Reload the page." };
     const before = await tx.supplierListing.findMany({ where: { supplierId }, select: { listingId: true } });
+    // A hidden item stays linked (the picker cannot show it to untick); only new links must be active.
+    const kept = new Set(before.map((row) => row.listingId));
+    const added = ids.filter((id) => !kept.has(id));
+    const found = await tx.listing.count({ where: { id: { in: added }, storeId, active: true } });
+    if (found !== added.length) return { ok: false, message: "An item is no longer in your store. Reload the page." };
     await tx.supplierListing.deleteMany({ where: { OR: [{ supplierId }, { listingId: { in: ids } }] } });
     await tx.supplierListing.createMany({ data: ids.map((listingId) => ({ storeId, supplierId, listingId })) });
     await tx.auditLog.create({
