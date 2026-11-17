@@ -8,6 +8,7 @@ const logoHosts = (process.env.LOGO_HOSTS ?? "")
   .filter(Boolean);
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   serverExternalPackages: ["pdfjs-dist", "sharp"],
   experimental: {
     serverActions: {

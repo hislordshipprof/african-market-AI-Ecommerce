@@ -275,25 +275,25 @@ describe("security headers on the proxy", () => {
     vi.stubEnv("VERCEL_ENV", "");
     const redirect = proxy(makeRequest("http://localhost:3000/?store=mama-ngozi"));
     expect(redirect.status).toBe(307);
-    expect(redirect.headers.get("content-security-policy")).toBe(
-      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
-    );
+    expect(redirect.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(redirect.headers.get("content-security-policy")).toContain("report-uri /api/csp-report");
     expect(redirect.headers.get("content-security-policy-report-only")).toContain("default-src 'self'");
-    expect(redirect.headers.get("strict-transport-security")).toBe("max-age=63072000");
+    expect(redirect.headers.get("strict-transport-security")).toBe("max-age=63072000; includeSubDomains");
 
     vi.stubEnv("NODE_ENV", "production");
     const pass = proxy(makeRequest("http://localhost:3000/"));
     expect(pass.headers.get("x-content-type-options")).toBe("nosniff");
     expect(pass.headers.get("x-frame-options")).toBe("DENY");
     expect(pass.headers.get("content-security-policy-report-only")).not.toContain("unsafe-eval");
-    expect(pass.headers.get("content-security-policy")).toBe(
-      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
-    );
+    expect(pass.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(pass.headers.get("content-security-policy")).not.toContain("unsafe-eval");
+    expect(pass.headers.get("permissions-policy")).toContain("camera=()");
 
     const nextConfig = (await import("../next.config")).default;
     if (!nextConfig.headers) throw new Error("next config does not set headers");
     const configured = await nextConfig.headers();
     expect(configured.map((entry: { source: string }) => entry.source)).toContain("/_next/static/:path*");
+    expect(nextConfig.poweredByHeader).toBe(false);
   });
 
   it("an SVG path gets a no-script, sandboxed policy (#124)", () => {

@@ -1,19 +1,45 @@
 import { describe, expect, it } from "vitest";
 import {
-  ENFORCED_CSP,
+  enforcedPolicy,
   imageHosts,
+  NO_SCRIPT_CSP,
   reportOnlyPolicy,
   staticSecurityHeaders,
 } from "./headers";
 
 describe("security headers", () => {
-  it("baseline enforced, full policy report-only, no unsafe-eval in production", () => {
-    const headers = staticSecurityHeaders();
-    expect(headers.find((header) => header.key === "Content-Security-Policy")?.value).toBe(ENFORCED_CSP);
-    expect(headers.find((header) => header.key === "Strict-Transport-Security")?.value).toBe("max-age=63072000");
-    expect(headers.map((header) => header.value).join(" ")).not.toContain("includeSubDomains");
-    expect(headers.map((header) => header.value).join(" ")).not.toContain("preload");
+  it("enforced policy: default-src self, real allow-lists, reports to /api/csp-report", () => {
+    const enforced = enforcedPolicy({ NODE_ENV: "production", R2_PUBLIC_URL: "https://cdn.example.test" });
+    const directive = (name: string) => enforced.split("; ").find((d) => d.startsWith(`${name} `));
+    expect(directive("default-src")).toBe("default-src 'self'");
+    expect(directive("connect-src")).toBe("connect-src 'self' https://api.stripe.com");
+    expect(directive("frame-src")).toBe("frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com");
+    expect(directive("img-src")).toContain("https://cdn.example.test");
+    // The payouts dashboard form is answered with a 303 to connect.stripe.com; form-action covers redirects.
+    expect(directive("form-action")).toBe("form-action 'self' https://connect.stripe.com");
+    expect(directive("frame-ancestors")).toBe("frame-ancestors 'none'");
+    expect(directive("report-uri")).toBe("report-uri /api/csp-report");
+    expect(directive("report-to")).toBe("report-to csp-endpoint");
+    // script-src is not tightened until nonces: Next's inline scripts must still run.
+    expect(directive("script-src")).toContain("'unsafe-inline'");
+    expect(enforced).not.toContain("nonce-");
+    expect(enforced).not.toContain("unsafe-eval");
+    expect(enforced).not.toContain("maps.googleapis.com");
 
+    const headers = staticSecurityHeaders({ NODE_ENV: "production" });
+    const value = (key: string) => headers.find((header) => header.key === key)?.value;
+    expect(value("Content-Security-Policy")).toBe(enforcedPolicy({ NODE_ENV: "production" }));
+    expect(value("Reporting-Endpoints")).toBe('csp-endpoint="/api/csp-report"');
+  });
+
+  it("HSTS covers subdomains without preload; Permissions-Policy limits device and payment APIs", () => {
+    const headers = staticSecurityHeaders({ NODE_ENV: "production" });
+    const value = (key: string) => headers.find((header) => header.key === key)?.value;
+    expect(value("Strict-Transport-Security")).toBe("max-age=63072000; includeSubDomains");
+    expect(value("Permissions-Policy")).toBe('camera=(), microphone=(), geolocation=(self), payment=(self "https://js.stripe.com")');
+  });
+
+  it("report-only policy keeps the nonce experiment and reports too", () => {
     const policy = reportOnlyPolicy("abc", { NODE_ENV: "production" });
     expect(policy).not.toContain("unsafe-eval");
     expect(policy).toContain("'nonce-abc'");
@@ -21,7 +47,13 @@ describe("security headers", () => {
     expect(policy).toContain("https://hooks.stripe.com");
     expect(policy).toContain("https://api.stripe.com");
     expect(policy).not.toContain("maps.googleapis.com");
-    expect(ENFORCED_CSP).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+    expect(policy).toContain("report-uri /api/csp-report");
+    expect(policy).toContain("report-to csp-endpoint");
+  });
+
+  it("the SVG policy has exactly one script-src, and it is 'none' (#124)", () => {
+    expect(NO_SCRIPT_CSP.match(/script-src[^;]*/g)).toEqual(["script-src 'none'"]);
+    expect(NO_SCRIPT_CSP).toContain("sandbox");
   });
 
   it("optional hosts omitted when unset", () => {
