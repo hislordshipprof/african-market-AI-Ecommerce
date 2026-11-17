@@ -57,7 +57,7 @@ async function settleCart(page: Page) {
   await expect(cart).not.toHaveAttribute("data-cart-pending");
   await page.reload();
   await page.getByRole("button", { name: /basket/i }).click();
-  return page.getByRole("dialog", { name: "Your cart" });
+  return page.getByRole("dialog", { name: "Your basket" });
 }
 
 test.describe("Phase 3 motion and depth", () => {

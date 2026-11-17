@@ -62,7 +62,7 @@ test.describe("Storefront redesign interactions", () => {
     await header
       .getByRole("button", { name: /basket/i })
       .click();
-    const cart = page.getByRole("dialog", { name: "Your cart" });
+    const cart = page.getByRole("dialog", { name: "Your basket" });
     await expect(cart).toBeVisible();
     await expect(
       cart.getByRole("heading", { name, exact: true }),
@@ -70,7 +70,7 @@ test.describe("Storefront redesign interactions", () => {
     await expect(cart.getByTestId("stepper-qty")).toHaveText("2");
     await cart.getByTestId("stepper-minus").click();
     await expect(header.getByTestId("cart-count")).toHaveText("1");
-    await cart.getByRole("button", { name: "Close cart" }).click();
+    await cart.getByRole("button", { name: "Close basket" }).click();
     await expect(cart).not.toBeVisible();
   });
 
@@ -178,7 +178,7 @@ test.describe("Storefront redesign interactions", () => {
       .getByTestId("storefront-header")
       .getByRole("button", { name: /basket/i })
       .click();
-    await expect(page.getByRole("dialog", { name: "Your cart" })).toContainText(
+    await expect(page.getByRole("dialog", { name: "Your basket" })).toContainText(
       packLabel,
     );
   });
@@ -207,10 +207,10 @@ test.describe("Storefront redesign interactions", () => {
       ).toHaveAttribute("aria-current", "page");
     }
     await nav.getByRole("button", { name: /basket/i }).click();
-    const cart = page.getByRole("dialog", { name: "Your cart" });
+    const cart = page.getByRole("dialog", { name: "Your basket" });
     await expect(cart).toBeVisible();
-    await expect(cart).toContainText("Your next good meal starts here");
-    await cart.getByRole("button", { name: "Close cart" }).click();
+    await expect(cart).toContainText("Your basket is empty");
+    await cart.getByRole("button", { name: "Close basket" }).click();
     await expect(cart).not.toBeVisible();
   });
 });

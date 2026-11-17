@@ -156,7 +156,7 @@ export function CartPage({
   enabled,
   realCheckout,
 }: ShoppingFlowProps & { realCheckout: boolean }) {
-  const { lines, subtotal, count, store, refreshCart, syncing, loading, attention } = useCart();
+  const { lines, subtotal, count, store, refreshCart, syncing, loading, loadFailed, pendingKeys } = useCart();
   const ready = useCartReady();
   const demo = useMemo(
     () => createDemoServices(settings, catalog, enabled),
@@ -223,17 +223,21 @@ export function CartPage({
       <AssistantSlot label="Shop with AI" />
       <DemoNotice />
       {!lines.length ? (
-        attention ? (
+        loadFailed ? (
           // Failed-to-load is distinct from a confirmed-empty basket (#708 AC3).
           <EmptyState
-            title="We couldn't load your basket"
-            description="Check your connection, then refresh the page to try again."
-          />
+            title="We couldn’t load your basket"
+            description="Check your connection, then try again."
+          >
+            <Button type="button" onClick={() => void refreshCart()}>Retry</Button>
+          </EmptyState>
         ) : (
           <EmptyState
-            title="A good meal starts with a full basket"
+            title="Your basket is empty"
             description="Explore your market and bring home something familiar."
-          />
+          >
+            <Link href="/categories" className="sf-button">Browse aisles</Link>
+          </EmptyState>
         )
       ) : (
         <div className={styles.layout}>
@@ -253,7 +257,7 @@ export function CartPage({
                   const key = cartItemKey(line),
                     item = catalog.find((item) => cartItemKey(item) === key);
                   return (
-                    <li className={styles.line} key={key}>
+                    <li className={styles.line} key={key} aria-busy={pendingKeys.has(key) || undefined}>
                       <div className={styles.photo}>
                         <ProductImage
                           src={line.imageUrl}
@@ -266,6 +270,7 @@ export function CartPage({
                         <p className={styles.muted}>
                           {money(line.price)}
                           {line.packLabel && ` / ${line.packLabel}`}
+                          {pendingKeys.has(key) && <span className={styles.updating}>Updating…</span>}
                         </p>
                         {(line.available === false || !item?.available) && (
                           <p className={styles.error}>

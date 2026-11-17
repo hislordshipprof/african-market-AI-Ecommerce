@@ -111,6 +111,17 @@ test.describe("Guest checkout flow", () => {
     await expect(page.getByLabel("Full name")).toHaveValue("E2E Guest");
   });
 
+  test("checkout tells a failed basket load from an empty basket (#708)", async ({ page }) => {
+    await page.context().addCookies([{ name: "e2e_fail_cart_read", value: "1", url: base }]);
+    await page.goto(`${base}/checkout`);
+    await expect(page.getByRole("heading", { name: "We couldn\u2019t load your basket" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your basket is empty" })).toHaveCount(0);
+    await page.context().clearCookies({ name: "e2e_fail_cart_read" });
+    await page.getByRole("main").getByRole("button", { name: "Retry" }).click();
+    await expect(page.getByRole("heading", { name: "Your basket is empty" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Browse aisles" })).toBeVisible();
+  });
+
   test("fulfillment options are visible", async ({ page }) => {
     await addItemToCart(page);
     await page.goto(`${base}/checkout`);
@@ -280,7 +291,7 @@ test("a hung address check settles to a failure and frees the button (#708)", as
       await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 } });
     });
     await page.context().addCookies([{ name: "e2e_stripe_harness", value: "1", url: `http://localhost:${process.env.E2E_PORT || "3000"}` }]);
-    const addButton = page.getByRole("button", { name: `Add ${name} to cart` });
+    const addButton = page.getByRole("button", { name: `Add ${name} to basket` });
     await expect(async () => {
       await page.goto(`/?store=${slug}`);
       await expect(addButton).toBeVisible();

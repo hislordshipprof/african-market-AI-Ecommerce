@@ -137,6 +137,12 @@ interface CartContextValue {
   loading: boolean;
   syncing: boolean;
   attention: boolean;
+  /** The last read of the server cart failed, so an empty list is unknown, not empty (#708 P1). */
+  loadFailed: boolean;
+  /** Lines with a change still on its way to the server, for a per-line "Updating…" (#717 AC4). */
+  pendingKeys: ReadonlySet<string>;
+  /** The latest cart change, for the one polite status of the surface in front (#708 P1). */
+  announcement: string;
   cartId: string | null;
   refreshCart: () => Promise<void>;
   reportCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
@@ -167,10 +173,13 @@ export function CartProvider({
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
   // A write failure while the (modal) drawer is open, shown inside it instead of a page toast (#708 AC3).
-  const [sheetNotice, setSheetNotice] = useState<{ message: string; retry?: () => void } | null>(null);
-  // One polite announcement for an add, so no two cart triggers announce the same change (#708 AC3).
+  // Keyed by line, so it clears when that line saves again; keyless ones clear when nothing is failing.
+  const [sheetNotice, setSheetNotice] = useState<{ message: string; retry?: () => void; key?: string } | null>(null);
+  // One polite announcement per change, so no two cart triggers announce the same change (#708 AC3).
   const [announce, setAnnounce] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [syncing, setSyncing] = useState(false);
   const [attention, setAttention] = useState(false);
   const [cartId, setCartId] = useState<string | null>(null);
@@ -207,10 +216,20 @@ export function CartProvider({
     setPending([]);
   }
   /** Inside the open drawer the message shows in it; elsewhere it is a toast, with Retry when there is one. */
-  function notify(message: string, retry?: () => void) {
+  function notify(message: string, retry?: () => void, key?: string) {
     if (!mounted.current) return;
-    if (openRef.current) setSheetNotice({ message, retry });
-    else toast.error(message, retry ? { action: { label: "Retry", onClick: retry } } : undefined);
+    if (openRef.current) setSheetNotice({ message, retry, key });
+    // One toast per line (or per message): a repeated failure replaces it instead of stacking.
+    else toast.error(message, { id: `cart:${key ?? message}`, ...(retry ? { action: { label: "Retry", onClick: retry } } : {}) });
+  }
+  /** A line saved again: its notice is resolved, and a general one too once nothing is failing. */
+  function resolveNotice(key?: string) {
+    if (!mounted.current) return;
+    const clean = failedKeys.current.size === 0;
+    setSheetNotice((notice) => (!notice ? notice : notice.key ? (notice.key === key ? null : notice) : clean ? null : notice));
+  }
+  function markPending(key: string) {
+    if (mounted.current) setPendingKeys((keys) => (keys.has(key) ? keys : new Set(keys).add(key)));
   }
   /** Retry puts the failed quantity back as the intent and sends it again. */
   function retryAt(item: CartItem, qty: number) {
@@ -311,6 +330,7 @@ export function CartProvider({
       fallback.current.delete(key);
     }
     if (failedKeys.current.size === 0 && mounted.current) setAttention(false);
+    resolveNotice(key);
   }
   function applyMerged(
     merged: {
@@ -419,6 +439,7 @@ export function CartProvider({
       if (!mounted.current) return "failed";
       if (!cart) {
         setCartId(null);
+        setLoadFailed(false);
         if (scope) {
           const cleared = clearKeyIdentity(
             {
@@ -437,6 +458,7 @@ export function CartProvider({
       }
       setCartId(cart.id);
       merge(cart.lines.map(serverLineToClient), stamp, mode, scope);
+      setLoadFailed(false);
       return "ok";
     } catch (error) {
       if (isStaleAction(error) && mounted.current) {
@@ -497,7 +519,11 @@ export function CartProvider({
     }
     if (mounted.current) {
       const line = linesRef.current.find((entry) => cartItemKey(entry) === key);
-      notify(OFFLINE, uncertainAdd && line ? retryAt(line, line.quantity) : undefined);
+      notify(
+        line ? `Couldn\u2019t update ${line.name}. Check your connection and try again.` : OFFLINE,
+        uncertainAdd && line ? retryAt(line, line.quantity) : undefined,
+        key,
+      );
       setAttention(true);
     }
     if (uncertainAdd) addAccepted.current.add(key);
@@ -571,7 +597,7 @@ export function CartProvider({
     if (!mounted.current) return;
     if (pulled === "failed") {
       if (!staleDeployment.current) {
-        notify(OFFLINE);
+        notify(OFFLINE, undefined, key);
         setAttention(true);
         failedKeys.current.add(key);
       }
@@ -579,6 +605,7 @@ export function CartProvider({
       return;
     }
     if (failedKeys.current.size === 0) setAttention(false);
+    resolveNotice(key);
   }
   async function stepServer(key: string) {
     if (!mounted.current || staleDeployment.current || paused.current.has(key)) return;
@@ -590,7 +617,7 @@ export function CartProvider({
         const result = override ?? (await removeCartLine(doomed));
         if (!result.ok && removalResultAction(result.code) === "rejected") {
           if (mounted.current) {
-            notify(result.error);
+            notify(result.error, undefined, key);
             setAttention(true);
           }
           await recoverRejected(key, revAtSend, "remove");
@@ -622,7 +649,7 @@ export function CartProvider({
         known = recovered;
       } else if (pulled === "failed") {
         if (mounted.current && !staleDeployment.current) {
-          notify(OFFLINE);
+          notify(OFFLINE, undefined, key);
           setAttention(true);
         }
         paused.current.add(key);
@@ -647,7 +674,7 @@ export function CartProvider({
       }
       if (!added.ok) {
         if (mounted.current) {
-          notify(added.error);
+          notify(`${item.name}: ${added.error}`, undefined, key);
           setAttention(true);
         }
         if (added.code === "MAX_PER_ORDER") {
@@ -671,7 +698,9 @@ export function CartProvider({
       if (!landed) {
         if (pulled === "failed") {
           addAccepted.current.add(key);
-          if (mounted.current && !staleDeployment.current) notify(OFFLINE, retryAt(item, intentQty(key)));
+          if (mounted.current && !staleDeployment.current) {
+            notify(`Couldn\u2019t add ${item.name}. Check your connection and try again.`, retryAt(item, intentQty(key)), key);
+          }
         } else {
           showQty(key, 0);
           confirmed.current.set(key, { qty: 0 });
@@ -698,7 +727,7 @@ export function CartProvider({
       }
       if (!result.ok) {
         if (mounted.current) {
-          notify(result.error);
+          notify(result.error, undefined, key);
           setAttention(true);
         }
         if (result.code === "MAX_PER_ORDER") {
@@ -722,7 +751,7 @@ export function CartProvider({
     }
     if (!result.ok) {
       if (mounted.current) {
-        notify(result.error);
+        notify(result.error, undefined, key);
         setAttention(true);
       }
       await recoverRejected(key, revAtSend, "qty");
@@ -763,7 +792,10 @@ export function CartProvider({
       } finally {
         if (!user) return;
         jobs.current = Math.max(0, jobs.current - 1);
-        if (jobs.current === 0 && mounted.current) setSyncing(false);
+        if (jobs.current === 0 && mounted.current) {
+          setSyncing(false);
+          setPendingKeys((keys) => (keys.size ? new Set() : keys));
+        }
       }
     });
     chain.current = run.then(
@@ -786,6 +818,7 @@ export function CartProvider({
     const pulled = await pullServer("server-wins");
     if (!mounted.current) return;
     if (pulled === "failed") {
+      setLoadFailed(true);
       if (!staleDeployment.current) {
         notify(OFFLINE);
         setAttention(true);
@@ -845,10 +878,17 @@ export function CartProvider({
       noteGesture(key);
       bump(key, (previous === 0) !== (next === 0));
       put(item, next);
+      markPending(key);
       // Optimistic, contextual confirmation: announced once, from the provider, not per trigger.
-      if (next > previous && mounted.current) {
+      if (mounted.current) {
         const total = linesRef.current.reduce((sum, line) => sum + line.quantity, 0);
-        setAnnounce(`${item.name} added. ${total} in basket.`);
+        setAnnounce(
+          next > previous
+            ? `${item.name} added. ${total} in basket.`
+            : next === 0
+              ? `${item.name} removed. ${total} in basket.`
+              : `${item.name} down to ${next}. ${total} in basket.`,
+        );
       }
       void enqueue(drain, true);
     },
@@ -860,6 +900,7 @@ export function CartProvider({
       noteGesture(key);
       bump(key, (intentQty(key) === 0) !== (next === 0));
       put(item, next);
+      markPending(key);
       void enqueue(drain, true);
     },
     remove(key) {
@@ -908,9 +949,14 @@ export function CartProvider({
   const refreshCart = () =>
     enqueue(async () => {
       const pulled = await pullServer("server-wins");
+      if (pulled === "failed" && mounted.current) setLoadFailed(true);
       if (pulled === "failed" && mounted.current && !staleDeployment.current) {
         notify(OFFLINE);
         setAttention(true);
+      }
+      if (pulled !== "failed" && failedKeys.current.size === 0 && mounted.current) {
+        setAttention(false);
+        resolveNotice();
       }
     }, true);
 
@@ -952,25 +998,21 @@ export function CartProvider({
         loading,
         syncing,
         attention,
+        loadFailed,
+        pendingKeys,
+        announcement: announce,
         cartId,
         refreshCart,
         reportCartFailure,
       }}
     >
       {children}
-      <div
-        className="sr-only"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        data-testid="cart-announce"
-      >
-        {announce}
-      </div>
+      {/* The open drawer is modal, so the page's live region would be inert: it moves inside. */}
+      {!open && <CartAnnouncement testId="cart-announce" />}
       <Sheet
         open={open}
         onClose={closeCart}
-        title="Your cart"
+        title="Your basket"
         footer={
           lines.length ? (
             <div className={styles.summary}>
@@ -1005,6 +1047,7 @@ export function CartProvider({
           ) : undefined
         }
       >
+        {open && <CartAnnouncement testId="cart-announce" />}
         <p className={styles.muted}>{storeName}</p>
         {open && <AssistantSlot label="Shop with AI" />}
         {(sheetNotice || attention) && (
@@ -1033,17 +1076,29 @@ export function CartProvider({
             </button>
           </div>
         )}
-        {!lines.length ? (
+        {!lines.length && loading ? (
+          // Still reading the server cart: never a false "empty" (#708 P1).
+          <div className={styles.loadingLines} role="status" aria-label="Loading your basket">
+            <span />
+            <span />
+          </div>
+        ) : !lines.length && loadFailed ? (
           <div className={styles.empty}>
-            <ShoppingBag size={44} />
-            <h3>Your next good meal starts here</h3>
-            <p>Add something from the shelves to start your cart.</p>
-            <button
-              className={styles.primaryButton}
-              onClick={closeCart}
-            >
-              Start shopping
+            <CircleAlert size={40} aria-hidden />
+            <h3>We couldn&rsquo;t load your basket</h3>
+            <p>Check your connection, then try again.</p>
+            <button type="button" className={styles.primaryButton} onClick={() => void refreshCart()}>
+              Retry
             </button>
+          </div>
+        ) : !lines.length ? (
+          <div className={styles.empty}>
+            <ShoppingBag size={44} aria-hidden />
+            <h3>Your basket is empty</h3>
+            <p>Add something from the shelves to get started.</p>
+            <Link className={styles.primaryButton} href="/categories" onClick={closeCart}>
+              Browse aisles
+            </Link>
           </div>
         ) : (
           <ul className={styles.lines}>
@@ -1057,6 +1112,7 @@ export function CartProvider({
                 className={styles.line}
                 key={key}
                 data-unavailable={unavailable || undefined}
+                aria-busy={pendingKeys.has(key) || undefined}
                 aria-describedby={unavailable || overLimit ? issueId : undefined}
               >
                 <div className={`${styles.photo} sf-cart-photo`}>
@@ -1071,6 +1127,7 @@ export function CartProvider({
                   <p>
                     {money(line.price)}
                     {line.packLabel && ` / ${line.packLabel}`}
+                    {pendingKeys.has(key) && <span className={styles.updating}>Updating…</span>}
                   </p>
                   <Link
                     className={styles.swap}
@@ -1146,6 +1203,20 @@ export function CartProvider({
     </Context.Provider>
   );
 }
+/**
+ * The one polite status for cart changes. The provider renders it on the page and
+ * inside the open drawer; a modal sheet that adjusts quantities (quick view) renders
+ * its own, because the page's region is inert while a modal is open.
+ */
+export function CartAnnouncement({ testId }: { testId?: string }) {
+  const { announcement } = useCart();
+  return (
+    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid={testId}>
+      {announcement}
+    </div>
+  );
+}
+
 export function CartTrigger({
   className,
   children,

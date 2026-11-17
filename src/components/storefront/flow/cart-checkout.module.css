@@ -422,6 +422,21 @@
 .quoteRetry p {
   margin: 0;
 }
+/* Shown only when a sync takes long enough to notice, so quick saves never flash it (#717 AC4). */
+.updating {
+  margin-left: 8px;
+  color: var(--color-muted);
+  font-weight: 600;
+  animation: updatingIn 0s linear 300ms both;
+}
+@keyframes updatingIn {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
 /* A summary line the shopper must change: icon and words, never colour alone. */
 .miniLines li[data-problem] > span:first-child {
   font-weight: 600;

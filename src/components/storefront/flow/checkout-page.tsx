@@ -924,17 +924,26 @@ export function CheckoutPage({
   stripeConfig,
 }: CheckoutPageProps) {
   const ready = useCartReady();
-  const { lines, subtotal } = useCart();
+  const { lines, subtotal, loading, loadFailed, refreshCart } = useCart();
 
-  if (!ready) return <FlowLoading />;
+  // Loading, failed and empty are three different states, never one "empty" (#708 P1).
+  if (!ready || (loading && !lines.length)) return <FlowLoading />;
+  if (!lines.length && loadFailed)
+    return (
+      <div className={styles.page}>
+        <FlowHeading title="Checkout" />
+        <EmptyState title="We couldn’t load your basket" description="Check your connection, then try again.">
+          <Button type="button" onClick={() => void refreshCart()}>Retry</Button>
+        </EmptyState>
+      </div>
+    );
   if (!lines.length)
     return (
       <div className={styles.page}>
         <FlowHeading title="Checkout" />
-        <EmptyState
-          title="Your basket is waiting"
-          description="Add your favorites before checking out."
-        />
+        <EmptyState title="Your basket is empty" description="Add your favorites before checking out.">
+          <Link href="/categories" className="sf-button">Browse aisles</Link>
+        </EmptyState>
       </div>
     );
 
@@ -1858,7 +1867,9 @@ function DemoCheckoutPage({
     return (
       <div className={styles.page}>
         <FlowHeading title="Checkout" />
-        <EmptyState title="Your basket is waiting" description="Add your favorites before checking out." />
+        <EmptyState title="Your basket is empty" description="Add your favorites before checking out.">
+          <Link href="/categories" className="sf-button">Browse aisles</Link>
+        </EmptyState>
       </div>
     );
 

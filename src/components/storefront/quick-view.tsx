@@ -8,6 +8,7 @@ import { Sheet } from "./sheet";
 import { ProductImage } from "./product-image";
 import { PriceDisplay } from "./price-display";
 import { QuickAddStepper } from "./quick-add-stepper";
+import { CartAnnouncement } from "./cart-provider";
 import { selectQuickViewPack, type QuickViewDetailState } from "./quick-view-selection";
 
 export function QuickView({ listing, onClose }: { listing: StorefrontListing; onClose: () => void }) {
@@ -69,6 +70,8 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
 
   return (
     <Sheet open={open} onClose={close} title={`Quick view: ${listing.displayName}`}>
+      {/* The page's cart status is inert behind this modal, so the add is announced here. */}
+      <CartAnnouncement />
       <div className="sf-quick-view" data-testid="quick-view">
         <button
           type="button"

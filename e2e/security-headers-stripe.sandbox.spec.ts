@@ -47,7 +47,7 @@ test("real Payment Element renders under the report-only policy with zero violat
       });
     });
     await page.goto(`/?store=${slug}`);
-    await page.getByRole("button", { name: `Add ${name} to cart` }).click();
+    await page.getByRole("button", { name: `Add ${name} to basket` }).click();
     const cart = page.getByRole("button", { name: /basket/i }).first();
     await expect(cart.getByTestId("cart-count")).toHaveText("1");
     await expect(cart).not.toHaveAttribute("data-cart-pending");

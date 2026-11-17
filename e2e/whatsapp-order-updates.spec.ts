@@ -65,7 +65,7 @@ test("checkout offers WhatsApp updates only at a store with a registered number,
       value: "1",
       url: `http://localhost:${process.env.E2E_PORT || "3000"}`,
     }]);
-    const addButton = page.getByRole("button", { name: `Add ${name} to cart` });
+    const addButton = page.getByRole("button", { name: `Add ${name} to basket` });
     await expect(async () => {
       await page.goto(`/?store=${slug}`);
       await expect(addButton).toBeVisible();

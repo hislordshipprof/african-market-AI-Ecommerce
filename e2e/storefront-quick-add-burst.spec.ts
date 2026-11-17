@@ -535,10 +535,10 @@ test.describe("quick add limits and recovery", () => {
     await addGarri(page);
     await burst(garri(page).getByTestId("stepper-plus"), 3);
     await page.getByRole("button", { name: /basket/i }).click();
-    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await settle(page);
     // The drawer's "Removed Yellow Garri (Ijebu). Undo" bar names the item, so check the lines only.
-    await expect(page.getByRole("dialog", { name: "Your cart" }).getByRole("listitem").filter({ hasText: "Yellow Garri" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Your basket" }).getByRole("listitem").filter({ hasText: "Yellow Garri" })).toHaveCount(0);
     await page.reload();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     await expect(cartCount(page)).toHaveText("0");
@@ -1001,7 +1001,7 @@ test.describe("quick add limits and recovery", () => {
       await route.fallback();
     });
     await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
-    const sheet = page.getByRole("dialog", { name: "Your cart" });
+    const sheet = page.getByRole("dialog", { name: "Your basket" });
     await sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-minus").click();
     await expect.poll(() => held).toBe(true);
     await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
@@ -1056,7 +1056,7 @@ test.describe("quick add limits and recovery", () => {
       await route.fallback();
     });
     await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
-    const sheet = page.getByRole("dialog", { name: "Your cart" });
+    const sheet = page.getByRole("dialog", { name: "Your basket" });
     const curryRow = sheet.getByRole("listitem").filter({ hasText: "Curry Powder" });
     await curryRow.getByTestId("stepper-minus").click();
     await expect.poll(() => held).toBe(true);
@@ -1219,7 +1219,7 @@ test.describe("quick add recovery gaps", () => {
     await garri(page).getByTestId("quick-add-btn").click();
     await expect.poll(() => held).toBe(true);
     await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
-    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     release();
     await settle(page);
@@ -1601,7 +1601,7 @@ async function openSavedYellowCart(page: Page) {
 
 async function openSheet(page: Page) {
   await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
-  const sheet = page.getByRole("dialog", { name: "Your cart" });
+  const sheet = page.getByRole("dialog", { name: "Your basket" });
   await expect(sheet).toBeVisible();
   return sheet;
 }
@@ -1651,7 +1651,7 @@ test.describe("cart recovery after a failed write", () => {
     await expect(cartCount(page)).toHaveText("1");
     await settle(page);
     const sheet = await openSheet(page);
-    await expect(sheet.getByRole("heading", { name: "Your next good meal starts here" })).toHaveCount(0);
+    await expect(sheet.getByRole("heading", { name: "Your basket is empty" })).toHaveCount(0);
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toBeVisible();
     const lines = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(lines.find((line) => line.id === row!.id)?.qty).toBe(1);
@@ -1679,7 +1679,7 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect.poll(() => aborted).toBe(1);
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toBeVisible();
     await expect(cartCount(page)).toHaveText("1");
@@ -2392,7 +2392,7 @@ test.describe("cart recovery after a failed write", () => {
       substituteVariantId: row!.substituteVariantId,
     });
     await page.unroute("**/*");
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     await garri(page).getByTestId("stepper-plus").click();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("5");
     await settle(page);
@@ -2486,13 +2486,13 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => heldWrite).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     releaseWrite();
     await expect.poll(() => heldRead).toBe(true);
     await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
     releaseRead();
     await settle(page);
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     const saved = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(saved.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
@@ -2622,7 +2622,7 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => heldQty).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     release();
     await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
     await settle(page);
@@ -2667,12 +2667,12 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect.poll(() => firstReads).toBeGreaterThanOrEqual(2);
     await expect(sheet.getByText("Exact item only")).toBeVisible();
     await settle(page);
     phase = "choose";
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     await page.getByRole("button", { name: /Replace with/ }).click();
     await page.getByRole("button").filter({ hasText: "White Garri" }).first().click();
     await expect.poll(async () => {
@@ -2682,7 +2682,7 @@ test.describe("cart recovery after a failed write", () => {
     const chosen = await openSheet(page);
     await expect(chosen.getByText("Named substitute chosen")).toBeVisible();
     phase = "second";
-    await chosen.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await chosen.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect.poll(() => secondReads).toBeGreaterThanOrEqual(2);
     await expect(chosen.getByText("Named substitute chosen")).toBeVisible();
     await expect(chosen.getByText("Exact item only")).toHaveCount(0);
@@ -2715,7 +2715,7 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toHaveCount(0);
     const whiteRow = sheet.getByRole("listitem").filter({ hasText: "White Garri" });
     await whiteRow.getByTestId("stepper-plus").click();
@@ -2758,7 +2758,7 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toHaveCount(0);
     const whiteRow = sheet.getByRole("listitem").filter({ hasText: "White Garri" });
     await whiteRow.getByTestId("stepper-plus").click();
@@ -2836,10 +2836,10 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => heldDelete).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove White Garri from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove White Garri from basket" }).click();
     releaseDelete();
     await settle(page);
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     const removed = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(removed.filter((line) => line.variantId === "mn_garri_w_v1")).toHaveLength(0);
     expect(removed.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
@@ -3126,7 +3126,7 @@ test.describe("cart recovery after a failed write", () => {
     const atToast = actions;
     const countAtToast = await cartCount(page).innerText();
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove White Garri from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove White Garri from basket" }).click();
     await page.waitForTimeout(400);
     expect(actions).toBe(atToast);
     await expect(cartCount(page)).toHaveText(countAtToast);
@@ -3186,7 +3186,7 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => proved).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     recover = true;
     release();
     await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
@@ -3365,3 +3365,79 @@ test("cart recovery works with production Vercel flags and no provider keys", as
     await running.stop();
   }
 });
+
+test.describe("basket feedback states (#708 P1, #717 AC4)", () => {
+  test("a drawer alert clears once the same line saves again", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const sheet = await openSheet(page);
+    await page.evaluate(() => {
+      (window as Window & { __e2eRemovalResult?: unknown }).__e2eRemovalResult = {
+        ok: false,
+        error: "Please sign in again.",
+        code: "USER_NOT_FOUND",
+      };
+    });
+    await sheet.getByRole("button", { name: /^Remove Yellow Garri/ }).click();
+    await expect(sheet.getByRole("alert")).toContainText("Please sign in again.");
+    const row = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await expect(row.getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await page.evaluate(() => {
+      delete (window as Window & { __e2eRemovalResult?: unknown }).__e2eRemovalResult;
+    });
+    await row.getByTestId("stepper-plus").click();
+    await expect(row.getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    await expect(sheet.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("a basket line shows Updating while its change is in flight", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await page.goto(`${base}/cart`);
+    const row = page.locator("main").getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await expect(row.getByTestId("stepper-qty")).toHaveText("1");
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      if (isAction(request) && quantitiesIn(request.postData() ?? "").includes(2)) await held;
+      await route.fallback();
+    });
+    await row.getByTestId("stepper-plus").click();
+    await expect(row).toHaveAttribute("aria-busy", "true");
+    await expect(row.getByText("Updating…")).toBeVisible();
+    release();
+    await settle(page);
+    await expect(row).not.toHaveAttribute("aria-busy", "true");
+    await expect(row.getByText("Updating…")).toHaveCount(0);
+    await page.unroute("**/*");
+  });
+
+  test("the drawer tells a failed load from an empty basket, with Retry", async ({ page }) => {
+    await page.context().addCookies([{ name: "e2e_fail_cart_read", value: "1", url: base }]);
+    await page.goto(grains);
+    const sheet = await openSheet(page);
+    await expect(sheet.getByText("We couldn\u2019t load your basket")).toBeVisible();
+    await expect(sheet.getByText("Your basket is empty")).toHaveCount(0);
+    await page.context().clearCookies({ name: "e2e_fail_cart_read" });
+    await sheet.getByRole("button", { name: "Retry" }).click();
+    await expect(sheet.getByText("Your basket is empty")).toBeVisible();
+    await expect(sheet.getByRole("link", { name: "Browse aisles" })).toBeVisible();
+  });
+
+  test("a change made in the drawer is announced once, inside the dialog", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const sheet = await openSheet(page);
+    const row = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await row.getByTestId("stepper-plus").click();
+    await expect(page.getByTestId("cart-announce")).toHaveCount(1);
+    await expect(sheet.getByTestId("cart-announce")).toContainText("2 in basket");
+    await row.getByTestId("stepper-minus").click();
+    await expect(sheet.getByTestId("cart-announce")).toContainText("1 in basket");
+    await settle(page);
+  });
+});
+

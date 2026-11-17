@@ -17,9 +17,9 @@ async function asStore<T>(prisma: PrismaClient, storeId: string, work: (tx: Para
 async function addToCart(page: Page, slug: string, name: string) {
   await expect(async () => {
     await page.goto(`/?store=${slug}`);
-    await expect(page.getByRole("button", { name: `Add ${name} to cart` })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Add ${name} to basket` })).toBeVisible();
   }).toPass({ timeout: 20_000 });
-  await page.getByRole("button", { name: `Add ${name} to cart` }).click();
+  await page.getByRole("button", { name: `Add ${name} to basket` }).click();
   await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("1");
   await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
 }

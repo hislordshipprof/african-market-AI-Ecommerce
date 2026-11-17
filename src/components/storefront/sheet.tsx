@@ -81,7 +81,7 @@ export function Sheet({
           <button
             type="button"
             className={styles.iconButton}
-            aria-label={title === "Your cart" ? "Close cart" : `Close ${title}`}
+            aria-label={title === "Your basket" ? "Close basket" : `Close ${title}`}
             onClick={onClose}
           >
             <X size={22} />
