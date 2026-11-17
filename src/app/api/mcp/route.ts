@@ -7,6 +7,8 @@ import { takeRateLimit } from "@/lib/rate-limit/app-limiter";
 
 const CALLS_PER_MINUTE = 60;
 const WINDOW_MS = 60_000;
+// Tool inputs are a search phrase, an id or a street address.
+const MAX_BODY_BYTES = 64 * 1024;
 
 /**
  * The host the agent called, which the proxy resolved the store from. `request.url` is not it:
@@ -38,8 +40,11 @@ async function handle(request: Request): Promise<Response> {
     return Response.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
   }
 
-  const handler = createMcpHandler(() => catalogServer({ store, origin, ip }), { responseMode: "json" });
+  const handler = createMcpHandler(() => catalogServer({ store, origin, ip }), { responseMode: "json", maxRequestBodySize: MAX_BODY_BYTES });
   return handler.fetch(request);
 }
 
-export { handle as GET, handle as POST, handle as DELETE };
+// GET and DELETE are 2025 session operations; the stateless SDK answers them 405.
+export const GET = handle;
+export const POST = handle;
+export const DELETE = handle;
