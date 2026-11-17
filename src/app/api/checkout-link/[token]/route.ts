@@ -3,7 +3,7 @@ import { z } from "zod";
 import { CART_COOKIE, serializeCartCookie } from "@/lib/cart/cookies";
 import { findStoreForHeaders } from "@/lib/get-store";
 import { parseInput } from "@/lib/security/parse-input";
-import { redeemCheckoutLink } from "@/lib/whatsapp/checkout-link";
+import { redeemCheckoutLink } from "@/lib/cart/checkout-link";
 
 export const dynamic = "force-dynamic";
 

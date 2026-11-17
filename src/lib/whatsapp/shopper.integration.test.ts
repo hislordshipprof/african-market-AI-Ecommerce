@@ -13,7 +13,7 @@ import { setWhatsAppProvider } from "./index";
 import { linkStoreNumber } from "./store-number";
 import { shopperSenderKey } from "./token-box";
 import { handleStoreInboundMessage } from "./store-inbound";
-import { CHECKOUT_LINK_TTL_MS, redeemCheckoutLink } from "./checkout-link";
+import { CHECKOUT_LINK_TTL_MS, redeemCheckoutLink } from "../cart/checkout-link";
 import { SHOPPER_TURNS_PER_HOUR, TYPE_YOUR_LIST_REPLY } from "./shopper";
 import type { InboundMessage } from "./webhook-payload";
 

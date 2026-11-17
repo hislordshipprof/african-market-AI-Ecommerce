@@ -6,7 +6,7 @@ import { assistantChatEnabled } from "../assistant/contract";
 import { money } from "../format";
 import { storePageUrl } from "../notifications/tracking-url";
 import { takeRateLimit } from "../rate-limit/app-limiter";
-import { checkoutLinkPath, createCheckoutLink } from "./checkout-link";
+import { checkoutLinkPath, createCheckoutLink } from "../cart/checkout-link";
 import { messageRef } from "./code";
 import { whatsappErrorCode } from "./errors";
 import { getWhatsAppProvider } from "./index";
