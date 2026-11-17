@@ -25,6 +25,8 @@ export default async function ListingsPage() {
         shippable: l.shippable,
         prepared: l.prepared,
         prepMinutes: l.prepMinutes,
+        cateringLeadHours: l.cateringLeadHours,
+        cateringMinQty: l.cateringMinQty,
         active: l.active,
         maxPerOrder: l.maxPerOrder,
         variants: l.variants.map((v) => ({
