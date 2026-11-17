@@ -218,6 +218,8 @@ if [ "$SCOPE" = pipeline ]; then
   echo "local-ci PASSED on $SHA (pipeline scope)"
   exit 0
 fi
+# A high or critical advisory in a production dependency fails the run (#715).
+step audit pnpm audit --prod --audit-level=high || fail audit "no retry"
 step typecheck pnpm typecheck || fail typecheck "no retry"
 step lint pnpm lint || fail lint "no retry"
 if [ "$SCOPE" = tests ]; then
