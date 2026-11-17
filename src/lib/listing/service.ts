@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { shippableRefusal } from "../shipping/eligibility";
 import { storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lockListingVariantRows } from "../db";
 import { MAX_PREP_MINUTES, PREPARED_NEEDS_ALLERGENS, preparedSaleBlocked, type PreparedKind } from "./prepared";
+import { cateringFields } from "./catering";
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
@@ -134,6 +135,9 @@ export interface CreateListingInput {
   /** #570: hot or cold prepared food, with its prep minutes; null for grocery. */
   prepared?: PreparedKind | null;
   prepMinutes?: number | null;
+  /** #571: catering lead hours and minimum quantity, both or neither; prepared only. */
+  cateringLeadHours?: number | null;
+  cateringMinQty?: number | null;
   maxPerOrder?: number | null;
   variants: CreateVariantInput[];
   actor: Actor;
@@ -163,6 +167,7 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
     status: input.status ?? undefined,
   });
   const prepared = preparedFields(input.prepared ?? null, input.prepMinutes ?? null);
+  const catering = cateringFields(prepared.prepared, input.cateringLeadHours ?? null, input.cateringMinQty ?? null);
 
   const listing = await tx.listing.create({
     data: {
@@ -176,6 +181,7 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
       frozen: input.frozen,
       perishable: input.perishable,
       ...prepared,
+      ...catering,
       // A new listing has no owner-stated allergens yet, so a prepared one waits off sale.
       active: !preparedSaleBlocked(prepared, null),
       maxPerOrder: input.maxPerOrder ?? null,
@@ -215,6 +221,8 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
         perishable: listing.perishable,
         prepared: listing.prepared,
         prepMinutes: listing.prepMinutes,
+        cateringLeadHours: listing.cateringLeadHours,
+        cateringMinQty: listing.cateringMinQty,
         active: listing.active,
         ...(input.source ? { source: input.source } : {}),
       },
@@ -242,6 +250,9 @@ export interface UpdateListingInput {
   /** Both together: a kind with its prep minutes, or null to make it grocery again. */
   prepared?: PreparedKind | null;
   prepMinutes?: number | null;
+  /** Both together, or null to stop selling it as catering. Making the listing grocery clears them. */
+  cateringLeadHours?: number | null;
+  cateringMinQty?: number | null;
   maxPerOrder?: number | null;
   actor: Actor;
   variants?: SaveVariantInput[];
@@ -280,6 +291,12 @@ export async function updateListing(input: UpdateListingInput) {
       heldForAllergens = existing.active && preparedSaleBlocked(prepared, own?.allergensStatus);
       if (heldForAllergens) data.active = false;
     }
+    if (input.cateringLeadHours !== undefined || input.prepared === null) {
+      const prepared = input.prepared !== undefined ? input.prepared : existing.prepared;
+      Object.assign(data, prepared == null
+        ? { cateringLeadHours: null, cateringMinQty: null }
+        : cateringFields(prepared, input.cateringLeadHours ?? null, input.cateringMinQty ?? null));
+    }
 
     const resolvedStockMode = input.stockMode ?? existing.stockMode;
 
@@ -314,7 +331,10 @@ export async function updateListing(input: UpdateListingInput) {
       : null;
     const updated = { ...listing, stockMoved, heldForAllergens };
 
-    if (input.prepared !== undefined && (existing.prepared !== listing.prepared || existing.prepMinutes !== listing.prepMinutes)) {
+    if (
+      existing.prepared !== listing.prepared || existing.prepMinutes !== listing.prepMinutes
+      || existing.cateringLeadHours !== listing.cateringLeadHours || existing.cateringMinQty !== listing.cateringMinQty
+    ) {
       await tx.auditLog.create({
         data: {
           storeId: input.storeId,
@@ -323,8 +343,8 @@ export async function updateListing(input: UpdateListingInput) {
           action: "listing.prepared_change",
           entityType: "listing",
           entityId: input.listingId,
-          before: { prepared: existing.prepared, prepMinutes: existing.prepMinutes, active: existing.active },
-          after: { prepared: listing.prepared, prepMinutes: listing.prepMinutes, active: listing.active },
+          before: { prepared: existing.prepared, prepMinutes: existing.prepMinutes, cateringLeadHours: existing.cateringLeadHours, cateringMinQty: existing.cateringMinQty, active: existing.active },
+          after: { prepared: listing.prepared, prepMinutes: listing.prepMinutes, cateringLeadHours: listing.cateringLeadHours, cateringMinQty: listing.cateringMinQty, active: listing.active },
         },
       });
     }

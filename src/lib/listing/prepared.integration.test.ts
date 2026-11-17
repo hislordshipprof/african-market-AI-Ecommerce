@@ -7,6 +7,7 @@ import { updateLineSwapRule } from "../cart/service";
 import { defaultPrepEstimate } from "../order/service";
 import { createListing, reactivateListing, updateListing } from "./service";
 import { PREPARED_NEEDS_ALLERGENS } from "./prepared";
+import { CATERING_NEEDS_PREPARED } from "./catering";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t570-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -124,5 +125,19 @@ describe.skipIf(!hasDb)("prepared food listings (#570)", () => {
     // Store prep 30 + the hot dish's 25 (the cold one is made alongside it).
     expect(await defaultPrepEstimate(storeA, order.id, 30)).toBe(55);
     expect(await defaultPrepEstimate(storeB, order.id, 30)).toBe(30);
+  });
+
+  it("#571 AC1: a prepared listing can be catering with a lead time and minimum; grocery cannot, and going back to grocery clears it", async () => {
+    const tray = await jollof(storeA, { prepared: "hot", prepMinutes: 30, cateringLeadHours: 48, cateringMinQty: 10 });
+    expect(tray).toMatchObject({ cateringLeadHours: 48, cateringMinQty: 10 });
+    await expect(jollof(storeA, { cateringLeadHours: 24, cateringMinQty: 2 })).rejects.toThrow(CATERING_NEEDS_PREPARED);
+    // Five days leaves no slot inside the 5-day hold.
+    await expect(updateListing({ storeId: storeA, listingId: tray.id, cateringLeadHours: 120, cateringMinQty: 10, actor }))
+      .rejects.toThrow(/lead time/);
+    expect(await updateListing({ storeId: storeA, listingId: tray.id, cateringLeadHours: 4, cateringMinQty: 1, actor }))
+      .toMatchObject({ cateringLeadHours: 4, cateringMinQty: 1 });
+    expect(await updateListing({ storeId: storeA, listingId: tray.id, prepared: null, actor }))
+      .toMatchObject({ prepared: null, cateringLeadHours: null, cateringMinQty: null });
+    await expect(updateListing({ storeId: storeB, listingId: tray.id, cateringLeadHours: 24, cateringMinQty: 1, actor })).rejects.toThrow();
   });
 });

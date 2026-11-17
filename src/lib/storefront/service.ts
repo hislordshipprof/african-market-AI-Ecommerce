@@ -46,6 +46,9 @@ async function readGetFlowCatalog(
       categoryId: listing.masterProduct?.categoryId ?? "uncategorized",
       frozen: listing.frozen,
       prepared: isPreparedKind(listing.prepared) ? listing.prepared : null,
+      catering: listing.cateringLeadHours != null && listing.cateringMinQty != null
+        ? { leadHours: listing.cateringLeadHours, minQty: listing.cateringMinQty }
+        : null,
       maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
       available:
         !(listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) &&

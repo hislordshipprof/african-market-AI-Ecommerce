@@ -256,6 +256,7 @@ async function untaxedQuote(
     frozen: line.variant.listing.frozen,
     perishable: line.variant.listing.perishable,
     hot: line.variant.listing.prepared === "hot",
+    minQty: line.variant.listing.cateringMinQty,
   }));
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
     const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee, null, null, coupon);
@@ -789,6 +790,7 @@ export async function recordAuthorizedOrder(
         frozen: line.variant.listing.frozen,
         perishable: line.variant.listing.perishable,
         hot: line.variant.listing.prepared === "hot",
+        minQty: line.variant.listing.cateringMinQty,
       }));
       if (!sameBasket(current, input.lines)) throw new BasketChangedError();
       const shipping = input.fulfillment === "ship"
@@ -1021,6 +1023,7 @@ function cartLinesToOrderLines(
   ships: boolean;
   weightG: number;
   hot: boolean;
+  minQty: number | null;
 }> {
   return cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -1035,6 +1038,7 @@ function cartLinesToOrderLines(
     ships: l.variant.ships,
     weightG: l.variant.weightG,
     hot: l.variant.listing.prepared === "hot",
+    minQty: l.variant.listing.cateringMinQty,
   }));
 }
 
@@ -1347,6 +1351,7 @@ export async function placeOrder(
     frozen: l.frozen,
     perishable: l.perishable,
     hot: l.hot,
+    minQty: l.minQty,
   }));
   const [storeRow, serviceFee, coupon] = await Promise.all([
     platform.store.findUnique({ where: { id: storeId } }),
