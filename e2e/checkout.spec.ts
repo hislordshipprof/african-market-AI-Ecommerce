@@ -336,3 +336,120 @@ test("a hung address check settles to a failure and frees the button (#708)", as
     await prisma.$disconnect();
   }
 });
+
+/** A real-payment store with one $40 listing, so the minimum and availability come from the server. */
+async function realStore(prefix: string, minimumOrderCents: number) {
+  const slug = `${prefix}-${Date.now().toString(36)}`;
+  const name = `Basket Yam ${slug}`;
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  const store = await prisma.store.create({
+    data: {
+      slug,
+      name: "Basket Lane",
+      themePreset: "palm-and-shea",
+      stripeOnboardingStatus: "complete",
+      stripeAccountId: `acct_${slug.replace(/[^a-z0-9]/g, "").slice(0, 20)}`,
+      pickupEnabled: true,
+      minimumOrderCents,
+      addressLine1: "8400 Park Place Blvd",
+      city: "Houston",
+      state: "TX",
+      zip: "77017",
+      lat: 29.693857800118,
+      lng: -95.266257879374,
+    },
+  });
+  const listingId = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+    const listing = await tx.listing.create({
+      data: { storeId: store.id, customName: name, price: 4000, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 } });
+    return listing.id;
+  });
+  async function asStore<T>(run: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<T>) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      return run(tx);
+    });
+  }
+  async function cleanup() {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.cartLine.deleteMany({ where: { storeId: store.id } });
+      await tx.cart.deleteMany({ where: { storeId: store.id } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
+      await tx.listing.deleteMany({ where: { storeId: store.id } });
+      await tx.auditLog.deleteMany({ where: { storeId: store.id } });
+    });
+    await prisma.store.delete({ where: { id: store.id } });
+    await prisma.$disconnect();
+  }
+  return { slug, name, listingId, asStore, cleanup };
+}
+
+async function addOneAndOpenCheckout(page: import("@playwright/test").Page, slug: string, name: string) {
+  await page.context().addCookies([{ name: "e2e_stripe_harness", value: "1", url: `http://localhost:${process.env.E2E_PORT || "3000"}` }]);
+  const addButton = page.getByRole("button", { name: `Add ${name} to basket` });
+  await expect(async () => {
+    await page.goto(`/?store=${slug}`);
+    await expect(addButton).toBeVisible();
+  }).toPass({ timeout: 20_000 });
+  await addButton.click();
+  await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("1");
+  await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
+  await expect(async () => {
+    await page.goto(`/checkout?store=${slug}`);
+    await expect(page.getByRole("heading", { name: "Contact details" })).toBeVisible();
+  }).toPass({ timeout: 20_000 });
+}
+
+test("fixing a below-minimum basket in the checkout drawer re-enables Pay (#708 P1)", async ({ page }) => {
+  test.setTimeout(90_000);
+  const fixture = await realStore("minimum", 5000);
+  try {
+    await addOneAndOpenCheckout(page, fixture.slug, fixture.name);
+    const pay = page.getByRole("button", { name: /Place order/ });
+    const review = page.locator("#review");
+    // $40 under a $50 minimum: Pay is off, with the reason beside the lines.
+    await expect(review.getByRole("alert")).toContainText(/minimum/i, { timeout: 20_000 });
+    await expect(pay).toBeDisabled();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$/ }).click();
+    const sheet = page.getByRole("dialog");
+    await sheet.getByRole("listitem").filter({ hasText: fixture.name }).getByTestId("stepper-plus").click();
+    await expect(sheet.getByRole("listitem").filter({ hasText: fixture.name }).getByTestId("stepper-qty")).toHaveText("2");
+    await page.keyboard.press("Escape");
+    await expect(review.getByRole("alert")).toHaveCount(0, { timeout: 20_000 });
+    await expect(pay).toBeEnabled({ timeout: 20_000 });
+    await expect(review).toContainText("2 × ");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("a line the store stopped selling blocks Pay and is highlighted with Review basket (#708 P1)", async ({ page }) => {
+  test.setTimeout(90_000);
+  const fixture = await realStore("gone", 0);
+  try {
+    await addOneAndOpenCheckout(page, fixture.slug, fixture.name);
+    const pay = page.getByRole("button", { name: /Place order/ });
+    await expect(pay).toBeEnabled({ timeout: 20_000 });
+    await fixture.asStore((tx) => tx.listing.update({ where: { id: fixture.listingId }, data: { active: false } }));
+    await page.reload();
+    const review = page.locator("#review");
+    const line = review.locator("li[data-problem]");
+    await expect(line).toHaveCount(1, { timeout: 20_000 });
+    await expect(line).toContainText(fixture.name);
+    await expect(line).toContainText("No longer available");
+    const alert = review.getByRole("alert");
+    await expect(alert.getByRole("link", { name: "Review basket" })).toHaveAttribute("href", "/cart");
+    await expect(pay).toBeDisabled();
+    const describedBy = await pay.getAttribute("aria-describedby");
+    expect(describedBy).toBe(await alert.getAttribute("id"));
+  } finally {
+    await fixture.cleanup();
+  }
+});

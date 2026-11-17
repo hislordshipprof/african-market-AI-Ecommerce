@@ -65,3 +65,18 @@ export function basketQuoteView(
   if (response.quote.subtotalCents !== subtotalCents) return { kind: "fallback" };
   return { kind: "quote", quote: response.quote };
 }
+
+/**
+ * What a checkout quote was asked for: the form and the basket. A quote held for an older
+ * key is stale, so a basket changed in the drawer is quoted again before Pay opens (#708 P1).
+ */
+export function checkoutQuoteKey(input: {
+  contact: unknown;
+  fulfillment: Fulfillment;
+  delivery: unknown;
+  couponRev: number;
+  lines: readonly { listingId: string; variantId?: string; quantity: number }[];
+}): string {
+  const basket = input.lines.map((line) => [line.listingId, line.variantId ?? null, line.quantity]);
+  return JSON.stringify({ contact: input.contact, fulfillment: input.fulfillment, delivery: input.delivery, couponRev: input.couponRev, basket });
+}

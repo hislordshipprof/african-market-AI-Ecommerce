@@ -1,5 +1,6 @@
 import type { FlowErrorCode, FlowProblem } from "@/lib/customer-flow/contracts";
 import { validPhone } from "@/lib/customer-account/phone";
+import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
 
 /**
  * Where a checkout failure is shown, so the message sits beside the control it
@@ -47,6 +48,25 @@ export function issueFromProblems(problems: readonly FlowProblem[]): CheckoutIss
     };
   }
   return null;
+}
+
+/** Lines the shopper must change before paying: over the per-order limit, or no longer sold (#717 AC2). */
+export function flaggedLineKeys(lines: readonly CartLine[]): string[] {
+  return lines
+    .filter((line) => line.available === false || (line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder))
+    .map((line) => cartItemKey(line));
+}
+
+/**
+ * Why Pay stays off in checkout: a basket problem from the live quote, or a line the basket
+ * already knows is unavailable or over its limit, even before any quote arrives (#708 P1).
+ */
+export function checkoutBasketBlock(problems: readonly FlowProblem[] | null, lines: readonly CartLine[]): CheckoutIssue | null {
+  const known = flaggedLineKeys(lines);
+  const quoted = problems ? issueFromProblems(basketBlockingProblems(problems)) : null;
+  if (quoted) return { ...quoted, lineKeys: [...new Set([...quoted.lineKeys, ...known])] };
+  if (!known.length) return null;
+  return { section: "basket", message: "Remove or change the marked items to check out.", lineKeys: known };
 }
 
 /** A thrown step failure: placed by the code the step attached, never by its wording. */

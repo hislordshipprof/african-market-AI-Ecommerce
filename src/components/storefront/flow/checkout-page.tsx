@@ -14,7 +14,7 @@ import {
 import { useCart } from "../cart-provider";
 import { Button, Chip, EmptyState } from "../primitives";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
-import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
+import { cartItemKey } from "@/lib/storefront/cart-store";
 import { cateringLeadText } from "@/lib/listing/catering";
 import { clearCart } from "@/lib/cart/actions";
 import {
@@ -44,8 +44,9 @@ import {
 import { PayButton } from "./feedback";
 import { CheckoutIssueAlert, type IssueActions } from "./checkout-issue-alert";
 import {
-  basketBlockingProblems,
+  checkoutBasketBlock,
   contactErrors,
+  flaggedLineKeys,
   firstInvalidContactField,
   issueFromError,
   issueFromProblems,
@@ -54,7 +55,7 @@ import {
 } from "@/lib/checkout/checkout-issue";
 import { settleWithTimeout } from "./settle";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
-import { placeOrderLabel } from "@/lib/checkout/summary";
+import { checkoutQuoteKey, placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
@@ -295,13 +296,6 @@ function StoreDeliveryFields({
   );
 }
 
-/** Lines the shopper must change before paying: over the per-order limit, or no longer sold (#717 AC2). */
-function flaggedLineKeys(lines: readonly CartLine[]): string[] {
-  return lines
-    .filter((line) => line.available === false || (line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder))
-    .map((line) => cartItemKey(line));
-}
-
 /** After "Use another card": the card entry gets focus, or the payment section when the entry is simulated. */
 function focusPaymentEntry(card?: { focus?: () => void } | null) {
   requestAnimationFrame(() => {
@@ -325,7 +319,7 @@ function RealCheckoutForm({
   catalog: ShoppingFlowProps["catalog"];
   stripeConfig: StripeConfig;
 }) {
-  const { lines, subtotal, refreshCart } = useCart();
+  const { lines, subtotal, refreshCart, syncing } = useCart();
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
@@ -413,7 +407,8 @@ function RealCheckoutForm({
         leaveAtDoor: fulfillment !== "ship" && !handoff && leaveAtDoor,
       }
     : undefined;
-  const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
+  // The basket is part of the key: a change made in the drawer is quoted again (#708 P1).
+  const currentKey = checkoutQuoteKey({ contact, fulfillment, delivery, couponRev, lines });
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
@@ -438,6 +433,12 @@ function RealCheckoutForm({
 
   useEffect(() => {
     let active = true;
+    const key = currentKey;
+    // The quote reads the server basket, so it waits for the drawer's change to land; a sync that never does still fails visibly.
+    if (syncing) {
+      const stuck = setTimeout(() => { if (active) setQuoteFailed(true); }, QUOTE_TIMEOUT_MS);
+      return () => { active = false; clearTimeout(stuck); };
+    }
     const timer = setTimeout(() => {
       // Always settles: a rejected or hanging quote ends in a visible failure, not a stuck UI (#708 AC2b).
       settleWithTimeout(() => quoteCheckoutAction(contact, fulfillment, delivery), QUOTE_TIMEOUT_MS).then((settled) => {
@@ -451,7 +452,7 @@ function RealCheckoutForm({
         if (result.ok) {
           setQuote(result.quote);
           setSlotOptions(result.slots);
-          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery, couponRev }));
+          setQuoteKey(key);
           setQuoteFailed(false);
           setQuoteFailMessage(undefined);
         } else {
@@ -462,9 +463,9 @@ function RealCheckoutForm({
       });
     }, 300);
     return () => { active = false; clearTimeout(timer); };
-    // currentKey already covers contact, fulfillment, and the confirmed address; quoteNonce drives Retry.
+    // currentKey already covers contact, fulfillment, the confirmed address and the basket; quoteNonce drives Retry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentKey, quoteNonce]);
+  }, [currentKey, quoteNonce, syncing]);
 
   function retryQuote() {
     setQuoteFailed(false);
@@ -1156,8 +1157,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
   const phoneInvalid = Boolean(fieldErrors.phone);
   const emailInvalid = Boolean(fieldErrors.email);
 
-  // Basket problems the live estimate already knows: Pay stays off, with the reason beside the lines.
-  const blocking = quote && !quotePending ? issueFromProblems(basketBlockingProblems(quote.problems)) : null;
+  // Basket problems the live estimate or the basket itself already knows: Pay stays off, with the reason beside the lines.
+  const blocking = checkoutBasketBlock(quote && !quotePending ? quote.problems : null, lines);
   const basketIssue = issue?.section === "basket" ? issue : blocking;
   const flagged = new Set(basketIssue ? [...basketIssue.lineKeys, ...flaggedLineKeys(lines)] : []);
   const issueId = (section: IssueSection) => `checkout-issue-${section}`;

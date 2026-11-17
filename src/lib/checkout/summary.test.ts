@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CheckoutQuote } from "../customer-flow/contracts";
-import { basketQuoteView, orderSummary } from "./summary";
+import { basketQuoteView, checkoutQuoteKey, orderSummary } from "./summary";
 
 function quote(overrides: Partial<CheckoutQuote> = {}): CheckoutQuote {
   return {
@@ -99,5 +99,30 @@ describe("basketQuoteView", () => {
   it("settles to the checkout fallback on an error or a timeout", () => {
     expect(basketQuoteView({ key, outcome: "error" }, key, 4194)).toEqual({ kind: "fallback" });
     expect(basketQuoteView({ key, outcome: "timeout" }, key, 4194)).toEqual({ kind: "fallback" });
+  });
+});
+
+describe("checkoutQuoteKey (#708 P1)", () => {
+  const contact = { name: "Ada", phone: "2025550199", email: "ada@example.com" };
+  const garri = { listingId: "garri", variantId: "1kg", name: "Garri", price: 4000, quantity: 1 };
+  const yam = { listingId: "yam", variantId: undefined, name: "Yam", price: 900, quantity: 2 };
+  const key = (lines: { listingId: string; variantId?: string; quantity: number }[]) =>
+    checkoutQuoteKey({ contact, fulfillment: "pickup", delivery: undefined, couponRev: 0, lines });
+
+  it("a basket changed in checkout makes the held quote stale, so it is asked again", () => {
+    const held = key([garri]);
+    expect(key([{ ...garri, quantity: 2 }])).not.toBe(held);
+    expect(key([garri, yam])).not.toBe(held);
+    expect(key([])).not.toBe(held);
+  });
+
+  it("the same basket and form keep the quote current", () => {
+    expect(key([garri, yam])).toBe(key([{ ...garri }, { ...yam }]));
+  });
+
+  it("the form still counts: a new fulfillment is a new quote", () => {
+    const pickup = key([garri]);
+    const ship = checkoutQuoteKey({ contact, fulfillment: "ship", delivery: undefined, couponRev: 0, lines: [garri] });
+    expect(ship).not.toBe(pickup);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   basketBlockingProblems,
+  checkoutBasketBlock,
   contactErrors,
   firstInvalidContactField,
   issueFromError,
@@ -65,5 +66,34 @@ describe("contact validation and first invalid field (#708 AC3)", () => {
     const contact = { name: "Ada Obi", phone: "(202) 555-0199", email: "ada@example.com" };
     expect(contactErrors(contact)).toEqual({});
     expect(firstInvalidContactField(contact)).toBeNull();
+  });
+});
+
+describe("what blocks Pay in checkout (#708 P1)", () => {
+  const line = { listingId: "listing-garri", variantId: "variant-1kg", name: "Yellow Garri", price: 4000, quantity: 1 };
+  const yam = { listingId: "listing-yam", name: "Yam", price: 900, quantity: 1 };
+
+  it("a line the basket knows is unavailable blocks Pay before any quote arrives", () => {
+    const block = checkoutBasketBlock(null, [{ ...line, available: false }, yam]);
+    expect(block?.section).toBe("basket");
+    expect(block?.lineKeys).toEqual([GARRI]);
+    expect(block?.message).toBeTruthy();
+  });
+
+  it("a line over its per-order limit blocks Pay too", () => {
+    expect(checkoutBasketBlock([], [{ ...line, quantity: 3, maxPerOrder: 2 }])?.lineKeys).toEqual([GARRI]);
+  });
+
+  it("a basket problem from the quote still blocks, with the server's reason and the known lines", () => {
+    const block = checkoutBasketBlock(
+      [{ code: "minimum-order", message: "Minimum order is $50." }],
+      [{ ...line, available: false }],
+    );
+    expect(block).toEqual({ section: "basket", message: "Minimum order is $50.", lineKeys: [GARRI] });
+  });
+
+  it("nothing blocks a sellable basket, whatever the contact fields say", () => {
+    expect(checkoutBasketBlock([{ code: "invalid-contact", message: "Required." }], [line, yam])).toBeNull();
+    expect(checkoutBasketBlock(null, [{ ...line, available: true, maxPerOrder: 1 }])).toBeNull();
   });
 });
