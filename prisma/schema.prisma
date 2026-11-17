@@ -130,6 +130,7 @@ model Store {
   whatsAppOptOuts        WhatsAppOptOut[]
   whatsAppShopperCarts   WhatsAppShopperCart[]
   whatsAppCheckoutLinks  WhatsAppCheckoutLink[]
+  acpCheckoutSessions    AcpCheckoutSession[]
   driverRoutes           DriverRoute[]
   pickBatches            PickBatch[]
   notifiedStoreRequests  DirectoryStoreRequest[]
@@ -1233,6 +1234,7 @@ model Cart {
   guestBrowserCarts     GuestBrowserCart[]
   whatsAppShopperCarts  WhatsAppShopperCart[]
   whatsAppCheckoutLinks WhatsAppCheckoutLink[]
+  acpCheckoutSession    AcpCheckoutSession?
 
   @@index([storeId])
   @@index([storeId, userId])
@@ -2302,6 +2304,28 @@ model WhatsAppCheckoutLink {
   @@index([storeId])
   @@index([cartId])
   @@map("whatsapp_checkout_links")
+}
+
+/// An Agentic Commerce Protocol checkout session (#574): an AI agent's cart at one store, which it pays with a delegated token.
+model AcpCheckoutSession {
+  id              String   @id @default(cuid())
+  storeId         String   @map("store_id")
+  cartId          String   @unique @map("cart_id")
+  /// open, complete_in_progress, completed or canceled. Ready for payment or not is worked out from the quote.
+  status          String   @default("open")
+  buyerName       String?  @map("buyer_name")
+  buyerEmail      String?  @map("buyer_email")
+  buyerPhone      String?  @map("buyer_phone")
+  paymentIntentId String?  @map("payment_intent_id")
+  orderId         String?  @map("order_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("acp_checkout_sessions")
 }
 
 /// A discount code a store owner creates (#556). The store funds it. Codes are stored upper-case.
