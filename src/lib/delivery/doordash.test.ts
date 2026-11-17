@@ -94,6 +94,23 @@ describe("DoorDashDriveProvider", () => {
     });
   });
 
+  it("keeps a tracking link only when it is https, on create and on a webhook", async () => {
+    const { fake } = setup();
+    const doFetch: typeof fetch = async (input, init) => {
+      const res = await fake.fetch(input as string, init);
+      if (!String(input).endsWith("/accept")) return res;
+      return Response.json({ ...(await res.json()), tracking_url: "javascript:alert(document.cookie)" }, { status: res.status });
+    };
+    const provider = new DoorDashDriveProvider({ env: keys, fetch: doFetch, now: () => now });
+    const quote = await provider.quote(request);
+    expect((await provider.create(quote.quoteId, request)).trackingUrl).toBeNull();
+
+    const authorization = "Basic d2ViaG9vazpzZWNyZXQ=";
+    const hooked = new DoorDashDriveProvider({ env: { ...keys, DOORDASH_WEBHOOK_AUTHORIZATION: authorization } });
+    const raw = JSON.stringify({ event_name: "DASHER_CONFIRMED", external_delivery_id: "ord_123-1", created_at: "2026-11-12T15:10:00Z", tracking_url: "javascript:alert(1)" });
+    expect(hooked.handleWebhook(raw, new Headers({ authorization })).trackingUrl).toBeNull();
+  });
+
   it("maps DoorDash webhook events to platform delivery events", () => {
     const authorization = "Basic d2ViaG9vazpzZWNyZXQ=";
     const provider = new DoorDashDriveProvider({ env: { ...keys, DOORDASH_WEBHOOK_AUTHORIZATION: authorization } });

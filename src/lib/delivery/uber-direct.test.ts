@@ -156,6 +156,22 @@ describe("UberDirectProvider", () => {
     await expect(slow.provider.quote(request)).rejects.toMatchObject({ provider: "uber", status: 504, code: "timeout" });
   });
 
+  it("keeps a tracking link only when it is https, on create and on a webhook", async () => {
+    const { provider } = setup({
+      api: async () => Response.json({ id: "del_js", tracking_url: "javascript:alert(document.cookie)" }),
+    });
+    expect((await provider.create("dqt_x", request)).trackingUrl).toBeNull();
+
+    const signingKey = "whsec-test-key";
+    const hooked = new UberDirectProvider({ env: { ...setup().keys, UBER_DIRECT_WEBHOOK_SIGNING_KEY: signingKey } });
+    const raw = JSON.stringify({
+      kind: "event.delivery_status", id: "evt_js", delivery_id: "del_js", status: "pickup", created: "2026-11-13T15:10:00Z",
+      data: { tracking_url: "javascript:alert(1)" },
+    });
+    const headers = new Headers({ "x-uber-signature": createHmac("sha256", signingKey).update(raw).digest("hex") });
+    expect(hooked.handleWebhook(raw, headers).trackingUrl).toBeNull();
+  });
+
   it("verifies x-uber-signature and maps delivery status events to platform delivery events", () => {
     const signingKey = "whsec-test-key";
     const { keys } = setup();
