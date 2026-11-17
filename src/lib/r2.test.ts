@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@aws-sdk/client-s3", () => {
   const send = vi.fn();
   return {
-    S3Client: vi.fn(() => ({ send })),
+    S3Client: vi.fn(function () { return { send }; }),
     PutObjectCommand: vi.fn(),
     GetObjectCommand: vi.fn(),
     __mockSend: send,

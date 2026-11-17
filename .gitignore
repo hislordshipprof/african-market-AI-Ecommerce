@@ -14,6 +14,14 @@ build/
 .env
 .env*.local
 .env.test
+.env.production
+.env.development
+.env.staging
+
+# Vercel project link and private keys
+.vercel
+*.pem
+*.key
 
 # debug
 npm-debug.log*

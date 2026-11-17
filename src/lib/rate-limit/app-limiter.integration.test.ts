@@ -58,7 +58,8 @@ describe.skipIf(!hasDb || process.env.TZ_CHILD === "1")("app rate limit", () => 
     const counts: string[] = [];
     for (const tz of ["UTC", "Pacific/Honolulu"]) {
       const child = spawnSync(process.execPath, [
-        vitestEntry, "run", "src/lib/rate-limit/app-limiter.integration.test.ts", "-t", "tz child count",
+        // Under an AI agent Vitest 4 picks a reporter that hides passed tests' logs, and this reads TZ_COUNT from them.
+        vitestEntry, "run", "src/lib/rate-limit/app-limiter.integration.test.ts", "-t", "tz child count", "--reporter=default",
       ], {
         cwd: process.cwd(),
         env: { ...process.env, TZ: tz, TZ_CHILD: "1" },
