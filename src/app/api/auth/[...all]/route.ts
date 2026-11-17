@@ -2,6 +2,7 @@ import { auth, onCustomDomain, registeredCustomDomain } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { isLocalCallbackPath } from "@/lib/security/callback-path";
 import { parseInput } from "@/lib/security/parse-input";
 
 const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
@@ -13,9 +14,7 @@ const CUSTOMER_ONLY_PATHS = [
 
 const CALLBACK_PARAMS = ["callbackURL", "newUserCallbackURL", "errorCallbackURL"];
 
-const callbackValue = z.string().max(2000).refine(
-  (value) => value.startsWith("/") && !value.startsWith("//"),
-);
+const callbackValue = z.string().max(2000).refine(isLocalCallbackPath);
 
 function rejectCallback(param: string, value: unknown): NextResponse | null {
   if (value === undefined || value === null) return null;
