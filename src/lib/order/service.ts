@@ -1347,7 +1347,7 @@ export async function markReady(
   if (courierReady) scheduleCourierDispatch(storeId, orderId);
   // Outside any transaction; a failure leaves it pending for the sweep (E10).
   await recordTaxTransaction(storeId, orderId);
-  // A label that fails is bought again from the order (Buy label); the capture stands.
+  // The capture stands; a label or PDF that fails is retried from the order (Buy label).
   const label = shipReady ? await buyShippingLabel(storeId, orderId, options.label) : null;
 
   return { ok: true, capturedAmountCents: finalize.capturedAmountCents, ...(label && !label.ok && { labelError: label.error }) };
