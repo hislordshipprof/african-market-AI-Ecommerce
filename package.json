@@ -62,6 +62,10 @@
       "esbuild",
       "unrs-resolver"
     ],
+    "overrides": {
+      "glob@>=9.0.0 <=14.0.1": "^14.0.2",
+      "minimatch@>=7.0.0 <11.0.1": "^11.0.1"
+    },
     "patchedDependencies": {
       "@ai-sdk/anthropic@4.0.96": "patches/@ai-sdk__anthropic@4.0.96.patch"
     }
