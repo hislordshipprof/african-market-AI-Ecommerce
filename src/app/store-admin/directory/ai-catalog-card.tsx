@@ -51,15 +51,18 @@ export function AiCatalogCard({ initial }: { initial: boolean }) {
         <p id="ai-catalog-state" className="text-sm text-muted-foreground">
           {readable ? "On. Assistants read your catalog from your storefront's address." : "Off. Assistants get nothing from your store."}
         </p>
-        {notice ? (
-          <p
-            role={notice.ok ? "status" : "alert"}
-            className={`flex items-center gap-1.5 text-sm ${notice.ok ? "text-muted-foreground" : "text-destructive"}`}
-          >
-            {notice.ok ? <Check className="size-4" aria-hidden="true" /> : <CircleAlert className="size-4" aria-hidden="true" />}
-            {notice.text}
-          </p>
-        ) : null}
+        {/* Always rendered, so screen readers announce the result when it arrives. */}
+        <p
+          role="status"
+          className={`flex items-center gap-1.5 text-sm empty:hidden ${notice?.ok === false ? "text-destructive" : "text-muted-foreground"}`}
+        >
+          {notice ? (
+            <>
+              {notice.ok ? <Check className="size-4" aria-hidden="true" /> : <CircleAlert className="size-4" aria-hidden="true" />}
+              {notice.text}
+            </>
+          ) : null}
+        </p>
       </CardContent>
     </Card>
   );
