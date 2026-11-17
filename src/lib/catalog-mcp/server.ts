@@ -164,7 +164,7 @@ export function catalogServer(req: CatalogRequest): McpServer {
     "get_product",
     {
       title: "Get one product",
-      description: "One product of this store by the id search_catalog returned: every pack size with its price, availability and url.",
+      description: "One product of this store by the id search_catalog returned: its price, availability and url, and every pack size with its price.",
       inputSchema: z.object({ id: z.string().trim().min(1).max(80).describe("A product id from search_catalog.") }),
       annotations: READ_ONLY,
     },

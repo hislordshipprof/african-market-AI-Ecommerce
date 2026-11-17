@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { createMcpHandler } from "@modelcontextprotocol/server";
+import { createMcpHandler, readRequestBody } from "@modelcontextprotocol/server";
 import { clientIp } from "@/lib/assistant/client-ip";
 import { catalogServer } from "@/lib/catalog-mcp/server";
 import { findStoreForHeaders } from "@/lib/get-store";
@@ -21,6 +21,17 @@ function hostOrigin(request: Request): string | null {
   return `${proto === "https" ? "https" : "http"}://${host}`;
 }
 
+/** A JSON-RPC batch would run up to 100 tool calls on one rate-limit token, and agents do not need it. */
+async function isBatch(request: Request): Promise<boolean> {
+  const body = await readRequestBody(request.clone(), MAX_BODY_BYTES);
+  if (body.tooLarge) return false;
+  try {
+    return Array.isArray(JSON.parse(body.text));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The store host's read-only catalog for AI agents (#572), streamable HTTP, no auth.
  * Not there (404) unless the host is an open store whose owner turned on "Let AI assistants read my catalog".
@@ -38,6 +49,10 @@ async function handle(request: Request): Promise<Response> {
   const limit = await takeRateLimit(`mcp:ip:${ip}`, CALLS_PER_MINUTE, WINDOW_MS);
   if (!limit.ok) {
     return Response.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
+  }
+
+  if (await isBatch(request)) {
+    return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request: send one message per request" } }, { status: 400 });
   }
 
   const handler = createMcpHandler(() => catalogServer({ store, origin, ip }), { responseMode: "json", maxRequestBodySize: MAX_BODY_BYTES });
