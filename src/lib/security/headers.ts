@@ -3,8 +3,8 @@ const BASE_CSP = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
 /** An SVG opened directly is a document; this keeps any script in it from running (#124). */
 export const NO_SCRIPT_CSP = `${BASE_CSP}; script-src 'none'; sandbox`;
 
-export const CSP_REPORT_PATH = "/api/csp-report";
-const REPORTING = [`report-uri ${CSP_REPORT_PATH}`, "report-to csp-endpoint"];
+// report-uri only: with report-to present Chromium ignores report-uri, and its Reporting API sent nothing in 70 s (#712).
+const REPORTING = ["report-uri /api/csp-report"];
 
 /** Matches the decoded path, as the static server does; an undecodable path counts as SVG. */
 export function isSvgPath(pathname: string): boolean {
@@ -30,7 +30,6 @@ export function staticSecurityHeaders(
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
     { key: "X-Frame-Options", value: "DENY" },
     { key: "Permissions-Policy", value: 'camera=(), microphone=(), geolocation=(self), payment=(self "https://js.stripe.com")' },
-    { key: "Reporting-Endpoints", value: `csp-endpoint="${CSP_REPORT_PATH}"` },
     { key: "Content-Security-Policy", value: enforcedPolicy(env) },
   ];
 }

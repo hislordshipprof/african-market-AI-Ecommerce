@@ -30,7 +30,6 @@ test("storefront, admin sign-in, checkout, api and static carry headers with zer
     expect(headers["content-security-policy"], path).toContain("default-src 'self'");
     expect(headers["content-security-policy"], path).toContain("report-uri /api/csp-report");
     expect(headers["content-security-policy-report-only"], path).toContain("report-uri /api/csp-report");
-    expect(headers["reporting-endpoints"], path).toBe('csp-endpoint="/api/csp-report"');
     expect(headers["permissions-policy"], path).toBe('camera=(), microphone=(), geolocation=(self), payment=(self "https://js.stripe.com")');
     expect(headers["x-powered-by"], path).toBeUndefined();
     expect(headers["content-security-policy-report-only"], path).toContain("default-src 'self'");

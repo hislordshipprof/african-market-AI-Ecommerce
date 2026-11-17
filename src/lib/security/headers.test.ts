@@ -19,7 +19,6 @@ describe("security headers", () => {
     expect(directive("form-action")).toBe("form-action 'self' https://connect.stripe.com");
     expect(directive("frame-ancestors")).toBe("frame-ancestors 'none'");
     expect(directive("report-uri")).toBe("report-uri /api/csp-report");
-    expect(directive("report-to")).toBe("report-to csp-endpoint");
     // script-src is not tightened until nonces: Next's inline scripts must still run.
     expect(directive("script-src")).toContain("'unsafe-inline'");
     expect(enforced).not.toContain("nonce-");
@@ -29,7 +28,6 @@ describe("security headers", () => {
     const headers = staticSecurityHeaders({ NODE_ENV: "production" });
     const value = (key: string) => headers.find((header) => header.key === key)?.value;
     expect(value("Content-Security-Policy")).toBe(enforcedPolicy({ NODE_ENV: "production" }));
-    expect(value("Reporting-Endpoints")).toBe('csp-endpoint="/api/csp-report"');
   });
 
   it("HSTS covers subdomains without preload; Permissions-Policy limits device and payment APIs", () => {
@@ -48,7 +46,6 @@ describe("security headers", () => {
     expect(policy).toContain("https://api.stripe.com");
     expect(policy).not.toContain("maps.googleapis.com");
     expect(policy).toContain("report-uri /api/csp-report");
-    expect(policy).toContain("report-to csp-endpoint");
   });
 
   it("the SVG policy has exactly one script-src, and it is 'none' (#124)", () => {

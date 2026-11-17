@@ -43,18 +43,6 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/csp-report", () => {
     expect(line).not.toContain("203.0.113.7");
   });
 
-  it("logs each report from a Reporting API batch", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const res = await post(JSON.stringify([
-      { type: "csp-violation", body: { documentURL: "https://a.test/p", blockedURL: "inline", effectiveDirective: "script-src-elem", disposition: "report" } },
-      { type: "deprecation", body: { id: "x" } },
-    ]), "application/reports+json");
-    expect(res.status).toBe(204);
-    expect(warnings(warn)).toEqual([
-      expect.objectContaining({ event: "csp_violation", disposition: "report", directive: "script-src-elem", blocked: "inline" }),
-    ]);
-  });
-
   it("drops a malformed body without logging a violation", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await post("not json", "application/csp-report");
