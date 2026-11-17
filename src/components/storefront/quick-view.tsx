@@ -136,13 +136,17 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
           <span className="sf-quick-view-choice">
             {selection.heading}
             {/* The chosen pack and its price, beside the control that adds it. */}
-            {!selection.addDisabled && (
+            {!selection.addDisabled && !selection.addBlockedReason && (
               <small>
                 {selection.cartItem.packLabel ?? "Each"} · {formatPrice(selection.price)}
               </small>
             )}
           </span>
-          <QuickAddStepper disabled={selection.addDisabled} item={selection.cartItem} />
+          <QuickAddStepper
+            disabled={selection.addDisabled}
+            blockedReason={selection.addBlockedReason}
+            item={selection.cartItem}
+          />
         </div>
         <Link className="sf-text-link" href={`/listings/${listing.id}`} onClick={onClose}>
           See full product details <ArrowRight size={16} aria-hidden />

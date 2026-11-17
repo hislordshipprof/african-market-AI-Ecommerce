@@ -872,6 +872,9 @@ test.describe("quick add limits and recovery", () => {
     const line = sheet.locator("li[data-unavailable]");
     await expect(line).toContainText("Thyme");
     await expect(line).toContainText("No longer available. Remove it to check out.");
+    // Only the increase stops: the shopper can still take one away (#708 P1).
+    await expect(line.getByTestId("stepper-minus")).toBeEnabled();
+    await expect(line.getByTestId("stepper-plus")).toBeDisabled();
     const picks = line.getByRole("list", { name: /Instead of/ }).getByRole("listitem");
     await expect(picks.first()).toBeVisible();
     expect(await picks.count()).toBeLessThanOrEqual(3);

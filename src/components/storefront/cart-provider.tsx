@@ -1152,7 +1152,8 @@ export function CartProvider({
                     </p>
                   )}
                   <div className={styles.lineActions}>
-                    {!unavailable && <QuickAddStepper item={line} />}
+                    {/* Kept on unavailable lines too: only the increase stops, so one can still be taken away (#708 P1). */}
+                    <QuickAddStepper item={line} />
                     {unavailable ? (
                       <button
                         type="button"

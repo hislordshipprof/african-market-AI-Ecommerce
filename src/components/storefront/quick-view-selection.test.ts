@@ -317,7 +317,7 @@ describe("selectQuickViewPack", () => {
     expect(result.cartItem).toMatchObject({ variantId: "v-1lb", packLabel: "1 pound", price: 5000 });
   });
 
-  it("loading, failure and ask-store keep a valid choice but disable add", () => {
+  it("loading and failure keep a valid choice but disable the stepper; ask-store stops only adding", () => {
     const loading = selectQuickViewPack(input({ chosenVariantId: "v-5lb" }));
     expect(loading.addDisabled).toBe(true);
     expect(loading.cartItem.variantId).toBe("v-5lb");
@@ -330,7 +330,10 @@ describe("selectQuickViewPack", () => {
       }),
     );
     expect(ask.selectedId).toBe("v-5lb");
-    expect(ask.addDisabled).toBe(true);
+    // Ask-store stops the increase with a reason, but a basket line can still be taken down (#708 P1).
+    expect(ask.addDisabled).toBe(false);
+    expect(ask.addBlockedReason).toBe("Ask store first");
+    expect(loading.addBlockedReason).toBeUndefined();
     expect(ask.statusMessage).toBeUndefined();
     expect(ask.cartItem.variantId).toBe("v-5lb");
   });
