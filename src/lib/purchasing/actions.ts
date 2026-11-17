@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { storeMayUse } from "../billing/plan";
+import { storeScoped } from "../db";
 import { requireStoreOwner } from "../store-admin/session";
 import { parseInput } from "../security/parse-input";
 import { QUANTITY_MAX } from "../copilot/types";
@@ -125,6 +126,12 @@ export async function readInvoiceAction(form: FormData): Promise<PrefillResult> 
   const photo = form.get("photo");
   const file = photo instanceof File && photo.size > 0 && photo.size <= DELIVERY_PROOF_MAX_BYTES ? photo : null;
   if (!parsed.ok || !file) return { ok: false, message: REPORT_PHOTO_INVALID };
+  // Checked before the model is called, so a wrong order spends no read.
+  const sent = await storeScoped(session.store.id).purchaseOrder.findFirst({
+    where: { id: parsed.data.orderId, storeId: session.store.id, status: "sent" },
+    select: { id: true },
+  });
+  if (!sent) return { ok: false, message: "Only a sent order in your store can be received." };
   const prepared = await prepareProofPhoto(new Uint8Array(await file.arrayBuffer()));
   if (!prepared.ok) return { ok: false, message: REPORT_PHOTO_INVALID };
   const refused = await copilotGate(`owner-report:${session.store.id}:${actor.id}`);

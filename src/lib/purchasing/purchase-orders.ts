@@ -29,7 +29,8 @@ export interface PurchaseOrderView {
   createdAt: Date;
   supplier: { id: string; name: string; channel: SupplierChannel; email: string | null; phone: string | null; leadDays: number };
   /** stockMode is the listing's now: a counted line is received with a quantity, a status line becomes in stock. */
-  lines: Array<{ id: string; listingId: string; name: string; quantity: number | null; stockMode: StockMode }>;
+  /** received: what came on a received order (a count, or "in_stock" for a status listing); null if it did not come. */
+  lines: Array<{ id: string; listingId: string; name: string; quantity: number | null; stockMode: StockMode; received: number | "in_stock" | null }>;
 }
 
 export type DraftResult = { ok: true; drafted: number; unassigned: string[] } | { ok: false; message: string };
@@ -327,13 +328,23 @@ export async function listPurchaseOrders(storeId: string): Promise<PurchaseOrder
       },
     },
   });
+  const receiptKeys = rows.filter((row) => row.status === "received").flatMap((row) => row.lines.map((line) => `po-receipt:${line.id}`));
+  const receipts = receiptKeys.length === 0 ? [] : await storeScoped(storeId).stockEvent.findMany({
+    where: { storeId, idempotencyKey: { in: receiptKeys } },
+    select: { idempotencyKey: true, type: true, delta: true },
+  });
+  const receivedOf = new Map(receipts.map((event) => [event.idempotencyKey, event.type === "restock" ? event.delta : ("in_stock" as const)]));
   return rows
     .map((row) => ({
       ...row,
       status: row.status as PoStatus,
       sentVia: row.sentVia as SupplierChannel | null,
       supplier: { ...row.supplier, channel: row.supplier.channel as SupplierChannel },
-      lines: row.lines.map(({ listing, ...line }) => ({ ...line, stockMode: listing.stockMode as StockMode })),
+      lines: row.lines.map(({ listing, ...line }) => ({
+        ...line,
+        stockMode: listing.stockMode as StockMode,
+        received: receivedOf.get(`po-receipt:${line.id}`) ?? null,
+      })),
     }))
     .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.supplier.name.localeCompare(b.supplier.name) || b.number - a.number);
 }

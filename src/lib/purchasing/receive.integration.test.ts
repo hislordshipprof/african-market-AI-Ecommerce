@@ -81,7 +81,9 @@ describe.skipIf(!hasDb)("receiving a purchase order into stock (lane database)",
     expect(changes[0]).toMatchObject({ actorId: actor.id, before: { qty: 2 }, after: { qty: 10, source: "copilot", purchaseOrderId: order.id } });
     const receipt = await raw.auditLog.findFirstOrThrow({ where: { entityId: order.id, action: "purchase_order.received" } });
     expect(receipt.after).toMatchObject({ status: "received", lines: [{ lineId: order.lines[0], quantity: 8 }, { lineId: order.lines[2], quantity: null }] });
-    expect((await listPurchaseOrders(storeA)).find((o) => o.id === order.id)!.status).toBe("received");
+    const shown = (await listPurchaseOrders(storeA)).find((o) => o.id === order.id)!;
+    expect(shown.status).toBe("received");
+    expect(shown.lines.map((l) => [l.quantity, l.received])).toEqual([[12, 8], [6, null], [4, "in_stock"]]);
   });
 
   it("writes nothing on a repeat tap", async () => {

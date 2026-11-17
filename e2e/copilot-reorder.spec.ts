@@ -285,6 +285,8 @@ test("owner adds suppliers, drafts one order per supplier from the reorder list,
     expect(stockAfter.qty).toBe((stockBefore.qty ?? 0) + 10);
     const events = await asPlatformAdmin((tx) => tx.stockEvent.count({ where: { listingId: items.firstId, idempotencyKey: { startsWith: "po-receipt:" } } }));
     expect(events).toBe(1);
+    await page.reload();
+    await expect(page.getByRole("region", { name: /^Lagos Foods · PO \d+$/ }).getByText("Came in: 10")).toBeVisible();
     await shootPage(page, "576-received", "Orders to wholesalers");
 
     await setPlan(null);

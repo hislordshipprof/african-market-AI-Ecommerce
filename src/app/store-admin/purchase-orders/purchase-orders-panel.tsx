@@ -225,7 +225,14 @@ function OrderCard({ order }: { order: OrderView }) {
       <ul className="mt-2 divide-y divide-border">
         {order.lines.map((line) => (
           <li key={line.id} className="flex items-center justify-between gap-3 px-4 py-2">
-            <span className="min-w-0 truncate text-base text-foreground">{line.name}</span>
+            <div className="min-w-0">
+              <p className="truncate text-base text-foreground">{line.name}</p>
+              {order.status === "received" ? (
+                <p className="text-sm text-muted-foreground">
+                  {line.received === null ? "Did not come" : line.received === "in_stock" ? "Came in, marked in stock" : `Came in: ${line.received}`}
+                </p>
+              ) : null}
+            </div>
             {draft ? (
               <input
                 aria-label={`Quantity of ${line.name}`}
