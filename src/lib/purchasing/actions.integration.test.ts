@@ -5,7 +5,7 @@ import { testPrismaClient } from "@/lib/test-prisma";
 const session = vi.hoisted(() => ({ store: { id: "", slug: "", name: "Starter store" }, user: { id: "", email: "" } }));
 vi.mock("@/lib/store-admin/session", () => ({ requireStoreOwner: async () => session }));
 
-import { draftPurchaseOrdersAction, saveSupplierAction } from "./actions";
+import { draftPurchaseOrdersAction, receivePurchaseOrderAction, saveSupplierAction } from "./actions";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -28,6 +28,8 @@ describe.skipIf(!hasDb)("purchasing actions plan gate (lane DB)", () => {
     const supplier = { name: "Lagos Foods", email: "orders@example.com", channel: "email", leadDays: 3 };
     expect(await saveSupplierAction({ id: null, supplier })).toMatchObject({ ok: false, message: expect.stringContaining("Pro") });
     expect(await draftPurchaseOrdersAction()).toMatchObject({ ok: false, message: expect.stringContaining("Pro") });
+    const receipt = { orderId: "po-1", lines: [{ lineId: "line-1", quantity: 2, stockMode: "counted" }] };
+    expect(await receivePurchaseOrderAction(receipt)).toMatchObject({ ok: false, message: expect.stringContaining("Pro") });
     expect(await raw.supplier.count({ where: { storeId: session.store.id } })).toBe(0);
   });
 });

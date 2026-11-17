@@ -1,19 +1,21 @@
 import { createHash } from "node:crypto";
-import { lockPurchaseOrders, storeScoped, storeScopedTransaction } from "../db";
+import { lockListingRow, lockPurchaseOrders, lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { quotedFrom } from "../email/from";
 import { sendEmail } from "../email/send";
 import { escapeHtml } from "../format";
-import { QUANTITY_MAX } from "../copilot/types";
+import { QTY_COLUMN_MAX, QUANTITY_MAX, WRITE_TRANSACTION } from "../copilot/types";
+import { writeStockChange } from "../copilot/confirm";
+import { matchReportItem, type ExtractedItem } from "../copilot/owner-report";
 import { NO_COUNT } from "../copilot/reorder-list";
 import type { Actor, Result, SupplierChannel } from "./suppliers";
 
 export const PO_STATUSES = ["draft", "sent", "received", "cancelled"] as const;
 export type PoStatus = (typeof PO_STATUSES)[number];
 
-/** Received and cancelled are final. Sending is its own step (sendPurchaseOrder). */
+/** Received and cancelled are final. Sending and receiving are their own steps. */
 const MOVES: Record<PoStatus, PoStatus[]> = {
   draft: ["cancelled"],
-  sent: ["received", "cancelled"],
+  sent: ["cancelled"],
   received: [],
   cancelled: [],
 };
@@ -26,7 +28,9 @@ export interface PurchaseOrderView {
   sentAt: Date | null;
   createdAt: Date;
   supplier: { id: string; name: string; channel: SupplierChannel; email: string | null; phone: string | null; leadDays: number };
-  lines: Array<{ id: string; listingId: string; name: string; quantity: number | null }>;
+  /** stockMode is the listing's now: a counted line is received with a quantity, a status line becomes in stock. */
+  /** received: what came on a received order (a count, or "in_stock" for a status listing); null if it did not come. */
+  lines: Array<{ id: string; listingId: string; name: string; quantity: number | null; stockMode: StockMode; received: number | "in_stock" | null }>;
 }
 
 export type DraftResult = { ok: true; drafted: number; unassigned: string[] } | { ok: false; message: string };
@@ -207,8 +211,8 @@ export async function sendPurchaseOrder(
   return link ? { ok: true, via: channel, link } : { ok: true, via: channel };
 }
 
-/** Draft or sent to cancelled; sent to received. Receiving changes no stock (that is #576). */
-export async function movePurchaseOrder(storeId: string, orderId: string, to: "received" | "cancelled", actor: Actor): Promise<Result> {
+/** Draft or sent to cancelled. Received is reached only through receivePurchaseOrder. */
+export async function movePurchaseOrder(storeId: string, orderId: string, to: "cancelled", actor: Actor): Promise<Result> {
   return storeScopedTransaction(storeId, async (tx) => {
     const order = await tx.purchaseOrder.findFirst({ where: { id: orderId, storeId }, select: { status: true } });
     if (!order) return { ok: false, message: "That order is not in your store." };
@@ -217,12 +221,89 @@ export async function movePurchaseOrder(storeId: string, orderId: string, to: "r
     const now = new Date();
     const moved = await tx.purchaseOrder.updateMany({
       where: { id: orderId, storeId, status: from },
-      data: to === "received" ? { status: to, receivedAt: now } : { status: to, cancelledAt: now },
+      data: { status: to, cancelledAt: now },
     });
     if (moved.count !== 1) return { ok: false, message: "This order just changed. Reload the page." };
     await tx.auditLog.create(audit(storeId, actor, `purchase_order.${to}`, orderId, { status: from }, { status: to }));
     return { ok: true };
   });
+}
+
+export type StockMode = "counted" | "status";
+/** One ticked line: the quantity that came for a counted listing (null for a status listing), and the stock mode the owner saw. */
+export type ReceivedLine = { lineId: string; quantity: number | null; stockMode: StockMode };
+export type RejectReason = "archived" | "stock_mode_changed" | "too_large";
+export type ReceiveResult =
+  | { ok: true; received: number; rejected: Array<{ lineId: string; name: string; reason: RejectReason }> }
+  | { ok: false; message: string };
+
+/**
+ * The owner's one tap on a sent order: each ticked line goes through the copilot's stock write keyed
+ * `po-receipt:<lineId>` (a counted listing is restocked, a status listing becomes in_stock), and the order
+ * is received. A line on an archived listing, or one whose stock mode changed since the owner looked, is
+ * rejected and listed; the rest still go in. Unticked lines did not come. Callers authenticate the owner.
+ */
+export async function receivePurchaseOrder(storeId: string, orderId: string, lines: ReceivedLine[], actor: Actor): Promise<ReceiveResult> {
+  if (lines.length === 0) return { ok: false, message: "Tick what came in." };
+  for (const line of lines) {
+    const q = line.quantity;
+    if (line.stockMode === "counted" && (q === null || !Number.isInteger(q) || q < 1 || q > QUANTITY_MAX)) {
+      return { ok: false, message: `Quantities are whole numbers, 1 to ${QUANTITY_MAX}.` };
+    }
+  }
+  const peek = await storeScoped(storeId).purchaseOrder.findFirst({
+    where: { id: orderId, storeId },
+    select: { lines: { select: { listingId: true } } },
+  });
+  if (!peek) return { ok: false, message: "That order is not in your store." };
+  const listingIds = [...new Set(peek.lines.map((line) => line.listingId))].sort();
+
+  return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    for (const listingId of listingIds) await lockListingRow(tx, listingId);
+    const order = await tx.purchaseOrder.findFirst({
+      where: { id: orderId, storeId },
+      select: { status: true, lines: { select: { id: true, listingId: true, name: true } } },
+    });
+    if (!order) return { ok: false, message: "That order is not in your store." };
+    if (order.status !== "sent") return { ok: false, message: order.status === "received" ? "This order was already received." : "Only a sent order can be received." };
+    const onOrder = new Map(order.lines.map((line) => [line.id, line]));
+    if (lines.some((line) => !onOrder.has(line.lineId)) || new Set(lines.map((line) => line.lineId)).size !== lines.length) {
+      return { ok: false, message: "A line is no longer on this order. Reload the page." };
+    }
+
+    const now = new Date();
+    const moved = await tx.purchaseOrder.updateMany({ where: { id: orderId, storeId, status: "sent" }, data: { status: "received", receivedAt: now } });
+    if (moved.count !== 1) return { ok: false, message: "This order just changed. Reload the page." };
+
+    const received: ReceivedLine[] = [];
+    const rejected: Array<{ lineId: string; name: string; reason: RejectReason }> = [];
+    for (const line of lines) {
+      const { listingId, name } = onOrder.get(line.lineId)!;
+      const listing = await tx.listing.findUnique({ where: { id: listingId }, include: { masterProduct: { select: { name: true } } } });
+      const quantity = line.quantity ?? 0;
+      const reason: RejectReason | null = !listing || !listing.active ? "archived"
+        : listing.stockMode !== line.stockMode ? "stock_mode_changed"
+          : line.stockMode === "counted" && (listing.qty ?? 0) + quantity > QTY_COLUMN_MAX ? "too_large"
+            : null;
+      if (reason) {
+        rejected.push({ lineId: line.lineId, name, reason });
+        continue;
+      }
+      await writeStockChange(tx, storeId, listing!, {
+        kind: line.stockMode === "counted" ? "restock" : "set_status",
+        quantity,
+        statusValue: "in_stock",
+      }, actor, `po-receipt:${line.lineId}`, { purchaseOrderId: orderId }, now);
+      received.push(line);
+    }
+    await tx.auditLog.create(audit(storeId, actor, "purchase_order.received", orderId, { status: "sent" }, {
+      status: "received",
+      lines: received.map((line) => ({ lineId: line.lineId, quantity: line.quantity })),
+      rejected: rejected.map((line) => ({ lineId: line.lineId, reason: line.reason })),
+    }));
+    return { ok: true, received: received.length, rejected };
+  }, WRITE_TRANSACTION);
 }
 
 const STATUS_RANK: Record<PoStatus, number> = { draft: 0, sent: 1, received: 2, cancelled: 3 };
@@ -241,15 +322,55 @@ export async function listPurchaseOrders(storeId: string): Promise<PurchaseOrder
       sentAt: true,
       createdAt: true,
       supplier: { select: { id: true, name: true, channel: true, email: true, phone: true, leadDays: true } },
-      lines: { orderBy: { position: "asc" }, select: { id: true, listingId: true, name: true, quantity: true } },
+      lines: {
+        orderBy: { position: "asc" },
+        select: { id: true, listingId: true, name: true, quantity: true, listing: { select: { stockMode: true } } },
+      },
     },
   });
+  const receiptKeys = rows.filter((row) => row.status === "received").flatMap((row) => row.lines.map((line) => `po-receipt:${line.id}`));
+  const receipts = receiptKeys.length === 0 ? [] : await storeScoped(storeId).stockEvent.findMany({
+    where: { storeId, idempotencyKey: { in: receiptKeys } },
+    select: { idempotencyKey: true, type: true, delta: true },
+  });
+  const receivedOf = new Map(receipts.map((event) => [event.idempotencyKey, event.type === "restock" ? event.delta : ("in_stock" as const)]));
   return rows
     .map((row) => ({
       ...row,
       status: row.status as PoStatus,
       sentVia: row.sentVia as SupplierChannel | null,
       supplier: { ...row.supplier, channel: row.supplier.channel as SupplierChannel },
+      lines: row.lines.map(({ listing, ...line }) => ({
+        ...line,
+        stockMode: listing.stockMode as StockMode,
+        received: receivedOf.get(`po-receipt:${line.id}`) ?? null,
+      })),
     }))
     .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.supplier.name.localeCompare(b.supplier.name) || b.number - a.number);
+}
+
+
+export type PrefillResult = { ok: true; lines: Record<string, number>; unmatched: string[] } | { ok: false; message: string };
+
+/**
+ * Invoice lines read by the copilot's reader (#21), matched to this order's lines through the copilot's
+ * listing search. Only fills the form: nothing is written until the owner confirms the receipt.
+ */
+export async function invoicePrefill(storeId: string, orderId: string, items: ExtractedItem[]): Promise<PrefillResult> {
+  const order = await storeScoped(storeId).purchaseOrder.findFirst({
+    where: { id: orderId, storeId },
+    select: { status: true, lines: { select: { id: true, listingId: true } } },
+  });
+  if (!order) return { ok: false, message: "That order is not in your store." };
+  if (order.status !== "sent") return { ok: false, message: "Only a sent order can be received." };
+  const lineOf = new Map(order.lines.map((line) => [line.listingId, line.id]));
+  const lines: Record<string, number> = {};
+  const unmatched: string[] = [];
+  for (const item of items) {
+    const match = await matchReportItem(storeId, item);
+    const lineId = match ? lineOf.get(match.listingId) : undefined;
+    if (!lineId || item.quantity === null) unmatched.push(item.name);
+    else lines[lineId] = Math.min(QUANTITY_MAX, (lines[lineId] ?? 0) + item.quantity);
+  }
+  return { ok: true, lines, unmatched };
 }
