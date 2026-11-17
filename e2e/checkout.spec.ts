@@ -7,6 +7,12 @@ import { storeUrl } from "./urls";
 
 const base = storeUrl("mama-ngozi");
 
+async function fillContact(page: import("@playwright/test").Page) {
+  await page.getByLabel("Full name").fill("E2E Guest");
+  await page.getByLabel("Phone number (required)").fill("2025550199");
+  await page.getByLabel("Email (required)").fill("e2e@test.example");
+}
+
 test.describe("Guest checkout flow", () => {
   test.describe.configure({ retries: 0 });
   test.use({ reducedMotion: "reduce" });
@@ -49,6 +55,60 @@ test.describe("Guest checkout flow", () => {
     await expect(
       page.getByText("Enter the name for your order"),
     ).toBeVisible();
+    // The first invalid field takes focus, so a keyboard shopper lands where to fix it.
+    await expect(page.getByLabel("Full name")).toBeFocused();
+    await page.getByLabel("Full name").fill("E2E Guest");
+    await page.getByRole("button", { name: /Place demo order|Place order/ }).click();
+    await expect(page.getByLabel("Phone number (required)")).toBeFocused();
+    await expect(page.getByLabel("Full name")).toHaveValue("E2E Guest");
+  });
+
+  test("a declined payment shows beside the card with Use another card, and keeps the form (#717)", async ({ page }) => {
+    await addItemToCart(page);
+    await page.goto(`${base}/checkout`);
+    await fillContact(page);
+    await page.getByLabel("Demo outcome").selectOption("declined");
+    await page.getByRole("button", { name: /Place demo order/ }).click();
+
+    const alert = page.locator("#payment").getByRole("alert");
+    await expect(alert).toContainText("Test payment declined");
+    await expect(alert).toBeFocused();
+    await expect(page.locator("#review").getByRole("alert")).toHaveCount(0);
+    await expect(page.getByLabel("Email (required)")).toHaveValue("e2e@test.example");
+    await alert.getByRole("button", { name: "Use another card" }).click();
+    await expect(alert).toBeHidden();
+    await expect(page.getByLabel("Demo outcome")).toBeFocused();
+  });
+
+  test("an unavailable item highlights its line with Review basket (#717)", async ({ page }) => {
+    await addItemToCart(page);
+    await page.goto(`${base}/checkout`);
+    await fillContact(page);
+    await page.getByLabel("Demo outcome").selectOption("out-of-stock");
+    await page.getByRole("button", { name: /Place demo order/ }).click();
+
+    const review = page.locator("#review");
+    const alert = review.getByRole("alert");
+    await expect(alert).toContainText("An item is unavailable.");
+    await expect(review.locator("li[data-problem]")).toHaveCount(1);
+    await expect(review.locator("li[data-problem]")).toContainText("Yellow Garri");
+    await expect(alert.getByRole("link", { name: "Review basket" })).toHaveAttribute("href", "/cart");
+    await expect(page.locator("#payment").getByRole("alert")).toHaveCount(0);
+  });
+
+  test("an expired session offers Refresh checkout and keeps the form (#717)", async ({ page }) => {
+    await addItemToCart(page);
+    await page.goto(`${base}/checkout`);
+    await fillContact(page);
+    await page.getByLabel("Demo outcome").selectOption("session-expired");
+    await page.getByRole("button", { name: /Place demo order/ }).click();
+
+    const alert = page.locator("#review").getByRole("alert");
+    await expect(alert).toContainText("Checkout session expired");
+    await alert.getByRole("button", { name: "Refresh checkout" }).click();
+    await expect(alert).toBeHidden();
+    await expect(page.getByRole("button", { name: /Place demo order/ })).toBeEnabled();
+    await expect(page.getByLabel("Full name")).toHaveValue("E2E Guest");
   });
 
   test("fulfillment options are visible", async ({ page }) => {
@@ -110,6 +170,79 @@ test.describe("Guest checkout flow", () => {
       .click();
     await expect(page.getByText("10% off applied")).toBeVisible();
   });
+});
+
+test("a real card decline shows beside the payment, not in the summary (#717)", async ({ page }) => {
+  test.setTimeout(90_000);
+  const slug = `decline-${Date.now().toString(36)}`;
+  const name = `Decline Yam ${slug}`;
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  const store = await prisma.store.create({
+    data: {
+      slug,
+      name: "Decline Lane",
+      themePreset: "palm-and-shea",
+      stripeOnboardingStatus: "complete",
+      stripeAccountId: `acct_${slug.replace(/[^a-z0-9]/g, "").slice(0, 20)}`,
+      pickupEnabled: true,
+      minimumOrderCents: 0,
+      addressLine1: "8400 Park Place Blvd",
+      city: "Houston",
+      state: "TX",
+      zip: "77017",
+      lat: 29.693857800118,
+      lng: -95.266257879374,
+    },
+  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      const listing = await tx.listing.create({
+        data: { storeId: store.id, customName: name, price: 4000, stockMode: "unlimited", frozen: false, perishable: false },
+      });
+      await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 } });
+    });
+    await page.context().addCookies([{ name: "e2e_stripe_harness", value: "1", url: `http://localhost:${process.env.E2E_PORT || "3000"}` }]);
+    // The fake's own declining card: the harness sends no card, so the test names it.
+    await page.route("**/api/e2e/fake-confirm", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      await route.continue({ postData: JSON.stringify({ ...body, paymentMethodId: "pm_card_chargeCustomerFail" }) });
+    });
+    const addButton = page.getByRole("button", { name: new RegExp(`^Add ${name} to`) });
+    await expect(async () => {
+      await page.goto(`/?store=${slug}`);
+      await expect(addButton).toBeVisible();
+    }).toPass({ timeout: 20_000 });
+    await addButton.click();
+    await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("1");
+    await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
+    await expect(async () => {
+      await page.goto(`/checkout?store=${slug}`);
+      await expect(page.getByRole("button", { name: /Place order/ })).toBeEnabled();
+    }).toPass({ timeout: 20_000 });
+    await fillContact(page);
+    await page.getByRole("button", { name: /Place order/ }).click();
+    const alert = page.locator("#payment").getByRole("alert");
+    await expect(alert).toContainText("Your card was declined.", { timeout: 20_000 });
+    await expect(alert.getByRole("button", { name: "Use another card" })).toBeVisible();
+    await expect(page.locator("#review").getByRole("alert")).toHaveCount(0);
+    await expect(page.getByLabel("Full name")).toHaveValue("E2E Guest");
+    await expect(page.getByRole("button", { name: /Place order/ })).toBeEnabled();
+  } finally {
+    await page.unroute("**/api/e2e/fake-confirm");
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.cartLine.deleteMany({ where: { storeId: store.id } });
+      await tx.cart.deleteMany({ where: { storeId: store.id } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
+      await tx.listing.deleteMany({ where: { storeId: store.id } });
+      await tx.auditLog.deleteMany({ where: { storeId: store.id } });
+    });
+    await prisma.store.delete({ where: { id: store.id } });
+    await prisma.$disconnect();
+  }
 });
 
 test("a hung address check settles to a failure and frees the button (#708)", async ({ page }) => {

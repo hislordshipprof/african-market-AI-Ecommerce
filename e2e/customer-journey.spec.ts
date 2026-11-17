@@ -105,6 +105,8 @@ test.describe("Customer journey demo", () => {
       .click();
     await page.getByLabel("Full name").fill("Ada Demo");
     await page.getByLabel("Phone number (required)").fill("2025550100");
+    // Pay now stops on an invalid contact before any payment step (#717), as the server does.
+    await page.getByLabel("Email (required)").fill("ada@demo.example");
     await page.getByLabel("Demo outcome").selectOption("declined");
     await page.getByRole("button", { name: /Place demo order/ }).click();
     await expect(

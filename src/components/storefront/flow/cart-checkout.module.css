@@ -422,6 +422,64 @@
 .quoteRetry p {
   margin: 0;
 }
+/* A summary line the shopper must change: icon and words, never colour alone. */
+.miniLines li[data-problem] > span:first-child {
+  font-weight: 600;
+}
+.miniLineProblem {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-deal);
+  font-size: 14px;
+  font-weight: 600;
+}
+/* A checkout failure beside the control it concerns, with its recovery (#717 AC3). */
+.issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--color-deal);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 16px;
+  line-height: 1.5;
+  scroll-margin-block: 96px;
+}
+.issue > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-deal);
+}
+.issue > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.issue p {
+  margin: 0;
+}
+.issueTitle {
+  font-weight: 700;
+}
+.issueActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.issueActions:empty {
+  display: none;
+}
+.issue:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
 .quoteRetry button {
   justify-self: start;
 }
@@ -461,12 +519,13 @@
 }
 .miniLines li {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 14px;
+  gap: 4px 14px;
   font-size: 13px;
   padding: 7px 0;
 }
-.miniLines li > span:last-child {
+.miniLines li > span + span {
   white-space: nowrap;
 }
 .stages {
