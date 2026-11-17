@@ -8,6 +8,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { auth } from "../auth";
 import { authPrisma, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
+import { createTestUser } from "../test-auth";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
@@ -1176,12 +1177,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   it("a signed-in customer keeps the guest cart and conversation after sign-in", async () => {
     const email = `ada-${randomUUID().slice(0, 8)}@example.com`;
     const password = "CartLink-123!";
-    const signedUp = await auth.handler(new Request("http://localhost:3000/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "http://localhost:3000" },
-      body: JSON.stringify({ email, password, name: "Ada" }),
-    }));
-    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+    await createTestUser({ email, password, name: "Ada" });
     const signedIn = await auth.handler(new Request("http://localhost:3000/api/auth/sign-in/email", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost:3000" },
@@ -1267,12 +1263,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   it("E3 an account cart cookie without that session becomes a new guest cart", async () => {
     const email = `owner-${randomUUID().slice(0, 8)}@example.com`;
     const password = "CartLink-123!";
-    const signedUp = await auth.handler(new Request("http://localhost:3000/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "http://localhost:3000" },
-      body: JSON.stringify({ email, password, name: "Owner" }),
-    }));
-    expect(signedUp.status).toBe(200);
+    await createTestUser({ email, password, name: "Owner" });
     const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
     const owned = await storeScoped(storeId).cart.create({
       data: { storeId, userId: user.id, source: "manual" },

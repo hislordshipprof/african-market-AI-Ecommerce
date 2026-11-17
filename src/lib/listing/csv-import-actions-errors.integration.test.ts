@@ -60,6 +60,7 @@ import { revalidateTag } from "next/cache";
 import { headers } from "next/headers";
 import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
+import { createTestUser } from "../test-auth";
 import * as db from "../db";
 import { authPrisma, healthQueryRaw, platformAdmin, storeScoped, withSessionTimeZone } from "../db";
 import { csvCommitAction, csvPreviewAction, type CommitActionResult } from "./csv-import-actions";
@@ -394,7 +395,8 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
 
   async function signUp(email: string, name: string): Promise<CookieJar> {
     const jar = new CookieJar();
-    const res = await authPost("/sign-up/email", { email, password, name });
+    await createTestUser({ email, password, name });
+    const res = await authPost("/sign-in/email", { email, password });
     expect(res.status, await res.clone().text()).toBe(200);
     jar.apply(res);
     return jar;

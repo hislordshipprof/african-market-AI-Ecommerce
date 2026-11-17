@@ -9,6 +9,8 @@ async function load(env: Record<string, string | undefined>) {
     if (value === undefined) vi.stubEnv(key, "");
     else vi.stubEnv(key, value);
   }
+  // Vercel always sets VERCEL_URL; a deployment's auth trusts no localhost host without it (#710).
+  if (env.VERCEL) vi.stubEnv("VERCEL_URL", "inngest-test.vercel.app");
   return import("./route");
 }
 

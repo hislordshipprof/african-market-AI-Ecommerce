@@ -43,6 +43,7 @@ import { listMasterProducts } from "../listing/service";
 import { dismissDuplicatePair, listDuplicatePairs, mergeDuplicatePair, scanCatalogDuplicates } from "./catalog-duplicates";
 import { getMasterProductEditor, saveMasterProduct } from "./master-catalog";
 import { addProductSynonym } from "./product-synonyms";
+import { createTestUser } from "../test-auth";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `dp${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -61,9 +62,7 @@ async function authPost(path: string, body: unknown, cookies?: string): Promise<
 }
 
 async function signUp(email: string): Promise<string> {
-  const res = await authPost("/sign-up/email", { email, password, name: RUN });
-  expect(res.status, await res.clone().text()).toBe(200);
-  return (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
+  return createTestUser({ email, password, name: RUN });
 }
 
 async function signInWith2fa(email: string): Promise<string> {

@@ -73,7 +73,7 @@ import { publishListingDrafts, uploadShelfPhoto } from "../listing/photo-draft-a
 import { searchListings } from "../storefront/service";
 import { approveProductProposal, listProductProposals, rejectProductProposal } from "../admin/product-proposals";
 import { listStoreProposals } from "./product-proposals";
-import { authPost } from "../test-auth";
+import { authPost, testSignUp } from "../test-auth";
 import { GET as getShelfPhoto } from "../../app/api/listing-photo/[draftId]/route";
 import { GET as getProposalPhoto } from "../../app/api/admin/product-proposals/[id]/photo/route";
 
@@ -146,7 +146,7 @@ describe.skipIf(!hasDb)("product proposals from unmatched shelf items (real auth
     vi.stubEnv("R2_SECRET_ACCESS_KEY", "test");
 
     for (const email of Object.values(emails)) {
-      const res = await authPost("/sign-up/email", { email, password, name: email.split("@")[0] });
+      const res = await testSignUp({ email, password, name: email.split("@")[0] });
       expect(res.status, await res.clone().text()).toBe(200);
     }
     const userId = async (email: string) => (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;

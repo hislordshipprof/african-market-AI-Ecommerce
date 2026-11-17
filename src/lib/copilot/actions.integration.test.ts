@@ -43,7 +43,7 @@ import { FIXED_ERROR } from "./types";
 import { NOTHING_DRAFTED, NUMBER_REFUSED } from "./turn";
 import { saveReorder, updateReorderDays } from "./reorder-actions";
 import { loadReorderList } from "./reorder-list";
-import { authPost } from "../test-auth";
+import { authPost, testSignUp } from "../test-auth";
 
 const RUN = `t142-${Date.now()}`;
 const password = "Copilot-142-Owner!";
@@ -125,7 +125,7 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       [emailB, "Owner B"],
       [emailStaff, "Staff A"],
     ] as const) {
-      const res = await authPost("/sign-up/email", { email, password, name });
+      const res = await testSignUp({ email, password, name });
       expect(res.status, await res.clone().text()).toBe(200);
     }
     ownerAId = (await authPrisma.user.findFirstOrThrow({ where: { email: emailA } })).id;

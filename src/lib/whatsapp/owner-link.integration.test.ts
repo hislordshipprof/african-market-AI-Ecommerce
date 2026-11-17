@@ -49,7 +49,7 @@ import { setWhatsAppProvider } from "./index";
 import { getOwnerLink, NOT_SET_UP_ERROR, resolveOwnerByPhone, SEND_FAILED_ERROR } from "./owner-link";
 import { signWhatsAppBody } from "./signature";
 import type { OutboundMessage } from "./types";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -72,7 +72,7 @@ function randomUsNumber(): { typed: string; e164: string; digits: string } {
 }
 
 async function signUp(email: string, name: string): Promise<string> {
-  const res = await authPost("/sign-up/email", { email, password, name });
+  const res = await testSignUp({ email, password, name });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
   return user.id;

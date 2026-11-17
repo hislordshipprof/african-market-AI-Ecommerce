@@ -37,7 +37,7 @@ import { authPrisma, storeScoped } from "../db";
 import { addToCart, clearCart, getServerCart } from "./actions";
 import { addLine, getOrCreateCart } from "./service";
 import { quoteCheckoutAction } from "../checkout/actions";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `cart-auth-${Date.now().toString(36)}`;
@@ -63,7 +63,7 @@ describe.skipIf(!hasDb)("authenticated cart actions (real session, lane DB)", ()
   let sessionCookies = "";
 
   beforeAll(async () => {
-    const signedUp = await authPost("/sign-up/email", {
+    const signedUp = await testSignUp({
       email,
       password,
       name: "Ada Buyer",

@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import Stripe from "stripe";
 import { resolveDirectUrl } from "../src/lib/env";
 import { E2E_PORT } from "./urls";
+import { insertShopperAccount } from "./account-fixture";
 import { sandboxConnectedAccountId } from "../src/lib/stripe/test-sandbox-account";
 import { cleanupSavedCard3dsRun } from "./saved-card-3ds-run";
 
@@ -37,10 +38,7 @@ test("real Stripe.js: a 3DS card is saved after its challenge, then pays again f
       await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 } });
     });
 
-    const signup = await page.request.post("/api/auth/sign-up/email", {
-      data: { email, password: "E2eTestPass-123!", name: "Ada Saver" },
-    });
-    expect(signup.ok(), await signup.text()).toBe(true);
+    await insertShopperAccount({ email, password: "E2eTestPass-123!", name: "Ada Saver" });
     const signin = await page.request.post("/api/auth/sign-in/email", { data: { email, password: "E2eTestPass-123!" }, headers: { Origin: origin } });
     expect(signin.ok(), await signin.text()).toBe(true);
 

@@ -26,6 +26,18 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// The route uses requireStoreOwner(), whose redirect() Next turns into a 307 in a route handler.
+vi.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`REDIRECT:${path}`);
+  },
+}));
+
+vi.mock("@/lib/billing/plan", () => ({
+  storePlan: vi.fn().mockResolvedValue("pro"),
+  readOnlyStaffIds: () => new Set<string>(),
+}));
+
 vi.mock("next/headers", () => ({
   headers: vi.fn().mockResolvedValue(new Headers()),
 }));
@@ -91,11 +103,9 @@ describe("GET /api/stripe/return", () => {
 
   it("redirects to sign-in when not authenticated", async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(null);
-    const res = await callReturn();
-    expect(res.status).toBe(307);
-    expect(new URL(res.headers.get("location")!).pathname).toBe(
-      "/store-admin/sign-in",
-    );
+    vi.mocked(getStore).mockResolvedValue(makeStore() as never);
+    await expect(callReturn()).rejects.toThrow("REDIRECT:/store-admin/sign-in?store=test-store");
+    expect(updateStoreOnboardingStatus).not.toHaveBeenCalled();
   });
 
   it("redirects to store-admin when user is not owner", async () => {
@@ -104,14 +114,12 @@ describe("GET /api/stripe/return", () => {
     vi.mocked(storeScoped).mockReturnValue({
       storeMembership: {
         findUnique: vi.fn().mockResolvedValue({ role: "staff" }),
+        findMany: vi.fn().mockResolvedValue([]),
       },
     } as never);
 
-    const res = await callReturn();
-    expect(res.status).toBe(307);
-    expect(new URL(res.headers.get("location")!).pathname).toBe(
-      "/store-admin",
-    );
+    await expect(callReturn()).rejects.toThrow("REDIRECT:/store-admin?store=test-store");
+    expect(updateStoreOnboardingStatus).not.toHaveBeenCalled();
   });
 
   it("calls updateStoreOnboardingStatus and redirects for owner", async () => {

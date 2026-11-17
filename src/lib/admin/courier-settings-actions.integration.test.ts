@@ -25,7 +25,7 @@ import CourierSettingsPage from "@/app/admin/(shell)/settings/couriers/page";
 import { saveCourierSettingsAction } from "./courier-settings-actions";
 import { authPrisma, platformAdmin } from "../db";
 import { readCourierSettings, type CourierSettings } from "../delivery/courier-settings";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const suffix = `${Date.now()}-cs535`;
 const password = "GuardPass-123!";
@@ -37,7 +37,7 @@ const emails = {
 const storeId = crypto.randomUUID();
 
 async function signUpAndIn(email: string): Promise<{ userId: string; cookies: string }> {
-  const signedUp = await authPost("/sign-up/email", { email, password, name: "Courier 535" });
+  const signedUp = await testSignUp({ email, password, name: "Courier 535" });
   expect(signedUp.status, await signedUp.clone().text()).toBe(200);
   const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
   const signedIn = await authPost("/sign-in/email", { email, password });

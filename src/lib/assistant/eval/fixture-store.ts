@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertAppRuntimeLogin, authPrisma, platform, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../../db";
 import { auth } from "../../auth";
+import { createTestUser } from "../../test-auth";
 import { resolveIngredients } from "../../catalog/ingredients";
 import { declaredRecipe, dishKey, type SeedRecipe } from "../recipe-base";
 import { findRecipe } from "../recipes";
@@ -250,9 +251,8 @@ export async function signInEvalShopper(created: CreatedEvalStores, orders: Past
     headers: { "content-type": "application/json", origin: AUTH_ORIGIN },
     body: JSON.stringify(body),
   }));
-  const signedUp = await call("sign-up/email", { email, password, name: "Eval Shopper" });
-  if (!signedUp.ok) throw new Error(`Eval shopper sign-up failed: ${signedUp.status}`);
-  const user = await authPrisma.user.findFirstOrThrow({ where: { email }, select: { id: true } });
+  // Public sign-up is closed; the test-only creator makes the account.
+  const user = { id: await createTestUser({ email, password, name: "Eval Shopper" }) };
   const remove = async () => {
     for (const storeId of [created.storeAId, created.storeBId]) {
       await storeScoped(storeId).order.deleteMany({ where: { customer: { OR: [{ userId: user.id }, { email }] } } });

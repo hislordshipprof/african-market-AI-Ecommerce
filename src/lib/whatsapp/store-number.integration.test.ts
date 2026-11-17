@@ -13,8 +13,8 @@ vi.mock("./customer-handler", async (importOriginal) => {
 });
 
 import { POST } from "@/app/api/webhooks/whatsapp/route";
-import { auth } from "../auth";
 import { authPrisma } from "../db";
+import { createTestUser } from "../test-auth";
 import { handleCustomerMessage } from "./customer-handler";
 import { WhatsAppApiError } from "./errors";
 import { fakeWhatsAppProvider } from "./fake";
@@ -96,13 +96,7 @@ describe.skipIf(!hasDb)("store WhatsApp number (lane database)", () => {
   const actorEmail = `swn-${suffix}@test.example`;
 
   beforeAll(async () => {
-    const res = await auth.handler(new Request("http://localhost:3000/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: actorEmail, password: "StoreNumberPass-123!", name: "Ada" }),
-    }));
-    expect(res.status, await res.clone().text()).toBe(200);
-    actorId = (await authPrisma.user.findFirstOrThrow({ where: { email: actorEmail } })).id;
+    actorId = await createTestUser({ email: actorEmail, password: "StoreNumberPass-123!", name: "Ada" });
     storeA = crypto.randomUUID();
     storeB = crypto.randomUUID();
     await asPlatformAdmin(async (tx) => {

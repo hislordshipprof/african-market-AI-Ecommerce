@@ -24,8 +24,8 @@ vi.mock("../admin/session", () => ({
   },
 }));
 
-import { auth } from "../auth";
 import { authPrisma } from "../db";
+import { createTestUser } from "../test-auth";
 import { fakeWhatsAppProvider } from "./fake";
 import { setWhatsAppProvider } from "./index";
 import { getStoreNumber } from "./store-number";
@@ -56,13 +56,7 @@ describe.skipIf(!hasDb)("store WhatsApp number actions (lane database)", () => {
   const email = `swna-${suffix}@test.example`;
 
   beforeAll(async () => {
-    const res = await auth.handler(new Request("http://localhost:3000/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: "StoreNumberPass-123!", name: "Ada" }),
-    }));
-    expect(res.status, await res.clone().text()).toBe(200);
-    userId = (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
+    userId = await createTestUser({ email, password: "StoreNumberPass-123!", name: "Ada" });
     storeA = crypto.randomUUID();
     storeB = crypto.randomUUID();
     await authPrisma.$transaction(async (tx) => {

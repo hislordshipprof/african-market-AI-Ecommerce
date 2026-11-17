@@ -29,7 +29,7 @@ import { createFakeAnthropicFetch } from "../assistant/messages-api-double";
 import { createAssistantModel } from "../assistant/model";
 import { findRecipe, saveLookedUpRecipe } from "../assistant/recipes";
 import { getRecipe } from "../assistant/tools/recipe";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const RUN = `rb${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const password = "GuardPass-123!";
@@ -37,7 +37,7 @@ const adminEmail = `${RUN}-admin@test.example`;
 const ownerEmail = `${RUN}-owner@test.example`;
 
 async function signUp(email: string): Promise<string> {
-  const res = await authPost("/sign-up/email", { email, password, name: RUN });
+  const res = await testSignUp({ email, password, name: RUN });
   expect(res.status, await res.clone().text()).toBe(200);
   return (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
 }

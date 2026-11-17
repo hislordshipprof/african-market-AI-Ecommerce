@@ -33,6 +33,8 @@ describe.skipIf(!hasDb || child)("app counters and Better Auth", () => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       NODE_ENV: "production",
+      // A deployment trusts only its own base URL's hosts, never bare localhost (#710).
+      BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
       RATE_LIMIT_PRUNE_CHILD: "1",
       ASSISTANT_CHAT_ENABLED: "1",
     };

@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { storeUrl, E2E_PORT } from "./urls";
 import { test, expect } from "@playwright/test";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 import { deleteGuestOrder, insertGuestOrder } from "./order-fixture";
+import { insertShopperAccount } from "./account-fixture";
 
 const base = storeUrl("mama-ngozi");
 const apiBase = `http://localhost:${E2E_PORT}`;
@@ -9,17 +11,8 @@ const email = `e2e-customer-${Date.now()}@test.example`;
 
 test.describe("Customer magic-link auth", () => {
   test("sign in via magic link → /account → sign out", async ({ page, request }) => {
-    // 1. Sign up the test user (sign-up/email is not a customer-only path, no slug needed)
-    const signupRes = await request.post(
-      `${apiBase}/api/auth/sign-up/email`,
-      {
-        data: { email, password: "E2eTestPass-123!", name: "E2E Customer" },
-      },
-    );
-    expect(
-      signupRes.ok(),
-      `Sign-up failed ${signupRes.status()}: ${await signupRes.text()}`,
-    ).toBe(true);
+    // 1. The test user exists with a name (public sign-up is closed, so the fixture writes it)
+    await insertShopperAccount({ email, password: "E2eTestPass-123!", name: "E2E Customer" });
 
     // 2. Navigate to the store sign-in page and submit via UI (browser resolves subdomain)
     await page.goto(`${base}/account/sign-in`);
@@ -145,6 +138,10 @@ test("signed-out production account redirects with demo flows disabled", async (
         E2E_STORE_OVERRIDE: "",
         E2E_FAKE_STRIPE: "",
         NODE_ENV: "production",
+        // A deployment trusts only its own base URL's hosts and refuses the committed test secret (#710).
+        BETTER_AUTH_URL: `http://localhost:${port}`,
+        BETTER_AUTH_TRUSTED_ORIGINS: `http://localhost:${port}`,
+        BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
         ...env,
       },
       healthUrl: `http://127.0.0.1:${port}/api/health`,

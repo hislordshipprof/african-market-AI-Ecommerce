@@ -25,7 +25,7 @@ import { generateTOTP } from "../../../e2e/totp";
 import { authPrisma, storeScoped, storeScopedTransaction } from "../db";
 import { createCouponAction, setCouponActiveAction, updateCouponAction } from "./actions";
 import { listCoupons } from "./service";
-import { authPost } from "../test-auth";
+import { authPost, testSignUp } from "../test-auth";
 
 const RUN = `t556-${Date.now()}`;
 const password = "Coupon-556-Owner!";
@@ -92,7 +92,7 @@ describe.skipIf(!hasDb)("store coupons (real auth, lane database)", () => {
 
   beforeAll(async () => {
     for (const key of Object.keys(emails) as Array<keyof typeof emails>) {
-      const res = await authPost("/sign-up/email", { email: emails[key], password, name: key });
+      const res = await testSignUp({ email: emails[key], password, name: key });
       expect(res.status, await res.clone().text()).toBe(200);
       ids[key] = (await authPrisma.user.findFirstOrThrow({ where: { email: emails[key] } })).id;
     }
