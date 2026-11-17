@@ -98,6 +98,7 @@ afterAll(sandbox.hook(async () => {
 
 describe.skipIf(!liveSandbox || !hasKey)(
   "Stripe PI sandbox (capture/cancel/refund/retrieve)",
+  { timeout: 60_000 },
   () => {
     beforeAll(sandbox.hook(async () => {
       stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
@@ -432,5 +433,4 @@ describe.skipIf(!liveSandbox || !hasKey)(
       });
     }), 200_000);
   },
-  { timeout: 60_000 },
 );

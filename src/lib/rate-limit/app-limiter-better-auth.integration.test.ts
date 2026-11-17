@@ -47,6 +47,8 @@ describe.skipIf(!hasDb || child)("app counters and Better Auth", () => {
       "src/lib/rate-limit/app-limiter-better-auth.integration.test.ts",
       "-t",
       "production child prune",
+      // Under an AI agent Vitest 4 picks a reporter that hides passed tests' logs, and this reads APP_COUNTERS_INTACT.
+      "--reporter=default",
     ], { cwd: process.cwd(), env, encoding: "utf8", timeout: 180_000 });
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toContain("APP_COUNTERS_INTACT");

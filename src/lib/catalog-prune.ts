@@ -281,7 +281,7 @@ function referenceDecodes(reference: string): boolean {
   }
 }
 
-function isLoopback(host: string): boolean {
+export function isLoopback(host: string): boolean {
   const normalized = addressHost(host);
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
