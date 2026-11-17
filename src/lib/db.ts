@@ -2049,9 +2049,12 @@ export async function platformSessionUser(): Promise<string> {
   });
 }
 
+/** The database login is not app_runtime, or it could bypass RLS. */
+export class UnsafeDatabaseLoginError extends Error {}
+
 /** Refuses a login that is not app_runtime, or one that bypasses RLS. */
-export async function assertAppRuntimeLogin(): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+export async function assertAppRuntimeLogin(client: Pick<PrismaClient, "$transaction"> = prisma): Promise<void> {
+  await client.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     const rows = await tx.$queryRaw<Array<{ session_user: string; rolsuper: boolean; rolbypassrls: boolean }>>`
       SELECT session_user::text AS session_user, rolsuper, rolbypassrls
@@ -2060,7 +2063,7 @@ export async function assertAppRuntimeLogin(): Promise<void> {
     `;
     const role = rows[0];
     if (!role || role.session_user !== "app_runtime" || role.rolsuper || role.rolbypassrls) {
-      throw new Error("The eval refuses evidence unless the database login is app_runtime.");
+      throw new UnsafeDatabaseLoginError("The database login must be app_runtime, without superuser or BYPASSRLS.");
     }
   });
 }
