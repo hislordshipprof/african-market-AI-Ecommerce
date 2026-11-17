@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { anthropic } from "@ai-sdk/anthropic";
 import { APICallError, generateText, stepCountIs, tool, type LanguageModel, type ModelMessage } from "ai";
 import { z } from "zod";
-import { platform } from "../db";
+import { insertLookedUpRecipe, platform } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { WEB_SEARCH_MICROS, billedSearches, callCostMicros, tokenUsageOf } from "./cost";
 import { assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
@@ -83,18 +83,12 @@ export async function saveLookedUpRecipe(dish: string, found: LookedUpDish): Pro
     : 0;
   const foundKey = taken === 0 ? reported : "";
   try {
-    await platform.recipe.create({
-      data: {
-        key,
-        name: found.name,
-        aliases: foundKey && foundKey !== key ? [foundKey] : [],
-        servings: null,
-        sourceUrl: found.sourceUrl,
-        origin: "lookup",
-        ingredients: {
-          create: found.ingredients.map((name, position) => ({ position, name })),
-        },
-      },
+    await insertLookedUpRecipe({
+      key,
+      name: found.name,
+      aliases: foundKey && foundKey !== key ? [foundKey] : [],
+      sourceUrl: found.sourceUrl,
+      ingredients: found.ingredients,
     });
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "P2002")) throw error;

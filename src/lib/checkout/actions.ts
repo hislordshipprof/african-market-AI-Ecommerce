@@ -50,6 +50,7 @@ const deliverySchema = z.strictObject({
   leaveAtDoor: z.boolean(),
 });
 const PAYMENT_LIMIT = 30;
+const PAYMENT_PER_IP = 20;
 const PAYMENT_WINDOW_MS = 60 * 60 * 1000;
 
 function readDelivery(
@@ -190,7 +191,9 @@ export async function createPaymentIntentAction(
       return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
     }
     const limit = await takeRateLimit(`payment:${cartId}`, PAYMENT_LIMIT, PAYMENT_WINDOW_MS);
-    if (!limit.ok) {
+    // A fresh cart per attempt resets the cart key, so the IP is counted too.
+    const ipLimit = limit.ok ? await takeRateLimit(`payment:ip:${clientIp(await headers())}`, PAYMENT_PER_IP, PAYMENT_WINDOW_MS) : limit;
+    if (!limit.ok || !ipLimit.ok) {
       return {
         ok: false,
         error: "Too many payment attempts. Please wait and try again.",

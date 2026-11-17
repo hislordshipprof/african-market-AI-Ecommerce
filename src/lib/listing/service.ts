@@ -3,6 +3,7 @@ import { shippableRefusal } from "../shipping/eligibility";
 import { storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lockListingVariantRows } from "../db";
 import { MAX_PREP_MINUTES, PREPARED_NEEDS_ALLERGENS, preparedSaleBlocked, type PreparedKind } from "./prepared";
 import { cateringFields } from "./catering";
+import { ListingInputError } from "./parse-variants";
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
@@ -149,7 +150,7 @@ export interface CreateListingInput {
 function preparedFields(prepared: PreparedKind | null, prepMinutes: number | null) {
   if (prepared == null) return { prepared: null, prepMinutes: null };
   if (prepMinutes == null || !Number.isInteger(prepMinutes) || prepMinutes < 0 || prepMinutes > MAX_PREP_MINUTES) {
-    throw new Error(`Prep time must be a whole number of minutes, 0 to ${MAX_PREP_MINUTES}`);
+    throw new ListingInputError(`Prep time must be a whole number of minutes, 0 to ${MAX_PREP_MINUTES}`);
   }
   return { prepared, prepMinutes };
 }
@@ -269,7 +270,7 @@ export async function updateListing(input: UpdateListingInput) {
     const existing = await tx.listing.findUnique({
       where: { id: input.listingId },
     });
-    if (!existing) throw new Error("Listing not found");
+    if (!existing) throw new ListingInputError("Listing not found");
 
     const modeChanged = input.stockMode !== undefined && input.stockMode !== existing.stockMode;
     // The number this form loaded coming back is not a count: an order may have moved qty since.
@@ -427,7 +428,7 @@ export async function updateListing(input: UpdateListingInput) {
     if (input.shippable ?? existing.shippable) {
       const variants = await tx.listingVariant.findMany({ where: { listingId: input.listingId }, select: { weightG: true, weightPlaceholder: true } });
       const refusal = shippableRefusal(listing, variants);
-      if (refusal && input.shippable === true) throw new Error(refusal);
+      if (refusal && input.shippable === true) throw new ListingInputError(refusal);
       shippable = refusal === null;
     }
     if (shippable !== existing.shippable) {
@@ -461,7 +462,7 @@ async function setListingActive(
     await lockStoreRow(tx, storeId);
     await lockListingRow(tx, listingId);
     const existing = await tx.listing.findUniqueOrThrow({ where: { id: listingId }, include: { attributes: { select: { allergensStatus: true } } } });
-    if (active && preparedSaleBlocked(existing, existing.attributes?.allergensStatus)) throw new Error(PREPARED_NEEDS_ALLERGENS);
+    if (active && preparedSaleBlocked(existing, existing.attributes?.allergensStatus)) throw new ListingInputError(PREPARED_NEEDS_ALLERGENS);
 
     const updated = await tx.listing.update({
       where: { id: listingId },
@@ -564,13 +565,13 @@ async function saveVariantsInPlace(
   },
 ) {
   if (input.variants.length === 0) {
-    throw new Error("At least one variant is required");
+    throw new ListingInputError("At least one variant is required");
   }
 
   await lockStoreRow(tx, input.storeId);
   await lockListingRow(tx, input.listingId);
   const listing = await tx.listing.findUnique({ where: { id: input.listingId } });
-  if (!listing) throw new Error("Listing not found");
+  if (!listing) throw new ListingInputError("Listing not found");
 
   const existing = await tx.listingVariant.findMany({
     where: { listingId: input.listingId },
@@ -580,9 +581,9 @@ async function saveVariantsInPlace(
   const seen = new Set<string>();
   for (const variant of input.variants) {
     if (!variant.id) continue;
-    if (seen.has(variant.id)) throw new Error("A variant appears twice in this save.");
+    if (seen.has(variant.id)) throw new ListingInputError("A variant appears twice in this save.");
     seen.add(variant.id);
-    if (!byId.has(variant.id)) throw new Error("Variant not found");
+    if (!byId.has(variant.id)) throw new ListingInputError("Variant not found");
   }
 
   const removed = existing
@@ -627,7 +628,7 @@ async function saveVariantsInPlace(
       }
     }
     const hit = removed.find((variant) => referenced.has(variant.id));
-    if (hit) throw new Error(CANT_REMOVE(hit.label));
+    if (hit) throw new ListingInputError(CANT_REMOVE(hit.label));
   }
 
   for (const variant of input.variants) {
@@ -649,7 +650,7 @@ async function saveVariantsInPlace(
     try {
       await tx.listingVariant.delete({ where: { id: variant.id } });
     } catch (err) {
-      if (isForeignKeyViolation(err)) throw new Error(CANT_REMOVE(variant.label));
+      if (isForeignKeyViolation(err)) throw new ListingInputError(CANT_REMOVE(variant.label));
       throw err;
     }
   }

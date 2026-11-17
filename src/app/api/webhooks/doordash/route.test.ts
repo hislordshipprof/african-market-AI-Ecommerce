@@ -154,4 +154,71 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/doordash", () => 
     expect((await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: returned.deliveryId } })).status).toBe("returned");
     expect(await orderStatus(returned.orderId)).toBe("PICKED_UP");
   });
+
+  describe("proof photo copy refuses what a courier provider would not send", () => {
+    const previousBucket = process.env.R2_PROOF_BUCKET;
+    beforeAll(() => {
+      process.env.R2_PROOF_BUCKET = "proof-test";
+    });
+    afterAll(() => {
+      if (previousBucket === undefined) delete process.env.R2_PROOF_BUCKET;
+      else process.env.R2_PROOF_BUCKET = previousBucket;
+    });
+
+    async function deliveredWithProof(proofUrl: string) {
+      const { orderId, deliveryId } = await courierOrder({ deliveryStatus: "delivered" });
+      await storeScoped(storeId).delivery.update({ where: { id: deliveryId }, data: { proofUrl } });
+      return { orderId, deliveryId };
+    }
+
+    it("a proof URL on a host outside the providers' image hosts is never fetched", async () => {
+      const uploads: string[] = [];
+      for (const url of ["http://169.254.169.254/latest/meta-data/", "https://evil.example/doordash.com/p.jpg", "https://doordash.com.evil.example/p.jpg"]) {
+        const { orderId, deliveryId } = await deliveredWithProof(url);
+        const fetched: string[] = [];
+        const deps = {
+          fetch: async (input: string | URL | Request) => {
+            fetched.push(String(input));
+            return new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { "content-type": "image/jpeg" } });
+          },
+          upload: async (key: string) => {
+            uploads.push(key);
+          },
+        };
+        expect(await copyCourierProof(storeId, deliveryId, deps)).toBe("skipped");
+        expect(fetched).toEqual([]);
+        expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).deliveryProofKey).toBeNull();
+      }
+      expect(uploads).toEqual([]);
+    });
+
+    it("a proof body with no Content-Length stops being read once it passes the photo cap", async () => {
+      const { orderId, deliveryId } = await deliveredWithProof("https://doordash-static.s3.amazonaws.com/huge.jpg");
+      const chunk = new Uint8Array(1024 * 1024);
+      let pulled = 0;
+      let cancelled = false;
+      const huge = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulled >= 64 * 1024 * 1024) return controller.close();
+          pulled += chunk.byteLength;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const uploads: string[] = [];
+      const deps = {
+        fetch: async () => new Response(huge, { headers: { "content-type": "image/jpeg" } }),
+        upload: async (key: string) => {
+          uploads.push(key);
+        },
+      };
+      expect(await copyCourierProof(storeId, deliveryId, deps)).toBe("skipped");
+      expect(cancelled).toBe(true);
+      expect(pulled).toBeLessThanOrEqual(4 * 1024 * 1024);
+      expect(uploads).toEqual([]);
+      expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).deliveryProofKey).toBeNull();
+    });
+  });
 });
