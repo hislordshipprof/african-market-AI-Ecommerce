@@ -64,6 +64,7 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
       const cartO2 = await tx.cart.create({ data: { storeId: storeA } });
       const cartX = await tx.cart.create({ data: { storeId: storeA } });
       const cartY = await tx.cart.create({ data: { storeId: storeA } });
+      const cartO3 = await tx.cart.create({ data: { storeId: storeA } });
 
       let number = 0;
       const order = (o: Partial<Prisma.OrderUncheckedCreateInput> & { customerId: string; createdAt: Date }) =>
@@ -83,8 +84,8 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
       await tx.delivery.create({ data: { storeId: storeA, orderId: o2.id, provider: "doordash", externalId: `${run}-d2`, status: "requested", quoteFeeCents: 899, createdAt: minutes(o2At, 41) } });
 
       const o3At = at("2026-11-05T20:00:00Z");
-      // Placed from an AI agent's checkout link (#573).
-      const o3 = await order({ customerId: c1guest.id, acquisitionSource: "agent", fulfillment: "store_delivery", status: "DELIVERED", tipCents: 200, deliveryFeeCents: 500, capturedAmountCents: 3700, platformFeeCents: 137, createdAt: o3At, readyAt: minutes(o3At, 90) });
+      // Placed from an AI agent's checkout link (#573), on a cart the shopping assistant also added to: counted once, as agent.
+      const o3 = await order({ customerId: c1guest.id, acquisitionSource: "agent", sourceCartId: cartO3.id, fulfillment: "store_delivery", status: "DELIVERED", tipCents: 200, deliveryFeeCents: 500, capturedAmountCents: 3700, platformFeeCents: 137, createdAt: o3At, readyAt: minutes(o3At, 90) });
       await tx.orderLine.create({ data: { storeId: storeA, orderId: o3.id, listingVariantId: vPalm.id, qtyOrdered: 2, qtyPicked: 2, unitPriceCents: 1500, status: "picked" } });
       const l4 = await tx.orderLine.create({ data: { storeId: storeA, orderId: o3.id, listingVariantId: vEgusi.id, qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 1000, status: "refunded" } });
       await tx.substitutionRequest.create({ data: { storeId: storeA, orderId: o3.id, orderLineId: l4.id, qty: 1, status: "timed_out", expiresAt: minutes(o3At, 15), createdAt: minutes(o3At, 5) } });
@@ -103,11 +104,14 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
 
       const convO2 = await tx.aiConversation.create({ data: { storeId: storeA, cartId: cartO2.id, model: "test", createdAt: minutes(o2At, -30) } });
       const convX = await tx.aiConversation.create({ data: { storeId: storeA, cartId: cartX.id, model: "test", createdAt: at("2026-11-04T15:00:00Z") } });
+      // Before the range, so the assistant view does not count this chat.
+      const convO3 = await tx.aiConversation.create({ data: { storeId: storeA, cartId: cartO3.id, model: "test", createdAt: at("2026-10-25T15:00:00Z") } });
       const convY = await tx.aiConversation.create({ data: { storeId: storeA, cartId: cartY.id, model: "test", createdAt: at("2026-11-05T15:00:00Z") } });
       const action = (conversationId: string, tool: string, input: object, output: object, createdAt: Date, ok = true) =>
         tx.aiAction.create({ data: { storeId: storeA, conversationId, tool, input, output, ok, createdAt } });
       await action(convO2.id, "add_to_cart", { items: [] }, { ok: true }, minutes(o2At, -20));
       await action(convX.id, "add_to_cart", { items: [] }, { ok: true }, at("2026-11-04T15:05:00Z"));
+      await action(convO3.id, "add_to_cart", { items: [] }, { ok: true }, at("2026-10-25T15:05:00Z"));
       await action(convY.id, "add_to_cart", { items: [] }, { ok: false }, at("2026-11-05T15:05:00Z"), false);
       await action(convY.id, "search_catalog", { query: " Ogiri" }, { ok: true, items: [] }, at("2026-11-05T15:01:00Z"));
       await action(convY.id, "search_catalog", { query: "OGIRI" }, { ok: true, items: [] }, at("2026-11-05T15:02:00Z"));

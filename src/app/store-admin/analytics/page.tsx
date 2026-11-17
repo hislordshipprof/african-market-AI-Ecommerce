@@ -83,7 +83,7 @@ function Stat({ label, value, detail }: { label: string; value: string; detail?:
   );
 }
 
-/** Two-part bar with a text legend, so the split never relies on colour alone. */
+/** Split bar (up to three parts) with a text legend, so the split never relies on colour alone. */
 function SplitBar({ label, parts }: { label: string; parts: Array<{ name: string; value: number }> }) {
   const total = parts.reduce((sum, p) => sum + p.value, 0);
   const tones = ["bg-primary", "bg-primary/35", "bg-muted-foreground/40"];
