@@ -12,6 +12,8 @@ describe("sendOrderAuthorized", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
+    // Vitest 4 no longer resets vi.fn() mocks in restoreAllMocks.
+    vi.resetAllMocks();
   });
 
   it("K8: logs but does not throw when DB update fails after successful send", async () => {
