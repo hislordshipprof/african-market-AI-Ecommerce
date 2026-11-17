@@ -71,6 +71,8 @@ model Store {
   listingBlurb  String?  @map("listing_blurb") @db.VarChar(160)
   /// Up to 3 directory cuisine tags (src/lib/directory/cuisine.ts, #450).
   cuisineTags   String[] @default([]) @map("cuisine_tags")
+  /// "Let AI assistants read my catalog" (#572): the store host's read-only catalog MCP endpoint answers only when true. The store owner turns it on.
+  aiCatalogReadable Boolean @default(false) @map("ai_catalog_readable")
 
   rlsFixtures            RlsTestFixture[]
   auditLogs              AuditLog[]

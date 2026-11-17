@@ -1,5 +1,6 @@
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { CUISINE_TAG_VALUES, type CuisineTag } from "@/lib/directory/listing-fields";
+import { AiCatalogCard } from "./ai-catalog-card";
 import { DirectoryListingForm } from "./directory-listing-form";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ export default async function DirectoryListingPage() {
         blurb: store.listingBlurb ?? "",
         cuisineTags: store.cuisineTags.filter((tag): tag is CuisineTag => known.has(tag)),
       }}
-    />
+    >
+      <AiCatalogCard initial={store.aiCatalogReadable} />
+    </DirectoryListingForm>
   );
 }
