@@ -217,8 +217,11 @@ _Avoid_: Confirm card (the parked 2026-11-04 design; replaced 2026-11-14)
 Not used. The assistant-only 10-minute cancel window was dropped on 2026-11-14 (#247), because assistant orders are placed by normal checkout.
 
 **Catalog endpoint**:
-A store host's read-only catalog for outside AI assistants such as ChatGPT or Claude, at `/api/mcp` over MCP (#572): `search_catalog`, `get_product`, `get_store_info` and `check_delivery_area`, answering with storefront links, prices and stock badges. No customer data, no cart or checkout, no sign-in; 60 calls a minute per IP. It answers only for an open store whose owner turned on "Let AI assistants read my catalog" (off by default); otherwise 404. Not the Shopper assistant, which runs on the storefront.
+A store host's catalog for outside AI assistants such as ChatGPT or Claude, at `/api/mcp` over MCP (#572): `search_catalog`, `get_product`, `get_store_info` and `check_delivery_area`, answering with storefront links, prices and stock badges, plus `create_checkout_link`, which returns an **Agent checkout link** (#573). No customer data, no payment and no order placed, no sign-in; 60 calls a minute per IP. It answers only for an open store whose owner turned on "Let AI assistants read my catalog" (off by default); otherwise 404. Not the Shopper assistant, which runs on the storefront.
 _Avoid_: Agent API, AI API
+
+**Agent checkout link**:
+The link an outside AI agent gets from the Catalog endpoint's `create_checkout_link` (#573). It puts the agent's variants in a new guest cart and opens the store's normal checkout with it, works once and for 60 minutes, and reserves and places nothing: the shopper pays on that page. At most 10 links an hour per IP. The order placed from that cart is counted as from an AI agent link in analytics (`source = agent`). It shares the WhatsApp checkout link's table and opening route.
 
 **Store copilot**:
 The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp.

@@ -1,7 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
+import type { PrismaClient } from "@prisma/client";
 import { storeScoped } from "../db";
 
-/** A WhatsApp checkout link opens the store's checkout once, within this long (#559). */
+/**
+ * A checkout link opens the store's checkout once, within this long. The WhatsApp shopper (#559) and
+ * AI agents over MCP (#573) both send one; the rows share the whatsapp_checkout_links table.
+ */
 export const CHECKOUT_LINK_TTL_MS = 60 * 60 * 1000;
 
 /** 32 random bytes, base64url: exactly 43 characters. */
@@ -15,10 +19,15 @@ export function checkoutLinkPath(token: string): string {
   return `/api/checkout-link/${token}`;
 }
 
-/** A new single-use link bound to this store's cart. Only the token's hash is stored. */
-export async function createCheckoutLink(storeId: string, cartId: string, now: Date): Promise<string> {
+/** A new single-use link bound to this store's cart. Only the token's hash is stored. Pass `db` to write inside a transaction. */
+export async function createCheckoutLink(
+  storeId: string,
+  cartId: string,
+  now: Date,
+  db: Pick<PrismaClient, "whatsAppCheckoutLink"> = storeScoped(storeId),
+): Promise<string> {
   const token = randomBytes(32).toString("base64url");
-  await storeScoped(storeId).whatsAppCheckoutLink.create({
+  await db.whatsAppCheckoutLink.create({
     data: {
       storeId,
       cartId,

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { storeMayUse } from "../billing/plan";
-import type { AcquisitionSource } from "../directory/attribution";
+import { AGENT_REF, type AcquisitionSource } from "../directory/attribution";
 import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS, storeHasWhatsAppNumber } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
@@ -922,7 +922,7 @@ export async function recordAuthorizedOrder(
           couponId,
           discountCents: currentQuote.discountCents,
           couponCustomerKey: couponId ? couponCustomerKey(couponUserId, input.contact.email) : null,
-          acquisitionSource: input.acquisitionSource ?? null,
+          acquisitionSource: cart.source === AGENT_REF ? AGENT_REF : (input.acquisitionSource ?? null),
           serviceFeeCents: currentQuote.serviceFeeCents,
           taxCents: tax.taxCents,
           taxLines: tax.lines as unknown as Prisma.InputJsonValue,
@@ -986,6 +986,8 @@ export async function recordAuthorizedOrder(
           paymentIntentId: null,
           paymentAttemptToken: null,
           purchaseEpoch: { increment: 1 },
+          // The agent built this basket only; the next order from the reused cart is the shopper's own (#573).
+          source: "manual",
           couponCode: null,
           taxCents: null,
           taxLines: Prisma.DbNull,
