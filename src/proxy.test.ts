@@ -401,6 +401,19 @@ describe("proxy on the platform root domain (store directory)", () => {
     });
   }
 
+  it("the not-found rewrite forwards the sanitised headers, so a forged x-store-slug never reaches the render", () => {
+    const req = new NextRequest("http://unknown-host.test/stores/texas", {
+      headers: { host: "unknown-host.test", "x-store-slug": "victim-store", "x-platform-root": "1" },
+    });
+    const res = proxy(req);
+    expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/_directory-not-here");
+    const forwarded = res.headers.get("x-middleware-override-headers")?.split(",") ?? [];
+    expect(forwarded).toContain("host");
+    expect(forwarded).not.toContain("x-store-slug");
+    expect(forwarded).not.toContain("x-platform-root");
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+  });
+
   it("leaves a store's own /stores-like paths alone", () => {
     const res = proxy(makeRequest("http://mama-ngozi.example.com/storesx"));
     expect(res.headers.get("x-middleware-rewrite")).toBeNull();
