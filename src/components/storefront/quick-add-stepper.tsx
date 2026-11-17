@@ -1,4 +1,5 @@
 "use client";
+import { useId } from "react";
 import { Plus, Minus } from "lucide-react";
 import { cartItemKey, type CartItem } from "@/lib/storefront/cart-store";
 import { cartQuantityCeiling } from "@/lib/storefront/cart-quantity";
@@ -18,10 +19,13 @@ export function QuickAddStepper({
     lines.find((line) => cartItemKey(line) === cartItemKey(item))?.quantity ??
     0;
   const ceiling = cartQuantityCeiling(maxQuantity);
+  const reasonId = useId();
+  // A real per-order ceiling was passed (not the 99 default) and we've reached it.
+  const atLimit = maxQuantity < 99 && qty >= ceiling;
   return (
     <div
       className={styles.stepper}
-      style={{ width: qty ? 132 : 44 }}
+      data-active={qty ? "true" : undefined}
       data-testid={qty ? "quick-add-stepper" : undefined}
     >
       {qty ? (
@@ -42,11 +46,17 @@ export function QuickAddStepper({
             type="button"
             data-testid="stepper-plus"
             disabled={disabled || qty >= ceiling}
+            aria-describedby={atLimit ? reasonId : undefined}
             onClick={() => store.adjust(item, 1, maxQuantity)}
             aria-label={`Add another ${item.name}`}
           >
             <Plus size={18} />
           </button>
+          {atLimit && (
+            <span id={reasonId} className="sr-only">
+              Limit {maxQuantity} per order
+            </span>
+          )}
         </>
       ) : (
         <button

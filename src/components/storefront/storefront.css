@@ -730,7 +730,7 @@
 }
 .sf-price {
   display: block;
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 750;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
@@ -751,16 +751,18 @@
 .sf-product-name {
   position: relative;
   display: block;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
-  margin-top: 10px;
+  margin-top: 8px;
+  /* Reserve two lines so prices align across the row; longer names still grow. */
+  min-height: calc(2 * 1.4em);
 }
 .sf-local-name {
   font-size: 13px;
   color: var(--muted-foreground);
   line-height: 1.5;
-  margin-top: 3px;
+  margin-top: 4px;
 }
 /* Tap targets reach 44px without changing how the text looks. */
 .sf-product-name::after,
@@ -1549,7 +1551,7 @@
     font-size: 20px;
   }
   .sf-product-name {
-    font-size: 14px;
+    font-size: 16px;
     margin-top: 8px;
   }
   .sf-local-name {

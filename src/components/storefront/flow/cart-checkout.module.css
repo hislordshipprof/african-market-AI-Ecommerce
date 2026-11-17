@@ -59,14 +59,15 @@
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 650;
   line-height: 1.4;
 }
+/* Square cart thumbnails: 80px desktop, 64px phone (#708 AC1). */
 .photo {
-  width: 88px;
-  height: 104px;
-  flex: 0 0 88px;
+  width: 80px;
+  height: 80px;
+  flex: 0 0 80px;
   overflow: hidden;
   border-radius: 12px;
   background: var(--sf-thumb-well, var(--color-bg));
@@ -566,14 +567,14 @@
   }
   .line {
     display: grid;
-    grid-template-columns: 66px minmax(0, 1fr);
+    grid-template-columns: 64px minmax(0, 1fr);
   }
   .line > strong {
     grid-column: 2;
   }
   .photo {
-    width: 66px;
-    height: 82px;
+    width: 64px;
+    height: 64px;
   }
 }
 @media (max-width: 900px) {
@@ -593,9 +594,9 @@
     gap: 10px;
   }
   .photo {
-    width: 66px;
-    flex-basis: 66px;
-    height: 82px;
+    width: 64px;
+    flex-basis: 64px;
+    height: 64px;
   }
   .line > strong {
     font-size: 13px;
