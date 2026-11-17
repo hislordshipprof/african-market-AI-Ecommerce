@@ -39,7 +39,7 @@ vi.mock("../auth", () => ({
   },
 }));
 
-import { updateDirectoryListing } from "./directory-actions";
+import { updateAiCatalogAccess, updateDirectoryListing } from "./directory-actions";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t450-${Date.now().toString(36)}`;
@@ -166,5 +166,39 @@ describe.skipIf(!hasDb)("updateDirectoryListing (lane database)", () => {
       `REDIRECT:/store-admin?store=${slugA}`,
     );
     expect(await store(ids.a)).toEqual(before);
+  });
+
+  describe("Let AI assistants read my catalog (#572)", () => {
+    const readable = async (id: string) =>
+      (await raw.store.findUniqueOrThrow({ where: { id }, select: { aiCatalogReadable: true } })).aiCatalogReadable;
+    const accessAudits = (storeId: string) =>
+      storeScoped(storeId).auditLog.findMany({ where: { action: "store.ai_catalog_access" }, orderBy: { createdAt: "asc" } });
+
+    it("is off by default; the owner turns it on with an audit row, and the store host stops serving its cached answer", async () => {
+      expect(await readable(ids.a)).toBe(false);
+      as(ids.ownerA, slugA);
+      expect(await updateAiCatalogAccess({ readable: true })).toEqual({ ok: true });
+      expect(await readable(ids.a)).toBe(true);
+      expect(await accessAudits(ids.a)).toEqual([
+        expect.objectContaining({ actorId: ids.ownerA, entityId: ids.a, before: { aiCatalogReadable: false }, after: { aiCatalogReadable: true } }),
+      ]);
+      expect(state.revalidated).toContain(`store-slug:${slugA}`);
+
+      expect(await updateAiCatalogAccess({ readable: false })).toEqual({ ok: true });
+      expect(await readable(ids.a)).toBe(false);
+      expect(await accessAudits(ids.a)).toHaveLength(2);
+    });
+
+    it("an owner of store A cannot change store B, and staff are refused", async () => {
+      as(ids.ownerA, slugA);
+      expect((await updateAiCatalogAccess({ storeId: ids.b, readable: true })).ok).toBe(false);
+      as(ids.ownerA, slugB);
+      await expect(updateAiCatalogAccess({ readable: true })).rejects.toThrow(`REDIRECT:/store-admin/sign-in?store=${slugB}`);
+      as(ids.staffA, slugA);
+      await expect(updateAiCatalogAccess({ readable: true })).rejects.toThrow(`REDIRECT:/store-admin?store=${slugA}`);
+      expect(await readable(ids.a)).toBe(false);
+      expect(await readable(ids.b)).toBe(false);
+      expect(await accessAudits(ids.b)).toHaveLength(0);
+    });
   });
 });
