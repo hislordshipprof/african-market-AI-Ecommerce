@@ -7,7 +7,8 @@ import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checko
 import { setStripeProvider } from "../stripe";
 import { capturedFees, capturedPayments, fakeStripeProvider, refundedPayments, setAuthorizedAmount } from "../stripe/fake";
 import { fakeTaxCalculator, setTaxCalculatorForTests } from "../tax/calculator";
-import { cancelShipment, markReady, SHIPMENT_SCANNED } from "../order/service";
+import { cancelShipment, markReady } from "../order/service";
+import { SHIPMENT_SCANNED } from "./label";
 import { platformFeeLedger } from "../admin/fee-ledger-query";
 import { createPaymentIntent, placeOrder, quoteCheckout, saveDeliverySnapshot, type DeliveryRequest } from "../checkout/service";
 import { ShippoProvider, signShippoWebhook } from "./shippo";

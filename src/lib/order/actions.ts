@@ -15,9 +15,8 @@ import {
   markDelivered,
   cancelOrder,
   cancelShipment,
-  SHIPMENT_SCANNED,
 } from "./service";
-import { buyShippingLabel, LABEL_BEING_BOUGHT, LABEL_NOT_BOUGHT, LABEL_STORAGE_NOT_SET_UP, POSTAGE_ROSE_PREFIX, SHIPPING_UNAVAILABLE } from "../shipping/label";
+import { buyShippingLabel, SHIPMENT_SCANNED, LABEL_BEING_BOUGHT, LABEL_NOT_BOUGHT, LABEL_STORAGE_NOT_SET_UP, POSTAGE_ROSE_PREFIX, SHIPPING_UNAVAILABLE } from "../shipping/label";
 import { STORE_CANCEL_REASONS } from "./constants";
 import {
   BATCH_LINE_DONE,

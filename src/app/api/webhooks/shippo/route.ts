@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { parseInput } from "@/lib/security/parse-input";
 import { parseTrackUpdated, verifyShippoSignature } from "@/lib/shipping/shippo";
 import { applyTrackingWebhook } from "@/lib/shipping/tracking";
 
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 256 * 1024;
+
+const eventIdsSchema = z.looseObject({ eventId: z.string().min(1).max(200), labelId: z.string().min(1).max(200) });
 
 /**
  * Shippo `track_updated` events (https://docs.goshippo.com/api-reference/track.md), set in the Shippo dashboard.
@@ -24,6 +28,7 @@ export async function POST(req: NextRequest) {
   }
   const event = parseTrackUpdated(raw);
   if (!event) return NextResponse.json({ received: true, recorded: false });
+  if (!parseInput(eventIdsSchema, event).ok) return NextResponse.json({ error: "Malformed webhook body" }, { status: 400 });
   if (event.test && process.env.SHIPPO_API_KEY?.startsWith("shippo_live_")) {
     return NextResponse.json({ received: true, recorded: false });
   }

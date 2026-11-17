@@ -20,7 +20,7 @@ import { recordCapture } from "./capture-record";
 import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
 import { orderPrepMinutes } from "../listing/prepared";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
-import { buyShippingLabel, fixPostage, SHIPPING_UNAVAILABLE, type LabelDeps } from "../shipping/label";
+import { buyShippingLabel, fixPostage, SHIPMENT_SCANNED, SHIPPING_UNAVAILABLE, type LabelDeps } from "../shipping/label";
 import { ShippingProviderError, type ShippingProvider } from "../shipping/provider";
 import { shippingProvider } from "../shipping/settings";
 export type { OrderLineStatus } from "./constants";
@@ -1577,8 +1577,6 @@ export async function cancelOrder(
 
   return { ok: true };
 }
-
-export const SHIPMENT_SCANNED = "The carrier has scanned this parcel, so it can no longer be cancelled";
 
 /**
  * Cancels a shipped order after Ready but before the carrier's first scan (#568): the label is voided with Shippo,

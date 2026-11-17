@@ -14,6 +14,7 @@ export const SHIPPING_UNAVAILABLE = "Shipping isn't available right now. Try aga
 export const LABEL_NOT_BOUGHT = "The label could not be bought. Try again in a few minutes";
 export const LABEL_BEING_BOUGHT = "The label is being bought";
 export const POSTAGE_ROSE_PREFIX = "Postage went up from ";
+export const SHIPMENT_SCANNED = "The carrier has scanned this parcel, so it can no longer be cancelled";
 
 export type PostageResult =
   | { ok: true }

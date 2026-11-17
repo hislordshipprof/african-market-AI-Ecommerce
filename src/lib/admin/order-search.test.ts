@@ -20,7 +20,7 @@ describe("parseOrderSearch", () => {
   });
 
   it("rejects a status or fulfillment outside the known lists", () => {
-    expect(parseOrderSearch({ ...blank, status: "SHIPPED" }).ok).toBe(false);
+    expect(parseOrderSearch({ ...blank, status: "LOST" }).ok).toBe(false);
     expect(parseOrderSearch({ ...blank, status: "%" }).ok).toBe(false);
     expect(parseOrderSearch({ ...blank, fulfillment: "drone" }).ok).toBe(false);
     expect(parseOrderSearch({ ...blank, status: "REFUND_FAILED", fulfillment: "courier" })).toMatchObject({
