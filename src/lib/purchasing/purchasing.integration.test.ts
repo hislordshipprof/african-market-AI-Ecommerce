@@ -11,6 +11,7 @@ import {
   editPurchaseOrderLines,
   listPurchaseOrders,
   movePurchaseOrder,
+  receivePurchaseOrder,
   sendPurchaseOrder,
 } from "./purchase-orders";
 
@@ -226,12 +227,13 @@ describe.skipIf(!hasDb)("suppliers and purchase orders (lane database)", () => {
   it("moves draft to sent to received or cancelled only, each move audited", async () => {
     const orders = await listPurchaseOrders(storeA);
     const accra = orders.find((o) => o.supplier.name === "Accra Imports")!;
-    expect(await movePurchaseOrder(storeA, accra.id, "received", actor)).toEqual({ ok: true });
+    const egusi = { lineId: accra.lines[0].id, quantity: null, stockMode: "status" as const };
+    expect(await receivePurchaseOrder(storeA, accra.id, [egusi], actor)).toMatchObject({ ok: true });
     expect(await movePurchaseOrder(storeA, accra.id, "cancelled", actor)).toMatchObject({ ok: false });
     expect(await movePurchaseOrder(storeB, accra.id, "cancelled", actor)).toMatchObject({ ok: false });
     expect((await audits(accra.id)).map((a) => a.action).slice(-2)).toEqual(["purchase_order.send", "purchase_order.received"]);
     const cancelled = orders.find((o) => o.status === "cancelled")!;
-    expect(await movePurchaseOrder(storeA, cancelled.id, "received", actor)).toMatchObject({ ok: false });
+    expect(await receivePurchaseOrder(storeA, cancelled.id, [{ ...egusi, lineId: cancelled.lines[0].id }], actor)).toMatchObject({ ok: false });
   });
 
   it("will not archive a supplier with an open order, and drops an archived supplier's listings", async () => {
@@ -241,7 +243,7 @@ describe.skipIf(!hasDb)("suppliers and purchase orders (lane database)", () => {
     const draft = (await listPurchaseOrders(storeA)).find((o) => o.status === "draft")!;
     await movePurchaseOrder(storeA, draft.id, "cancelled", actor);
     const sentLagos = (await listPurchaseOrders(storeA)).find((o) => o.supplier.name === "Lagos Foods" && o.status === "sent")!;
-    await movePurchaseOrder(storeA, sentLagos.id, "received", actor);
+    await receivePurchaseOrder(storeA, sentLagos.id, [{ lineId: sentLagos.lines[0].id, quantity: 20, stockMode: "counted" }], actor);
     expect(await archiveSupplier(storeA, ids.lagos, actor)).toEqual({ ok: true });
     expect((await listSuppliers(storeA)).map((s) => s.name)).not.toContain("Lagos Foods");
     expect(await draftPurchaseOrders(storeA, actor)).toMatchObject({ ok: false });
