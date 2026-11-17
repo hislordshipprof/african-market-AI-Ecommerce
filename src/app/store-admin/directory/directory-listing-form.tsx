@@ -32,9 +32,11 @@ interface Props {
   /** The store's status: only an active store is in the directory (#449, #555). */
   status: string;
   initial: Listing;
+  /** Other store settings, shown below the listing form with their own save. */
+  children?: React.ReactNode;
 }
 
-export function DirectoryListingForm({ storeName, storeSlug, place, located, status, initial }: Props) {
+export function DirectoryListingForm({ storeName, storeSlug, place, located, status, initial, children }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [listing, setListing] = useState<Listing>(initial);
@@ -208,6 +210,7 @@ export function DirectoryListingForm({ storeName, storeSlug, place, located, sta
             ) : null}
           </div>
         </form>
+        {children ? <div className="mt-6 flex flex-col gap-6">{children}</div> : null}
       </main>
     </div>
   );
