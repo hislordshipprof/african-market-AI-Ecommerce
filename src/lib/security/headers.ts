@@ -75,6 +75,7 @@ function sharedDirectives(env: Record<string, string | undefined>): string[] {
     "data:",
     "blob:",
     "https://images.unsplash.com",
+    "https://upload.wikimedia.org",
     "https://*.stripe.com",
     images,
   ].filter(Boolean).join(" ");
@@ -92,14 +93,16 @@ function sharedDirectives(env: Record<string, string | undefined>): string[] {
   ];
 }
 
-function scriptSrc(env: Record<string, string | undefined>): string {
-  const devEval = env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
-  return `script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com${devEval}`;
+function scriptSrc(withEval: boolean): string {
+  return `script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com${withEval ? " 'unsafe-eval'" : ""}`;
 }
 
-/** Enforced. script-src stays as loose as Next needs until nonces work (see reportOnlyPolicy). */
+/**
+ * Enforced. script-src blocks nothing the app runs until nonces work (see reportOnlyPolicy):
+ * a bundled vm polyfill on /admin pages calls eval, which the report-only policy still reports.
+ */
 export function enforcedPolicy(env: Record<string, string | undefined>): string {
-  return ["default-src 'self'", scriptSrc(env), ...sharedDirectives(env)].join("; ");
+  return ["default-src 'self'", scriptSrc(true), ...sharedDirectives(env)].join("; ");
 }
 
 export function reportOnlyPolicy(
@@ -112,7 +115,7 @@ export function reportOnlyPolicy(
     // runtime does not read the request CSP. A nonce in script-src disables
     // 'unsafe-inline', and 'strict-dynamic' ignores 'self', so either one reports
     // every framework script. The rotating nonce lives on script-src-attr instead.
-    scriptSrc(env),
+    scriptSrc(env.NODE_ENV === "development"),
     `script-src-attr 'nonce-${nonce}'`,
     ...sharedDirectives(env),
   ].join("; ");

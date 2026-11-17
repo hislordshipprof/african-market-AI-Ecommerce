@@ -286,7 +286,6 @@ describe("security headers on the proxy", () => {
     expect(pass.headers.get("x-frame-options")).toBe("DENY");
     expect(pass.headers.get("content-security-policy-report-only")).not.toContain("unsafe-eval");
     expect(pass.headers.get("content-security-policy")).toContain("default-src 'self'");
-    expect(pass.headers.get("content-security-policy")).not.toContain("unsafe-eval");
     expect(pass.headers.get("permissions-policy")).toContain("camera=()");
 
     const nextConfig = (await import("../next.config")).default;

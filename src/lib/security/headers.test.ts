@@ -15,14 +15,16 @@ describe("security headers", () => {
     expect(directive("connect-src")).toBe("connect-src 'self' https://api.stripe.com");
     expect(directive("frame-src")).toBe("frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com");
     expect(directive("img-src")).toContain("https://cdn.example.test");
+    // Catalog photos (src/lib/storefront/catalog-media.json) are served from Wikimedia.
+    expect(directive("img-src")).toContain("https://upload.wikimedia.org");
     // The payouts dashboard form is answered with a 303 to connect.stripe.com; form-action covers redirects.
     expect(directive("form-action")).toBe("form-action 'self' https://connect.stripe.com");
     expect(directive("frame-ancestors")).toBe("frame-ancestors 'none'");
     expect(directive("report-uri")).toBe("report-uri /api/csp-report");
-    // script-src is not tightened until nonces: Next's inline scripts must still run.
+    // script-src is not tightened until nonces: Next's inline scripts and the admin bundle's eval still run.
     expect(directive("script-src")).toContain("'unsafe-inline'");
+    expect(directive("script-src")).toContain("'unsafe-eval'");
     expect(enforced).not.toContain("nonce-");
-    expect(enforced).not.toContain("unsafe-eval");
     expect(enforced).not.toContain("maps.googleapis.com");
 
     const headers = staticSecurityHeaders({ NODE_ENV: "production" });
