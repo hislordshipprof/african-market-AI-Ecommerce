@@ -62,6 +62,7 @@ type Outcome =
 
 /** A quote request that takes longer than this is treated as failed, so checkout never hangs (#708 AC2b). */
 const QUOTE_TIMEOUT_MS = 12_000;
+const ADDRESS_TIMEOUT_MS = 12_000;
 
 interface StripeConfig {
   publishableKey: string;
@@ -670,15 +671,26 @@ function RealCheckoutForm({
           }}
           onConfirm={() => {
             setConfirming(true);
-            confirmAddressAction({
+            // Always settles: a rejected or hanging check frees the button with a visible failure (#708 AC2b).
+            settleWithTimeout(() => confirmAddressAction({
               line1,
               line2: line2 || null,
               city,
               state: region,
               zip,
               leaveAtDoor: !handoff && leaveAtDoor,
-            }).then((result) => {
+            }), ADDRESS_TIMEOUT_MS).then((settled) => {
               setConfirming(false);
+              if (!settled.ok) {
+                setConfirmed(null);
+                setError(
+                  fulfillment === "ship"
+                    ? "We couldn't check that shipping address. Try again."
+                    : "We couldn't check that address. Try again.",
+                );
+                return;
+              }
+              const result = settled.value;
               if (!result.ok) {
                 setConfirmed(null);
                 setError(result.error);
@@ -700,15 +712,6 @@ function RealCheckoutForm({
               setCity(result.city);
               setRegion(result.state);
               setZip(result.zip);
-            }).catch(() => {
-              // A rejected address check must release the button, not leave it stuck "Checking…" (#708 AC2b).
-              setConfirming(false);
-              setConfirmed(null);
-              setError(
-                fulfillment === "ship"
-                  ? "We couldn't check that shipping address. Try again."
-                  : "We couldn't check that address. Try again.",
-              );
             });
           }}
           confirming={confirming}
