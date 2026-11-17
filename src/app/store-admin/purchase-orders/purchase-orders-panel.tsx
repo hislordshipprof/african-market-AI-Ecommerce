@@ -10,11 +10,13 @@ import {
   draftPurchaseOrdersAction,
   editPurchaseOrderAction,
   movePurchaseOrderAction,
+  readInvoiceAction,
+  receivePurchaseOrderAction,
   saveSupplierAction,
   sendPurchaseOrderAction,
   setSupplierListingsAction,
 } from "@/lib/purchasing/actions";
-import type { PurchaseOrderView } from "@/lib/purchasing/purchase-orders";
+import type { PurchaseOrderView, ReceivedLine, ReceiveResult } from "@/lib/purchasing/purchase-orders";
 import type { SupplierChannel, SupplierView } from "@/lib/purchasing/suppliers";
 
 type OrderView = Omit<PurchaseOrderView, "sentAt" | "createdAt"> & { sentAt: string | null; createdAt: string };
@@ -31,6 +33,128 @@ function Notice({ text }: { text: string | null }) {
   return text ? <p role="status" className="text-sm text-muted-foreground">{text}</p> : null;
 }
 
+const REJECTED: Record<Extract<ReceiveResult, { ok: true }>["rejected"][number]["reason"], string> = {
+  archived: "the item was removed from your store",
+  stock_mode_changed: "the item's stock tracking changed. Update it on the Copilot page",
+  too_large: "the count would be too large",
+};
+
+type Receipt = Extract<ReceiveResult, { ok: true }>;
+
+/** Tick what came, at the quantity that came. One tap writes it all; a photo of the invoice only fills the form. */
+function ReceiveForm({ order, onReceived, onClose }: { order: OrderView; onReceived: (receipt: Receipt) => void; onClose: () => void }) {
+  const router = useRouter();
+  const [ticked, setTicked] = useState(() => new Set(order.lines.map((line) => line.id)));
+  const [quantities, setQuantities] = useState<Record<string, string>>(() =>
+    Object.fromEntries(order.lines.map((line) => [line.id, line.quantity === null ? "" : String(line.quantity)])),
+  );
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const count = ticked.size;
+
+  function toggle(lineId: string) {
+    setTicked((current) => {
+      const next = new Set(current);
+      if (!next.delete(lineId)) next.add(lineId);
+      return next;
+    });
+  }
+
+  function readInvoice(file: File | undefined) {
+    if (!file) return;
+    const form = new FormData();
+    form.set("orderId", order.id);
+    form.set("photo", file);
+    startTransition(async () => {
+      setNotice("Reading the invoice…");
+      const result = await readInvoiceAction(form);
+      if (!result.ok) return setNotice(result.message);
+      const found = Object.keys(result.lines);
+      setQuantities((current) => ({ ...current, ...Object.fromEntries(found.map((lineId) => [lineId, String(result.lines[lineId])])) }));
+      setTicked(new Set(found));
+      const filled = found.length === 0 ? "No line on this order was found on the invoice." : `Filled ${found.length} of ${order.lines.length} lines from the invoice. Check them before you confirm.`;
+      setNotice(result.unmatched.length ? `${filled} Not on this order: ${result.unmatched.join(", ")}.` : filled);
+    });
+  }
+
+  function receive() {
+    const lines: ReceivedLine[] = [];
+    for (const line of order.lines) {
+      if (!ticked.has(line.id)) continue;
+      if (line.stockMode === "status") {
+        lines.push({ lineId: line.id, quantity: null, stockMode: line.stockMode });
+        continue;
+      }
+      const raw = (quantities[line.id] ?? "").trim();
+      if (!/^\d{1,6}$/.test(raw) || Number(raw) < 1) return setNotice(`Enter how many ${line.name} came, or untick it.`);
+      lines.push({ lineId: line.id, quantity: Number(raw), stockMode: line.stockMode });
+    }
+    if (lines.length === 0) return setNotice("Tick what came in.");
+    startTransition(async () => {
+      const result = await receivePurchaseOrderAction({ orderId: order.id, lines });
+      if (!result.ok) return setNotice(result.message);
+      onReceived(result);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border px-4 py-3">
+      <p className="text-sm text-muted-foreground">Tick what came in and how many. Untick anything that did not come.</p>
+      <ul className="divide-y divide-border rounded-lg border border-border">
+        {order.lines.map((line) => (
+          <li key={line.id} className="flex items-center gap-3 px-3 py-2">
+            <label className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-base text-foreground">
+              <input type="checkbox" className="size-5 shrink-0 accent-primary" checked={ticked.has(line.id)} onChange={() => toggle(line.id)} />
+              <span className="min-w-0 truncate">{line.name}</span>
+            </label>
+            {line.stockMode === "counted" ? (
+              <input
+                aria-label={`Quantity of ${line.name} received`}
+                inputMode="numeric"
+                placeholder="Qty"
+                disabled={!ticked.has(line.id)}
+                value={quantities[line.id] ?? ""}
+                onChange={(e) => setQuantities((current) => ({ ...current, [line.id]: e.target.value }))}
+                className={`${FIELD} w-24 shrink-0 text-right tabular-nums disabled:opacity-50`}
+              />
+            ) : (
+              <span className="shrink-0 text-sm text-muted-foreground">In stock</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" className={PILL} disabled={pending || count === 0} onClick={receive}>
+          {`Add ${count} ${count === 1 ? "item" : "items"} to stock`}
+        </Button>
+        <label className={buttonVariants({ variant: "outline", className: `${PILL} cursor-pointer focus-within:ring-2 focus-within:ring-ring` })}>
+          Fill from invoice photo
+          <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="sr-only" disabled={pending} onChange={(e) => { readInvoice(e.target.files?.[0]); e.target.value = ""; }} />
+        </label>
+        <Button type="button" variant="ghost" className={PILL} disabled={pending} onClick={onClose}>Close</Button>
+      </div>
+      <Notice text={notice} />
+    </div>
+  );
+}
+
+function ReceiptNotice({ receipt }: { receipt: Receipt }) {
+  return (
+    <div role="status" className="flex flex-col gap-1 border-t border-border px-4 py-3 text-sm">
+      <p className="text-foreground">{`${receipt.received} ${receipt.received === 1 ? "item" : "items"} added to stock.`}</p>
+      {receipt.rejected.length > 0 ? (
+        <>
+          <p className="font-semibold text-foreground">Not added:</p>
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {receipt.rejected.map((line) => <li key={line.lineId}>{`${line.name}: ${REJECTED[line.reason]}.`}</li>)}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function OrderCard({ order }: { order: OrderView }) {
   const router = useRouter();
   const titleId = useId();
@@ -39,6 +163,8 @@ function OrderCard({ order }: { order: OrderView }) {
     Object.fromEntries(order.lines.map((line) => [line.id, line.quantity === null ? "" : String(line.quantity)])),
   );
   const [notice, setNotice] = useState<string | null>(null);
+  const [receiving, setReceiving] = useState(false);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [pending, startTransition] = useTransition();
 
   function edits(): Array<{ lineId: string; quantity: number | null }> | null {
@@ -115,7 +241,11 @@ function OrderCard({ order }: { order: OrderView }) {
           </li>
         ))}
       </ul>
-      {draft || order.status === "sent" ? (
+      {receiving && order.status === "sent" ? (
+        <ReceiveForm order={order} onClose={() => setReceiving(false)} onReceived={(result) => { setReceipt(result); setReceiving(false); }} />
+      ) : null}
+      {receipt ? <ReceiptNotice receipt={receipt} /> : null}
+      {draft || (order.status === "sent" && !receiving) ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
           {draft ? (
             <>
@@ -123,8 +253,8 @@ function OrderCard({ order }: { order: OrderView }) {
               <Button type="button" variant="outline" className={PILL} disabled={pending} onClick={save}>Save changes</Button>
             </>
           ) : (
-            <Button type="button" className={PILL} disabled={pending} onClick={() => run(() => movePurchaseOrderAction({ orderId: order.id, to: "received" }), "Marked received.")}>
-              Mark received
+            <Button type="button" className={PILL} disabled={pending} onClick={() => setReceiving(true)}>
+              Receive delivery
             </Button>
           )}
           <Button
@@ -381,7 +511,8 @@ export function PurchaseOrdersPage({
               {orders.length === 0 ? (
                 <p className="rounded-xl border border-border bg-card px-4 py-4 text-base text-muted-foreground">No purchase orders yet.</p>
               ) : (
-                orders.map((order) => <OrderCard key={`${order.id}-${order.status}-${order.lines.map((l) => `${l.id}:${l.quantity}`).join(",")}`} order={order} />)
+                // The key leaves status out, so a receipt's result stays on the card after the refresh.
+                orders.map((order) => <OrderCard key={`${order.id}-${order.lines.map((l) => `${l.id}:${l.quantity}`).join(",")}`} order={order} />)
               )}
             </section>
 

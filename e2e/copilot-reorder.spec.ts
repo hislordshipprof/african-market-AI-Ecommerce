@@ -191,7 +191,7 @@ async function seedOrders(): Promise<{ first: string; second: string }> {
         position,
       })),
     });
-    return { first: listings[0].customName!, second: listings[1].customName! };
+    return { first: listings[0].customName!, second: listings[1].customName!, firstId: listings[0].id };
   });
 }
 
@@ -229,7 +229,7 @@ async function pickItem(page: Page, supplier: string, item: string) {
   await expect(card.getByText("Items saved.")).toBeVisible();
 }
 
-test("owner adds suppliers, drafts one order per supplier from the reorder list, emails one and opens WhatsApp for the other (#575)", async ({ page }) => {
+test("owner adds suppliers, drafts one order per supplier from the reorder list, emails one and opens WhatsApp for the other (#575), then receives a short delivery into stock (#576)", async ({ page }) => {
   const before = await setPlan({ plan: "pro", status: "active" });
   try {
     const items = await seedOrders();
@@ -255,7 +255,7 @@ test("owner adds suppliers, drafts one order per supplier from the reorder list,
     await lagos.getByRole("button", { name: "Send by email" }).click();
     await expect(lagos.getByText("Sent", { exact: true })).toBeVisible();
     await expect(lagos.getByText("15", { exact: true })).toBeVisible();
-    await expect(lagos.getByRole("button", { name: "Mark received" })).toBeVisible();
+    await expect(lagos.getByRole("button", { name: "Receive delivery" })).toBeVisible();
 
     await accra.getByRole("button", { name: "Send on WhatsApp" }).click();
     await page.waitForURL(/^https:\/\/wa\.me\/12145552368\?text=/);
@@ -265,9 +265,27 @@ test("owner adds suppliers, drafts one order per supplier from the reorder list,
 
     await page.goto(`/store-admin/purchase-orders?store=${SLUG}`);
     await expect(page.getByRole("region", { name: /^Accra Imports · PO \d+$/ }).getByText("Sent", { exact: true })).toBeVisible();
-    await page.getByRole("region", { name: /^Lagos Foods · PO \d+$/ }).getByRole("button", { name: "Mark received" }).click();
-    await expect(page.getByRole("region", { name: /^Lagos Foods · PO \d+$/ }).getByText("Received", { exact: true })).toBeVisible();
     await shootPage(page, "575-purchase-orders-sent", "Orders to wholesalers");
+
+    // #576: 10 of the 15 ordered came. One tap adds them to stock and receives the order.
+    const stockOf = () => asPlatformAdmin((tx) => tx.listing.findUniqueOrThrow({ where: { id: items.firstId }, select: { qty: true, stockMode: true } }));
+    const stockBefore = await stockOf();
+    const received = page.getByRole("region", { name: /^Lagos Foods · PO \d+$/ });
+    await received.getByRole("button", { name: "Receive delivery" }).click();
+    const qty = received.getByLabel(`Quantity of ${items.first} received`);
+    expect(stockBefore.stockMode).toBe("counted");
+    await expect(qty).toHaveValue("15");
+    await qty.fill("10");
+    await shootPage(page, "576-receive-form", "Orders to wholesalers");
+    await received.getByRole("button", { name: "Add 1 item to stock" }).click();
+    await expect(received.getByText("1 item added to stock.")).toBeVisible();
+    await expect(received.getByText("Received", { exact: true })).toBeVisible();
+    await expect(received.getByRole("button", { name: "Receive delivery" })).toHaveCount(0);
+    const stockAfter = await stockOf();
+    expect(stockAfter.qty).toBe((stockBefore.qty ?? 0) + 10);
+    const events = await asPlatformAdmin((tx) => tx.stockEvent.count({ where: { listingId: items.firstId, idempotencyKey: { startsWith: "po-receipt:" } } }));
+    expect(events).toBe(1);
+    await shootPage(page, "576-received", "Orders to wholesalers");
 
     await setPlan(null);
     await page.goto(`/store-admin/purchase-orders?store=${SLUG}`);
