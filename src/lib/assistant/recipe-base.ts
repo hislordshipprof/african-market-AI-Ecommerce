@@ -74,6 +74,9 @@ export async function seedRecipeBase(prisma: PrismaClient, recipes: SeedRecipe[]
     }));
     // A re-seed keeps the fields a platform admin edited on a curated dish, also after a rename moved its key (#675).
     const keptAdminChanges = await prisma.$transaction(async (tx) => {
+      // The recipe tables force RLS on their owner too (#713): the seed writes them as the platform admin.
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       const existing = await lockSeededRecipe(tx, key);
       if (!existing) {
         await tx.recipe.create({ data: { key, ...data, ingredients: { createMany: { data: ingredients } } } });

@@ -1975,6 +1975,43 @@ export async function claimImportRow(
   return rows.length > 0;
 }
 
+/**
+ * The public /sell form's one write (#554): a new, undecided application. RLS lets this context insert and nothing
+ * else, so the insert returns no row; a duplicate pending email or phone still raises P2002.
+ */
+export async function insertStoreApplication(data: Omit<Prisma.StoreApplicationCreateManyInput, "id">): Promise<void> {
+  await prisma.$transaction([
+    prisma.$executeRaw`SET LOCAL ROLE app_user`,
+    prisma.storeApplication.createMany({ data: [data] }),
+  ]);
+}
+
+/** The assistant's one recipe write (#25): a looked-up dish with plain ingredient names. RLS allows nothing more here. */
+export async function insertLookedUpRecipe(recipe: {
+  key: string;
+  name: string;
+  aliases: string[];
+  sourceUrl: string;
+  ingredients: string[];
+}): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.recipe_writer', 'lookup', true)`;
+    await tx.recipe.create({
+      data: {
+        key: recipe.key,
+        name: recipe.name,
+        aliases: recipe.aliases,
+        servings: null,
+        sourceUrl: recipe.sourceUrl,
+        origin: "lookup",
+        ingredients: { create: recipe.ingredients.map((name, position) => ({ position, name })) },
+      },
+      select: { id: true },
+    });
+  });
+}
+
 /** A read as the platform admin, for queries Prisma's query API cannot express. */
 export async function platformAdminRawQuery<T>(sql: Prisma.Sql): Promise<T[]> {
   return prisma.$transaction(async (tx) => {

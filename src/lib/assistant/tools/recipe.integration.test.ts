@@ -2,7 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import recipeBase from "../../../../prisma/recipe-base.json";
-import { platform, platformAdmin, storeScoped, storeScopedTransaction } from "../../db";
+import { platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../../db";
 import { testPrismaClient } from "../../test-prisma";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-api-double";
 import { createAssistantModel } from "../model";
@@ -114,10 +114,11 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   afterAll(async () => {
     setSpendClock(null);
     vi.unstubAllEnvs();
-    await platform.recipe.deleteMany({ where: { key: { startsWith: "kelewele " } } });
-    await platform.recipe.deleteMany({ where: { key: { startsWith: "egusi stew " } } });
-    await platform.recipe.deleteMany({ where: { key: { startsWith: `plantain ${suffix}` } } });
-    await platform.recipe.deleteMany({ where: { key: { startsWith: "ዶሮ ወጥ " } } });
+    await platformAdminTransaction(async (tx) => {
+      for (const prefix of ["kelewele ", "egusi stew ", `plantain ${suffix}`, "ዶሮ ወጥ "]) {
+        await tx.recipe.deleteMany({ where: { key: { startsWith: prefix } } });
+      }
+    });
     for (const id of [storeA, storeB].filter(Boolean)) {
       await storeScoped(id).cart.deleteMany({});
       await storeScoped(id).listing.deleteMany({});
