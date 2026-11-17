@@ -167,7 +167,7 @@ test("owner edits and saves a reorder list, then downloads, prints and copies it
 });
 
 /** No suppliers or orders, and a saved reorder list of two items. */
-async function seedOrders(): Promise<{ first: string; second: string }> {
+async function seedOrders(): Promise<{ first: string; second: string; firstId: string }> {
   return asPlatformAdmin(async (tx) => {
     const store = await tx.store.findUniqueOrThrow({ where: { slug: SLUG } });
     const owner = await tx.user.findUniqueOrThrow({ where: { email: "owner@mama-ngozi.test" } });
