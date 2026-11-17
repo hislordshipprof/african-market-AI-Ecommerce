@@ -512,16 +512,16 @@ function RealCheckoutForm({
     setSubmitAttempt((attempt) => attempt + 1);
     setIssue(null);
     setErrorHref(null);
-    // The fields show their own errors and the first one takes focus; the values stay.
-    if (firstInvalidContactField(contact)) return;
-    if (scheduled && chosenSlot === "asap") {
-      fail("general", fulfillment === "pickup" ? "Choose a pickup time." : "Choose a delivery time.");
-      return;
-    }
+    // In page order: the address card comes before contact. Fields show their own errors; values stay.
     if (fulfillment !== "pickup" && !delivery) {
       fail("address", fulfillment === "ship" ? "Confirm your shipping address." : "Confirm your delivery address.");
       return;
     }
+    if (scheduled && chosenSlot === "asap") {
+      fail("general", fulfillment === "pickup" ? "Choose a pickup time." : "Choose a delivery time.");
+      return;
+    }
+    if (firstInvalidContactField(contact)) return;
     if (!stripe || !elements) {
       fail("network", "Payment is still loading. Try again in a moment.");
       return;
@@ -1168,12 +1168,15 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     // Runs once Pay settles: the fieldset is disabled while pending, so nothing inside could take focus earlier.
     if (payState !== "idle" || submitAttempt === handledAttempt.current) return;
     handledAttempt.current = submitAttempt;
+    // Page order: an address problem sits above the contact fields, everything else below them.
     const field = firstInvalidContactField(contact);
-    const target = field
-      ? document.getElementById(`checkout-contact-${field}`)
-      : issue
-        ? document.getElementById(issueId(issue.section))
-        : null;
+    const target = issue?.section === "address"
+      ? document.getElementById(issueId("address"))
+      : field
+        ? document.getElementById(`checkout-contact-${field}`)
+        : issue
+          ? document.getElementById(issueId(issue.section))
+          : null;
     if (!target) return;
     target.scrollIntoView({ block: "center" });
     target.focus({ preventScroll: true });

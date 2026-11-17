@@ -604,8 +604,8 @@ export function CartProvider({
       paused.current.add(key);
       return;
     }
+    // A read is not a save: a rejection the read just reconciled still explains what happened.
     if (failedKeys.current.size === 0) setAttention(false);
-    resolveNotice(key);
   }
   async function stepServer(key: string) {
     if (!mounted.current || staleDeployment.current || paused.current.has(key)) return;

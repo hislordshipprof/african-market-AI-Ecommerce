@@ -292,7 +292,9 @@ test.describe("quick add limits and recovery", () => {
     await expect(curry(page).getByTestId("stepper-qty")).toHaveText("1");
     await settle(page);
     await burst(curry(page).getByTestId("stepper-plus"), 4);
-    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Maximum 3 per order for this item" }).first()).toBeVisible();
+    // The first add's cart read carries the server's max, so the stepper stops at 3 and says why (#708 P1);
+    // the server stays authoritative, it just no longer has to refuse.
+    await expect(curry(page).getByTestId("stepper-limit")).toHaveText("Limit 3 per order");
     await expect(curry(page).getByTestId("stepper-qty")).toHaveText("3");
     await expect(cartCount(page)).toHaveText("3");
     await settle(page);
@@ -2076,7 +2078,7 @@ test.describe("cart recovery after a failed write", () => {
     const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
     await rowUi.evaluate((el) => {
       const plus = el.querySelector("[data-testid='stepper-plus']") as HTMLButtonElement | null;
-      const trash = el.querySelector("button[aria-label$='from cart']") as HTMLButtonElement | null;
+      const trash = el.querySelector("button[aria-label$='from basket']") as HTMLButtonElement | null;
       plus?.click();
       trash?.click();
     });
@@ -3042,7 +3044,7 @@ test.describe("cart recovery after a failed write", () => {
     const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
     await rowUi.evaluate((el) => {
       const plus = el.querySelector("[data-testid='stepper-plus']") as HTMLButtonElement | null;
-      const trash = el.querySelector("button[aria-label$='from cart']") as HTMLButtonElement | null;
+      const trash = el.querySelector("button[aria-label$='from basket']") as HTMLButtonElement | null;
       plus?.click();
       trash?.click();
     });
