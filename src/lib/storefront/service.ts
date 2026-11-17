@@ -1,7 +1,7 @@
 import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { orderPacks } from "./pack-order";
-import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
+import { listingAvailable, stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
@@ -9,6 +9,7 @@ import { effectiveMaxPerOrder } from "../cart/limits";
 import type { ShopperNeed } from "../catalog/attributes";
 import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
+import type { CartAlternative } from "../cart/service";
 import { isPreparedKind } from "../listing/prepared";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
@@ -50,9 +51,7 @@ async function readGetFlowCatalog(
         ? { leadHours: listing.cateringLeadHours, minQty: listing.cateringMinQty }
         : null,
       maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
-      available:
-        !(listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) &&
-        !(listing.stockMode === "status" && listing.status === "out_of_stock"),
+      available: listingAvailable(listing),
     };
     return variants.length
       ? variants.map((variant) => ({
@@ -64,6 +63,53 @@ async function readGetFlowCatalog(
         }))
       : [{ ...base, price: listing.price, packLabel: "Each", weightG: 500 }];
   });
+}
+
+/**
+ * Up to `perLine` in-stock listings from each unavailable line's aisle, for the
+ * drawer's "Try instead" row (#717 AC2). One read, only when a line is unavailable.
+ */
+export async function readCartAlternatives(
+  storeId: string,
+  wanted: { lineId: string; categoryId: string }[],
+  excludeListingIds: string[],
+  perLine = 3,
+): Promise<Map<string, CartAlternative[]>> {
+  const result = new Map<string, CartAlternative[]>();
+  if (!wanted.length) return result;
+  const listings = await storeScoped(storeId).listing.findMany({
+    where: {
+      active: true,
+      ...notE2eListing,
+      id: { notIn: excludeListingIds },
+      masterProduct: { categoryId: { in: [...new Set(wanted.map((entry) => entry.categoryId))] } },
+    },
+    include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
+    orderBy: { createdAt: "desc" },
+    take: 60,
+  });
+  const inStock = listings.filter((listing) => listingAvailable(listing) && listing.variants.length > 0);
+  for (const { lineId, categoryId } of wanted) {
+    result.set(
+      lineId,
+      inStock
+        .filter((listing) => listing.masterProduct?.categoryId === categoryId)
+        .slice(0, perLine)
+        .map((listing) => {
+          const card = projectStorefrontListing(listing);
+          return {
+            listingId: card.id,
+            variantId: card.variantId!,
+            name: card.displayName,
+            price: card.startingPrice,
+            imageUrl: card.imageUrl,
+            packLabel: card.packLabel ?? "Each",
+            maxPerOrder: card.maxPerOrder,
+          };
+        }),
+    );
+  }
+  return result;
 }
 
 export async function listCategories() {
@@ -85,6 +131,7 @@ export interface StorefrontListing {
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
+  maxPerOrder: number;
   imageUrl?: string;
   categorySlug?: string;
   variantId?: string;
@@ -121,6 +168,7 @@ export function projectStorefrontListing(listing: {
   status: string | null;
   frozen: boolean;
   perishable: boolean;
+  maxPerOrder?: number | null;
   imageUrl?: string | null;
   masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
   variants: { id?: string; label?: string; price: number; weightG?: number }[];
@@ -166,6 +214,7 @@ export function projectStorefrontListing(listing: {
     } satisfies StockBadgeInput),
     frozen: listing.frozen,
     perishable: listing.perishable,
+    maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
   };
 }
 
@@ -211,6 +260,7 @@ export interface StorefrontListingDetail {
   categorySlug?: string;
   description?: string;
   price: number;
+  maxPerOrder: number;
   variants: {
     id: string;
     label: string;
@@ -248,6 +298,7 @@ async function readGetListingDetail(
     description: photo?.description,
     categorySlug: listing.masterProduct?.category?.slug,
     price: listing.price,
+    maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
     badge: stockBadge({
       confidence: listing.confidence,
       stockMode: listing.stockMode,
@@ -273,6 +324,7 @@ export interface SearchResult {
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
+  maxPerOrder: number;
   imageUrl?: string;
   categorySlug?: string;
   variantId?: string;
@@ -304,6 +356,7 @@ interface RawSearchRow {
   weight_g: number | null;
   frozen: boolean;
   perishable: boolean;
+  max_per_order: number | null;
   match: string;
   matched_term: string | null;
 }
@@ -320,7 +373,7 @@ async function readSearchListings(
     storeId,
     Prisma.sql`
     SELECT l.id, l.custom_name, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
-      l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
+      l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable, l.max_per_order,
       pack.price AS min_variant_price, pack.id AS variant_id,
       pack.label AS pack_label, pack.weight_g,
       CASE
@@ -404,6 +457,7 @@ async function readSearchListings(
       price: row.min_variant_price ?? row.price,
       frozen: row.frozen,
       perishable: row.perishable,
+      maxPerOrder: effectiveMaxPerOrder(row.max_per_order),
       badge: stockBadge({
         confidence: row.confidence,
         stockMode: row.stock_mode,

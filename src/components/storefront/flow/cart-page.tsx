@@ -156,7 +156,7 @@ export function CartPage({
   enabled,
   realCheckout,
 }: ShoppingFlowProps & { realCheckout: boolean }) {
-  const { lines, subtotal, count, store, refreshCart, syncing } = useCart();
+  const { lines, subtotal, count, store, refreshCart, syncing, loading, loadFailed, pendingKeys } = useCart();
   const ready = useCartReady();
   const demo = useMemo(
     () => createDemoServices(settings, catalog, enabled),
@@ -173,8 +173,15 @@ export function CartPage({
     const item = catalog.find(
       (item) => cartItemKey(item) === cartItemKey(line),
     );
-    return !item?.available || line.quantity > item.maxPerOrder;
+    // The cart line's own fields come from the latest server read; the catalog is the page's copy.
+    return line.available === false || !item?.available || line.quantity > (line.maxPerOrder ?? item.maxPerOrder);
   });
+  // The phone bar names every reason Checkout is off, not only the minimum (#708 P1).
+  const blockedReason = invalid
+    ? "Review unavailable items and quantities."
+    : !settings.takingOrders
+      ? STORE_NOT_TAKING_ORDERS
+      : minimum.message;
   function choose(rule: SwapRule) {
     if (!selected || !selected.serverLineId) return;
     const { swapRule, substituteVariantId } = clientRuleToServer(rule);
@@ -193,7 +200,8 @@ export function CartPage({
       }
     });
   }
-  if (!ready) return <FlowLoading />;
+  // Skeleton until the server cart read finishes, so "empty" is never shown mid-load (#708 AC3).
+  if (!ready || (loading && !lines.length)) return <FlowLoading />;
   const selectedItem =
     selected &&
     catalog.find((item) => cartItemKey(item) === cartItemKey(selected));
@@ -212,13 +220,24 @@ export function CartPage({
         backHref="/"
         backLabel="Keep shopping"
       />
-      <AssistantSlot label="Shop with AI" />
-      <DemoNotice />
+      {!lines.length && <DemoNotice />}
       {!lines.length ? (
-        <EmptyState
-          title="A good meal starts with a full basket"
-          description="Explore your market and bring home something familiar."
-        />
+        loadFailed ? (
+          // Failed-to-load is distinct from a confirmed-empty basket (#708 AC3).
+          <EmptyState
+            title="We couldn’t load your basket"
+            description="Check your connection, then try again."
+          >
+            <Button type="button" onClick={() => void refreshCart()}>Retry</Button>
+          </EmptyState>
+        ) : (
+          <EmptyState
+            title="Your basket is empty"
+            description="Explore your market and bring home something familiar."
+          >
+            <Link href="/categories" className="sf-button">Browse aisles</Link>
+          </EmptyState>
+        )
       ) : (
         <div className={styles.layout}>
           <div className={styles.stack}>
@@ -237,7 +256,7 @@ export function CartPage({
                   const key = cartItemKey(line),
                     item = catalog.find((item) => cartItemKey(item) === key);
                   return (
-                    <li className={styles.line} key={key}>
+                    <li className={styles.line} key={key} aria-busy={pendingKeys.has(key) || undefined}>
                       <div className={styles.photo}>
                         <ProductImage
                           src={line.imageUrl}
@@ -250,8 +269,9 @@ export function CartPage({
                         <p className={styles.muted}>
                           {money(line.price)}
                           {line.packLabel && ` / ${line.packLabel}`}
+                          {pendingKeys.has(key) && <span className={styles.updating}>Updating…</span>}
                         </p>
-                        {!item?.available && (
+                        {(line.available === false || !item?.available) && (
                           <p className={styles.error}>
                             Unavailable. Remove this item before checkout.
                           </p>
@@ -304,6 +324,9 @@ export function CartPage({
                 })}
               </ul>
             </FlowCard>
+            {/* After the lines, so a phone shows the first line without scrolling (#708 P1). */}
+            <AssistantSlot label="Shop with AI" />
+            <DemoNotice />
             {!!related.length && (
               <FlowCard>
                 <RailScroller
@@ -323,6 +346,7 @@ export function CartPage({
                           weightG: item.weightG,
                           frozen: item.frozen,
                           perishable: item.frozen,
+                          maxPerOrder: item.maxPerOrder,
                           badge: "in-stock",
                         }}
                       />
@@ -402,14 +426,14 @@ export function CartPage({
         </div>
       )}
       {!!lines.length && (
-        <div className={styles.mobileAction} data-blocked={minimum.message ? "" : undefined}>
+        <div className={styles.mobileAction} data-basket-action="" data-blocked={blockedReason ? "" : undefined}>
           <div>
             <small>Subtotal</small>
             <strong>{money(subtotal)}</strong>
-            {minimum.message && <small>{minimum.message}</small>}
+            {blockedReason && <small id="cart-mobile-reason">{blockedReason}</small>}
           </div>
           {!minimum.met || invalid || !settings.takingOrders ? (
-            <Button disabled>Checkout</Button>
+            <Button disabled aria-describedby={blockedReason ? "cart-mobile-reason" : undefined}>Checkout</Button>
           ) : (
             <Link className="sf-button" href="/checkout">
               Checkout <ArrowRight size={18} />

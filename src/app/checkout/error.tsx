@@ -12,7 +12,7 @@ export default function CheckoutError({
     <div className="sf-container flow-page">
       <FlowError
         title="Checkout could not load"
-        message="Your cart is saved. Please try again to review your order."
+        message="Your basket is saved. Please try again to review your order."
       >
         <button className="sf-button" onClick={retry}>
           Try again

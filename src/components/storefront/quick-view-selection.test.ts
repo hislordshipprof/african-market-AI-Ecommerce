@@ -24,6 +24,10 @@ function input(overrides: Partial<QuickViewSelectionInput> = {}): QuickViewSelec
 }
 
 describe("selectQuickViewPack", () => {
+  it("the cart item carries the listing's per-order max to the stepper (#708)", () => {
+    expect(selectQuickViewPack(input({ maxPerOrder: 3 })).cartItem.maxPerOrder).toBe(3);
+  });
+
   it("a pack chosen before details load stays selected when they arrive in another order", () => {
     const before = selectQuickViewPack(input({ chosenVariantId: "v-5lb" }));
     expect(before.heading).toBe("Loading pack sizes…");
@@ -228,7 +232,8 @@ describe("selectQuickViewPack", () => {
   it("a failed detail load disables add without reporting a vanished pack", () => {
     const result = selectQuickViewPack(input({ chosenVariantId: "v-5lb", detail: { status: "error" } }));
     expect(result.addDisabled).toBe(true);
-    expect(result.statusMessage).toBe("Pack details could not load. Open the product page to try again.");
+    // Quick view now offers Retry beside this message, so it no longer sends the shopper away (#708 P2).
+    expect(result.statusMessage).toBe("Pack details could not load. Try again.");
     expect(result.statusMessage).not.toContain("no longer available");
     expect(result.selectedId).toBe("v-5lb");
     expect(result.heading).toBe("Details unavailable");
@@ -312,7 +317,7 @@ describe("selectQuickViewPack", () => {
     expect(result.cartItem).toMatchObject({ variantId: "v-1lb", packLabel: "1 pound", price: 5000 });
   });
 
-  it("loading, failure and ask-store keep a valid choice but disable add", () => {
+  it("loading and failure keep a valid choice but disable the stepper; ask-store stops only adding", () => {
     const loading = selectQuickViewPack(input({ chosenVariantId: "v-5lb" }));
     expect(loading.addDisabled).toBe(true);
     expect(loading.cartItem.variantId).toBe("v-5lb");
@@ -325,7 +330,10 @@ describe("selectQuickViewPack", () => {
       }),
     );
     expect(ask.selectedId).toBe("v-5lb");
-    expect(ask.addDisabled).toBe(true);
+    // Ask-store stops the increase with a reason, but a basket line can still be taken down (#708 P1).
+    expect(ask.addDisabled).toBe(false);
+    expect(ask.addBlockedReason).toBe("Ask store first");
+    expect(loading.addBlockedReason).toBeUndefined();
     expect(ask.statusMessage).toBeUndefined();
     expect(ask.cartItem.variantId).toBe("v-5lb");
   });

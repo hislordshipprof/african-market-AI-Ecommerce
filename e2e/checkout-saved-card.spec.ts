@@ -48,7 +48,7 @@ test("signed-in checkout: save tick starts unticked, a saved card is reused, a r
     await page.context().addCookies([{ name: "e2e_stripe_harness", value: "1", url: apiBase }]);
     await expect(async () => {
       await page.goto(`/?store=${slug}`);
-      await expect(page.getByRole("button", { name: `Add ${name} to cart` })).toBeVisible();
+      await expect(page.getByRole("button", { name: `Add ${name} to basket` })).toBeVisible();
     }).toPass({ timeout: 20_000 });
     await page.goto("/account/sign-in");
     await page.getByLabel("Email address").fill(email);
@@ -125,7 +125,7 @@ test("signed-in checkout: save tick starts unticked, a saved card is reused, a r
 
 async function openCheckout(page: Page, name: string) {
   await page.goto("/");
-  await page.getByRole("button", { name: `Add ${name} to cart` }).click();
+  await page.getByRole("button", { name: `Add ${name} to basket` }).click();
   await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("1");
   await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
   await page.goto("/checkout");

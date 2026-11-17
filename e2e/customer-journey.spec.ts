@@ -105,6 +105,8 @@ test.describe("Customer journey demo", () => {
       .click();
     await page.getByLabel("Full name").fill("Ada Demo");
     await page.getByLabel("Phone number (required)").fill("2025550100");
+    // Pay now stops on an invalid contact before any payment step (#717), as the server does.
+    await page.getByLabel("Email (required)").fill("ada@demo.example");
     await page.getByLabel("Demo outcome").selectOption("declined");
     await page.getByRole("button", { name: /Place demo order/ }).click();
     await expect(
@@ -185,7 +187,7 @@ test("store delivery payment with a confirmed address leads to tracking", async 
       value: "1",
       url: `http://localhost:${process.env.E2E_PORT || "3000"}`,
     }]);
-    const addButton = page.getByRole("button", { name: `Add ${name} to cart` });
+    const addButton = page.getByRole("button", { name: `Add ${name} to basket` });
     await expect(async () => {
       // Arrives from a Store directory link, so the order is attributed to the directory (#454).
       await page.goto(`/?store=${slug}&ref=directory`);
@@ -298,7 +300,7 @@ test("courier delivery is offered at a registered Pro store and says why an orde
     }]);
     const count = page.getByTestId("storefront-header").getByTestId("cart-count");
     const add = async (name: string, total: string) => {
-      const button = page.getByRole("button", { name: `Add ${name} to cart` });
+      const button = page.getByRole("button", { name: `Add ${name} to basket` });
       await expect(async () => {
         await page.goto(`/?store=${slug}`);
         await expect(button).toBeVisible();

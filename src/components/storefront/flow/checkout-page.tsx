@@ -42,8 +42,20 @@ import {
   QuoteLines,
 } from "./common";
 import { PayButton } from "./feedback";
+import { CheckoutIssueAlert, type IssueActions } from "./checkout-issue-alert";
+import {
+  checkoutBasketBlock,
+  contactErrors,
+  flaggedLineKeys,
+  firstInvalidContactField,
+  issueFromError,
+  issueFromProblems,
+  type CheckoutIssue,
+  type IssueSection,
+} from "@/lib/checkout/checkout-issue";
+import { settleWithTimeout } from "./settle";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
-import { placeOrderLabel } from "@/lib/checkout/summary";
+import { checkoutQuoteKey, placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
@@ -58,6 +70,10 @@ type Outcome =
   | "out-of-stock"
   | "outside-radius"
   | "session-expired";
+
+/** A quote request that takes longer than this is treated as failed, so checkout never hangs (#708 AC2b). */
+const QUOTE_TIMEOUT_MS = 12_000;
+const ADDRESS_TIMEOUT_MS = 12_000;
 
 interface StripeConfig {
   publishableKey: string;
@@ -280,6 +296,20 @@ function StoreDeliveryFields({
   );
 }
 
+/** After "Use another card": the card entry gets focus, or the payment section when the entry is simulated. */
+function focusPaymentEntry(card?: { focus?: () => void } | null) {
+  requestAnimationFrame(() => {
+    if (card?.focus) {
+      card.focus();
+      return;
+    }
+    const section = document.getElementById("payment");
+    section?.scrollIntoView({ block: "start" });
+    const target = section?.querySelector<HTMLElement>("input:not([disabled]), select:not([disabled]), button:not([disabled])") ?? section;
+    target?.focus();
+  });
+}
+
 function RealCheckoutForm({
   settings,
   catalog,
@@ -289,7 +319,7 @@ function RealCheckoutForm({
   catalog: ShoppingFlowProps["catalog"];
   stripeConfig: StripeConfig;
 }) {
-  const { lines, subtotal, refreshCart } = useCart();
+  const { lines, subtotal, refreshCart, syncing } = useCart();
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
@@ -333,10 +363,17 @@ function RealCheckoutForm({
   // Server-computed times for the chosen fulfillment, in store time (#565).
   const [slotOptions, setSlotOptions] = useState<SlotOptions | null>(stripeConfig.pickupSlots ?? null);
   const [quoteKey, setQuoteKey] = useState("");
-  const [error, setError] = useState("");
+  // The quote refused, rejected, or timed out: a visible failure with Retry, never a stuck "estimating" (#708 AC2b).
+  const [quoteFailed, setQuoteFailed] = useState(false);
+  const [quoteNonce, setQuoteNonce] = useState(0);
+  // A failure placed beside the control it concerns, with its recovery (#717 AC3).
+  const [issue, setIssue] = useState<CheckoutIssue | null>(null);
+  const [quoteFailMessage, setQuoteFailMessage] = useState<string | undefined>();
   const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [submitAttempt, setSubmitAttempt] = useState(0);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
+  const fail = (section: IssueSection, message: string, lineKeys: string[] = []) => setIssue({ section, message, lineKeys });
   // Bumped when the cart's code changes, so the quote is asked again (#557).
   const [couponRev, setCouponRev] = useState(0);
   const metadata = lines.map((line) => ({
@@ -370,7 +407,8 @@ function RealCheckoutForm({
         leaveAtDoor: fulfillment !== "ship" && !handoff && leaveAtDoor,
       }
     : undefined;
-  const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
+  // The basket is part of the key: a change made in the drawer is quoted again (#708 P1).
+  const currentKey = checkoutQuoteKey({ contact, fulfillment, delivery, couponRev, lines });
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
@@ -395,22 +433,45 @@ function RealCheckoutForm({
 
   useEffect(() => {
     let active = true;
+    const key = currentKey;
+    // The quote reads the server basket, so it waits for the drawer's change to land; a sync that never does still fails visibly.
+    if (syncing) {
+      const stuck = setTimeout(() => { if (active) setQuoteFailed(true); }, QUOTE_TIMEOUT_MS);
+      return () => { active = false; clearTimeout(stuck); };
+    }
     const timer = setTimeout(() => {
-      quoteCheckoutAction(contact, fulfillment, delivery).then((result) => {
+      // Always settles: a rejected or hanging quote ends in a visible failure, not a stuck UI (#708 AC2b).
+      settleWithTimeout(() => quoteCheckoutAction(contact, fulfillment, delivery), QUOTE_TIMEOUT_MS).then((settled) => {
         if (!active) return;
+        if (!settled.ok) {
+          // Rejected or timed out: offer Retry instead of estimating forever.
+          setQuoteFailed(true);
+          return;
+        }
+        const result = settled.value;
         if (result.ok) {
           setQuote(result.quote);
           setSlotOptions(result.slots);
-          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery, couponRev }));
+          setQuoteKey(key);
+          setQuoteFailed(false);
+          setQuoteFailMessage(undefined);
         } else {
-          setError(result.error);
+          // The server refused the quote (a real reason): shown in the estimate's Retry box.
+          setQuoteFailMessage(result.error);
+          setQuoteFailed(true);
         }
       });
     }, 300);
     return () => { active = false; clearTimeout(timer); };
-    // currentKey already covers contact, fulfillment, and the confirmed address.
+    // currentKey already covers contact, fulfillment, the confirmed address and the basket; quoteNonce drives Retry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentKey]);
+  }, [currentKey, quoteNonce, syncing]);
+
+  function retryQuote() {
+    setQuoteFailed(false);
+    setQuoteFailMessage(undefined);
+    setQuoteNonce((nonce) => nonce + 1);
+  }
 
   const slotRequired = slotOptions?.required === true;
   const slots = (slotOptions?.slots ?? []).map((option) => ({ value: option.id, label: option.label }));
@@ -423,7 +484,7 @@ function RealCheckoutForm({
   function takeFreshSlots(fresh: SlotOptions, message: string) {
     setSlotOptions(fresh);
     setSlot(fresh.slots[0]?.id ?? "asap");
-    setError(message);
+    fail("general", message);
     setPayState("idle");
   }
 
@@ -447,31 +508,41 @@ function RealCheckoutForm({
 
   async function pay(event: FormEvent) {
     event.preventDefault();
-    setSubmitted(true);
-    setError("");
-    setErrorHref(null);
-    if (scheduled && chosenSlot === "asap") {
-      setError(fulfillment === "pickup" ? "Choose a pickup time." : "Choose a delivery time.");
-      return;
-    }
-    if (fulfillment !== "pickup" && !delivery) {
-      setError(fulfillment === "ship" ? "Confirm your shipping address." : "Confirm your delivery address.");
-      return;
-    }
     if (payState !== "idle") return;
+    setSubmitted(true);
+    setSubmitAttempt((attempt) => attempt + 1);
+    setIssue(null);
+    setErrorHref(null);
+    // In page order: the address card comes before contact. Fields show their own errors; values stay.
+    if (fulfillment !== "pickup" && !delivery) {
+      fail("address", fulfillment === "ship" ? "Confirm your shipping address." : "Confirm your delivery address.");
+      return;
+    }
+    if (scheduled && chosenSlot === "asap") {
+      fail("general", fulfillment === "pickup" ? "Choose a pickup time." : "Choose a delivery time.");
+      return;
+    }
+    if (firstInvalidContactField(contact)) return;
     if (!stripe || !elements) {
-      setError("Payment is still loading. Try again in a moment.");
+      fail("network", "Payment is still loading. Try again in a moment.");
       return;
     }
     suggestAbort.current?.abort();
     setSuggestions([]);
     setPayState("pending");
     try {
-      const quoteResult = await quoteCheckoutAction(contact, fulfillment, delivery);
+      // Bounded like the live estimate: a hung quote ends in Try again, never a stuck button (#708).
+      const settledQuote = await settleWithTimeout(() => quoteCheckoutAction(contact, fulfillment, delivery), QUOTE_TIMEOUT_MS);
+      if (!settledQuote.ok) {
+        fail("network", "We couldn\u2019t confirm your total. Check your connection, then try again.");
+        setPayState("idle");
+        return;
+      }
+      const quoteResult = settledQuote.value;
       if (!quoteResult.ok) {
         if (quoteResult.code === "basket_already_ordered") {
           setErrorHref("/account");
-          setError(quoteResult.error);
+          fail("general", quoteResult.error);
           setPayState("idle");
           return;
         }
@@ -485,12 +556,12 @@ function RealCheckoutForm({
       }
       const latest = quoteResult.quote;
       if (latest.problems.length) {
-        throw new Error(
-          latest.problems
-            .map((p: { message: string }) => p.message)
-            .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i)
-            .join(" "),
-        );
+        const placed = issueFromProblems(latest.problems);
+        setIssue(placed?.section === "basket"
+          ? { ...placed, lineKeys: flaggedLineKeys(lines) }
+          : placed ?? { section: "general", message: [...new Set(latest.problems.map((p) => p.message))].join(" "), lineKeys: [] });
+        setPayState("idle");
+        return;
       }
 
       const payingSavedCard = Boolean(selectedCardId) && !showCardForm;
@@ -511,7 +582,7 @@ function RealCheckoutForm({
         if (piResult.code === "quote_changed") {
           setQuote(piResult.quote);
           setQuoteKey(currentKey);
-          setError(piResult.error);
+          fail("general", piResult.error);
           setPayState("idle");
           return;
         }
@@ -521,7 +592,7 @@ function RealCheckoutForm({
         }
         if (piResult.code === "basket_already_ordered") {
           setErrorHref("/account");
-          setError(piResult.error);
+          fail("general", piResult.error);
           setPayState("idle");
           return;
         }
@@ -529,6 +600,9 @@ function RealCheckoutForm({
           setSelectedCardId(null);
           setShowCardForm(true);
           setSaveCard(false);
+          fail("payment", piResult.error);
+          setPayState("idle");
+          return;
         }
         throw new Error(piResult.error);
       }
@@ -557,7 +631,11 @@ function RealCheckoutForm({
           setupFutureUsage: saveCard ? "on_session" : null,
         }));
         const { error: submitError } = await elements.submit();
-        if (submitError) throw new Error(submitError.message ?? "Card validation failed");
+        if (submitError) {
+          fail("payment", submitError.message ?? "Check your card details.");
+          setPayState("idle");
+          return;
+        }
         const confirmed = await stripe.confirmPayment({
           elements,
           clientSecret: piResult.clientSecret,
@@ -566,7 +644,12 @@ function RealCheckoutForm({
         });
         confirmError = confirmed.error;
       }
-      if (confirmError) throw new Error(confirmError.message ?? "Payment failed");
+      if (confirmError) {
+        // A decline or card error sits by the card, with Use another card (#717 AC3).
+        fail("payment", confirmError.message ?? "Your card was declined.");
+        setPayState("idle");
+        return;
+      }
 
       const orderResult = await placeOrderAction(
         piResult.paymentIntentId,
@@ -584,14 +667,20 @@ function RealCheckoutForm({
           return;
         }
         setErrorHref(orderResult.code === "basket_already_ordered" ? "/account" : null);
-        if (orderResult.code === "basket_changed" || orderResult.code === "basket_already_ordered") {
-          setError(orderResult.error);
+        if (orderResult.code === "basket_changed") {
+          fail("basket", orderResult.error, flaggedLineKeys(lines));
+          setPayState("idle");
+          await refreshCart();
+          return;
+        }
+        if (orderResult.code === "basket_already_ordered") {
+          fail("general", orderResult.error);
           setPayState("idle");
           return;
         }
         if (orderResult.code === "coupon_refused") {
           // The hold was released and the code taken off; the next quote shows the full price.
-          setError(orderResult.error);
+          fail("general", orderResult.error);
           setPayState("idle");
           setCouponRev((rev) => rev + 1);
           return;
@@ -607,13 +696,27 @@ function RealCheckoutForm({
       router.push(`/order/${orderResult.token}?placed=1`);
     } catch (reason) {
       setErrorHref(null);
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "We could not place your order. Your basket is saved.",
-      );
+      setIssue(issueFromError(reason));
       setPayState("idle");
     }
+  }
+
+  function switchCard() {
+    setIssue(null);
+    if (selectedCardId && !showCardForm) {
+      setSelectedCardId(null);
+      setShowCardForm(true);
+      setSaveCard(false);
+    }
+    const card = elements?.getElement("payment") as { clear?: () => void; focus?: () => void } | null | undefined;
+    card?.clear?.();
+    focusPaymentEntry(card);
+  }
+
+  function refreshCheckout() {
+    setIssue(null);
+    retryQuote();
+    void refreshCart();
   }
 
   return (
@@ -647,21 +750,33 @@ function RealCheckoutForm({
           }}
           onConfirm={() => {
             setConfirming(true);
-            confirmAddressAction({
+            // Always settles: a rejected or hanging check frees the button with a visible failure (#708 AC2b).
+            settleWithTimeout(() => confirmAddressAction({
               line1,
               line2: line2 || null,
               city,
               state: region,
               zip,
               leaveAtDoor: !handoff && leaveAtDoor,
-            }).then((result) => {
+            }), ADDRESS_TIMEOUT_MS).then((settled) => {
               setConfirming(false);
-              if (!result.ok) {
+              if (!settled.ok) {
                 setConfirmed(null);
-                setError(result.error);
+                fail(
+                  "address",
+                  fulfillment === "ship"
+                    ? "We couldn't check that shipping address. Try again."
+                    : "We couldn't check that address. Try again.",
+                );
                 return;
               }
-              setError("");
+              const result = settled.value;
+              if (!result.ok) {
+                setConfirmed(null);
+                fail("address", result.error);
+                return;
+              }
+              setIssue(null);
               setSuggestions([]);
               setConfirmed({
                 formatted: result.formatted,
@@ -724,7 +839,14 @@ function RealCheckoutForm({
       setCustomTip={() => {}}
       quote={quote}
       quotePending={quotePending}
-      error={error}
+      quoteFailed={quoteFailed}
+      quoteFailMessage={quoteFailMessage}
+      onRetryQuote={retryQuote}
+      issue={issue}
+      onClearIssue={() => setIssue(null)}
+      onUseAnotherCard={switchCard}
+      onRefresh={refreshCheckout}
+      submitAttempt={submitAttempt}
       errorHref={errorHref}
       submitted={submitted}
       payState={payState}
@@ -803,17 +925,26 @@ export function CheckoutPage({
   stripeConfig,
 }: CheckoutPageProps) {
   const ready = useCartReady();
-  const { lines, subtotal } = useCart();
+  const { lines, subtotal, loading, loadFailed, refreshCart } = useCart();
 
-  if (!ready) return <FlowLoading />;
+  // Loading, failed and empty are three different states, never one "empty" (#708 P1).
+  if (!ready || (loading && !lines.length)) return <FlowLoading />;
+  if (!lines.length && loadFailed)
+    return (
+      <div className={styles.page}>
+        <FlowHeading title="Checkout" />
+        <EmptyState title="We couldn’t load your basket" description="Check your connection, then try again.">
+          <Button type="button" onClick={() => void refreshCart()}>Retry</Button>
+        </EmptyState>
+      </div>
+    );
   if (!lines.length)
     return (
       <div className={styles.page}>
         <FlowHeading title="Checkout" />
-        <EmptyState
-          title="Your basket is waiting"
-          description="Add your favorites before checking out."
-        />
+        <EmptyState title="Your basket is empty" description="Add your favorites before checking out.">
+          <Link href="/categories" className="sf-button">Browse aisles</Link>
+        </EmptyState>
       </div>
     );
 
@@ -947,7 +1078,18 @@ interface CheckoutLayoutProps {
   setCustomTip: (v: string) => void;
   quote: CheckoutQuote | null;
   quotePending: boolean;
-  error: string;
+  /** Real checkout: the quote refused, rejected or timed out, so it offers Retry (#708 AC2b). */
+  quoteFailed?: boolean;
+  /** The server's reason for refusing the estimate, shown in its Retry box. */
+  quoteFailMessage?: string;
+  onRetryQuote?: () => void;
+  /** The failure of the last Pay, placed beside the control it concerns (#717 AC3). */
+  issue: CheckoutIssue | null;
+  onClearIssue: () => void;
+  onUseAnotherCard?: () => void;
+  onRefresh?: () => void;
+  /** Bumped on every Pay, so focus moves to the first invalid field or the failure once per attempt. */
+  submitAttempt: number;
   errorHref?: string | null;
   submitted: boolean;
   payState: "idle" | "pending" | "success";
@@ -1001,12 +1143,61 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     slot, setSlot, slots, slotRequired = false, cateringLead, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage, coupon,
     tipPercent, setTipPercent, customTip, setCustomTip,
-    quote, quotePending, error, errorHref, submitted, payState,
+    quote, quotePending, quoteFailed = false, quoteFailMessage, onRetryQuote,
+    issue, onClearIssue, onUseAnotherCard, onRefresh, submitAttempt, errorHref, submitted, payState,
     frozen, hot = false, prepMinutes, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     signedIn = false, identityLocked = false, whatsapp,
   } = props;
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
+
+  // Field validity, shared by aria-invalid and the error each field describes (#708 AC3).
+  const fieldErrors = submitted ? contactErrors(contact) : {};
+  const nameInvalid = Boolean(fieldErrors.name);
+  const phoneInvalid = Boolean(fieldErrors.phone);
+  const emailInvalid = Boolean(fieldErrors.email);
+
+  // Basket problems the live estimate or the basket itself already knows: Pay stays off, with the reason beside the lines.
+  const blocking = checkoutBasketBlock(quote && !quotePending ? quote.problems : null, lines);
+  const basketIssue = issue?.section === "basket" ? issue : blocking;
+  const flagged = new Set(basketIssue ? [...basketIssue.lineKeys, ...flaggedLineKeys(lines)] : []);
+  const issueId = (section: IssueSection) => `checkout-issue-${section}`;
+
+  const formRef = useRef<HTMLFormElement>(null);
+  const handledAttempt = useRef(0);
+  useEffect(() => {
+    // Runs once Pay settles: the fieldset is disabled while pending, so nothing inside could take focus earlier.
+    if (payState !== "idle" || submitAttempt === handledAttempt.current) return;
+    handledAttempt.current = submitAttempt;
+    // Page order: an address problem sits above the contact fields, everything else below them.
+    const field = firstInvalidContactField(contact);
+    const target = issue?.section === "address"
+      ? document.getElementById(issueId("address"))
+      : field
+        ? document.getElementById(`checkout-contact-${field}`)
+        : issue
+          ? document.getElementById(issueId(issue.section))
+          : null;
+    if (!target) return;
+    target.scrollIntoView({ block: "center" });
+    target.focus({ preventScroll: true });
+  }, [submitAttempt, payState, contact, issue]);
+
+  const actions: IssueActions = {
+    useAnotherCard: onUseAnotherCard,
+    refresh: onRefresh,
+    retry: () => formRef.current?.requestSubmit(),
+    editAddress: fulfillment === "pickup" ? undefined : () => {
+      onClearIssue();
+      document.querySelector<HTMLElement>("#fulfillment input:not([disabled])")?.focus();
+    },
+    choosePickup: settings.pickupEnabled && fulfillment !== "pickup" ? () => {
+      onClearIssue();
+      setFulfillment("pickup");
+    } : undefined,
+  };
+  const issueHere = (section: IssueSection) =>
+    issue?.section === section ? <CheckoutIssueAlert issue={issue} id={issueId(section)} actions={actions} /> : null;
 
   const courierReasons = (quote?.problems ?? [])
     .filter((problem) => problem.code === "ineligible" || problem.code === "outside-radius")
@@ -1025,7 +1216,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
       />
       {!isRealPayment && <DemoNotice />}
       <CheckoutStages />
-      <form className={styles.layout} onSubmit={onSubmit} noValidate>
+      <form ref={formRef} className={styles.layout} onSubmit={onSubmit} noValidate>
         <fieldset className={styles.formFields} disabled={payState !== "idle"}>
           <legend className="sr-only">Checkout details</legend>
           <div id="fulfillment" className={styles.anchor}>
@@ -1186,6 +1377,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   </p>
                 </>
               )}
+              {issueHere("address")}
             </FlowCard>
           </div>
           <FlowCard title={shipping ? "Notes for the store" : "When works for you?"}>
@@ -1264,35 +1456,36 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               <label className={styles.field}>
                 Full name
                 <input
+                  id="checkout-contact-name"
                   autoComplete="name"
                   required
                   readOnly={identityLocked}
                   value={contact.name}
-                  aria-invalid={submitted && !contact.name.trim()}
+                  aria-invalid={nameInvalid}
+                  aria-describedby={nameInvalid ? "contact-name-error" : undefined}
                   onChange={(e) => setContact({ ...contact, name: e.target.value })}
                 />
               </label>
-              {submitted && !contact.name.trim() && (
-                <p className={styles.error}>Enter the name for your order.</p>
+              {nameInvalid && (
+                <p className={styles.error} id="contact-name-error">{fieldErrors.name}</p>
               )}
               <label className={styles.field}>
                 Phone number (required)
                 <input
+                  id="checkout-contact-phone"
                   autoComplete="tel"
                   type="tel"
                   required
                   value={contact.phone}
+                  aria-invalid={phoneInvalid}
+                  aria-describedby={phoneInvalid ? "contact-phone-error" : undefined}
                   onChange={(e) => setContact({ ...contact, phone: e.target.value })}
                   placeholder="(555) 123-4567"
                 />
               </label>
-              {submitted &&
-                (!/^\+?[\d\s().-]{10,20}$/.test(contact.phone) ||
-                  contact.phone.replace(/\D/g, "").length < 10) && (
-                  <p className={styles.error}>
-                    Enter a valid phone number with at least 10 digits.
-                  </p>
-                )}
+              {phoneInvalid && (
+                <p className={styles.error} id="contact-phone-error">{fieldErrors.phone}</p>
+              )}
               {whatsapp && (
                 <label className={styles.choice}>
                   <input
@@ -1309,17 +1502,19 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               <label className={styles.field}>
                 Email (required)
                 <input
+                  id="checkout-contact-email"
                   autoComplete="email"
                   type="email"
                   required
                   readOnly={identityLocked}
                   value={contact.email}
-                  aria-invalid={submitted && !contact.email.trim()}
+                  aria-invalid={emailInvalid}
+                  aria-describedby={emailInvalid ? "contact-email-error" : undefined}
                   onChange={(e) => setContact({ ...contact, email: e.target.value })}
                 />
               </label>
-              {submitted && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim()) && (
-                <p className={styles.error}>Enter a valid email address.</p>
+              {emailInvalid && (
+                <p className={styles.error} id="contact-email-error">{fieldErrors.email}</p>
               )}
             </FlowCard>
           </div>
@@ -1365,6 +1560,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           <div id="payment" className={styles.anchor}>
             <FlowCard title={isRealPayment ? "Payment" : "Test payment"}>
               {paymentSection}
+              {issueHere("payment")}
               {outcomeSelector}
             </FlowCard>
           </div>
@@ -1376,13 +1572,31 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               <Link className="sf-text-link" href="/cart">Edit basket</Link>
             </p>
             <ul className={styles.miniLines}>
-              {lines.map((line) => (
-                <li key={cartItemKey(line)}>
-                  <span>{line.quantity} × {line.name}</span>
-                  <span>{money(line.quantity * line.price)}</span>
-                </li>
-              ))}
+              {lines.map((line) => {
+                const problem = flagged.has(cartItemKey(line));
+                return (
+                  <li
+                    key={cartItemKey(line)}
+                    data-problem={problem || undefined}
+                    aria-describedby={problem && basketIssue ? issueId("basket") : undefined}
+                  >
+                    <span>{line.quantity} × {line.name}</span>
+                    <span>{money(line.quantity * line.price)}</span>
+                    {problem && (
+                      <small className={styles.miniLineProblem}>
+                        <CircleAlert size={14} aria-hidden />
+                        {line.available === false
+                          ? "No longer available"
+                          : line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder
+                            ? `Limit ${line.maxPerOrder} per order`
+                            : "Needs a change"}
+                      </small>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
+            {basketIssue && <CheckoutIssueAlert issue={basketIssue} id={issueId("basket")} actions={actions} />}
             {coupon ? (
               <CouponField
                 applied={quote?.coupon ?? null}
@@ -1427,7 +1641,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             )}
             {quote ? (
               <QuoteLines quote={quote} fulfillment={fulfillment} />
-            ) : (
+            ) : quoteFailed ? null : (
               <p role="status">Estimating your order…</p>
             )}
             <p className={styles.notice}>
@@ -1437,11 +1651,18 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               funds are released. Any higher-priced swap requires your approval
               and must fit within this hold.
             </p>
-            {quotePending && (
+            {quoteFailed && onRetryQuote ? (
+              <div className={styles.quoteRetry} role="alert">
+                <p>{quoteFailMessage ?? "We couldn\u2019t update your estimate. Check your connection, then try again."}</p>
+                <Button type="button" onClick={onRetryQuote}>Retry estimate</Button>
+              </div>
+            ) : quotePending ? (
               <p className={styles.muted} role="status">Updating estimate…</p>
-            )}
-            {error && (
-              <FlowError title="Let's review that" message={error}>
+            ) : null}
+            {issueHere("session")}
+            {issueHere("network")}
+            {issue?.section === "general" && (
+              <FlowError title="Let's review that" message={issue.message}>
                 {errorHref ? <Link className="sf-text-link" href={errorHref}>View your orders</Link> : null}
               </FlowError>
             )}
@@ -1461,7 +1682,9 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             <PayButton
               type="submit"
               state={payState}
-              disabled={payState !== "idle" || quotePending}
+              realPayment={isRealPayment}
+              disabled={payState !== "idle" || quotePending || Boolean(blocking)}
+              aria-describedby={blocking ? issueId("basket") : undefined}
               label={payLabel}
             />
             <p className={styles.muted}>
@@ -1512,8 +1735,10 @@ function DemoCheckoutPage({
   const [customTip, setCustomTip] = useState("");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [quoteKey, setQuoteKey] = useState("");
-  const [error, setError] = useState("");
+  const [issue, setIssue] = useState<CheckoutIssue | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [submitAttempt, setSubmitAttempt] = useState(0);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
   const [outcome, setOutcome] = useState<Outcome>("success");
   const metadata = lines.map((line) => ({
@@ -1556,10 +1781,11 @@ function DemoCheckoutPage({
     services.checkout.quote(input).then((value) => {
       if (active) { setQuote(value); setQuoteKey(JSON.stringify(input)); }
     }).catch((reason) => {
-      if (active) setError(reason instanceof Error ? reason.message : "Could not estimate your order.");
+      if (active) setIssue(issueFromError(reason, "Could not estimate your order."));
     });
     return () => { active = false; };
-  }, [services, input]);
+    // refreshNonce re-asks the same quote for Refresh checkout.
+  }, [services, input, refreshNonce]);
 
   useEffect(() => {
     let active = true;
@@ -1568,7 +1794,7 @@ function DemoCheckoutPage({
       setSearching(true);
       services.addresses.search(query)
         .then((results) => { if (active) setSuggestions(results); })
-        .catch(() => { if (active) setError("Address lookup is unavailable."); })
+        .catch(() => { if (active) setIssue({ section: "address", message: "Address lookup is unavailable.", lineKeys: [] }); })
         .finally(() => { if (active) setSearching(false); });
     }, 250);
     return () => { active = false; clearTimeout(timer); };
@@ -1592,13 +1818,15 @@ function DemoCheckoutPage({
 
   async function pay(event: FormEvent) {
     event.preventDefault();
+    if (payState !== "idle") return;
     setSubmitted(true);
-    setError("");
+    setSubmitAttempt((attempt) => attempt + 1);
+    setIssue(null);
+    if (firstInvalidContactField(contact)) return;
     if (schedule && slot === "asap") {
-      setError("Choose a pickup time within the next six days.");
+      setIssue({ section: "general", message: "Choose a pickup time within the next six days.", lineKeys: [] });
       return;
     }
-    if (payState !== "idle") return;
     setPayState("pending");
     try {
       let request = input;
@@ -1611,8 +1839,15 @@ function DemoCheckoutPage({
           address: { id: "demo-outside", label: "Outside service area", street: "Demo address", city: "Demo City", state: "MD", zip: "20910", distanceMi: settings.deliveryRadiusMi + 10 },
         };
       const latest = await services.checkout.quote(request);
-      if (latest.problems.length)
-        throw new Error(latest.problems.map((p) => p.message).filter((v, i, a) => a.indexOf(v) === i).join(" "));
+      if (latest.problems.length) {
+        // The simulated unavailable line stands in for the shopper's first line.
+        const stand = cartItemKey(request.lines[0] ?? input.lines[0]);
+        const own = input.lines[0] ? cartItemKey(input.lines[0]) : stand;
+        const placed = issueFromProblems(latest.problems.map((p) => (p.lineKey === stand ? { ...p, lineKey: own } : p)));
+        setIssue(placed ?? { section: "general", message: [...new Set(latest.problems.map((p) => p.message))].join(" "), lineKeys: [] });
+        setPayState("idle");
+        return;
+      }
       const authorization = await services.payment.authorize(latest, outcome === "declined" ? "declined" : "success");
       const order = await services.checkout.place(
         request,
@@ -1626,7 +1861,7 @@ function DemoCheckoutPage({
         await new Promise((r) => setTimeout(r, 650));
       router.push(`/order/${order.token}?placed=1`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "We could not place your demo order.");
+      setIssue(issueFromError(reason, "We could not place your demo order."));
       setPayState("idle");
     }
   }
@@ -1636,7 +1871,9 @@ function DemoCheckoutPage({
     return (
       <div className={styles.page}>
         <FlowHeading title="Checkout" />
-        <EmptyState title="Your basket is waiting" description="Add your favorites before checking out." />
+        <EmptyState title="Your basket is empty" description="Add your favorites before checking out.">
+          <Link href="/categories" className="sf-button">Browse aisles</Link>
+        </EmptyState>
       </div>
     );
 
@@ -1697,7 +1934,18 @@ function DemoCheckoutPage({
       setCustomTip={setCustomTip}
       quote={quote}
       quotePending={quotePending}
-      error={error}
+      issue={issue}
+      onClearIssue={() => setIssue(null)}
+      onUseAnotherCard={() => {
+        setIssue(null);
+        focusPaymentEntry();
+      }}
+      onRefresh={() => {
+        setIssue(null);
+        setRefreshNonce((nonce) => nonce + 1);
+        void refreshCart();
+      }}
+      submitAttempt={submitAttempt}
       submitted={submitted}
       payState={payState}
       frozen={frozen}

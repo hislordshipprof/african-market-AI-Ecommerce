@@ -22,6 +22,17 @@
   margin-block: 16px;
 }
 
+/* The shell's phone entry: in the page flow under the header, never floating over cards (#717 AC5). */
+.phoneSlot {
+  margin: 12px 0 0;
+  padding-inline: var(--sf-page-padding, 16px);
+}
+@media (min-width: 768px) {
+  .phoneSlot {
+    display: none;
+  }
+}
+
 /* In-page entry on product and basket pages, so nothing floats over their controls. */
 .entry {
   display: inline-flex;
@@ -701,6 +712,7 @@ a.primary {
     max-height: calc(88dvh - 88px);
   }
 
+  /* Phones use the in-flow entry (AssistantSlot phoneOnly); this only shows if no slot exists. */
   .launcher {
     right: 16px;
     /* Clears the 73px bottom nav sitting 12px up, with an 8px gap. */

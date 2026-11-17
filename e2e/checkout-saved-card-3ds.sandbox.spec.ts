@@ -93,9 +93,9 @@ async function openCheckout(page: Page, slug: string, name: string) {
   // The store page is cached for up to 60s, so a listing made just now can take that long to show.
   await expect(async () => {
     await page.goto(`/?store=${slug}`);
-    await expect(page.getByRole("button", { name: `Add ${name} to cart` })).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole("button", { name: `Add ${name} to basket` })).toBeVisible({ timeout: 3_000 });
   }).toPass({ timeout: 90_000 });
-  await page.getByRole("button", { name: `Add ${name} to cart` }).click();
+  await page.getByRole("button", { name: `Add ${name} to basket` }).click();
   await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("1");
   await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
   await page.goto(`/checkout?store=${slug}`);

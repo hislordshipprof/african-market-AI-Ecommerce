@@ -65,21 +65,31 @@
 @media (prefers-color-scheme:dark) { :root { --sf-photo-edge: inset 0 0 0 1px rgb(0 0 0 / 28%), inset 0 1px 8px rgb(0 0 0 / 14%); } body { --sf-thumb-well: var(--color-photo-well); } }
 .sf-product-image[data-image-kind="cutout"]:has(img)::after { content:""; position:absolute; z-index:-1; bottom:10%; left:24%; width:52%; height:9%; border-radius:50%; background:radial-gradient(ellipse,rgb(var(--sf-scrim) / 14%),transparent 70%); }
 .sf-product-image img { object-fit:cover; padding:0; filter:none; transition:transform .4s var(--sf-motion-ease); }
-.sf-product-card { position:relative; padding:8px 8px 16px; border:1px solid transparent; border-radius:12px; background:var(--color-surface); transition:transform .3s var(--sf-motion-ease); }
-.sf-product-card::after { content:""; position:absolute; inset:0; border-radius:inherit; box-shadow:var(--sf-shadow-lift); pointer-events:none; opacity:0; transition:opacity .3s; }
-.sf-product-copy { padding-inline:4px; }
+/* Flat by default: no tilt, no hover lift (DESIGN "Flat by default"; #708 AC1). */
+/* A size container, so the quick add fits the card's own width, not the viewport's (#708 P1). */
+.sf-product-card { position:relative; container:card / inline-size; padding:8px 8px 16px; border:1px solid transparent; border-radius:12px; background:var(--color-surface); transition:border-color .2s var(--sf-motion-ease); }
+/* Copy aligns with the photo's left edge. */
+.sf-product-copy { padding-inline:0; }
 .sf-product-card:focus-within { border-color:var(--color-primary); }
 .sf-rail-scroll { padding-block:10px 24px; touch-action:pan-x pan-y; }
 .sf-rail-item { width:216px; }
-.sf-quick-view-trigger { position:absolute; top:10px; right:10px; z-index:3; white-space:nowrap; padding:10px 16px; border-radius:99px; background:var(--color-surface); color:var(--color-ink); border:1px solid var(--color-line-strong); min-height:44px; font-size:13px; font-weight:650; }
-.sf-quick-view { display:grid; gap:20px; }
+/* Over the photo only where it can hide until hover; phones and touch get it in the copy (#708 P1). */
+.sf-quick-view-trigger { position:absolute; top:18px; right:18px; z-index:3; white-space:nowrap; padding:10px 16px; border-radius:99px; background:var(--color-surface); color:var(--color-ink); border:1px solid var(--color-line-strong); min-height:44px; font-size:13px; font-weight:650; }
+@media (max-width:767px), (hover:none) {
+  .sf-quick-view-trigger { position:static; display:inline-flex; align-items:center; margin-top:4px; padding:0; border:0; border-radius:0; background:none; color:var(--color-primary-text); text-decoration:underline; text-underline-offset:3px; }
+  .sf-product-card .sf-quick-view-trigger { opacity:1; }
+}
+.sf-quick-view { display:grid; gap:16px; }
 .sf-quick-gallery { width:100%; overflow:hidden; border-radius:16px; cursor:zoom-in; }
 .sf-quick-gallery[data-zoom="true"] img { transform:scale(1.65); }
 .sf-quick-gallery[data-zoom="true"] { cursor:zoom-out; }
 .sf-quick-packs { display:flex; flex-wrap:wrap; gap:8px; border:0; margin:0; padding:0; min-inline-size:0; }
 .sf-quick-packs legend { font-weight:650; margin-bottom:12px; padding:0; }
 .sf-quick-status { margin:0; max-width:42rem; color:var(--color-ink); font-size:16px; line-height:1.5; }
-.sf-quick-view-add { display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--color-line); padding-top:20px; font-weight:650; }
+.sf-quick-status-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.sf-quick-view-choice { display:grid; gap:4px; min-width:0; }
+.sf-quick-view-choice small { color:var(--color-muted); font-size:13px; font-weight:600; }
+.sf-quick-view-add { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; margin-top:8px; border-top:1px solid var(--color-line); padding-top:24px; font-weight:650; }
 .sf-parallax-frame { position:absolute; inset:0; overflow:hidden; }
 .sf-parallax-image { position:absolute; inset:-24px 0; }
 .sf-collection-card p { padding-right:50px; color:#fff; }
@@ -143,9 +153,8 @@
 ::view-transition-group(.sf-product-morph) { animation-duration:450ms; animation-timing-function:cubic-bezier(.22,1,.36,1); }
 ::view-transition { pointer-events:none; }
 @media (hover:hover) and (pointer:fine) {
-  .sf-product-card:hover { transform:perspective(800px) translateY(-5px) rotateX(var(--tilt-x,0deg)) rotateY(var(--tilt-y,0deg)); border-color:var(--color-primary); }
-  .sf-product-card:hover::after { opacity:1; }
-  .sf-product-card:hover .sf-product-image img { transform:scale(1.08); }
+  .sf-product-card:hover { border-color:var(--color-line); }
+  .sf-product-card:hover .sf-product-image img { transform:scale(1.04); }
   .sf-quick-view-trigger { opacity:0; transition:opacity .2s; }
   .sf-product-card:is(:hover,:focus-within) .sf-quick-view-trigger { opacity:1; }
   .sf-category-tile:hover img { transform:scale(1.08); }
@@ -183,10 +192,8 @@
   .sf-category-rail .sf-rail-arrows { display:none; }
   .sf-category-tile strong,.sf-category-tile:first-child strong { font-size:15px; }
   .sf-rail-item { width:185px; }
-  .sf-product-card { padding:5px 5px 12px; }
-  .sf-quick-view-trigger { font-size:13px; padding:8px 12px; top:5px; right:5px; }
-  /* Narrow cards: Quick view drops below the Frozen badge so both stay visible. */
-  .sf-product-photo:has(.sf-photo-tag) .sf-quick-view-trigger { top:40px; }
+  /* Narrow cards: no side padding, so photo, price and name share one left edge. */
+  .sf-product-card { padding:0 0 12px; }
   .sf-product-name { font-size:16px; }
   .sf-local-name,.sf-product-meta,.sf-product-meta [data-testid="stock-badge"],.sf-price small,.sf-window-chip small { font-size:13px; }
   .sf-promo-photo { height:230px; }

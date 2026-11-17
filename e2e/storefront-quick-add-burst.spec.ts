@@ -229,6 +229,31 @@ test.describe("same-render quick add", () => {
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText(String(Number(shown) + 1));
   });
+
+  test("a failed first add rolls back and its toast retries the add (#708)", async ({ page }) => {
+    await openGrains(page);
+    let failed = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      if (!failed && isAction(request) && quantitiesIn(request.postData() ?? "").length > 0) {
+        failed = true;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await expect(cartCount(page)).toHaveText("0");
+    const retry = page.locator("[data-sonner-toast]").getByRole("button", { name: "Retry" });
+    await expect(retry).toBeVisible();
+    await page.unroute("**/*");
+    await retry.click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.listingId === "mn_garri_yellow")?.qty).toBe(1);
+  });
 });
 
 test.describe("quick add limits and recovery", () => {
@@ -259,13 +284,18 @@ test.describe("quick add limits and recovery", () => {
   });
 
   test("a burst past the listing max ends at the max the server allows", async ({ page }) => {
-    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
+    // The page loads with no max; only the server learns it, so the refusal comes from the server.
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await revalidateMama(page);
     await page.goto(spices);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
     await curry(page).getByTestId("quick-add-btn").click();
     await expect(curry(page).getByTestId("stepper-qty")).toHaveText("1");
     await settle(page);
     await burst(curry(page).getByTestId("stepper-plus"), 4);
-    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Maximum 3 per order for this item" }).first()).toBeVisible();
+    // The first add's cart read carries the server's max, so the stepper stops at 3 and says why (#708 P1);
+    // the server stays authoritative, it just no longer has to refuse.
+    await expect(curry(page).getByTestId("stepper-limit")).toHaveText("Limit 3 per order");
     await expect(curry(page).getByTestId("stepper-qty")).toHaveText("3");
     await expect(cartCount(page)).toHaveText("3");
     await settle(page);
@@ -276,8 +306,10 @@ test.describe("quick add limits and recovery", () => {
   });
 
   test("first-add burst respects a server-only maximum", async ({ page }) => {
-    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await revalidateMama(page);
     await page.goto(spices);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -505,11 +537,11 @@ test.describe("quick add limits and recovery", () => {
     await openGrains(page);
     await addGarri(page);
     await burst(garri(page).getByTestId("stepper-plus"), 3);
-    await page.getByRole("button", { name: "Shopping cart" }).click();
-    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await page.getByRole("button", { name: /in basket$|^Basket$/ }).click();
+    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await settle(page);
     // The drawer's "Removed Yellow Garri (Ijebu). Undo" bar names the item, so check the lines only.
-    await expect(page.getByRole("dialog", { name: "Your cart" }).getByRole("listitem").filter({ hasText: "Yellow Garri" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Your basket" }).getByRole("listitem").filter({ hasText: "Yellow Garri" })).toHaveCount(0);
     await page.reload();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     await expect(cartCount(page)).toHaveText("0");
@@ -675,6 +707,11 @@ test.describe("quick add limits and recovery", () => {
     await expectNoCrash(page);
     await expect(page.locator("[data-sonner-toast]").first()).toBeVisible();
     await expect(page.getByTestId("storefront-header").locator("[data-cart-attention]")).toBeVisible();
+    // The closed basket keeps a visible, named failure until it saves (#708 P1).
+    const status = page.getByTestId("storefront-header").getByTestId("cart-sync-status");
+    await expect(status).toBeVisible();
+    await expect(status).toHaveAttribute("data-state", "failed");
+    await expect(page.getByTestId("storefront-header").getByRole("button", { name: /^Changes not saved\. .*in basket$/ })).toBeVisible();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
     await settle(page);
     await page.unroute("**/*");
@@ -682,6 +719,7 @@ test.describe("quick add limits and recovery", () => {
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
     await settle(page);
     await expect(page.getByTestId("storefront-header").locator("[data-cart-attention]")).toHaveCount(0);
+    await expect(status).toHaveCount(0);
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
   });
@@ -826,6 +864,57 @@ test.describe("quick add limits and recovery", () => {
     await expect(page.locator("main").getByRole("listitem").filter({ hasText: "Thyme" }).getByTestId("stepper-qty")).toHaveText("1");
   });
 
+  test("an unavailable line in the drawer keeps Remove and offers same-aisle picks (#717)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_thyme", thymeStock);
+    await revalidateMama(page);
+    await page.goto(spices);
+    await thyme(page).getByTestId("quick-add-btn").click();
+    await expect(thyme(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await writeListingStock("mama-ngozi", "mn_thyme", { ...thymeStock, stockMode: "status", status: "out_of_stock", qty: null });
+    await revalidateMama(page);
+    await page.reload();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
+    const sheet = page.getByRole("dialog");
+    const line = sheet.locator("li[data-unavailable]");
+    await expect(line).toContainText("Thyme");
+    await expect(line).toContainText("No longer available. Remove it to check out.");
+    // Only the increase stops: the shopper can still take one away (#708 P1).
+    await expect(line.getByTestId("stepper-minus")).toBeEnabled();
+    await expect(line.getByTestId("stepper-plus")).toBeDisabled();
+    const picks = line.getByRole("list", { name: /Instead of/ }).getByRole("listitem");
+    await expect(picks.first()).toBeVisible();
+    expect(await picks.count()).toBeLessThanOrEqual(3);
+    await expect(picks.filter({ hasText: "Thyme" })).toHaveCount(0);
+    // Reviewing the basket stays open; the reason sits beside the link.
+    const review = sheet.getByRole("link", { name: "Review basket & checkout" });
+    await expect(review).toBeEnabled();
+    await expect(sheet.locator("#cart-gate-reason")).toContainText("Remove or change the items marked below");
+    await line.getByRole("button", { name: /^Remove Thyme/ }).click();
+    await expect(sheet.locator("li[data-unavailable]")).toHaveCount(0);
+    await settle(page);
+  });
+
+  test("a card stepper at its limit stops plus only and shows why (#717)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 2 });
+    await revalidateMama(page);
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("2");
+    await expect(curry(page).getByTestId("stepper-plus")).toBeDisabled();
+    await expect(curry(page).getByTestId("stepper-minus")).toBeEnabled();
+    const why = curry(page).getByTestId("stepper-limit");
+    await expect(why).toBeVisible();
+    await expect(why).toHaveText("Limit 2 per order");
+    const describedBy = await curry(page).getByTestId("stepper-plus").getAttribute("aria-describedby");
+    expect(describedBy).toBe(await why.getAttribute("id"));
+    await settle(page);
+    await curry(page).getByTestId("stepper-minus").click();
+    await curry(page).getByTestId("stepper-minus").click();
+    await settle(page);
+  });
+
   test("a saved first add shows after reload when the cart cookie reached this host", async ({ page }) => {
     await openGrains(page);
     let setCookie = "";
@@ -923,14 +1012,14 @@ test.describe("quick add limits and recovery", () => {
       }
       await route.fallback();
     });
-    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
-    const sheet = page.getByRole("dialog", { name: "Your cart" });
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
+    const sheet = page.getByRole("dialog", { name: "Your basket" });
     await sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-minus").click();
     await expect.poll(() => held).toBe(true);
     await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
     await expect(sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-qty")).toHaveText("2");
     release();
-    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Maximum 1 per order for this item" }).first()).toBeVisible();
+    await expect(sheet.getByRole("alert")).toContainText("Maximum 1 per order for this item");
     await expect(sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-qty")).toHaveText("3");
     await expect(sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-qty")).toHaveText("2");
     await expect(cartCount(page)).toHaveText("5");
@@ -978,8 +1067,8 @@ test.describe("quick add limits and recovery", () => {
       }
       await route.fallback();
     });
-    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
-    const sheet = page.getByRole("dialog", { name: "Your cart" });
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
+    const sheet = page.getByRole("dialog", { name: "Your basket" });
     const curryRow = sheet.getByRole("listitem").filter({ hasText: "Curry Powder" });
     await curryRow.getByTestId("stepper-minus").click();
     await expect.poll(() => held).toBe(true);
@@ -1054,6 +1143,36 @@ test.describe("quick add limits and recovery", () => {
     expect(lines.find((line) => line.id === curryLine!.id)?.qty).toBe(3);
     expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
   });
+
+  test("the card and drawer steppers stop at the listing max with the reason (#708)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 2 });
+    await revalidateMama(page);
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("2");
+    await expect(curry(page).getByTestId("stepper-plus")).toBeDisabled();
+    await expect(curry(page).getByTestId("stepper-plus")).toHaveAccessibleDescription("Limit 2 per order");
+    await settle(page);
+    const line = (await openSheet(page)).getByRole("listitem").filter({ hasText: "Curry Powder" });
+    await expect(line.getByTestId("stepper-plus")).toBeDisabled();
+    await expect(line.getByTestId("stepper-plus")).toHaveAccessibleDescription("Limit 2 per order");
+  });
+
+  test("a refusal in the open drawer shows its reason inside the sheet, not as a page toast (#708)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await revalidateMama(page);
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 1 });
+    const sheet = await openSheet(page);
+    await sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-plus").click();
+    await expect(sheet.getByRole("alert")).toContainText("Maximum 1 per order for this item");
+    await settle(page);
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  });
 });
 
 test.describe("quick add recovery gaps", () => {
@@ -1111,8 +1230,8 @@ test.describe("quick add recovery gaps", () => {
     });
     await garri(page).getByTestId("quick-add-btn").click();
     await expect.poll(() => held).toBe(true);
-    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
-    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
+    await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     release();
     await settle(page);
@@ -1493,8 +1612,8 @@ async function openSavedYellowCart(page: Page) {
 }
 
 async function openSheet(page: Page) {
-  await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
-  const sheet = page.getByRole("dialog", { name: "Your cart" });
+  await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
+  const sheet = page.getByRole("dialog", { name: "Your basket" });
   await expect(sheet).toBeVisible();
   return sheet;
 }
@@ -1544,7 +1663,7 @@ test.describe("cart recovery after a failed write", () => {
     await expect(cartCount(page)).toHaveText("1");
     await settle(page);
     const sheet = await openSheet(page);
-    await expect(sheet.getByRole("heading", { name: "Your next good meal starts here" })).toHaveCount(0);
+    await expect(sheet.getByRole("heading", { name: "Your basket is empty" })).toHaveCount(0);
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toBeVisible();
     const lines = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(lines.find((line) => line.id === row!.id)?.qty).toBe(1);
@@ -1572,7 +1691,7 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect.poll(() => aborted).toBe(1);
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toBeVisible();
     await expect(cartCount(page)).toHaveText("1");
@@ -1969,7 +2088,7 @@ test.describe("cart recovery after a failed write", () => {
     const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
     await rowUi.evaluate((el) => {
       const plus = el.querySelector("[data-testid='stepper-plus']") as HTMLButtonElement | null;
-      const trash = el.querySelector("button[aria-label$='from cart']") as HTMLButtonElement | null;
+      const trash = el.querySelector("button[aria-label$='from basket']") as HTMLButtonElement | null;
       plus?.click();
       trash?.click();
     });
@@ -2285,7 +2404,7 @@ test.describe("cart recovery after a failed write", () => {
       substituteVariantId: row!.substituteVariantId,
     });
     await page.unroute("**/*");
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     await garri(page).getByTestId("stepper-plus").click();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("5");
     await settle(page);
@@ -2379,13 +2498,13 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => heldWrite).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     releaseWrite();
     await expect.poll(() => heldRead).toBe(true);
     await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
     releaseRead();
     await settle(page);
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     const saved = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(saved.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
@@ -2515,7 +2634,7 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => heldQty).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     release();
     await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
     await settle(page);
@@ -2560,12 +2679,12 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect.poll(() => firstReads).toBeGreaterThanOrEqual(2);
     await expect(sheet.getByText("Exact item only")).toBeVisible();
     await settle(page);
     phase = "choose";
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     await page.getByRole("button", { name: /Replace with/ }).click();
     await page.getByRole("button").filter({ hasText: "White Garri" }).first().click();
     await expect.poll(async () => {
@@ -2575,7 +2694,7 @@ test.describe("cart recovery after a failed write", () => {
     const chosen = await openSheet(page);
     await expect(chosen.getByText("Named substitute chosen")).toBeVisible();
     phase = "second";
-    await chosen.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await chosen.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect.poll(() => secondReads).toBeGreaterThanOrEqual(2);
     await expect(chosen.getByText("Named substitute chosen")).toBeVisible();
     await expect(chosen.getByText("Exact item only")).toHaveCount(0);
@@ -2608,7 +2727,7 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toHaveCount(0);
     const whiteRow = sheet.getByRole("listitem").filter({ hasText: "White Garri" });
     await whiteRow.getByTestId("stepper-plus").click();
@@ -2651,7 +2770,7 @@ test.describe("cart recovery after a failed write", () => {
       await route.fallback();
     });
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toHaveCount(0);
     const whiteRow = sheet.getByRole("listitem").filter({ hasText: "White Garri" });
     await whiteRow.getByTestId("stepper-plus").click();
@@ -2729,10 +2848,10 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => heldDelete).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove White Garri from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove White Garri from basket" }).click();
     releaseDelete();
     await settle(page);
-    await page.getByRole("button", { name: "Close cart" }).click();
+    await page.getByRole("button", { name: "Close basket" }).click();
     const removed = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(removed.filter((line) => line.variantId === "mn_garri_w_v1")).toHaveLength(0);
     expect(removed.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
@@ -2935,7 +3054,7 @@ test.describe("cart recovery after a failed write", () => {
     const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
     await rowUi.evaluate((el) => {
       const plus = el.querySelector("[data-testid='stepper-plus']") as HTMLButtonElement | null;
-      const trash = el.querySelector("button[aria-label$='from cart']") as HTMLButtonElement | null;
+      const trash = el.querySelector("button[aria-label$='from basket']") as HTMLButtonElement | null;
       plus?.click();
       trash?.click();
     });
@@ -3019,7 +3138,7 @@ test.describe("cart recovery after a failed write", () => {
     const atToast = actions;
     const countAtToast = await cartCount(page).innerText();
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove White Garri from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove White Garri from basket" }).click();
     await page.waitForTimeout(400);
     expect(actions).toBe(atToast);
     await expect(cartCount(page)).toHaveText(countAtToast);
@@ -3079,7 +3198,7 @@ test.describe("cart recovery after a failed write", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expect.poll(() => proved).toBe(true);
     const sheet = await openSheet(page);
-    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     recover = true;
     release();
     await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
@@ -3262,3 +3381,79 @@ test("cart recovery works with production Vercel flags and no provider keys", as
     await running.stop();
   }
 });
+
+test.describe("basket feedback states (#708 P1, #717 AC4)", () => {
+  test("a drawer alert clears once the same line saves again", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const sheet = await openSheet(page);
+    await page.evaluate(() => {
+      (window as Window & { __e2eRemovalResult?: unknown }).__e2eRemovalResult = {
+        ok: false,
+        error: "Please sign in again.",
+        code: "USER_NOT_FOUND",
+      };
+    });
+    await sheet.getByRole("button", { name: /^Remove Yellow Garri/ }).click();
+    await expect(sheet.getByRole("alert")).toContainText("Please sign in again.");
+    const row = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await expect(row.getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await page.evaluate(() => {
+      delete (window as Window & { __e2eRemovalResult?: unknown }).__e2eRemovalResult;
+    });
+    await row.getByTestId("stepper-plus").click();
+    await expect(row.getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    await expect(sheet.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("a basket line shows Updating while its change is in flight", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await page.goto(`${base}/cart`);
+    const row = page.locator("main").getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await expect(row.getByTestId("stepper-qty")).toHaveText("1");
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      if (isAction(request) && quantitiesIn(request.postData() ?? "").includes(2)) await held;
+      await route.fallback();
+    });
+    await row.getByTestId("stepper-plus").click();
+    await expect(row).toHaveAttribute("aria-busy", "true");
+    await expect(row.getByText("Updating…")).toBeVisible();
+    release();
+    await settle(page);
+    await expect(row).not.toHaveAttribute("aria-busy", "true");
+    await expect(row.getByText("Updating…")).toHaveCount(0);
+    await page.unroute("**/*");
+  });
+
+  test("the drawer tells a failed load from an empty basket, with Retry", async ({ page }) => {
+    await page.context().addCookies([{ name: "e2e_fail_cart_read", value: "1", url: base }]);
+    await page.goto(grains);
+    const sheet = await openSheet(page);
+    await expect(sheet.getByText("We couldn\u2019t load your basket")).toBeVisible();
+    await expect(sheet.getByText("Your basket is empty")).toHaveCount(0);
+    await page.context().clearCookies({ name: "e2e_fail_cart_read" });
+    await sheet.getByRole("button", { name: "Retry" }).click();
+    await expect(sheet.getByText("Your basket is empty")).toBeVisible();
+    await expect(sheet.getByRole("link", { name: "Browse aisles" })).toBeVisible();
+  });
+
+  test("a change made in the drawer is announced once, inside the dialog", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const sheet = await openSheet(page);
+    const row = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await row.getByTestId("stepper-plus").click();
+    await expect(page.getByTestId("cart-announce")).toHaveCount(1);
+    await expect(sheet.getByTestId("cart-announce")).toContainText("2 in basket");
+    await row.getByTestId("stepper-minus").click();
+    await expect(sheet.getByTestId("cart-announce")).toContainText("1 in basket");
+    await settle(page);
+  });
+});
+

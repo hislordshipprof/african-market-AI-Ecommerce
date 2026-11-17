@@ -23,6 +23,7 @@ export type QuickViewSelectionInput = {
   listingId: string;
   name: string;
   imageUrl?: string;
+  maxPerOrder?: number;
   listPacks: readonly QuickViewPack[];
   listBasePrice: number;
   /** Cheapest pack, or the pack the category `?pack=` filter already chose. */
@@ -42,6 +43,8 @@ export type QuickViewSelection = {
   weightG?: number;
   statusMessage?: string;
   addDisabled: boolean;
+  /** Stops adding but keeps minus, with this reason beside the stepper (ask-store, #708 P1). */
+  addBlockedReason?: string;
   /**
    * True only for a listing that had no packs on the shelf and still has none
    * after details load. The add control then builds an in-memory line with no
@@ -65,6 +68,7 @@ function cartItem(
     price,
     imageUrl: input.imageUrl,
     packLabel,
+    maxPerOrder: input.maxPerOrder,
   };
 }
 
@@ -75,6 +79,8 @@ function fromPack(pack: QuickViewPack | undefined, fallbackPrice: number) {
     label: pack?.label ?? "Each",
   };
 }
+
+const ASK_STORE = "Ask store first";
 
 export function selectQuickViewPack(input: QuickViewSelectionInput): QuickViewSelection {
   const listPacks = orderPacks(input.listPacks);
@@ -94,7 +100,7 @@ export function selectQuickViewPack(input: QuickViewSelectionInput): QuickViewSe
       weightG: shown.weightG,
       statusMessage:
         input.detail.status === "error"
-          ? "Pack details could not load. Open the product page to try again."
+          ? "Pack details could not load. Try again."
           : undefined,
       addDisabled: true,
       eachOnly: false,
@@ -113,7 +119,8 @@ export function selectQuickViewPack(input: QuickViewSelectionInput): QuickViewSe
       selectedId: undefined,
       price: basePrice,
       weightG: undefined,
-      addDisabled: askStore,
+      addDisabled: false,
+      addBlockedReason: askStore ? ASK_STORE : undefined,
       eachOnly: true,
       heading: "Add to your basket",
       cartItem: cartItem(input, undefined, basePrice, "Each"),
@@ -155,7 +162,8 @@ export function selectQuickViewPack(input: QuickViewSelectionInput): QuickViewSe
       selectedId: match.id,
       price: match.price,
       weightG: match.weightG,
-      addDisabled: askStore,
+      addDisabled: false,
+      addBlockedReason: askStore ? ASK_STORE : undefined,
       eachOnly: false,
       heading: "Add to your basket",
       cartItem: cartItem(input, match, match.price, match.label),
@@ -169,7 +177,8 @@ export function selectQuickViewPack(input: QuickViewSelectionInput): QuickViewSe
     selectedId: fallback.id,
     price: fallback.price,
     weightG: fallback.weightG,
-    addDisabled: askStore,
+    addDisabled: false,
+    addBlockedReason: askStore ? ASK_STORE : undefined,
     eachOnly: false,
     heading: "Add to your basket",
     cartItem: cartItem(input, fallback, fallback.price, fallback.label),

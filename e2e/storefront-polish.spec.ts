@@ -50,7 +50,7 @@ test.describe("Storefront layout on a phone (#529)", () => {
     expect(overlap(await box(launcher), await box(bottomNav(page)))).toBe(false);
   });
 
-  test("below the minimum, the basket bar says why Checkout is off and clears the nav", async ({ page }) => {
+  test("below the minimum, the basket bar says why Checkout is off and takes the nav's place", async ({ page }) => {
     await page.goto(`${BASE}/listings/mn_egusi`, { waitUntil: "networkidle" });
     await page.getByTestId("product-detail").getByTestId("quick-add-btn").first().click();
     await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden({ timeout: 20_000 });
@@ -60,7 +60,8 @@ test.describe("Storefront layout on a phone (#529)", () => {
       .filter({ hasText: "Subtotal" }).last();
     await expect(bar).toBeVisible();
     await expect(bar).toContainText(/minimum/i);
-    expect(overlap(await box(bar), await box(bottomNav(page)))).toBe(false);
+    // One bottom region on the basket page (#708 P1): the bar replaces the nav, so nothing stacks over the lines.
+    await expect(bottomNav(page)).toBeHidden();
   });
 
   test("text fields are at least 16px, so a phone does not zoom on focus", async ({ page }) => {

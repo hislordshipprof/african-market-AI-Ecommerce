@@ -32,3 +32,29 @@ export function stepCartQuantity(
   if (qty >= cartQuantityCeiling(max)) return null;
   return qty + 1;
 }
+
+export interface StepperLimit {
+  /** The first add is allowed. */
+  canAdd: boolean;
+  /** Plus is allowed; minus is always allowed above zero. */
+  canIncrease: boolean;
+  /** Shown beside the stepper and named by aria-describedby when plus is off. */
+  reason?: string;
+}
+
+/**
+ * What a stepper allows and why (#708 P1, #717 AC1). Only the increase stops:
+ * a shopper can always take one away. Server checks stay authoritative.
+ */
+export function stepperLimit(input: {
+  qty: number;
+  max: number | undefined;
+  available: boolean | undefined;
+  variantId: string | undefined;
+}): StepperLimit {
+  if (!input.variantId) return { canAdd: false, canIncrease: false, reason: "Not sold online yet" };
+  const ceiling = cartQuantityCeiling(input.max);
+  if (input.available === false || ceiling < 1) return { canAdd: false, canIncrease: false, reason: "No longer available" };
+  if (input.qty >= ceiling) return { canAdd: false, canIncrease: false, reason: `Limit ${ceiling} per order` };
+  return { canAdd: true, canIncrease: true };
+}

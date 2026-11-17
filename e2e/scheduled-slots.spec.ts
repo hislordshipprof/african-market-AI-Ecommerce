@@ -54,7 +54,7 @@ test("a heavy cart books a scheduled store delivery slot, and a slot that fills 
       await tx.listingVariant.create({ data: { listingId: listing.id, label: "Sack", price: 4000, weightG: 25_000 } });
     });
     await page.context().addCookies([{ name: "e2e_stripe_harness", value: "1", url: `http://localhost:${process.env.E2E_PORT || "3000"}` }]);
-    const addButton = page.getByRole("button", { name: `Add ${name} to cart` });
+    const addButton = page.getByRole("button", { name: `Add ${name} to basket` });
     await expect(async () => {
       await page.goto(`/?store=${slug}`);
       await expect(addButton).toBeVisible();

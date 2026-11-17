@@ -708,9 +708,24 @@
   position: absolute;
   right: 8px;
   bottom: 8px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: calc(100% - 16px);
   filter: drop-shadow(0 2px 6px #0002);
 }
 /* The fallback name centres above the 44px add button, never under it. */
+/* Too narrow for the full control inside the photo with its 8px insets: a reserved action row below it. */
+@container card (max-width: 127px) {
+  .sf-quick-add {
+    position: static;
+    margin-top: 8px;
+    align-items: flex-start;
+    max-width: 100%;
+    filter: none;
+  }
+}
 .sf-product-photo:has(.sf-quick-add) .sf-product-fallback {
   padding-bottom: 56px;
 }
@@ -730,7 +745,7 @@
 }
 .sf-price {
   display: block;
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 750;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
@@ -751,16 +766,18 @@
 .sf-product-name {
   position: relative;
   display: block;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
-  margin-top: 10px;
+  margin-top: 8px;
+  /* Reserve two lines so prices align across the row; longer names still grow. */
+  min-height: calc(2 * 1.4em);
 }
 .sf-local-name {
   font-size: 13px;
   color: var(--muted-foreground);
   line-height: 1.5;
-  margin-top: 3px;
+  margin-top: 4px;
 }
 /* Tap targets reach 44px without changing how the text looks. */
 .sf-product-name::after,
@@ -1053,7 +1070,7 @@
 .sf-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 32px 20px;
+  gap: 32px 16px;
 }
 .sf-browse {
   display: grid;
@@ -1253,11 +1270,11 @@
 }
 .sf-add-bar {
   display: flex;
-  gap: 20px;
+  gap: var(--ds-space-md);
   align-items: center;
   justify-content: space-between;
   margin-top: 24px;
-  padding: 20px;
+  padding: var(--ds-space-lg);
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: 12px;
@@ -1270,10 +1287,7 @@
   font-size: 20px;
 }
 @media (min-width: 768px) {
-  /* The add bar carries the price and unit price beside the add control. */
-  .sf-detail-copy > .sf-price {
-    display: none;
-  }
+  /* Price under the title, then sizes, then the add bar repeating the chosen pack and price (#708 P2). */
   .sf-detail-copy > .sf-add-bar {
     margin-top: 16px;
   }
@@ -1543,13 +1557,13 @@
     width: 43.5%;
   }
   .sf-product-copy {
-    padding-top: 10px;
+    padding-top: 12px;
   }
   .sf-price {
     font-size: 20px;
   }
   .sf-product-name {
-    font-size: 14px;
+    font-size: 16px;
     margin-top: 8px;
   }
   .sf-local-name {
@@ -1661,7 +1675,7 @@
   .sf-grid,
   .sf-browse .sf-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 28px 12px;
+    gap: 24px 12px;
   }
   .sf-filters {
     margin-block: 16px;

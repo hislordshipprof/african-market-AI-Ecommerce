@@ -10,9 +10,15 @@ export interface CartItem {
   price: number;
   imageUrl?: string;
   packLabel?: string;
+  /** The listing's per-order maximum, when the page knows it. Steppers stop there. */
+  maxPerOrder?: number;
+  /** False when the server says the listing is no longer sold or is out of stock (#717 AC2). */
+  available?: boolean;
 }
 export interface CartLine extends CartItem {
   quantity: number;
+  /** In-stock picks from the same aisle when this line is no longer sold (#717 AC2). */
+  alternatives?: CartItem[];
   serverLineId?: string;
   swapRule?: SwapRuleValue;
   substituteVariantId?: string | null;

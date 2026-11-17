@@ -1,65 +1,115 @@
 "use client";
+import { useId } from "react";
 import { Plus, Minus } from "lucide-react";
 import { cartItemKey, type CartItem } from "@/lib/storefront/cart-store";
-import { cartQuantityCeiling } from "@/lib/storefront/cart-quantity";
+import { stepperLimit, type StepperLimit } from "@/lib/storefront/cart-quantity";
 import { useCart } from "./cart-provider";
-import { flyToCart } from "./cart-flight";
 import styles from "./cart.module.css";
+
+/**
+ * The stepper's markup, apart from the cart context so its limits can be rendered
+ * and asserted (#708 P1). Only plus stops at a limit; minus always works above zero.
+ * The quantity is not a live region: the cart's one status announces changes.
+ */
+export function QuickAddStepperView({
+  item,
+  qty,
+  limit,
+  disabled,
+  reasonId,
+  onStep,
+}: {
+  item: CartItem;
+  qty: number;
+  limit: StepperLimit;
+  disabled: boolean;
+  reasonId: string;
+  onStep: (delta: 1 | -1) => void;
+}) {
+  const blocked = qty ? !limit.canIncrease : !limit.canAdd;
+  const reason = blocked && !disabled ? limit.reason : undefined;
+  return (
+    <>
+      <div
+        className={styles.stepper}
+        data-active={qty ? "true" : undefined}
+        data-testid={qty ? "quick-add-stepper" : undefined}
+      >
+        {qty ? (
+          <>
+            <button
+              type="button"
+              data-testid="stepper-minus"
+              disabled={disabled}
+              onClick={() => onStep(-1)}
+              aria-label={`Remove one ${item.name}`}
+            >
+              <Minus size={18} />
+            </button>
+            <span data-testid="stepper-qty">{qty}</span>
+            <button
+              type="button"
+              data-testid="stepper-plus"
+              disabled={disabled || !limit.canIncrease}
+              aria-describedby={reason ? reasonId : undefined}
+              onClick={() => onStep(1)}
+              aria-label={`Add another ${item.name}`}
+            >
+              <Plus size={18} />
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            data-testid="quick-add-btn"
+            disabled={disabled || !limit.canAdd}
+            aria-describedby={reason ? reasonId : undefined}
+            onClick={() => onStep(1)}
+            aria-label={`Add ${item.name} to basket`}
+          >
+            <Plus size={20} />
+          </button>
+        )}
+      </div>
+      {reason && (
+        <span id={reasonId} className={styles.stepperNote} data-testid="stepper-limit">
+          {reason}
+        </span>
+      )}
+    </>
+  );
+}
+
 export function QuickAddStepper({
   item,
   disabled = false,
-  maxQuantity = 99,
+  maxQuantity,
+  blockedReason,
 }: {
   item: CartItem;
+  /** Turns the whole stepper off (both directions), e.g. while a pack is loading. */
   disabled?: boolean;
   maxQuantity?: number;
+  /** Stops adding but keeps minus, with this reason shown beside it (e.g. ask the store). */
+  blockedReason?: string;
 }) {
   const { lines, store } = useCart();
-  const qty =
-    lines.find((line) => cartItemKey(line) === cartItemKey(item))?.quantity ??
-    0;
-  const ceiling = cartQuantityCeiling(maxQuantity);
+  const reasonId = useId();
+  const line = lines.find((entry) => cartItemKey(entry) === cartItemKey(item));
+  const qty = line?.quantity ?? 0;
+  // The cart line carries the server's fresh limit and availability; the page's copy can be stale.
+  const max = line?.maxPerOrder ?? maxQuantity ?? item.maxPerOrder;
+  const limit: StepperLimit = blockedReason
+    ? { canAdd: false, canIncrease: false, reason: blockedReason }
+    : stepperLimit({ qty, max, available: line?.available ?? item.available, variantId: item.variantId });
   return (
-    <div
-      className={styles.stepper}
-      style={{ width: qty ? 132 : 44 }}
-      data-testid={qty ? "quick-add-stepper" : undefined}
-    >
-      {qty ? (
-        <>
-          <button
-            type="button"
-            data-testid="stepper-minus"
-            disabled={disabled}
-            onClick={() => store.adjust(item, -1, maxQuantity)}
-            aria-label={`Remove one ${item.name}`}
-          >
-            <Minus size={18} />
-          </button>
-          <span data-testid="stepper-qty" aria-live="polite" aria-atomic="true">
-            {qty}
-          </span>
-          <button
-            type="button"
-            data-testid="stepper-plus"
-            disabled={disabled || qty >= ceiling}
-            onClick={e => { store.adjust(item, 1, maxQuantity); flyToCart(e.currentTarget); }}
-            aria-label={`Add another ${item.name}`}
-          >
-            <Plus size={18} />
-          </button>
-        </>
-      ) : (
-        <button
-          type="button"
-          data-testid="quick-add-btn"
-          disabled={disabled || ceiling < 1}
-          onClick={e => { store.adjust(item, 1, maxQuantity); flyToCart(e.currentTarget); }}
-          aria-label={`Add ${item.name} to cart`}
-        >
-          <Plus size={20} />
-        </button>
-      )}
-    </div>
+    <QuickAddStepperView
+      item={item}
+      qty={qty}
+      limit={limit}
+      disabled={disabled}
+      reasonId={reasonId}
+      onStep={(delta) => store.adjust(item, delta, max)}
+    />
   );
 }

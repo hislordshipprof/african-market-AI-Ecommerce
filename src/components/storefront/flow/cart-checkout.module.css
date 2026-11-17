@@ -13,7 +13,7 @@
 .stack,
 .formFields {
   display: grid;
-  gap: 20px;
+  gap: 24px;
   min-width: 0;
 }
 .stack p,
@@ -59,14 +59,15 @@
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 650;
   line-height: 1.4;
 }
+/* Square cart thumbnails: 80px desktop, 64px phone (#708 AC1). */
 .photo {
-  width: 88px;
-  height: 104px;
-  flex: 0 0 88px;
+  width: 80px;
+  height: 80px;
+  flex: 0 0 80px;
   overflow: hidden;
   border-radius: 12px;
   background: var(--sf-thumb-well, var(--color-bg));
@@ -107,7 +108,8 @@
 }
 .lineActions {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   margin-top: 8px;
 }
@@ -401,9 +403,102 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   color: var(--color-deal);
-  font-size: 13px;
-  line-height: 1.6;
-  margin: 10px 0;
+  /* Actionable errors read at body size (#708 P2). */
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+/* The quote could not settle: a visible failure with Retry, never a stuck "estimating" (#708 AC2b). */
+.quoteRetry {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--color-deal);
+  border-radius: 12px;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.quoteRetry p {
+  margin: 0;
+}
+/* Shown only when a sync takes long enough to notice, so quick saves never flash it (#717 AC4). */
+.updating {
+  margin-left: 8px;
+  color: var(--color-muted);
+  font-weight: 600;
+  animation: updatingIn 0s linear 300ms both;
+}
+@keyframes updatingIn {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+/* A summary line the shopper must change: icon and words, never colour alone. */
+.miniLines li[data-problem] > span:first-child {
+  font-weight: 600;
+}
+.miniLineProblem {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-deal);
+  font-size: 14px;
+  font-weight: 600;
+}
+/* A checkout failure beside the control it concerns, with its recovery (#717 AC3). */
+.issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--color-deal);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 16px;
+  line-height: 1.5;
+  scroll-margin-block: 96px;
+}
+.issue > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-deal);
+}
+.issue > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.issue p {
+  margin: 0;
+}
+.issueTitle {
+  font-weight: 700;
+}
+.issueActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.issueActions:empty {
+  display: none;
+}
+.issue:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.quoteRetry button {
+  justify-self: start;
 }
 .addressResult {
   display: flex;
@@ -441,12 +536,13 @@
 }
 .miniLines li {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 14px;
+  gap: 4px 14px;
   font-size: 13px;
   padding: 7px 0;
 }
-.miniLines li > span:last-child {
+.miniLines li > span + span {
   white-space: nowrap;
 }
 .stages {
@@ -496,15 +592,15 @@
 }
 @media (max-width: 767px) {
   .page {
-    /* Fixed stack above the viewport bottom: nav (12px offset + 73px bar)
-       + 11px gap, then the 74px checkout bar, then a 12px scroll margin. */
-    --cart-bar-bottom: calc(96px + env(safe-area-inset-bottom));
+    /* One bottom region on the basket page: the checkout bar takes the nav's place
+       (the nav hides here), so the first line is never under two bars (#708 P1). */
+    --cart-bar-bottom: calc(12px + env(safe-area-inset-bottom));
     --cart-bar-height: 74px;
     padding-bottom: calc(var(--cart-bar-bottom) + var(--cart-bar-height) + 12px);
   }
-  /* Keyboard focus scrolls clear of the nav and the checkout bar (96 + 120 + 12). */
+  /* Keyboard focus scrolls clear of the checkout bar (12 + 120 + 12). */
   :global(html):has(.mobileAction) {
-    scroll-padding-bottom: calc(228px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(144px + env(safe-area-inset-bottom));
   }
   /* The bar names why Checkout is off, on up to two more lines. */
   .page:has(.mobileAction[data-blocked]) {
@@ -547,17 +643,18 @@
   }
   .line {
     display: grid;
-    grid-template-columns: 66px minmax(0, 1fr);
+    grid-template-columns: 64px minmax(0, 1fr);
   }
   .line > strong {
     grid-column: 2;
   }
   .photo {
-    width: 66px;
-    height: 82px;
+    width: 64px;
+    height: 64px;
   }
 }
-@media (max-width: 900px) {
+/* Side panel from 1024px (DESIGN Layout); one column below. */
+@media (max-width: 1023px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -571,12 +668,12 @@
     padding-top: 24px;
   }
   .line {
-    gap: 10px;
+    gap: 16px;
   }
   .photo {
-    width: 66px;
-    flex-basis: 66px;
-    height: 82px;
+    width: 64px;
+    flex-basis: 64px;
+    height: 64px;
   }
   .line > strong {
     font-size: 13px;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stepCartQuantity } from "./cart-quantity";
+import { stepperLimit, stepCartQuantity } from "./cart-quantity";
 
 describe("stepCartQuantity", () => {
   it("adds and removes one from the latest quantity", () => {
@@ -36,5 +36,32 @@ describe("stepCartQuantity", () => {
     expect(stepCartQuantity(5, -1, 3)).toBe(4);
     expect(stepCartQuantity(3, -1, 0)).toBe(2);
     expect(stepCartQuantity(5, 1, 3)).toBeNull();
+  });
+});
+
+describe("stepperLimit: what the stepper allows, and why (#708 P1, #717 AC1)", () => {
+  it("stops only the increase at the real ceiling, with the limit as the reason", () => {
+    expect(stepperLimit({ qty: 2, max: 2, available: true, variantId: "v1" })).toEqual({
+      canAdd: false,
+      canIncrease: false,
+      reason: "Limit 2 per order",
+    });
+  });
+
+  it("allows more below the ceiling and gives no reason", () => {
+    expect(stepperLimit({ qty: 1, max: 2, available: true, variantId: "v1" })).toEqual({ canAdd: true, canIncrease: true });
+  });
+
+  it("says the item is no longer sold when the server marks it unavailable", () => {
+    expect(stepperLimit({ qty: 1, max: 5, available: false, variantId: "v1" }).reason).toBe("No longer available");
+    expect(stepperLimit({ qty: 0, max: 0, available: undefined, variantId: "v1" }).canAdd).toBe(false);
+  });
+
+  it("cannot add a listing that has no pack to order", () => {
+    expect(stepperLimit({ qty: 0, max: undefined, available: true, variantId: undefined })).toEqual({
+      canAdd: false,
+      canIncrease: false,
+      reason: "Not sold online yet",
+    });
   });
 });

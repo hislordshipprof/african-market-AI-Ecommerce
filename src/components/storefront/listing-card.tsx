@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useId, useRef, ViewTransition } from "react";
+import { useId, ViewTransition } from "react";
 import { flushSync } from "react-dom";
 import { useQuickView, useProductImageTransition } from "./quick-view-provider";
 import type { StorefrontListing } from "@/lib/storefront/service";
@@ -15,21 +15,12 @@ export function ListingCard({
   listing: StorefrontListing;
   categorySlug?: string;
 }) {
-  const ref = useRef<HTMLElement>(null);
   const instance = useId();
   const { selected, select } = useProductImageTransition();
   const openQuickView = useQuickView();
   const choose = () => flushSync(() => select(instance));
   return (
-    <article ref={ref} className="sf-product-card" data-testid="listing-card"
-      onPointerMove={e => {
-        if (e.pointerType !== "mouse" || !window.matchMedia("(hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference)").matches) return;
-        const box = e.currentTarget.getBoundingClientRect();
-        const x = Math.max(-6, Math.min(6, (e.clientY - box.top) / box.height * -12 + 6));
-        const y = Math.max(-6, Math.min(6, (e.clientX - box.left) / box.width * 12 - 6));
-        e.currentTarget.style.setProperty("--tilt-x", `${x}deg`);
-        e.currentTarget.style.setProperty("--tilt-y", `${y}deg`);
-      }} onPointerLeave={() => { ref.current?.style.setProperty("--tilt-x", "0deg"); ref.current?.style.setProperty("--tilt-y", "0deg"); }}>
+    <article className="sf-product-card" data-testid="listing-card">
       <div className="sf-product-photo">
         <Link
           href={`/listings/${listing.id}`}
@@ -39,7 +30,6 @@ export function ListingCard({
         >
           <ViewTransition name={selected === instance ? `product-${listing.id}` : "auto"} share="sf-product-morph" default="none"><ProductImage category={listing.categorySlug} src={listing.imageUrl} name={listing.displayName} /></ViewTransition>
         </Link>
-        <button className="sf-quick-view-trigger" onClick={() => openQuickView(listing)} aria-label={`Quick view ${listing.displayName}`}>Quick view</button>
         {listing.frozen && <span className="sf-photo-tag">Frozen</span>}
         <div className="sf-quick-add">
           <QuickAddStepper
@@ -50,8 +40,9 @@ export function ListingCard({
               price: listing.startingPrice,
               imageUrl: listing.imageUrl,
               packLabel: listing.packLabel,
+              maxPerOrder: listing.maxPerOrder,
             }}
-            disabled={listing.badge === "ask-store"}
+            blockedReason={listing.badge === "ask-store" ? "Ask store first" : undefined}
           />
         </div>
       </div>
@@ -66,6 +57,8 @@ export function ListingCard({
           <StockBadgeChip badge={listing.badge} />
         </div>
       </div>
+      {/* Out of the photo on phones and touch; over it, until hover, on desktop (motion.css). */}
+      <button type="button" className="sf-quick-view-trigger" onClick={() => openQuickView(listing)} aria-label={`Quick view ${listing.displayName}`}>Quick view</button>
     </article>
   );
 }

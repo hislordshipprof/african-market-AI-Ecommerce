@@ -51,10 +51,10 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567), a
     const count = page.getByTestId("storefront-header").getByTestId("cart-count");
     await expect(async () => {
       await page.goto(`/?store=${slug}`);
-      await expect(page.getByRole("button", { name: `Add ${items[0]} to cart` })).toBeVisible();
+      await expect(page.getByRole("button", { name: `Add ${items[0]} to basket` })).toBeVisible();
     }).toPass({ timeout: 20_000 });
     for (const [i, name] of items.entries()) {
-      await page.getByRole("button", { name: `Add ${name} to cart` }).click();
+      await page.getByRole("button", { name: `Add ${name} to basket` }).click();
       await expect(count).toHaveText(String(i + 1));
       await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
     }

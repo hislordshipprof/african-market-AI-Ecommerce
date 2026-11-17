@@ -5,6 +5,7 @@ import type {
   CheckoutQuote,
   CustomerProfile,
   FlowCatalogItem,
+  FlowErrorCode,
   FlowOrder,
   FlowServices,
   FlowStore,
@@ -24,8 +25,9 @@ import {
 const uuid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const clone = <T>(v: T): T => structuredClone(v);
-const fail = (message: string): never => {
-  throw new Error(message);
+/** The code lets checkout place the failure beside the control it concerns (#717 AC3). */
+const fail = (message: string, code?: FlowErrorCode): never => {
+  throw Object.assign(new Error(message), code ? { code } : {});
 };
 const challenges = new Map<
   string,
@@ -376,9 +378,9 @@ export function createDemoServices(
           auth.amount !== q.holdCents ||
           a.amountCents !== q.holdCents
         )
-          fail("Checkout session expired. Please quote again.");
+          fail("Checkout session expired. Please quote again.", "session-expired");
         const fresh = await quote(input);
-        if (fresh.problems.length) fail(fresh.problems[0].message);
+        if (fresh.problems.length) fail(fresh.problems[0].message, fresh.problems[0].code);
         authorizations.delete(a.id);
         quotes.delete(q.id);
         const id = uuid();
@@ -419,13 +421,13 @@ export function createDemoServices(
     },
     payment: {
       async authorize(q, outcome = "success") {
-        if (outcome === "declined") fail("Test payment declined.");
+        if (outcome === "declined") fail("Test payment declined.", "payment-failed");
         if (
           !quotes.has(q.id) ||
           q.problems.length ||
           Date.parse(q.expiresAt) <= Date.now()
         )
-          fail("Quote expired or ineligible.");
+          fail("Quote expired or ineligible.", "session-expired");
         const id = uuid();
         authorizations.set(id, { quoteId: q.id, amount: q.holdCents });
         return { id, amountCents: q.holdCents };

@@ -8,6 +8,7 @@ import { StorefrontFooter } from "./storefront-footer";
 import { StorefrontMotion } from "./motion-provider";
 import { QuickViewProvider } from "./quick-view-provider";
 import { InstallPrompt } from "../pwa/install-prompt-lazy";
+import { AssistantSlot } from "./assistant/assistant-slot";
 
 export function StorefrontShell({
   store,
@@ -28,6 +29,8 @@ export function StorefrontShell({
           Skip to content
         </a>
         <StorefrontHeader store={store} />
+        {/* On phones the AI entry sits here in the flow; pages with their own slot win. */}
+        <AssistantSlot label="Shop with AI" phoneOnly />
         <main id="main-content">{children}</main>
         <StorefrontFooter store={store} />
         <MobileNav />

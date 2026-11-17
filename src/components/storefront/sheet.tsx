@@ -9,11 +9,14 @@ export function Sheet({
   onClose,
   title,
   children,
+  footer,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** A fixed footer below the independently scrolling body (e.g. the cart summary, #708 AC1). */
+  footer?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const restore = useRef<(() => void) | null>(null);
@@ -78,13 +81,14 @@ export function Sheet({
           <button
             type="button"
             className={styles.iconButton}
-            aria-label={title === "Your cart" ? "Close cart" : `Close ${title}`}
+            aria-label={title === "Your basket" ? "Close basket" : `Close ${title}`}
             onClick={onClose}
           >
             <X size={22} />
           </button>
         </header>
-        {children}
+        <div className={styles.sheetBody}>{children}</div>
+        {footer && <div className={styles.sheetFooter}>{footer}</div>}
       </div>
     </dialog>
   );

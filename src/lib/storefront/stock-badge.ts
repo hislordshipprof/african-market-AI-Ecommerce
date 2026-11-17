@@ -19,3 +19,13 @@ export function stockBadge(input: StockBadgeInput): StockBadge {
   if (input.confidence < 0.6) return "limited";
   return "in-stock";
 }
+
+/**
+ * Whether the storefront sells a listing now: switched on, and not counted out
+ * or marked out of stock. The basket page, cart lines and the drawer share it (#717 AC2).
+ */
+export function listingAvailable(listing: { active: boolean; stockMode: string; qty: number | null; status: string | null }): boolean {
+  if (!listing.active) return false;
+  if (listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) return false;
+  return !(listing.stockMode === "status" && listing.status === "out_of_stock");
+}

@@ -12,6 +12,7 @@
   cursor: pointer;
 }
 .cartTrigger {
+  position: relative;
   gap: 8px;
   border-radius: 999px;
   padding: 0 14px;
@@ -28,10 +29,12 @@
   outline-offset: 3px;
 }
 .stepper {
+  position: relative;
   display: flex;
   width: 44px;
   min-width: 44px;
   height: 44px;
+  max-width: 100%;
   flex-shrink: 0;
   align-items: center;
   overflow: hidden;
@@ -40,6 +43,37 @@
   color: var(--store-on-primary, var(--color-on-primary));
   /* Grows and shrinks like the old spring (stiffness 400, damping 25): a little overshoot. */
   transition: width 0.32s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+/* Expanded: 44 + 44 + 44; narrow cards shrink the quantity cell to 24 so it never overflows (#708 AC1). */
+.stepper[data-active="true"] {
+  width: 132px;
+}
+/* Chosen by the card's own width, not the viewport: 112px when 132 + 8px insets no longer fit (#708 P1). */
+@container card (max-width: 147px) {
+  .stepper[data-active="true"] {
+    width: 112px;
+  }
+  .stepper[data-active="true"] span {
+    width: 24px;
+  }
+}
+/* Primary add in quick view and on the product page: 48px (DESIGN button-primary). */
+:global(.sf-quick-view-add) .stepper,
+:global(.sf-add-bar) .stepper {
+  height: 48px;
+  min-width: 48px;
+}
+:global(.sf-quick-view-add) .stepper:not([data-active="true"]),
+:global(.sf-add-bar) .stepper:not([data-active="true"]) {
+  width: 48px;
+}
+:global(.sf-quick-view-add) .stepper button,
+:global(.sf-add-bar) .stepper button {
+  width: 48px;
+}
+:global(.sf-quick-view-add) .stepper[data-active="true"],
+:global(.sf-add-bar) .stepper[data-active="true"] {
+  width: 144px;
 }
 .stepper button {
   width: 44px;
@@ -75,7 +109,8 @@
   background: var(--color-surface);
   color: var(--color-ink);
   box-shadow: -8px 0 40px #0002;
-  overflow: auto;
+  /* The body scrolls on its own; the dialog itself does not (#708 AC1). */
+  overflow: hidden;
 }
 
 /* Open and close slides (#563: CSS instead of the animation library). Mobile slides up; see the media query. */
@@ -89,20 +124,39 @@
   background: #0006;
 }
 .sheetInner {
-  padding: 24px;
-  min-height: 100%;
+  height: 100%;
   min-width: 0;
   max-width: 100%;
   display: flex;
   flex-direction: column;
 }
+/* Fixed header, scrolling middle, fixed footer (#708 AC1). */
 .sheetHeader {
+  flex: none;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
   min-width: 0;
   max-width: 100%;
+  padding: 24px 24px 8px;
+}
+.sheetBody {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 24px 24px;
+}
+.sheetFooter {
+  flex: none;
+  min-width: 0;
+  max-width: 100%;
+  padding: 16px 24px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
 }
 .sheetHeader h2 {
   min-width: 0;
@@ -141,6 +195,10 @@
   color: var(--muted-foreground);
 }
 .primaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
   border: 0;
   border-radius: 999px;
   padding: 12px 24px;
@@ -171,20 +229,41 @@
   outline: 2px solid var(--color-ink);
   outline-offset: 2px;
 }
-/* The count badge settles from 1.2x, as the old spring did (stiffness 400, damping 20). */
+/* One subtle cart bump on change: ~5% overshoot, under 300ms (#708 AC1; reduced motion off). */
 .countBump {
-  animation: countBump 0.35s ease-out;
+  animation: countBump 0.25s ease-out;
 }
 @keyframes countBump {
   from {
-    transform: scale(1.2);
-  }
-  55% {
-    transform: scale(0.96);
+    transform: scale(1.05);
   }
   to {
     transform: scale(1);
   }
+}
+/* Sync status on the closed basket button (#708 P1): a red alert badge on failure, a quiet dot while saving. */
+.syncStatus {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-bg);
+  border-radius: 999px;
+  pointer-events: none;
+}
+.syncStatus[data-state="failed"] {
+  background: var(--color-deal);
+  color: #fff;
+}
+/* Shown only when a save takes long enough to notice, like the per-line "Updating…" (#717 AC4). */
+.syncStatus[data-state="pending"] {
+  width: 14px;
+  height: 14px;
+  background: var(--color-muted);
+  animation: updatingIn 0s linear 300ms both;
 }
 .countLoading {
   display: inline-block;
@@ -193,6 +272,38 @@
   border-radius: 999px;
   background: currentColor;
   opacity: 0.45;
+}
+/* Shown only when a sync takes long enough to notice, so quick saves never flash it (#717 AC4). */
+.updating {
+  margin-left: 8px;
+  color: var(--color-muted);
+  font-weight: 600;
+  animation: updatingIn 0s linear 300ms both;
+}
+@keyframes updatingIn {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+.loadingLines {
+  display: grid;
+  gap: 16px;
+  margin: 24px 0;
+}
+.loadingLines span {
+  height: 80px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--color-raised), var(--color-surface), var(--color-raised));
+  background-size: 200% 100%;
+  animation: loadingShimmer 1.3s linear infinite;
+}
+@keyframes loadingShimmer {
+  to {
+    background-position: -200% 0;
+  }
 }
 .primaryButton:disabled {
   background: var(--color-raised);
@@ -207,17 +318,24 @@
 .line {
   display: flex;
   gap: 16px;
-  padding: 20px 0;
+  padding: 24px 0;
   border-bottom: 1px solid var(--color-line);
 }
 .photo,
 .fallback {
-  width: 76px;
-  height: 76px;
+  width: 80px;
+  height: 80px;
   border-radius: 12px;
   object-fit: cover;
   flex-shrink: 0;
   background: var(--sf-thumb-well, var(--color-bg));
+}
+@media (max-width: 767px) {
+  .photo,
+  .fallback {
+    width: 64px;
+    height: 64px;
+  }
 }
 .fallback {
   display: grid;
@@ -235,15 +353,15 @@
   overflow-wrap: anywhere;
 }
 .lineDetails p {
-  font-size: 14px;
-  margin: 4px 0 10px;
+  font-size: 13px;
+  margin: 4px 0 8px;
 }
 .swap {
   position: relative;
   display: inline-flex;
   font-size: 13px;
   border-radius: 999px;
-  padding: 5px 10px;
+  padding: 4px 8px;
   background: var(--color-bg);
   color: var(--muted-foreground);
 }
@@ -255,26 +373,163 @@
 }
 .lineActions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
   margin-top: 12px;
 }
-.summary {
-  margin-top: auto;
-  padding-top: 16px;
+/* The reason a stepper stops, visible beside it (#708 P1). */
+.stepperNote {
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+/* Over a card photo the note sits on its own plate so it reads on any image. */
+:global(.sf-quick-add) .stepperNote {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.line[data-unavailable] .photo {
+  opacity: 0.55;
+}
+.lineIssue {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--color-deal);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.lineIssue svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.lineDetails .lineIssue {
+  font-size: 16px;
+  margin: 8px 0 0;
+}
+.removeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--color-line-strong, var(--color-line));
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.alternatives {
+  margin-top: 16px;
+}
+.alternatives > p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+.alternatives ul {
   display: grid;
-  gap: 14px;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.alternatives li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.alternatives li > span {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 600;
+}
+.alternatives small {
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.altPhoto {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--sf-thumb-well, var(--color-bg));
+}
+.summary {
+  display: grid;
+  gap: 12px;
+}
+/* A transient failure shown inside the open drawer, where a root toast can't be reached (#708 AC3). */
+.sheetError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-block: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-deal);
+  border-radius: 12px;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-size: 16px;
+  line-height: 1.5;
+}
+.sheetError button {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-weight: 650;
+  color: var(--color-primary-text);
+}
+.sheetError button:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
 }
 .total {
   display: flex;
   justify-content: space-between;
   font-size: 18px;
 }
+/* The store's primary on a raised track, as on the basket page: never the browser's green (#717 AC5). */
 .progress {
   width: 100%;
-  height: 7px;
-  accent-color: var(--color-primary);
+  height: 8px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-raised);
+}
+.progress::-webkit-progress-bar {
+  background: var(--color-raised);
+}
+.progress::-webkit-progress-value {
+  background: var(--color-primary);
+  border-radius: 999px;
+}
+.progress::-moz-progress-bar {
+  background: var(--color-primary);
+  border-radius: 999px;
+}
+.gateReason {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 16px;
+  line-height: 1.5;
 }
 .mobileNav {
   display: none;
@@ -300,10 +555,16 @@
     inset: auto 0 0;
     width: 100%;
     height: 88dvh;
-    border-radius: 20px 20px 0 0;
+    border-radius: 16px 16px 0 0;
   }
-  .sheetInner {
-    padding: 20px 20px calc(24px + env(safe-area-inset-bottom));
+  .sheetHeader {
+    padding: 16px 16px 8px;
+  }
+  .sheetBody {
+    padding: 8px 16px 16px;
+  }
+  .sheetFooter {
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
   }
   .mobileNav {
     position: fixed;
@@ -322,6 +583,10 @@
   }
   .navSlot {
     display: contents;
+  }
+  /* The basket page's checkout bar is the one bottom region there (#708 P1). */
+  :global(html):has([data-basket-action]) .mobileNav {
+    display: none;
   }
   .navLink,
   .activeNav {
@@ -373,7 +638,8 @@
   .sheet[data-closing="true"] {
     animation: none;
   }
-  .countBump {
+  .countBump,
+  .loadingLines span {
     animation: none;
   }
   .stepper,

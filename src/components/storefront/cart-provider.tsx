@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ShoppingBag, Trash2 } from "lucide-react";
+import { CircleAlert, ShoppingBag, Trash2 } from "lucide-react";
 import {
   cartItemKey,
   EMPTY_CART,
@@ -18,6 +18,7 @@ import {
   type CartStore,
 } from "@/lib/storefront/cart-store";
 import { stepCartQuantity } from "@/lib/storefront/cart-quantity";
+import { effectiveMaxPerOrder } from "@/lib/cart/limits";
 import {
   clearKeyIdentity,
   confirmedSnapshot,
@@ -46,6 +47,7 @@ import {
 } from "@/lib/storefront/cart-undo";
 import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
+import { CartTriggerView } from "./cart-trigger";
 import { Sheet } from "./sheet";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { money } from "@/lib/format";
@@ -67,7 +69,7 @@ const toast = Object.assign(
 
 /** Wall clock for the Undo window; only read from event handlers and timers. */
 const undoClock = () => Date.now();
-const OFFLINE = "Couldn't update your cart. Check your connection and try again.";
+const OFFLINE = "Couldn't update your basket. Check your connection and try again.";
 const STALE_PAGE = "This page is out of date. Reload the market and try again.";
 
 function serverLineToClient(sl: CartLineView): CartLine {
@@ -82,6 +84,17 @@ function serverLineToClient(sl: CartLineView): CartLine {
     price: sl.variant.price,
     imageUrl: sl.imageUrl,
     packLabel: sl.variant.label,
+    maxPerOrder: effectiveMaxPerOrder(sl.variant.listing.maxPerOrder),
+    available: sl.variant.listing.available,
+    alternatives: sl.alternatives?.map((alt) => ({
+      listingId: alt.listingId,
+      variantId: alt.variantId,
+      name: alt.name,
+      price: alt.price,
+      imageUrl: alt.imageUrl,
+      packLabel: alt.packLabel,
+      maxPerOrder: alt.maxPerOrder,
+    })),
     quantity: sl.qty,
     serverLineId: sl.id,
     swapRule: sl.swapRule,
@@ -124,6 +137,12 @@ interface CartContextValue {
   loading: boolean;
   syncing: boolean;
   attention: boolean;
+  /** The last read of the server cart failed, so an empty list is unknown, not empty (#708 P1). */
+  loadFailed: boolean;
+  /** Lines with a change still on its way to the server, for a per-line "Updating…" (#717 AC4). */
+  pendingKeys: ReadonlySet<string>;
+  /** The latest cart change, for the one polite status of the surface in front (#708 P1). */
+  announcement: string;
   cartId: string | null;
   refreshCart: () => Promise<void>;
   reportCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
@@ -152,7 +171,15 @@ export function CartProvider({
 }) {
   const [lines, setLines] = useState<readonly CartLine[]>(EMPTY_CART);
   const [open, setOpen] = useState(false);
+  const openRef = useRef(false);
+  // A write failure while the (modal) drawer is open, shown inside it instead of a page toast (#708 AC3).
+  // Keyed by line, so it clears when that line saves again; keyless ones clear when nothing is failing.
+  const [sheetNotice, setSheetNotice] = useState<{ message: string; retry?: () => void; key?: string } | null>(null);
+  // One polite announcement per change, so no two cart triggers announce the same change (#708 AC3).
+  const [announce, setAnnounce] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [syncing, setSyncing] = useState(false);
   const [attention, setAttention] = useState(false);
   const [cartId, setCartId] = useState<string | null>(null);
@@ -175,12 +202,46 @@ export function CartProvider({
       action: { label: "Undo", onClick: () => livePendingUndo(entries, undoClock()).entries.forEach((entry) => restoreRemoved(entry.removed)) },
     });
   }
+  function openCart() {
+    openRef.current = true;
+    setOpen(true);
+  }
   function closeCart() {
+    openRef.current = false;
     setOpen(false);
+    setSheetNotice(null);
     // Whatever was still undoable in the drawer moves to a toast for the time it has left.
     const { entries, remainingMs } = livePendingUndo(pendingUndoRef.current, undoClock());
     if (entries.length) undoToast(entries, remainingMs);
     setPending([]);
+  }
+  /** Inside the open drawer the message shows in it; elsewhere it is a toast, with Retry when there is one. */
+  function notify(message: string, retry?: () => void, key?: string) {
+    if (!mounted.current) return;
+    if (openRef.current) setSheetNotice({ message, retry, key });
+    // One toast per line (or per message): a repeated failure replaces it instead of stacking.
+    else toast.error(message, { id: `cart:${key ?? message}`, ...(retry ? { action: { label: "Retry", onClick: retry } } : {}) });
+  }
+  /** A line saved again: its notice is resolved, and a general one too once nothing is failing. */
+  function resolveNotice(key?: string) {
+    if (!mounted.current) return;
+    const clean = failedKeys.current.size === 0;
+    setSheetNotice((notice) => (!notice ? notice : notice.key ? (notice.key === key ? null : notice) : clean ? null : notice));
+  }
+  function markPending(key: string) {
+    if (mounted.current) setPendingKeys((keys) => (keys.has(key) ? keys : new Set(keys).add(key)));
+  }
+  /** Retry puts the failed quantity back as the intent and sends it again. */
+  function retryAt(item: CartItem, qty: number) {
+    return () => {
+      setSheetNotice(null);
+      const key = cartItemKey(item);
+      if (intentQty(key) !== qty) store.setQuantity(item, qty);
+      else if (!rejectStale()) {
+        noteGesture(key);
+        void enqueue(drain, true);
+      }
+    };
   }
   const mounted = useRef(true);
   const linesRef = useRef<CartLine[]>([]);
@@ -269,6 +330,7 @@ export function CartProvider({
       fallback.current.delete(key);
     }
     if (failedKeys.current.size === 0 && mounted.current) setAttention(false);
+    resolveNotice(key);
   }
   function applyMerged(
     merged: {
@@ -315,6 +377,10 @@ export function CartProvider({
       price: item.price,
       imageUrl: item.imageUrl,
       packLabel: item.packLabel,
+      // The server line's limit and availability are fresher than the page's copy of the listing.
+      maxPerOrder: previous?.maxPerOrder ?? item.maxPerOrder,
+      available: previous?.available ?? item.available,
+      alternatives: previous?.alternatives,
       quantity: qty,
       serverLineId: previous?.serverLineId,
       swapRule: previous?.swapRule,
@@ -373,6 +439,7 @@ export function CartProvider({
       if (!mounted.current) return "failed";
       if (!cart) {
         setCartId(null);
+        setLoadFailed(false);
         if (scope) {
           const cleared = clearKeyIdentity(
             {
@@ -391,11 +458,12 @@ export function CartProvider({
       }
       setCartId(cart.id);
       merge(cart.lines.map(serverLineToClient), stamp, mode, scope);
+      setLoadFailed(false);
       return "ok";
     } catch (error) {
       if (isStaleAction(error) && mounted.current) {
         staleDeployment.current = true;
-        toast.error(STALE_PAGE);
+        notify(STALE_PAGE);
         setAttention(true);
       }
       return "failed";
@@ -444,13 +512,18 @@ export function CartProvider({
     if (isStaleAction(error)) {
       staleDeployment.current = true;
       if (mounted.current) {
-        toast.error(STALE_PAGE);
+        notify(STALE_PAGE);
         setAttention(true);
       }
       return;
     }
     if (mounted.current) {
-      toast.error(OFFLINE);
+      const line = linesRef.current.find((entry) => cartItemKey(entry) === key);
+      notify(
+        line ? `Couldn\u2019t update ${line.name}. Check your connection and try again.` : OFFLINE,
+        uncertainAdd && line ? retryAt(line, line.quantity) : undefined,
+        key,
+      );
       setAttention(true);
     }
     if (uncertainAdd) addAccepted.current.add(key);
@@ -524,13 +597,14 @@ export function CartProvider({
     if (!mounted.current) return;
     if (pulled === "failed") {
       if (!staleDeployment.current) {
-        toast.error(OFFLINE);
+        notify(OFFLINE, undefined, key);
         setAttention(true);
         failedKeys.current.add(key);
       }
       paused.current.add(key);
       return;
     }
+    // A read is not a save: a rejection the read just reconciled still explains what happened.
     if (failedKeys.current.size === 0) setAttention(false);
   }
   async function stepServer(key: string) {
@@ -543,7 +617,7 @@ export function CartProvider({
         const result = override ?? (await removeCartLine(doomed));
         if (!result.ok && removalResultAction(result.code) === "rejected") {
           if (mounted.current) {
-            toast.error(result.error);
+            notify(result.error, undefined, key);
             setAttention(true);
           }
           await recoverRejected(key, revAtSend, "remove");
@@ -575,7 +649,7 @@ export function CartProvider({
         known = recovered;
       } else if (pulled === "failed") {
         if (mounted.current && !staleDeployment.current) {
-          toast.error(OFFLINE);
+          notify(OFFLINE, undefined, key);
           setAttention(true);
         }
         paused.current.add(key);
@@ -600,7 +674,7 @@ export function CartProvider({
       }
       if (!added.ok) {
         if (mounted.current) {
-          toast.error(added.error);
+          notify(`${item.name}: ${added.error}`, undefined, key);
           setAttention(true);
         }
         if (added.code === "MAX_PER_ORDER") {
@@ -624,7 +698,9 @@ export function CartProvider({
       if (!landed) {
         if (pulled === "failed") {
           addAccepted.current.add(key);
-          if (mounted.current && !staleDeployment.current) toast.error(OFFLINE);
+          if (mounted.current && !staleDeployment.current) {
+            notify(`Couldn\u2019t add ${item.name}. Check your connection and try again.`, retryAt(item, intentQty(key)), key);
+          }
         } else {
           showQty(key, 0);
           confirmed.current.set(key, { qty: 0 });
@@ -651,7 +727,7 @@ export function CartProvider({
       }
       if (!result.ok) {
         if (mounted.current) {
-          toast.error(result.error);
+          notify(result.error, undefined, key);
           setAttention(true);
         }
         if (result.code === "MAX_PER_ORDER") {
@@ -675,7 +751,7 @@ export function CartProvider({
     }
     if (!result.ok) {
       if (mounted.current) {
-        toast.error(result.error);
+        notify(result.error, undefined, key);
         setAttention(true);
       }
       await recoverRejected(key, revAtSend, "qty");
@@ -708,15 +784,18 @@ export function CartProvider({
         if (!mounted.current) return;
         if (isStaleAction(error)) {
           staleDeployment.current = true;
-          toast.error(STALE_PAGE);
+          notify(STALE_PAGE);
         } else {
-          toast.error(OFFLINE);
+          notify(OFFLINE);
         }
         setAttention(true);
       } finally {
         if (!user) return;
         jobs.current = Math.max(0, jobs.current - 1);
-        if (jobs.current === 0 && mounted.current) setSyncing(false);
+        if (jobs.current === 0 && mounted.current) {
+          setSyncing(false);
+          setPendingKeys((keys) => (keys.size ? new Set() : keys));
+        }
       }
     });
     chain.current = run.then(
@@ -731,7 +810,7 @@ export function CartProvider({
   }
   function rejectStale() {
     if (!staleDeployment.current) return false;
-    toast.error(STALE_PAGE);
+    notify(STALE_PAGE);
     if (mounted.current) setAttention(true);
     return true;
   }
@@ -739,8 +818,9 @@ export function CartProvider({
     const pulled = await pullServer("server-wins");
     if (!mounted.current) return;
     if (pulled === "failed") {
+      setLoadFailed(true);
       if (!staleDeployment.current) {
-        toast.error(OFFLINE);
+        notify(OFFLINE);
         setAttention(true);
       }
       return;
@@ -787,11 +867,29 @@ export function CartProvider({
     subscribe: () => () => {},
     adjust(item, delta, max) {
       const key = cartItemKey(item);
-      const next = stepCartQuantity(intentQty(key), delta, max);
+      const previous = intentQty(key);
+      // Nothing the server could add is never shown as added (#708 P1).
+      if (delta > 0 && !item.variantId) {
+        notify(`${item.name} can\u2019t be added online yet.`);
+        return;
+      }
+      const next = stepCartQuantity(previous, delta, max);
       if (next === null || rejectStale()) return;
       noteGesture(key);
-      bump(key, (intentQty(key) === 0) !== (next === 0));
+      bump(key, (previous === 0) !== (next === 0));
       put(item, next);
+      markPending(key);
+      // Optimistic, contextual confirmation: announced once, from the provider, not per trigger.
+      if (mounted.current) {
+        const total = linesRef.current.reduce((sum, line) => sum + line.quantity, 0);
+        setAnnounce(
+          next > previous
+            ? `${item.name} added. ${total} in basket.`
+            : next === 0
+              ? `${item.name} removed. ${total} in basket.`
+              : `${item.name} down to ${next}. ${total} in basket.`,
+        );
+      }
       void enqueue(drain, true);
     },
     setQuantity(item, quantity) {
@@ -802,6 +900,7 @@ export function CartProvider({
       noteGesture(key);
       bump(key, (intentQty(key) === 0) !== (next === 0));
       put(item, next);
+      markPending(key);
       void enqueue(drain, true);
     },
     remove(key) {
@@ -843,16 +942,21 @@ export function CartProvider({
         confirmed.current.get(key)?.lineId;
       if (!lineId) return;
       const result = await setSwapRule(lineId, swap.swapRule, swap.substituteVariantId);
-      if (!result.ok && mounted.current) toast.error(result.error);
+      if (!result.ok && mounted.current) notify(result.error);
       await pullServer("server-wins");
     }, true);
   }
   const refreshCart = () =>
     enqueue(async () => {
       const pulled = await pullServer("server-wins");
+      if (pulled === "failed" && mounted.current) setLoadFailed(true);
       if (pulled === "failed" && mounted.current && !staleDeployment.current) {
-        toast.error(OFFLINE);
+        notify(OFFLINE);
         setAttention(true);
+      }
+      if (pulled !== "failed" && failedKeys.current.size === 0 && mounted.current) {
+        setAttention(false);
+        resolveNotice();
       }
     }, true);
 
@@ -866,9 +970,9 @@ export function CartProvider({
     if (!mounted.current) return;
     if (failure.thrown !== undefined && isStaleAction(failure.thrown)) {
       staleDeployment.current = true;
-      toast.error(STALE_PAGE);
+      notify(STALE_PAGE);
     } else {
-      toast.error(failure.error ?? OFFLINE);
+      notify(failure.error ?? OFFLINE);
     }
     setAttention(true);
   }
@@ -877,6 +981,11 @@ export function CartProvider({
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.price, 0);
   const minimum = Math.max(0, minimumOrderCents);
   const gate = minimumOrderGate(subtotal, minimum);
+  const needsChange = lines.some(
+    (line) => line.available === false || (line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder),
+  );
+  // Why checkout is not open yet, beside the link that still lets the shopper review the basket.
+  const blockReason = needsChange ? "Remove or change the items marked below to check out." : gate.met ? null : gate.message;
 
   return (
     <Context.Provider
@@ -885,19 +994,73 @@ export function CartProvider({
         lines,
         count,
         subtotal,
-        openCart: () => setOpen(true),
+        openCart,
         loading,
         syncing,
         attention,
+        loadFailed,
+        pendingKeys,
+        announcement: announce,
         cartId,
         refreshCart,
         reportCartFailure,
       }}
     >
       {children}
-      <Sheet open={open} onClose={closeCart} title="Your cart">
+      {/* The open drawer is modal, so the page's live region would be inert: it moves inside. */}
+      {!open && <CartAnnouncement testId="cart-announce" />}
+      <Sheet
+        open={open}
+        onClose={closeCart}
+        title="Your basket"
+        footer={
+          lines.length ? (
+            <div className={styles.summary}>
+              <div className={styles.total}>
+                <span>Subtotal</span>
+                <strong>{money(subtotal)}</strong>
+              </div>
+              {minimum > 0 && (
+                <progress
+                  className={styles.progress}
+                  max={minimum}
+                  value={Math.min(minimum, subtotal)}
+                  aria-label="Minimum order progress"
+                />
+              )}
+              {blockReason ? (
+                // The reason sits outside the link, so the label stays stable (#708 AC3).
+                <p className={styles.gateReason} id="cart-gate-reason">{blockReason}</p>
+              ) : minimum > 0 ? (
+                <p className={styles.muted}>Minimum order reached</p>
+              ) : null}
+              {/* Reviewing the basket is always allowed; the basket page holds checkout until it is ready. */}
+              <Link
+                className={styles.primaryButton}
+                href="/cart"
+                onClick={closeCart}
+                aria-describedby={blockReason ? "cart-gate-reason" : undefined}
+              >
+                Review basket & checkout
+              </Link>
+            </div>
+          ) : undefined
+        }
+      >
+        {open && <CartAnnouncement testId="cart-announce" />}
         <p className={styles.muted}>{storeName}</p>
         {open && <AssistantSlot label="Shop with AI" />}
+        {(sheetNotice || attention) && (
+          // Shown in the open modal, where the root toast can't be tapped (#708 AC3).
+          <div className={styles.sheetError} role="alert">
+            {sheetNotice?.message ?? "Some changes couldn\u2019t be saved. Check your connection, then try again."}
+            {sheetNotice?.retry && (
+              <button type="button" onClick={sheetNotice.retry}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
         {pendingUndo.length > 0 && (
           <div className={styles.undoBar} role="status">
             <span>{undoMessage(pendingUndo)}</span>
@@ -913,100 +1076,149 @@ export function CartProvider({
             </button>
           </div>
         )}
-        {!lines.length ? (
+        {!lines.length && loading ? (
+          // Still reading the server cart: never a false "empty" (#708 P1).
+          <div className={styles.loadingLines} role="status" aria-label="Loading your basket">
+            <span />
+            <span />
+          </div>
+        ) : !lines.length && loadFailed ? (
           <div className={styles.empty}>
-            <ShoppingBag size={44} />
-            <h3>Your next good meal starts here</h3>
-            <p>Add something from the shelves to start your cart.</p>
-            <button
-              className={styles.primaryButton}
-              onClick={closeCart}
-            >
-              Start shopping
+            <CircleAlert size={40} aria-hidden />
+            <h3>We couldn&rsquo;t load your basket</h3>
+            <p>Check your connection, then try again.</p>
+            <button type="button" className={styles.primaryButton} onClick={() => void refreshCart()}>
+              Retry
             </button>
           </div>
+        ) : !lines.length ? (
+          <div className={styles.empty}>
+            <ShoppingBag size={44} aria-hidden />
+            <h3>Your basket is empty</h3>
+            <p>Add something from the shelves to get started.</p>
+            <Link className={styles.primaryButton} href="/categories" onClick={closeCart}>
+              Browse aisles
+            </Link>
+          </div>
         ) : (
-          <>
-            <ul className={styles.lines}>
-              {lines.map((line) => (
-                <li className={styles.line} key={cartItemKey(line)}>
-                  <div className={`${styles.photo} sf-cart-photo`}>
-                    <ProductImage
-                      src={line.imageUrl}
-                      name={line.name}
-                      sizes="76px"
-                    />
-                  </div>
-                  <div className={styles.lineDetails}>
-                    <h3>{line.name}</h3>
-                    <p>
-                      {money(line.price)}
-                      {line.packLabel && ` / ${line.packLabel}`}
+          <ul className={styles.lines}>
+            {lines.map((line) => {
+              const key = cartItemKey(line);
+              const unavailable = line.available === false;
+              const overLimit = !unavailable && line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder;
+              const issueId = `cart-line-issue-${line.serverLineId ?? line.listingId}`;
+              return (
+              <li
+                className={styles.line}
+                key={key}
+                data-unavailable={unavailable || undefined}
+                aria-busy={pendingKeys.has(key) || undefined}
+                aria-describedby={unavailable || overLimit ? issueId : undefined}
+              >
+                <div className={`${styles.photo} sf-cart-photo`}>
+                  <ProductImage
+                    src={line.imageUrl}
+                    name={line.name}
+                    sizes="80px"
+                  />
+                </div>
+                <div className={styles.lineDetails}>
+                  <h3>{line.name}</h3>
+                  <p>
+                    {money(line.price)}
+                    {line.packLabel && ` / ${line.packLabel}`}
+                    {pendingKeys.has(key) && <span className={styles.updating}>Updating…</span>}
+                  </p>
+                  <Link
+                    className={styles.swap}
+                    href="/cart"
+                    onClick={closeCart}
+                  >
+                    {(() => {
+                      const rule = line.swapRule ?? "exact_only";
+                      return rule === "named_substitute"
+                        ? "Named substitute chosen"
+                        : rule === "store_suggests"
+                          ? "Store suggests a swap"
+                          : "Exact item only";
+                    })()}
+                  </Link>
+                  {(unavailable || overLimit) && (
+                    <p className={styles.lineIssue} id={issueId}>
+                      <CircleAlert size={16} aria-hidden />
+                      {unavailable
+                        ? "No longer available. Remove it to check out."
+                        : `Limit ${line.maxPerOrder} per order. Reduce it to check out.`}
                     </p>
-                    <Link
-                      className={styles.swap}
-                      href="/cart"
-                      onClick={closeCart}
-                    >
-                      {(() => {
-                        const rule = line.swapRule ?? "exact_only";
-                        return rule === "named_substitute"
-                          ? "Named substitute chosen"
-                          : rule === "store_suggests"
-                            ? "Store suggests a swap"
-                            : "Exact item only";
-                      })()}
-                    </Link>
-                    <div className={styles.lineActions}>
-                      <QuickAddStepper item={line} />
+                  )}
+                  <div className={styles.lineActions}>
+                    {/* Kept on unavailable lines too: only the increase stops, so one can still be taken away (#708 P1). */}
+                    <QuickAddStepper item={line} />
+                    {unavailable ? (
                       <button
+                        type="button"
+                        className={styles.removeButton}
+                        aria-label={`Remove ${line.name} from basket`}
+                        onClick={() => store.remove(key)}
+                      >
+                        <Trash2 size={18} aria-hidden />
+                        Remove
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
                         className={styles.iconButton}
-                        aria-label={`Remove ${line.name} from cart`}
-                        onClick={() => store.remove(cartItemKey(line))}
+                        aria-label={`Remove ${line.name} from basket`}
+                        onClick={() => store.remove(key)}
                       >
                         <Trash2 size={18} />
                       </button>
-                    </div>
+                    )}
                   </div>
-                </li>
-              ))}
-            </ul>
-            <div className={styles.summary}>
-              <div className={styles.total}>
-                <span>Subtotal</span>
-                <strong>{money(subtotal)}</strong>
-              </div>
-              {minimum > 0 && (
-                <>
-                  <progress
-                    className={styles.progress}
-                    max={minimum}
-                    value={Math.min(minimum, subtotal)}
-                    aria-label="Minimum order progress"
-                  />
-                  {gate.met && <p className={styles.muted}>Minimum order reached</p>}
-                </>
-              )}
-              {gate.met ? (
-                <Link
-                  className={styles.primaryButton}
-                  href="/cart"
-                  onClick={closeCart}
-                >
-                  Review basket & checkout
-                </Link>
-              ) : (
-                <button type="button" className={styles.primaryButton} disabled>
-                  {gate.message}
-                </button>
-              )}
-            </div>
-          </>
+                  {unavailable && !!line.alternatives?.length && (
+                    <div className={styles.alternatives}>
+                      <p>Try instead</p>
+                      <ul aria-label={`Instead of ${line.name}`}>
+                        {line.alternatives.map((alt) => (
+                          <li key={cartItemKey(alt)}>
+                            <div className={`${styles.altPhoto} sf-cart-photo`}>
+                              <ProductImage src={alt.imageUrl} name={alt.name} sizes="48px" />
+                            </div>
+                            <span>
+                              {alt.name}
+                              <small>{money(alt.price)}{alt.packLabel && ` / ${alt.packLabel}`}</small>
+                            </span>
+                            <QuickAddStepper item={alt} />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </li>
+              );
+            })}
+          </ul>
         )}
       </Sheet>
     </Context.Provider>
   );
 }
+/**
+ * The one polite status for cart changes. The provider renders it on the page and
+ * inside the open drawer; a modal sheet that adjusts quantities (quick view) renders
+ * its own, because the page's region is inert while a modal is open.
+ */
+export function CartAnnouncement({ testId }: { testId?: string }) {
+  const { announcement } = useCart();
+  return (
+    // A polite live region without role=status, so it never competes with a surface's own status text.
+    <div className="sr-only" aria-live="polite" aria-atomic="true" data-testid={testId}>
+      {announcement}
+    </div>
+  );
+}
+
 export function CartTrigger({
   className,
   children,
@@ -1016,28 +1228,15 @@ export function CartTrigger({
 }) {
   const { count, openCart, syncing, attention, loading } = useCart();
   return (
-    <button
-      type="button"
-      className={`${styles.cartTrigger} ${className ?? ""}`}
-      onClick={openCart}
-      aria-label="Shopping cart"
-      data-cart-pending={syncing || undefined}
-      data-cart-attention={attention || undefined}
+    <CartTriggerView
+      count={count}
+      loading={loading}
+      syncing={syncing}
+      attention={attention}
+      onOpen={openCart}
+      className={className}
     >
-      <ShoppingBag size={21} />
       {children}
-      {loading ? (
-        // No number until the server cart is read, so the badge never flashes a false 0.
-        <span data-testid="cart-count" data-loading="true" aria-hidden="true" className={styles.countLoading} />
-      ) : (
-        // Remounts on each change, so the bump replays (CSS; reduced motion turns it off).
-        <span key={count} data-testid="cart-count" aria-hidden="true" className={styles.countBump}>
-          {count}
-        </span>
-      )}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {loading ? "" : `${count} ${count === 1 ? "item" : "items"} in cart`}
-      </span>
-    </button>
+    </CartTriggerView>
   );
 }
