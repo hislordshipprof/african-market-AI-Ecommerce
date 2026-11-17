@@ -422,8 +422,11 @@ Built in #567. **Ship** is a fourth fulfillment (`orders.fulfillment = "ship"`),
 - A listing is shippable only when the store marks it and it is not frozen, not perishable and every size has a real weight; an edit that breaks the rule turns it off. The store opts in on the Shipping page with 1 to 10 handling days.
 - Checkout offers Ship when every line ships, the store ships, the confirmed destination's state is on `platform_settings.shipping_states` (each state added after tax advisor sign-off, ADR-0008) and the order weighs at most 50 lb, in one 12 × 10 × 8 in box. The delivery radius does not apply.
 - Rates come through `ShippingProvider` (`src/lib/shipping/`): Shippo `POST /shipments` with `async: false`, or its fake outside production (`E2E_FAKE_SHIPPO=1`). Checkout shows only the cheapest rate, with carrier, service and transit days plus the store's handling days, at the carrier's price with no markup. The rate is saved on the cart (`shipping_*`, keyed on state, ZIP and weight) and reused until it expires 7 days later; an expired rate that comes back different is shown before the hold. Placement charges the saved rate, refuses an expired one, and re-checks every line and the state under the store lock.
-- Tax is computed at the destination address. Hold and capture are the existing flow; capture is at Ready. The order keeps the postage in `delivery_fee_cents`, with `shipping_rate_id`, carrier, service and days. Until #568 buys labels, the postage is part of the store's share of the capture.
-- Not built here: labels, tracking, the Shipped state and moving postage to a platform pass-through (#568); returns; multi-box orders; an admin screen for the state allowlist.
+- Tax is computed at the destination address. Hold and capture are the existing flow; capture is at Ready. The order keeps what the shopper paid for postage in `delivery_fee_cents`, with `shipping_rate_id`, its expiry, carrier, service and days.
+- **Labels (#568).** Mark ready keeps the shopper's rate while Shippo still sells it; past its expiry the box is quoted again. The store absorbs a rise up to $2; above that staff confirm the exact new postage before capture. The postage is fixed in `orders.shipping_postage_cents` and passes through to the platform like a courier fee (`courierFeeCents`): it is in the application fee, off the store's card fee, and in the fee ledger's courier column. After capture the platform buys the label (`POST /transactions`, 4×6 PDF) on its Shippo account; the order is claimed first, so a double click never buys two. The PDF is kept in the private proof bucket (`shipping-label/<order>/<label>.pdf`) and opened by the store's members only (`/api/shipping-label/<order>`, 404 for anyone else). A label that fails is bought again from the inbox; the capture stands.
+- **Tracking (#568).** Shippo sends `track_updated` for every label it sells to `/api/webhooks/shippo`, signed with `Shippo-Auth-Signature` (HMAC-SHA256, `SHIPPO_WEBHOOK_SECRET`). The first carrier scan (TRANSIT) moves READY to **SHIPPED**, a later scan to **IN_TRANSIT**, DELIVERED to **DELIVERED**; statuses only move forward, each tracking status is recorded once (`delivery_events`, keyed on its id), and each step sends one customer message carrying the carrier's tracking link (email, SMS, push; WhatsApp waits for approved templates). PRE_TRANSIT, RETURNED and FAILURE move nothing; the last two are logged.
+- **Cancel (#568).** A READY shipped order can be cancelled before the first scan: the label is voided with Shippo (`POST /refunds`), then the whole capture, postage included, is refunded. Shippo refuses a scanned label, and a SHIPPED or later order is refused, with nothing changed.
+- Not built: returns; multi-box orders; an admin screen for the state allowlist; WhatsApp templates for the parcel steps.
 
 ---
 
@@ -611,7 +614,7 @@ Phase 2 started on 2026-11-14, alongside the Phase 1 tail (Build Board decision 
 - Reports & payouts dashboard; platform admin console.
 
 ### Phase 3: Scale
-Second metro, native apps, scheduled van slots, nationwide shipping for dry goods (rates at checkout built in #567, ADR-0023; labels and tracking #568), hot food/catering, agentic commerce (MCP/ACP), store reorder from wholesalers.
+Second metro, native apps, scheduled van slots, nationwide shipping for dry goods (rates at checkout built in #567, labels and tracking in #568, ADR-0023), hot food/catering, agentic commerce (MCP/ACP), store reorder from wholesalers.
 
 ---
 

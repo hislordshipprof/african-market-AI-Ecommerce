@@ -1,6 +1,6 @@
 # 23. Nationwide parcel shipping for shelf-stable goods
 
-Date: 2026-11-15 · Status: accepted (#567; labels and tracking in #568)
+Date: 2026-11-15 · Status: accepted (#567; amended 2026-11-16 for labels and tracking, #568)
 
 ## Context
 
@@ -14,8 +14,11 @@ Spec §1 listed nationwide parcel shipping as a v1 non-goal and §17 named it a 
 - **When.** Checkout offers Ship when every line ships, the store ships, the destination state is allowed and the order weighs at most 50 lb. It is one box per order (12 × 10 × 8 in).
 - **Price.** A `ShippingProvider` seam (`src/lib/shipping/provider.ts`) with a Shippo adapter (`POST /shipments`, `async: false`) and a fake that refuses what Shippo refuses. Checkout shows only the cheapest rate, with carrier, service and days, at the carrier's price with no markup (ADR-0006). The rate is locked on the cart, keyed on the destination state, ZIP and order weight, until it expires 7 days after the quote, the window in which Shippo sells a rate. An expired rate is asked again; a different price is shown before the card hold. Placement charges the locked rate and never asks again.
 - **Tax.** Stripe Tax taxes the order at the destination address (#65).
-- **Money.** The hold and capture follow the existing flow; capture is at Ready (Packed). The postage is stored in `orders.delivery_fee_cents` with the rate id, carrier, service and days. Until #568 buys labels, the postage stays in the store's part of the capture, like a store delivery fee. #568 moves it to a platform pass-through, like the courier fee.
-- **Not in scope.** Returns, multi-box orders, label purchase, tracking and the Shipped state (#568).
+- **Money.** The hold and capture follow the existing flow; capture is at Ready (Packed). What the shopper paid is stored in `orders.delivery_fee_cents` with the rate id, its expiry, carrier, service and days.
+- **Labels (#568).** At Ready the platform buys the label on its own Shippo account, so the postage is a platform pass-through, like the courier fee: `orders.shipping_postage_cents` goes into the application fee and the #546 ledger's courier column. An expired rate is quoted again; the store absorbs a rise up to $2 (it comes out of the store's part), and staff confirm a larger one before capture. The label PDF is kept in the private proof bucket, for the store's members only.
+- **Tracking (#568).** Shippo `track_updated` webhooks, verified by HMAC (`Shippo-Auth-Signature`), drive READY → SHIPPED (first scan) → IN_TRANSIT (a later scan) → DELIVERED, forward only, each status once, one customer message per step with the carrier's tracking link.
+- **Cancel (#568).** Before the first scan the label is voided and the whole capture refunded; after it, the cancel is refused.
+- **Not in scope.** Returns, multi-box orders.
 
 ## Consequences
 
