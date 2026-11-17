@@ -1,7 +1,28 @@
 import { Prisma } from "@prisma/client";
-import { platformAdmin } from "./db";
+import { platformAdmin, platformAdminTransaction } from "./db";
 import { getVercelDomainsAdapter, VercelApiError, type VercelDomainsAdapter } from "./vercel-domains";
 import { revalidateStore } from "./get-store";
+
+export type DomainActor = { id: string; email: string };
+
+/** Sets or clears the domain and writes its audit row in one transaction (#712). */
+async function saveCustomDomain(storeId: string, before: string | null, after: string | null, actor: DomainActor) {
+  await platformAdminTransaction(async (tx) => {
+    await tx.store.update({ where: { id: storeId }, data: { customDomain: after } });
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: actor.id,
+        actorEmail: actor.email,
+        action: after ? "store.custom_domain_add" : "store.custom_domain_remove",
+        entityType: "store",
+        entityId: storeId,
+        before: { customDomain: before },
+        after: { customDomain: after },
+      },
+    });
+  });
+}
 
 export type DomainResult =
   | { ok: true; domain: string; verified: boolean; cname: string }
@@ -19,6 +40,7 @@ function vercelAdapter(): VercelDomainsAdapter | { ok: false; error: string; sta
 export async function addDomainToStore(
   storeId: string,
   domain: string,
+  actor: DomainActor,
 ): Promise<DomainResult> {
   const store = await platformAdmin.store.findUnique({
     where: { id: storeId },
@@ -48,10 +70,7 @@ export async function addDomainToStore(
     const result = await adapter.addDomain(domain);
 
     try {
-      await platformAdmin.store.update({
-        where: { id: storeId },
-        data: { customDomain: domain },
-      });
+      await saveCustomDomain(storeId, store.customDomain, domain, actor);
     } catch (dbErr) {
       if (
         dbErr instanceof Prisma.PrismaClientKnownRequestError &&
@@ -103,6 +122,7 @@ export async function getDomainStatus(
 
 export async function removeDomainFromStore(
   storeId: string,
+  actor: DomainActor,
 ): Promise<DomainResult> {
   const store = await platformAdmin.store.findUnique({
     where: { id: storeId },
@@ -129,10 +149,7 @@ export async function removeDomainFromStore(
     }
   }
 
-  await platformAdmin.store.update({
-    where: { id: storeId },
-    data: { customDomain: null },
-  });
+  await saveCustomDomain(storeId, oldDomain, null, actor);
 
   revalidateStore({ id: storeId, slug: store.slug, customDomain: oldDomain });
 

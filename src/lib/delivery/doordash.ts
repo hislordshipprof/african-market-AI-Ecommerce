@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   DeliveryProviderError,
+  httpsUrl,
   type CourierEventType,
   type CreatedDelivery,
   type DeliveryAddress,
@@ -162,7 +163,7 @@ export class DoorDashDriveProvider implements DeliveryProvider {
     });
     return {
       externalId: String(res.external_delivery_id ?? quoteId),
-      trackingUrl: typeof res.tracking_url === "string" ? res.tracking_url : null,
+      trackingUrl: httpsUrl(res.tracking_url),
       pin: req.dropoffPin ?? null,
     };
   }
@@ -205,7 +206,7 @@ export class DoorDashDriveProvider implements DeliveryProvider {
       externalEventId: `${eventName}:${externalDeliveryId}:${occurredAt.toISOString()}`,
       type: EVENT_TYPES[eventName] ?? null,
       occurredAt,
-      trackingUrl: typeof body.tracking_url === "string" ? body.tracking_url : null,
+      trackingUrl: httpsUrl(body.tracking_url),
       actualFeeCents: body.fee === undefined ? null : feeCents(body.fee),
       courier: hasCourier
         ? {

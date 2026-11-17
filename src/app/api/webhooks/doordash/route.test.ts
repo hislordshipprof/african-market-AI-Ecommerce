@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
@@ -7,6 +7,9 @@ import { copyCourierProof } from "@/lib/delivery/proof";
 import { POST } from "./route";
 
 const authorization = "Basic ZG9vcmRhc2g6cm91dGUtdGVzdA==";
+const signatureEvents = (warn: { mock: { calls: unknown[][] } }) =>
+  warn.mock.calls.map((call) => JSON.parse(String(call[0]))).filter((e) => e.event === "webhook_signature_invalid");
+
 
 function post(raw: string, auth?: string) {
   const headers = new Headers({ "content-type": "application/json" });
@@ -87,8 +90,15 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/doordash", () => 
   it("AC2: a missing or wrong Authorization header gets 401 and records nothing", async () => {
     const { orderId, deliveryId, externalId } = await courierOrder();
     const body = event(externalId, "DASHER_CONFIRMED");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect((await post(body)).status).toBe(401);
     expect((await post(body, "Basic d3Jvbmc=")).status).toBe(401);
+    expect(signatureEvents(warn)).toEqual([
+      { event: "webhook_signature_invalid", provider: "doordash", ip: expect.stringMatching(/^[0-9a-f]{16}$/) },
+      { event: "webhook_signature_invalid", provider: "doordash", ip: expect.stringMatching(/^[0-9a-f]{16}$/) },
+    ]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("d3Jvbmc=");
+    warn.mockRestore();
     expect(await storeScoped(storeId).deliveryEvent.count({ where: { deliveryId } })).toBe(0);
     expect(await orderStatus(orderId)).toBe("COURIER_REQUESTED");
   });

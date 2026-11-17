@@ -6,7 +6,14 @@ const addDomainToStore = vi.fn();
 const getDomainStatus = vi.fn();
 const removeDomainFromStore = vi.fn();
 
-vi.mock("@/lib/admin/session", () => ({ platformAdminApiDenial: () => denial() }));
+const ADMIN = { id: "admin-1", email: "admin@example.test" };
+vi.mock("@/lib/admin/session", () => ({
+  platformAdminApiDenial: () => denial(),
+  platformAdminApiActor: async () => {
+    const denied = await denial();
+    return denied ? { denial: denied, actor: null } : { denial: null, actor: ADMIN };
+  },
+}));
 vi.mock("@/lib/domain-service", () => ({
   addDomainToStore: (...a: unknown[]) => addDomainToStore(...a),
   getDomainStatus: (...a: unknown[]) => getDomainStatus(...a),
@@ -69,8 +76,13 @@ describe("domain admin route", () => {
   it("normalises the domain and passes the service result through", async () => {
     const res = await POST(req("POST", { domain: " Shop.Example.COM " }), ctx());
     expect(res.status).toBe(200);
-    expect(addDomainToStore).toHaveBeenCalledWith(STORE_ID, "shop.example.com");
+    expect(addDomainToStore).toHaveBeenCalledWith(STORE_ID, "shop.example.com", ADMIN);
     addDomainToStore.mockResolvedValue({ ok: false, error: "Domain is already assigned to another store", status: 409 });
     expect((await POST(req("POST", { domain: "shop.example.com" }), ctx())).status).toBe(409);
+  });
+
+  it("passes the signed-in admin to the service for the audit row on DELETE", async () => {
+    expect((await DELETE(req("DELETE"), ctx())).status).toBe(200);
+    expect(removeDomainFromStore).toHaveBeenCalledWith(STORE_ID, ADMIN);
   });
 });
