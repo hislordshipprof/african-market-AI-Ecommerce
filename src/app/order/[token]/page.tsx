@@ -15,6 +15,7 @@ import type { DeliveryProviderName } from "@/lib/delivery/provider";
 import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
 import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
+import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
 
@@ -46,6 +47,7 @@ export default async function OrderPage({
     const eta = courierInfo?.dropoffEta
       ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: context.store.timezone }).format(new Date(courierInfo.dropoffEta))
       : null;
+    const scheduled = scheduledTimeLabel(realOrder.pickupSlot, context.store.timezone);
     // Only the tracking token opens the thread: an order id opens the page but never the messages.
     const messages = realOrder.trackingToken === token
       ? await readCustomerMessages(context.store.id, token).catch(() => null)
@@ -84,6 +86,9 @@ export default async function OrderPage({
           <FlowCard title="Order details">
             <p><strong>Status:</strong> {customerStatusLabel(realOrder.status)}</p>
             <p><strong>Fulfillment:</strong> {FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment}</p>
+            {scheduled && (
+              <p><strong>Scheduled for:</strong> {scheduled}</p>
+            )}
             {realOrder.fulfillment === "ship" && realOrder.shippingCarrier && (
               <p><strong>Carrier:</strong> {[realOrder.shippingCarrier, realOrder.shippingService].filter(Boolean).join(" ")} · {money(realOrder.deliveryFeeCents)}</p>
             )}

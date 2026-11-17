@@ -94,6 +94,8 @@ interface Listing {
   shippable: boolean;
   prepared: string | null;
   prepMinutes: number | null;
+  cateringLeadHours: number | null;
+  cateringMinQty: number | null;
   active: boolean;
   maxPerOrder: number | null;
   variants: Variant[];
@@ -161,6 +163,10 @@ interface ListingFormFields {
   /** "" for grocery, else "hot" or "cold" prepared food (#570). */
   prepared: string;
   prepMinutes: string;
+  /** #571: "" when not catering; else a lead in `cateringUnit` and a minimum quantity. */
+  cateringLead: string;
+  cateringUnit: string;
+  cateringMinQty: string;
   maxPerOrder: string;
   masterProductId: string | null;
 }
@@ -185,7 +191,12 @@ function buildListingFormData(
   fd.set("perishable", String(fields.perishable));
   if (listingId) fd.set("shippable", String(fields.shippable));
   fd.set("prepared", fields.prepared);
-  if (fields.prepared) fd.set("prepMinutes", fields.prepMinutes);
+  if (fields.prepared) {
+    fd.set("prepMinutes", fields.prepMinutes);
+    fd.set("cateringLead", fields.cateringLead);
+    fd.set("cateringLeadUnit", fields.cateringUnit);
+    fd.set("cateringMinQty", fields.cateringMinQty);
+  }
   // Update always sends maxPerOrder so clearing it works; create omits it when blank.
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
@@ -220,6 +231,10 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   const [shippable, setShippable] = useState(false);
   const [prepared, setPrepared] = useState("");
   const [prepMinutes, setPrepMinutes] = useState("15");
+  const [catering, setCatering] = useState(false);
+  const [cateringLead, setCateringLead] = useState("1");
+  const [cateringUnit, setCateringUnit] = useState("days");
+  const [cateringMinQty, setCateringMinQty] = useState("1");
   const [maxPerOrder, setMaxPerOrder] = useState("");
   const [masterProductId, setMasterProductId] = useState<string | null>(null);
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
@@ -240,6 +255,10 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
     setShippable(false);
     setPrepared("");
     setPrepMinutes("15");
+    setCatering(false);
+    setCateringLead("1");
+    setCateringUnit("days");
+    setCateringMinQty("1");
     setMaxPerOrder("");
     setMasterProductId(null);
     setSelectedMasterOption(null);
@@ -292,6 +311,11 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
     setShippable(listing.shippable);
     setPrepared(listing.prepared ?? "");
     setPrepMinutes(String(listing.prepMinutes ?? 15));
+    const leadHours = listing.cateringLeadHours;
+    setCatering(leadHours != null);
+    setCateringUnit(leadHours == null || leadHours % 24 === 0 ? "days" : "hours");
+    setCateringLead(String(leadHours == null ? 1 : leadHours % 24 === 0 ? leadHours / 24 : leadHours));
+    setCateringMinQty(String(listing.cateringMinQty ?? 1));
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
     setMasterProductId(listing.masterProductId);
     setVariants(listing.variants.map(loadedVariantRow));
@@ -336,6 +360,9 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
     shippable: shippable && shipRefusal === null,
     prepared,
     prepMinutes,
+    cateringLead: catering ? cateringLead : "",
+    cateringUnit,
+    cateringMinQty,
     maxPerOrder,
     masterProductId,
   };
@@ -595,6 +622,59 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
             <p>On sale once you state its allergens under Ingredients and allergens.</p>
           </div>
         )}
+        {prepared && (
+          <div className="flex flex-col gap-2 pt-1">
+            <div className="flex items-center gap-2">
+              <Switch id="listing-catering" checked={catering} onCheckedChange={setCatering} />
+              <Label htmlFor="listing-catering">Catering, ordered ahead</Label>
+            </div>
+            {catering && (
+              <>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="flex w-24 flex-col gap-2">
+                    <Label htmlFor="listing-catering-lead">Lead time</Label>
+                    <Input
+                      id="listing-catering-lead"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={cateringUnit === "days" ? 4 : 96}
+                      value={cateringLead}
+                      onChange={(e) => setCateringLead(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex w-28 flex-col gap-2">
+                    <Label>Unit</Label>
+                    <Select value={cateringUnit} onValueChange={(v) => setCateringUnit(v === "hours" ? "hours" : "days")}>
+                      <SelectTrigger aria-label="Lead time unit">
+                        <SelectValue>{(value: string) => (value === "hours" ? "Hours" : "Days")}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hours">Hours</SelectItem>
+                        <SelectItem value="days">Days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex w-28 flex-col gap-2">
+                    <Label htmlFor="listing-catering-min">Minimum qty</Label>
+                    <Input
+                      id="listing-catering-min"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={500}
+                      value={cateringMinQty}
+                      onChange={(e) => setCateringMinQty(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Customers pick a time at least this far ahead, up to 5 days, from your pickup or delivery schedule. They can&rsquo;t cancel once you accept.
+                </p>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -851,6 +931,11 @@ function ListingRow({
           {listing.prepared && (
             <Badge variant="outline" className="shrink-0">
               {listing.prepared === "hot" ? "Hot food" : "Cold food"} · {listing.prepMinutes} min
+            </Badge>
+          )}
+          {listing.cateringLeadHours != null && (
+            <Badge variant="outline" className="shrink-0">
+              Catering · {listing.cateringLeadHours} h ahead · min {listing.cateringMinQty}
             </Badge>
           )}
         </div>

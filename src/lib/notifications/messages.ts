@@ -2,6 +2,7 @@ import { customerStatusLabel } from "../customer-account/order-history-view";
 import { quotedFrom, stripHeaderChars } from "../email/from";
 import { escapeHtml, money } from "../format";
 import { fulfilledStatus } from "../order/constants";
+import { scheduledTimeLabel } from "../order/pickup-slots";
 import type { PushMessage } from "../push/sender";
 import { presetPrimary, readableFillColor } from "../theme";
 import { ORDER_UPDATE_TEMPLATES, orderUpdateMessage } from "../whatsapp/templates";
@@ -40,6 +41,8 @@ export type NotifyOrder = {
   refundId: string | null;
   prepEstimateMinutes: number | null;
   acceptedAt: Date | null;
+  /** The booked slot's start, a UTC ISO instant (#565); null for ASAP and on-demand orders. */
+  pickupSlot?: string | null;
   trackingToken: string | null;
   customer: { name: string; email: string | null; phone: string | null };
   store: {
@@ -217,7 +220,9 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   const ink = readableFillColor(color);
   const logo = httpsLogo(order.store.logoUrl);
   const subject = stripHeaderChars(`${storeName} order #${order.number}: ${status}`);
-  const around = event === "accepted" ? readyAround(order) : null;
+  // A scheduled order is ready at its slot, not prep minutes after acceptance (#571).
+  const scheduled = event === "placed" || event === "accepted" ? scheduledTimeLabel(order.pickupSlot ?? null, order.store.timezone) : null;
+  const around = event === "accepted" && !scheduled ? readyAround(order) : null;
   const parts: string[] = [];
   parts.push(`<div style="background:${escapeHtml(color)};color:${ink};padding:16px 20px">`);
   if (logo) {
@@ -229,6 +234,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     parts.push(`<p>Hello ${escapeHtml(order.customer.name.trim())},</p>`);
   }
   parts.push(`<p>${escapeHtml(status)}. Order #${order.number}.</p>`);
+  if (scheduled) parts.push(`<p>Scheduled for ${escapeHtml(scheduled)}.</p>`);
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
   if (event !== "cancelled" && event !== "store_replied" && event !== "refunded" && event !== "substitution") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {

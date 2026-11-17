@@ -309,6 +309,29 @@ test.describe("Listing management (authenticated)", () => {
     await expect(section(page, "Active listings").getByText(uniqueName)).toBeVisible({ timeout: 10000 });
   });
 
+  test("#571: an owner makes a prepared dish catering with a lead time in days and a minimum", async ({ page }) => {
+    const uniqueName = `E2E Party tray ${Date.now()}`;
+    createdNames.push(uniqueName);
+    await page.goto(LISTINGS_URL);
+    await page.click("text=Add listing");
+    await page.getByLabel("Product name").fill(uniqueName);
+    await page.getByLabel("Quantity in stock").fill("10");
+    await page.getByRole("combobox", { name: "Prepared food" }).click();
+    await page.getByRole("option", { name: "Hot, from the counter" }).click();
+    await page.getByLabel("Prep time (min)").fill("30");
+    await page.getByRole("switch", { name: "Catering, ordered ahead" }).click();
+    await page.getByLabel("Lead time", { exact: true }).fill("2");
+    await page.getByLabel("Minimum qty").fill("10");
+    await page.locator("input[placeholder='Label (e.g. 1kg)']").first().fill("Tray");
+    await page.locator("input[placeholder='Price']").first().fill("90.00");
+    await page.locator("input[placeholder='Weight (g)']").first().fill("3000");
+    await page.click("text=Create listing");
+    await expect(page.getByText(/Saved, off sale/)).toBeVisible({ timeout: 10000 });
+
+    await page.goto(LISTINGS_URL);
+    await expect(listingRow(page, uniqueName).getByText("Catering · 48 h ahead · min 10")).toBeVisible({ timeout: 10000 });
+  });
+
   test("deactivate listing excludes it from active list", async ({ page }) => {
     const uniqueName = `E2E Deactivate ${Date.now()}`;
     await createListingViaUI(page, { name: uniqueName, price: "4.00" });
