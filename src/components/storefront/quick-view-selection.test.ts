@@ -24,6 +24,10 @@ function input(overrides: Partial<QuickViewSelectionInput> = {}): QuickViewSelec
 }
 
 describe("selectQuickViewPack", () => {
+  it("the cart item carries the listing's per-order max to the stepper (#708)", () => {
+    expect(selectQuickViewPack(input({ maxPerOrder: 3 })).cartItem.maxPerOrder).toBe(3);
+  });
+
   it("a pack chosen before details load stays selected when they arrive in another order", () => {
     const before = selectQuickViewPack(input({ chosenVariantId: "v-5lb" }));
     expect(before.heading).toBe("Loading pack sizes…");

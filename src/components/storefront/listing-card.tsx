@@ -41,6 +41,7 @@ export function ListingCard({
               price: listing.startingPrice,
               imageUrl: listing.imageUrl,
               packLabel: listing.packLabel,
+              maxPerOrder: listing.maxPerOrder,
             }}
             disabled={listing.badge === "ask-store"}
           />

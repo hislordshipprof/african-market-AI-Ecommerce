@@ -61,6 +61,7 @@ export default async function SearchPage({
                       badge: r.badge,
                       frozen: r.frozen,
                       perishable: r.perishable,
+                      maxPerOrder: r.maxPerOrder,
                       imageUrl: r.imageUrl,
                       categorySlug: r.categorySlug,
                       variantId: r.variantId,

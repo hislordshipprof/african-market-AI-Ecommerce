@@ -24,6 +24,7 @@ export function ProductDetail({
     price,
     imageUrl: listing.imageUrl,
     packLabel: variant?.label ?? "Each",
+    maxPerOrder: listing.maxPerOrder,
   };
   return (
     <div className="sf-detail" data-testid="product-detail">

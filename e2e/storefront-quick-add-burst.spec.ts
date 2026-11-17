@@ -228,6 +228,31 @@ test.describe("same-render quick add", () => {
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText(String(Number(shown) + 1));
   });
+
+  test("a failed first add rolls back and its toast retries the add (#708)", async ({ page }) => {
+    await openGrains(page);
+    let failed = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      if (!failed && isAction(request) && quantitiesIn(request.postData() ?? "").length > 0) {
+        failed = true;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await expect(cartCount(page)).toHaveText("0");
+    const retry = page.locator("[data-sonner-toast]").getByRole("button", { name: "Retry" });
+    await expect(retry).toBeVisible();
+    await page.unroute("**/*");
+    await retry.click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.listingId === "mn_garri_yellow")?.qty).toBe(1);
+  });
 });
 
 test.describe("quick add limits and recovery", () => {
@@ -258,8 +283,11 @@ test.describe("quick add limits and recovery", () => {
   });
 
   test("a burst past the listing max ends at the max the server allows", async ({ page }) => {
-    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
+    // The page loads with no max; only the server learns it, so the refusal comes from the server.
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await revalidateMama(page);
     await page.goto(spices);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
     await curry(page).getByTestId("quick-add-btn").click();
     await expect(curry(page).getByTestId("stepper-qty")).toHaveText("1");
     await settle(page);
@@ -275,8 +303,10 @@ test.describe("quick add limits and recovery", () => {
   });
 
   test("first-add burst respects a server-only maximum", async ({ page }) => {
-    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await revalidateMama(page);
     await page.goto(spices);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 3 });
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -929,7 +959,7 @@ test.describe("quick add limits and recovery", () => {
     await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
     await expect(sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-qty")).toHaveText("2");
     release();
-    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Maximum 1 per order for this item" }).first()).toBeVisible();
+    await expect(sheet.getByRole("alert")).toContainText("Maximum 1 per order for this item");
     await expect(sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-qty")).toHaveText("3");
     await expect(sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-qty")).toHaveText("2");
     await expect(cartCount(page)).toHaveText("5");
@@ -1052,6 +1082,36 @@ test.describe("quick add limits and recovery", () => {
     const lines = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(lines.find((line) => line.id === curryLine!.id)?.qty).toBe(3);
     expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+  });
+
+  test("the card and drawer steppers stop at the listing max with the reason (#708)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 2 });
+    await revalidateMama(page);
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("2");
+    await expect(curry(page).getByTestId("stepper-plus")).toBeDisabled();
+    await expect(curry(page).getByTestId("stepper-plus")).toHaveAccessibleDescription("Limit 2 per order");
+    await settle(page);
+    const line = (await openSheet(page)).getByRole("listitem").filter({ hasText: "Curry Powder" });
+    await expect(line.getByTestId("stepper-plus")).toBeDisabled();
+    await expect(line.getByTestId("stepper-plus")).toHaveAccessibleDescription("Limit 2 per order");
+  });
+
+  test("a refusal in the open drawer shows its reason inside the sheet, not as a page toast (#708)", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await revalidateMama(page);
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 1 });
+    const sheet = await openSheet(page);
+    await sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-plus").click();
+    await expect(sheet.getByRole("alert")).toContainText("Maximum 1 per order for this item");
+    await settle(page);
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   });
 });
 

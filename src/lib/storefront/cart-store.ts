@@ -10,6 +10,8 @@ export interface CartItem {
   price: number;
   imageUrl?: string;
   packLabel?: string;
+  /** The listing's per-order maximum, when the page knows it. Steppers stop there. */
+  maxPerOrder?: number;
 }
 export interface CartLine extends CartItem {
   quantity: number;

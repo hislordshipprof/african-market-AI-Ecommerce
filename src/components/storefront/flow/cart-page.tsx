@@ -332,6 +332,7 @@ export function CartPage({
                           weightG: item.weightG,
                           frozen: item.frozen,
                           perishable: item.frozen,
+                          maxPerOrder: item.maxPerOrder,
                           badge: "in-stock",
                         }}
                       />

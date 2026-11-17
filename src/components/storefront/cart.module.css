@@ -304,6 +304,10 @@
 }
 /* A transient failure shown inside the open drawer, where a root toast can't be reached (#708 AC3). */
 .sheetError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-block: 12px;
   padding: 12px 16px;
   border: 1px solid var(--color-deal);
@@ -312,6 +316,17 @@
   color: var(--color-ink);
   font-size: 14px;
   line-height: 1.5;
+}
+.sheetError button {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-weight: 650;
+  color: var(--color-primary-text);
+}
+.sheetError button:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
 }
 .total {
   display: flex;

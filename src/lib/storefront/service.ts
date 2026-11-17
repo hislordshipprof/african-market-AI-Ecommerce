@@ -85,6 +85,7 @@ export interface StorefrontListing {
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
+  maxPerOrder: number;
   imageUrl?: string;
   categorySlug?: string;
   variantId?: string;
@@ -121,6 +122,7 @@ export function projectStorefrontListing(listing: {
   status: string | null;
   frozen: boolean;
   perishable: boolean;
+  maxPerOrder?: number | null;
   imageUrl?: string | null;
   masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
   variants: { id?: string; label?: string; price: number; weightG?: number }[];
@@ -166,6 +168,7 @@ export function projectStorefrontListing(listing: {
     } satisfies StockBadgeInput),
     frozen: listing.frozen,
     perishable: listing.perishable,
+    maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
   };
 }
 
@@ -211,6 +214,7 @@ export interface StorefrontListingDetail {
   categorySlug?: string;
   description?: string;
   price: number;
+  maxPerOrder: number;
   variants: {
     id: string;
     label: string;
@@ -248,6 +252,7 @@ async function readGetListingDetail(
     description: photo?.description,
     categorySlug: listing.masterProduct?.category?.slug,
     price: listing.price,
+    maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
     badge: stockBadge({
       confidence: listing.confidence,
       stockMode: listing.stockMode,
@@ -273,6 +278,7 @@ export interface SearchResult {
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
+  maxPerOrder: number;
   imageUrl?: string;
   categorySlug?: string;
   variantId?: string;
@@ -304,6 +310,7 @@ interface RawSearchRow {
   weight_g: number | null;
   frozen: boolean;
   perishable: boolean;
+  max_per_order: number | null;
   match: string;
   matched_term: string | null;
 }
@@ -320,7 +327,7 @@ async function readSearchListings(
     storeId,
     Prisma.sql`
     SELECT l.id, l.custom_name, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
-      l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
+      l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable, l.max_per_order,
       pack.price AS min_variant_price, pack.id AS variant_id,
       pack.label AS pack_label, pack.weight_g,
       CASE
@@ -404,6 +411,7 @@ async function readSearchListings(
       price: row.min_variant_price ?? row.price,
       frozen: row.frozen,
       perishable: row.perishable,
+      maxPerOrder: effectiveMaxPerOrder(row.max_per_order),
       badge: stockBadge({
         confidence: row.confidence,
         stockMode: row.stock_mode,

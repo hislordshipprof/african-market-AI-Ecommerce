@@ -23,6 +23,7 @@ export type QuickViewSelectionInput = {
   listingId: string;
   name: string;
   imageUrl?: string;
+  maxPerOrder?: number;
   listPacks: readonly QuickViewPack[];
   listBasePrice: number;
   /** Cheapest pack, or the pack the category `?pack=` filter already chose. */
@@ -65,6 +66,7 @@ function cartItem(
     price,
     imageUrl: input.imageUrl,
     packLabel,
+    maxPerOrder: input.maxPerOrder,
   };
 }
 

@@ -18,6 +18,7 @@ import {
   type CartStore,
 } from "@/lib/storefront/cart-store";
 import { stepCartQuantity } from "@/lib/storefront/cart-quantity";
+import { effectiveMaxPerOrder } from "@/lib/cart/limits";
 import {
   clearKeyIdentity,
   confirmedSnapshot,
@@ -83,6 +84,7 @@ function serverLineToClient(sl: CartLineView): CartLine {
     price: sl.variant.price,
     imageUrl: sl.imageUrl,
     packLabel: sl.variant.label,
+    maxPerOrder: effectiveMaxPerOrder(sl.variant.listing.maxPerOrder),
     quantity: sl.qty,
     serverLineId: sl.id,
     swapRule: sl.swapRule,
@@ -153,6 +155,9 @@ export function CartProvider({
 }) {
   const [lines, setLines] = useState<readonly CartLine[]>(EMPTY_CART);
   const [open, setOpen] = useState(false);
+  const openRef = useRef(false);
+  // A write failure while the (modal) drawer is open, shown inside it instead of a page toast (#708 AC3).
+  const [sheetNotice, setSheetNotice] = useState<{ message: string; retry?: () => void } | null>(null);
   // One polite announcement for an add, so no two cart triggers announce the same change (#708 AC3).
   const [announce, setAnnounce] = useState("");
   const [loading, setLoading] = useState(true);
@@ -178,12 +183,36 @@ export function CartProvider({
       action: { label: "Undo", onClick: () => livePendingUndo(entries, undoClock()).entries.forEach((entry) => restoreRemoved(entry.removed)) },
     });
   }
+  function openCart() {
+    openRef.current = true;
+    setOpen(true);
+  }
   function closeCart() {
+    openRef.current = false;
     setOpen(false);
+    setSheetNotice(null);
     // Whatever was still undoable in the drawer moves to a toast for the time it has left.
     const { entries, remainingMs } = livePendingUndo(pendingUndoRef.current, undoClock());
     if (entries.length) undoToast(entries, remainingMs);
     setPending([]);
+  }
+  /** Inside the open drawer the message shows in it; elsewhere it is a toast, with Retry when there is one. */
+  function notify(message: string, retry?: () => void) {
+    if (!mounted.current) return;
+    if (openRef.current) setSheetNotice({ message, retry });
+    else toast.error(message, retry ? { action: { label: "Retry", onClick: retry } } : undefined);
+  }
+  /** Retry puts the failed quantity back as the intent and sends it again. */
+  function retryAt(item: CartItem, qty: number) {
+    return () => {
+      setSheetNotice(null);
+      const key = cartItemKey(item);
+      if (intentQty(key) !== qty) store.setQuantity(item, qty);
+      else if (!rejectStale()) {
+        noteGesture(key);
+        void enqueue(drain, true);
+      }
+    };
   }
   const mounted = useRef(true);
   const linesRef = useRef<CartLine[]>([]);
@@ -318,6 +347,7 @@ export function CartProvider({
       price: item.price,
       imageUrl: item.imageUrl,
       packLabel: item.packLabel,
+      maxPerOrder: item.maxPerOrder ?? previous?.maxPerOrder,
       quantity: qty,
       serverLineId: previous?.serverLineId,
       swapRule: previous?.swapRule,
@@ -398,7 +428,7 @@ export function CartProvider({
     } catch (error) {
       if (isStaleAction(error) && mounted.current) {
         staleDeployment.current = true;
-        toast.error(STALE_PAGE);
+        notify(STALE_PAGE);
         setAttention(true);
       }
       return "failed";
@@ -447,13 +477,14 @@ export function CartProvider({
     if (isStaleAction(error)) {
       staleDeployment.current = true;
       if (mounted.current) {
-        toast.error(STALE_PAGE);
+        notify(STALE_PAGE);
         setAttention(true);
       }
       return;
     }
     if (mounted.current) {
-      toast.error(OFFLINE);
+      const line = linesRef.current.find((entry) => cartItemKey(entry) === key);
+      notify(OFFLINE, uncertainAdd && line ? retryAt(line, line.quantity) : undefined);
       setAttention(true);
     }
     if (uncertainAdd) addAccepted.current.add(key);
@@ -527,7 +558,7 @@ export function CartProvider({
     if (!mounted.current) return;
     if (pulled === "failed") {
       if (!staleDeployment.current) {
-        toast.error(OFFLINE);
+        notify(OFFLINE);
         setAttention(true);
         failedKeys.current.add(key);
       }
@@ -546,7 +577,7 @@ export function CartProvider({
         const result = override ?? (await removeCartLine(doomed));
         if (!result.ok && removalResultAction(result.code) === "rejected") {
           if (mounted.current) {
-            toast.error(result.error);
+            notify(result.error);
             setAttention(true);
           }
           await recoverRejected(key, revAtSend, "remove");
@@ -578,7 +609,7 @@ export function CartProvider({
         known = recovered;
       } else if (pulled === "failed") {
         if (mounted.current && !staleDeployment.current) {
-          toast.error(OFFLINE);
+          notify(OFFLINE);
           setAttention(true);
         }
         paused.current.add(key);
@@ -603,7 +634,7 @@ export function CartProvider({
       }
       if (!added.ok) {
         if (mounted.current) {
-          toast.error(added.error);
+          notify(added.error);
           setAttention(true);
         }
         if (added.code === "MAX_PER_ORDER") {
@@ -627,7 +658,7 @@ export function CartProvider({
       if (!landed) {
         if (pulled === "failed") {
           addAccepted.current.add(key);
-          if (mounted.current && !staleDeployment.current) toast.error(OFFLINE);
+          if (mounted.current && !staleDeployment.current) notify(OFFLINE, retryAt(item, intentQty(key)));
         } else {
           showQty(key, 0);
           confirmed.current.set(key, { qty: 0 });
@@ -654,7 +685,7 @@ export function CartProvider({
       }
       if (!result.ok) {
         if (mounted.current) {
-          toast.error(result.error);
+          notify(result.error);
           setAttention(true);
         }
         if (result.code === "MAX_PER_ORDER") {
@@ -678,7 +709,7 @@ export function CartProvider({
     }
     if (!result.ok) {
       if (mounted.current) {
-        toast.error(result.error);
+        notify(result.error);
         setAttention(true);
       }
       await recoverRejected(key, revAtSend, "qty");
@@ -711,9 +742,9 @@ export function CartProvider({
         if (!mounted.current) return;
         if (isStaleAction(error)) {
           staleDeployment.current = true;
-          toast.error(STALE_PAGE);
+          notify(STALE_PAGE);
         } else {
-          toast.error(OFFLINE);
+          notify(OFFLINE);
         }
         setAttention(true);
       } finally {
@@ -734,7 +765,7 @@ export function CartProvider({
   }
   function rejectStale() {
     if (!staleDeployment.current) return false;
-    toast.error(STALE_PAGE);
+    notify(STALE_PAGE);
     if (mounted.current) setAttention(true);
     return true;
   }
@@ -743,7 +774,7 @@ export function CartProvider({
     if (!mounted.current) return;
     if (pulled === "failed") {
       if (!staleDeployment.current) {
-        toast.error(OFFLINE);
+        notify(OFFLINE);
         setAttention(true);
       }
       return;
@@ -852,7 +883,7 @@ export function CartProvider({
         confirmed.current.get(key)?.lineId;
       if (!lineId) return;
       const result = await setSwapRule(lineId, swap.swapRule, swap.substituteVariantId);
-      if (!result.ok && mounted.current) toast.error(result.error);
+      if (!result.ok && mounted.current) notify(result.error);
       await pullServer("server-wins");
     }, true);
   }
@@ -860,7 +891,7 @@ export function CartProvider({
     enqueue(async () => {
       const pulled = await pullServer("server-wins");
       if (pulled === "failed" && mounted.current && !staleDeployment.current) {
-        toast.error(OFFLINE);
+        notify(OFFLINE);
         setAttention(true);
       }
     }, true);
@@ -875,9 +906,9 @@ export function CartProvider({
     if (!mounted.current) return;
     if (failure.thrown !== undefined && isStaleAction(failure.thrown)) {
       staleDeployment.current = true;
-      toast.error(STALE_PAGE);
+      notify(STALE_PAGE);
     } else {
-      toast.error(failure.error ?? OFFLINE);
+      notify(failure.error ?? OFFLINE);
     }
     setAttention(true);
   }
@@ -894,7 +925,7 @@ export function CartProvider({
         lines,
         count,
         subtotal,
-        openCart: () => setOpen(true),
+        openCart,
         loading,
         syncing,
         attention,
@@ -964,10 +995,15 @@ export function CartProvider({
       >
         <p className={styles.muted}>{storeName}</p>
         {open && <AssistantSlot label="Shop with AI" />}
-        {attention && (
-          // A transient sync failure shown in the open modal, where the root toast can't be tapped (#708 AC3).
+        {(sheetNotice || attention) && (
+          // Shown in the open modal, where the root toast can't be tapped (#708 AC3).
           <div className={styles.sheetError} role="alert">
-            Some changes couldn&rsquo;t be saved. Check your connection, then try again.
+            {sheetNotice?.message ?? "Some changes couldn\u2019t be saved. Check your connection, then try again."}
+            {sheetNotice?.retry && (
+              <button type="button" onClick={sheetNotice.retry}>
+                Retry
+              </button>
+            )}
           </div>
         )}
         {pendingUndo.length > 0 && (

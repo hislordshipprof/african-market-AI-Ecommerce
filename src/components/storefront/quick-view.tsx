@@ -58,6 +58,7 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
     listingId: listing.id,
     name: listing.displayName,
     imageUrl: listing.imageUrl,
+    maxPerOrder: listing.maxPerOrder,
     listPacks: listing.packOptions ?? [],
     listBasePrice: listing.startingPrice,
     defaultVariantId: listing.variantId,
