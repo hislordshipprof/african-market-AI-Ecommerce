@@ -42,6 +42,7 @@ describe("auth integration (real DB, app_runtime)", () => {
   const storeDomain = `shop-${suffix}.integ.example`;
   const adaEmail = `ada-claim-${suffix}@example.com`;
   const unprovenEmail = `unproven-claim-${suffix}@example.com`;
+  const bindEmail = `integ-bind-${suffix}@test.example`;
 
   let storeId: string;
   let staffUserId: string;
@@ -96,6 +97,7 @@ describe("auth integration (real DB, app_runtime)", () => {
         `integ-unknown-${suffix}@test.example`,
         adaEmail,
         unprovenEmail,
+        bindEmail,
       ];
       for (const email of emails) {
         await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
@@ -104,9 +106,18 @@ describe("auth integration (real DB, app_runtime)", () => {
         await tx.$executeRaw`DELETE FROM verifications WHERE identifier = ${email} OR value LIKE ${"%" + email + "%"}`;
         await tx.$executeRaw`DELETE FROM users WHERE email = ${email}`;
       }
+      await tx.$executeRaw`DELETE FROM verifications WHERE identifier LIKE 'magic-link-store:%' AND value = ${storeId}`;
       await tx.$executeRaw`DELETE FROM stores WHERE id = ${storeId}`;
     });
   });
+
+  async function setDomainVerified(verified: boolean) {
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`UPDATE stores SET custom_domain_verified_at = ${verified ? new Date() : null} WHERE id = ${storeId}`;
+    });
+  }
 
   beforeEach(() => {
     clearTestSentEmails();
@@ -313,6 +324,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     await authPrisma.$executeRaw`DELETE FROM verifications
       WHERE CASE WHEN left(identifier, 11) = 'magic-link:'
         THEN value::jsonb->>'email' = ${customerEmail} ELSE false END`;
+    await setDomainVerified(true);
     const res = await authPost(
       "/sign-in/magic-link",
       { email: customerEmail, callbackURL: "/account" },
@@ -356,6 +368,120 @@ describe("auth integration (real DB, app_runtime)", () => {
     );
     expect(res.status).toBe(403);
     expect(getTestSentEmails()).toHaveLength(0);
+  });
+
+  it("#711 AC1: a link asked for on an unverified custom domain goes to the store's platform subdomain, and works there", async () => {
+    await setDomainVerified(false);
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "platform.test");
+    try {
+      const res = await authPost(
+        "/sign-in/magic-link",
+        { email: bindEmail, callbackURL: "/account" },
+        undefined,
+        { "x-custom-domain": storeDomain, host: storeDomain },
+      );
+      expect(res.status).toBe(200);
+      const link = new URL(extractVerifyUrl());
+      expect(link.origin).toBe(`http://${storeSlug}.platform.test:3000`);
+      expect(link.pathname).toBe("/api/auth/magic-link/verify");
+
+      const onSubdomain = await authGet(link.toString(), undefined, {
+        "x-store-slug": storeSlug,
+        host: link.host,
+      });
+      expect(collectCookies(onSubdomain)).toContain("session_token");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("#711 AC1: a link asked for on a verified custom domain goes to that domain", async () => {
+    await setDomainVerified(true);
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "platform.test");
+    try {
+      await authPost(
+        "/sign-in/magic-link",
+        { email: bindEmail, callbackURL: "/account" },
+        undefined,
+        { "x-custom-domain": storeDomain, host: storeDomain },
+      );
+      expect(new URL(extractVerifyUrl()).origin).toBe(`http://${storeDomain}`);
+    } finally {
+      vi.unstubAllEnvs();
+      await setDomainVerified(false);
+    }
+  });
+
+  it("#711 AC2: a token issued for store A is refused on store B and on the root domain, and still works on A", async () => {
+    const storeBId = crypto.randomUUID();
+    const storeBSlug = `integ-storeb-${suffix}`;
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeBId}, 'Integ Store B', ${storeBSlug}, 'active', now())`;
+    });
+    const onStore = (slug: string) => ({ "x-store-slug": slug, host: `${slug}.localhost:3000` });
+    try {
+      const res = await authPost(
+        "/sign-in/magic-link",
+        { email: bindEmail, callbackURL: "/account" },
+        undefined,
+        onStore(storeSlug),
+      );
+      expect(res.status).toBe(200);
+      const link = extractVerifyUrl();
+      const onB = new URL(link);
+      onB.host = `${storeBSlug}.localhost:3000`;
+
+      const viaHandlerOnB = await authGet(onB.toString(), undefined, onStore(storeBSlug));
+      expect(viaHandlerOnB.status).toBe(403);
+      expect(collectCookies(viaHandlerOnB)).not.toContain("session_token");
+
+      const viaRouteOnB = await authRouteGET(
+        new NextRequest(onB, { headers: onStore(storeBSlug), redirect: "manual" }),
+      );
+      expect(viaRouteOnB.status).toBe(403);
+      expect(collectCookies(viaRouteOnB)).not.toContain("session_token");
+
+      const onRoot = new URL(link);
+      onRoot.host = "localhost:3000";
+      const viaHandlerOnRoot = await authGet(onRoot.toString());
+      expect(viaHandlerOnRoot.status).toBe(403);
+      expect(collectCookies(viaHandlerOnRoot)).not.toContain("session_token");
+      const viaRouteOnRoot = await authRouteGET(new NextRequest(onRoot, { redirect: "manual" }));
+      expect(viaRouteOnRoot.status).toBe(403);
+
+      const onA = await authGet(link, undefined, onStore(storeSlug));
+      expect(collectCookies(onA)).toContain("session_token");
+    } finally {
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM customers WHERE store_id = ${storeBId}`;
+        await tx.$executeRaw`DELETE FROM stores WHERE id = ${storeBId}`;
+      });
+    }
+  });
+
+  it("#711 AC2: a token with no recorded store is refused", async () => {
+    const onStore = { "x-store-slug": storeSlug, host: `${storeSlug}.localhost:3000` };
+    await authPost("/sign-in/magic-link", { email: bindEmail, callbackURL: "/account" }, undefined, onStore);
+    const link = extractVerifyUrl();
+    const token = new URL(link).searchParams.get("token");
+    await authPrisma.verification.deleteMany({ where: { identifier: `magic-link-store:${token}` } });
+
+    const res = await authGet(link, undefined, onStore);
+    expect(res.status).toBe(403);
+    expect(collectCookies(res)).not.toContain("session_token");
+  });
+
+  it("#711: an unknown token still gets Better Auth's invalid-link redirect", async () => {
+    const res = await authGet(`${AUTH_BASE}/magic-link/verify?token=no-such-token-${suffix}&callbackURL=/account`, undefined, {
+      "x-store-slug": storeSlug,
+      host: `${storeSlug}.localhost:3000`,
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("INVALID_TOKEN");
   });
 
   it("E5: an expired magic link does not create a session", async () => {

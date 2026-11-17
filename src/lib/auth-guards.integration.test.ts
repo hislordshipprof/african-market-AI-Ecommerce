@@ -602,7 +602,8 @@ async function customerMagicSession(email: string, slug: string): Promise<LiveSe
   const html = getTestSentEmails().at(-1)?.html ?? "";
   const href = (verifyUrlFromEmail(html) ?? undefined);
   expect(href).toBeTruthy();
-  const verifyRes = await authGet(href!);
+  // Redeemed on the store it was asked for on, as the proxy's x-store-slug says (#711).
+  const verifyRes = await authGet(href!, undefined, { "x-store-slug": slug, host: `${slug}.localhost:3000` });
   const cookies = collectCookies(verifyRes);
   expect(cookies).toContain("session_token");
   const session = await readSession(cookies);
