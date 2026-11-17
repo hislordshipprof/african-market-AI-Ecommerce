@@ -485,7 +485,7 @@
   border-radius: 12px;
   background: var(--color-bg);
   color: var(--color-ink);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.5;
 }
 .sheetError button {

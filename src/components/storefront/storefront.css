@@ -1270,11 +1270,11 @@
 }
 .sf-add-bar {
   display: flex;
-  gap: 20px;
+  gap: var(--ds-space-md);
   align-items: center;
   justify-content: space-between;
   margin-top: 24px;
-  padding: 20px;
+  padding: var(--ds-space-lg);
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: 12px;
