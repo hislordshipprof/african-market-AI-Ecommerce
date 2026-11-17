@@ -11,6 +11,9 @@ const LABEL_CLAIM_STALE_MS = 5 * 60_000;
 
 export const LABEL_STORAGE_NOT_SET_UP = "Shipping labels are not set up for this store yet. Contact support";
 export const SHIPPING_UNAVAILABLE = "Shipping isn't available right now. Try again in a few minutes";
+export const LABEL_NOT_BOUGHT = "The label could not be bought. Try again in a few minutes";
+export const LABEL_BEING_BOUGHT = "The label is being bought";
+export const POSTAGE_ROSE_PREFIX = "Postage went up from ";
 
 export type PostageResult =
   | { ok: true }
@@ -25,7 +28,7 @@ export interface LabelDeps {
 
 function postageMessage(paidCents: number, newCents: number): string {
   const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-  return `Postage went up from ${dollars(paidCents)} to ${dollars(newCents)}. The store pays the ${dollars(newCents - paidCents)} difference. Confirm to buy the label`;
+  return `${POSTAGE_ROSE_PREFIX}${dollars(paidCents)} to ${dollars(newCents)}. The store pays the ${dollars(newCents - paidCents)} difference. Confirm to buy the label`;
 }
 
 /**
@@ -104,7 +107,7 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
   if (claimed.count === 0) {
     const order = await scoped.order.findUnique({ where: { id: orderId }, select: { shippingLabelStatus: true } });
     if (order?.shippingLabelStatus === "bought") return { ok: true };
-    return { ok: false, error: order?.shippingLabelStatus === "buying" ? "The label is being bought" : "This order cannot get a label" };
+    return { ok: false, error: order?.shippingLabelStatus === "buying" ? LABEL_BEING_BOUGHT : "This order cannot get a label" };
   }
   const release = () => scoped.order.updateMany({ where: { id: orderId, shippingLabelStatus: "buying" }, data: { shippingLabelStatus: null, shippingLabelClaimedAt: null } });
 
@@ -134,6 +137,6 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
     await release();
     if (!(error instanceof ShippingProviderError)) throw error;
     console.error(JSON.stringify({ event: "shipping_label_failed", storeId, orderId, status: error.status, message: error.message.slice(0, 200) }));
-    return { ok: false, error: "The label could not be bought. Try again in a few minutes" };
+    return { ok: false, error: LABEL_NOT_BOUGHT };
   }
 }

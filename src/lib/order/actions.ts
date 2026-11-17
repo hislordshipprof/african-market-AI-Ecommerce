@@ -15,8 +15,9 @@ import {
   markDelivered,
   cancelOrder,
   cancelShipment,
+  SHIPMENT_SCANNED,
 } from "./service";
-import { buyShippingLabel } from "../shipping/label";
+import { buyShippingLabel, LABEL_BEING_BOUGHT, LABEL_NOT_BOUGHT, LABEL_STORAGE_NOT_SET_UP, POSTAGE_ROSE_PREFIX, SHIPPING_UNAVAILABLE } from "../shipping/label";
 import { STORE_CANCEL_REASONS } from "./constants";
 import {
   BATCH_LINE_DONE,
@@ -58,6 +59,15 @@ import {
 } from "./issue-review";
 
 const ALLOWED_STAFF_ERRORS = new Set([
+  LABEL_STORAGE_NOT_SET_UP,
+  SHIPPING_UNAVAILABLE,
+  LABEL_NOT_BOUGHT,
+  LABEL_BEING_BOUGHT,
+  SHIPMENT_SCANNED,
+  "This order cannot get a label",
+  "The label is being bought. Try again in a minute",
+  "Order status changed during cancellation",
+  "Refund is still confirming with the bank",
   "Order not found",
   "Order line not found",
   "Auto-accept is not enabled for this store",
@@ -107,6 +117,7 @@ function isAllowListed(message: string): boolean {
     message.startsWith("Retrying in ") ||
     message.startsWith("Capture amount ") ||
     message.startsWith(UNITS_FOUND_PREFIX) ||
+    message.startsWith(POSTAGE_ROSE_PREFIX) ||
     message.startsWith(ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX)
   );
 }
