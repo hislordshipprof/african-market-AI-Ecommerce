@@ -5,6 +5,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 fail=0
+# CI exports the lane DATABASE_URL; each case must see only the URLs its env file sets.
+unset DATABASE_URL DIRECT_URL
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 
