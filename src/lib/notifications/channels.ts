@@ -183,7 +183,7 @@ export const whatsappChannel: NotificationChannel = {
   prepare(order, event, url, env) {
     const whatsapp = order.whatsapp;
     if (!whatsapp) return { outcome: "skipped", reason: "not_opted_in" };
-    if (event === "store_replied" || !WHATSAPP_EVENTS.has(event)) return { outcome: "skipped", reason: "not_whatsapp_event" };
+    if (event === "store_replied" || event === "shipped" || event === "in_transit" || !WHATSAPP_EVENTS.has(event)) return { outcome: "skipped", reason: "not_whatsapp_event" };
     const phone = normalizeUsPhone(order.customer.phone);
     if (!phone.ok) return { outcome: "skipped", reason: phone.reason };
     if (previewEnv(env)) {

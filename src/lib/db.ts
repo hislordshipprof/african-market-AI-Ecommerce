@@ -1369,6 +1369,17 @@ export async function findDeliveryByExternalId(
   });
 }
 
+/** The shipped order a Shippo label (transaction) belongs to, across stores: the tracking webhook names only the label (#568). */
+export async function findOrderByShippingLabel(labelId: string): Promise<{ storeId: string; orderId: string } | null> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT id, store_id FROM orders WHERE shipping_label_id = ${labelId} AND fulfillment = 'ship' LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? { storeId: row.store_id, orderId: row.id } : null;
+  });
+}
+
 export async function findStuckTransitionalOrders(opts?: {
   storeIds?: readonly string[];
 }): Promise<Array<{ id: string; storeId: string }>> {

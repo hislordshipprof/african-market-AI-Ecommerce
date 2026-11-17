@@ -42,6 +42,8 @@ const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
   COURIER_ASSIGNED: "Courier on the way to the store",
   PICKED_UP: "Courier on the way to you",
   OUT_FOR_DELIVERY: "Out for delivery",
+  SHIPPED: "Shipped",
+  IN_TRANSIT: "On its way",
   DELIVERED: "Delivered",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",

@@ -74,6 +74,7 @@ export default defineConfig({
           E2E_FAKE_STRIPE: "1",
           E2E_FAKE_ADDRESS: "1",
           E2E_FAKE_SHIPPO: "1",
+          SHIPPO_WEBHOOK_SECRET: process.env.SHIPPO_WEBHOOK_SECRET ?? "e2e-shippo-webhook",
           // `next start` is production. CI=true selects the fake Stripe provider and
           // the in-memory email sender. VERCEL must stay unset. An empty key stops
           // .env.local from hiding a missing-secret failure.

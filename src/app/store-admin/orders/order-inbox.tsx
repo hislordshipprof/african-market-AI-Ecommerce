@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -32,6 +32,7 @@ import {
   Clock,
   HandMetal,
   Package,
+  Printer,
   RefreshCw,
   ShieldAlert,
   Truck,
@@ -51,6 +52,8 @@ import {
   markDeliveredAction,
   cancelOrderAction,
   pushReadyTimeAction,
+  buyShippingLabelAction,
+  cancelShipmentAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
@@ -81,6 +84,8 @@ const STATUS_CONFIG: Record<
   COURIER_ASSIGNED: { label: "Courier assigned", variant: "secondary", icon: Truck },
   PICKED_UP: { label: "Courier picked up", variant: "secondary", icon: Truck },
   OUT_FOR_DELIVERY: { label: "Out for delivery", variant: "secondary", icon: Truck },
+  SHIPPED: { label: "Shipped", variant: "secondary", icon: Truck },
+  IN_TRANSIT: { label: "In transit", variant: "secondary", icon: Truck },
   DELIVERED: { label: "Delivered", variant: "outline", icon: CheckCircle2 },
   COMPLETED: { label: "Completed", variant: "outline", icon: CheckCircle2 },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
@@ -149,6 +154,8 @@ export function OrderInbox({
   const [orders, setOrders] = useState(initialOrders);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  /** A re-quoted postage more than $2 above what the shopper paid, waiting for staff to confirm (#568). */
+  const [postageToConfirm, setPostageToConfirm] = useState<{ orderId: string; cents: number; message: string } | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
   const [acceptingOrderId, setAcceptingOrderId] = useState<string | null>(null);
@@ -321,15 +328,44 @@ export function OrderInbox({
     });
   }
 
-  function handleMarkReady(orderId: string) {
+  function handleMarkReady(orderId: string, confirmPostageCents?: number) {
     startTransition(async () => {
-      const result = await markReadyAction(orderId);
+      const result = await markReadyAction(orderId, confirmPostageCents);
+      setPostageToConfirm(null);
       if (result.ok) {
         if (result.voided) {
           toast.success("Order cancelled — amount below capture minimum");
+        } else if ("labelError" in result && result.labelError) {
+          toast.error(`Order marked ready. ${result.labelError}`);
         } else {
           toast.success("Order marked ready");
         }
+        pollOrders();
+      } else if ("confirmPostageCents" in result && typeof result.confirmPostageCents === "number") {
+        setPostageToConfirm({ orderId, cents: result.confirmPostageCents, message: result.error });
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleBuyLabel(orderId: string, pdfOnly: boolean) {
+    startTransition(async () => {
+      const result = await buyShippingLabelAction(orderId);
+      if (result.ok) {
+        toast.success(pdfOnly ? "Label saved" : "Label bought");
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleCancelShipment(orderId: string) {
+    startTransition(async () => {
+      const result = await cancelShipmentAction(orderId);
+      if (result.ok) {
+        toast.success("Shipment cancelled and the customer refunded");
         pollOrders();
       } else {
         toast.error(result.error);
@@ -687,6 +723,65 @@ export function OrderInbox({
                   >
                     <CheckCircle2 className="mr-2 size-4" /> Mark ready
                   </Button>
+                )}
+
+                {selectedOrder.status === "PICKING" && postageToConfirm?.orderId === selectedOrder.id && (
+                  <div role="alert" className="mb-4 space-y-3 rounded-lg border p-3 text-sm">
+                    <p>{postageToConfirm.message}</p>
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 rounded-full"
+                        onClick={() => handleMarkReady(selectedOrder.id, postageToConfirm.cents)}
+                        disabled={isPending}
+                      >
+                        Buy label at {money(postageToConfirm.cents)}
+                      </Button>
+                      <Button variant="outline" className="rounded-full" onClick={() => setPostageToConfirm(null)} disabled={isPending}>
+                        Not now
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {selectedOrder.fulfillment === "ship" && ["READY", "SHIPPED", "IN_TRANSIT", "DELIVERED"].includes(selectedOrder.status) && (
+                  <div className="mb-4 space-y-3">
+                    {selectedOrder.shippingLabelStatus === "bought" && selectedOrder.shippingLabelKey ? (
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span>
+                          Tracking{" "}
+                          {selectedOrder.shippingTrackingUrl ? (
+                            <a className="underline underline-offset-2" href={selectedOrder.shippingTrackingUrl} target="_blank" rel="noopener noreferrer">
+                              {selectedOrder.shippingTrackingNumber}
+                            </a>
+                          ) : (
+                            selectedOrder.shippingTrackingNumber
+                          )}
+                        </span>
+                        <a
+                          className={buttonVariants({ variant: "outline", size: "sm", className: "rounded-full" })}
+                          href={`/api/shipping-label/${selectedOrder.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Printer className="mr-2 size-4" /> Print label
+                        </a>
+                      </div>
+                    ) : selectedOrder.shippingLabelStatus === "bought" || selectedOrder.status === "READY" ? (
+                      <Button className="w-full rounded-full" onClick={() => handleBuyLabel(selectedOrder.id, selectedOrder.shippingLabelStatus === "bought")} disabled={isPending}>
+                        <Printer className="mr-2 size-4" /> {selectedOrder.shippingLabelStatus === "bought" ? "Get the label PDF" : "Buy label"}
+                      </Button>
+                    ) : null}
+                    {selectedOrder.status === "READY" && (
+                      <Button
+                        variant="outline"
+                        className="w-full rounded-full"
+                        onClick={() => handleCancelShipment(selectedOrder.id)}
+                        disabled={isPending}
+                      >
+                        <XCircle className="mr-2 size-4" /> Cancel shipment and refund
+                      </Button>
+                    )}
+                  </div>
                 )}
 
                 {STORE_CANCELLABLE.includes(selectedOrder.status) && (

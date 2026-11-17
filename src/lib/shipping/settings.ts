@@ -12,10 +12,12 @@ export async function readShippingStates(db: SettingsReader = platform): Promise
 }
 
 const FAKE_TOKEN = "shippo_test_fake";
+// One fake per server, so a label can be bought from the rate checkout quoted.
+let fake: ReturnType<typeof fakeShippo> | null = null;
 
 /** Shippo with SHIPPO_API_KEY; the fake outside production when E2E_FAKE_SHIPPO=1; otherwise none. */
 export function shippingProvider(): ShippingProvider | null {
   if (process.env.SHIPPO_API_KEY) return new ShippoProvider();
   const fakeAllowed = !process.env.VERCEL && process.env.E2E_FAKE_SHIPPO === "1" && (process.env.CI === "true" || process.env.NODE_ENV !== "production");
-  return fakeAllowed ? new ShippoProvider({ apiKey: FAKE_TOKEN, fetch: fakeShippo({ token: FAKE_TOKEN }) }) : null;
+  return fakeAllowed ? new ShippoProvider({ apiKey: FAKE_TOKEN, fetch: (fake ??= fakeShippo({ token: FAKE_TOKEN })) }) : null;
 }

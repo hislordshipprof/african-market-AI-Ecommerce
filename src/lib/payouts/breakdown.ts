@@ -1,4 +1,4 @@
-import { capturedPayout, courierFeeCents } from "@/lib/order/platform-fee";
+import { capturedPayout, passesThroughDeliveryFee } from "@/lib/order/platform-fee";
 import { csvDollars, toCsv } from "@/lib/analytics/csv";
 import type { PayoutTransaction } from "@/lib/stripe/types";
 
@@ -12,6 +12,8 @@ export type PayoutOrder = {
   serviceFeeCents: number;
   tipCents: number;
   deliveryFeeCents: number;
+  /** The postage a shipped order passed through (#568). */
+  shippingPostageCents?: number | null;
   /** Goods discount from a store coupon; the store funds it, and the captured amount is already net of it. */
   discountCents: number;
   /** Sales tax in the captured amount (#65); 0 on orders placed before Stripe Tax. */
@@ -61,9 +63,11 @@ export function payoutBreakdown(
       // A destination charge lands at its full captured amount, so it stands in when capture was never recorded.
       const captured = order.capturedAmountCents ?? txn.amountCents;
       const split = capturedPayout({ ...order, capturedAmountCents: captured });
-      // Sales tax is the order's own line (#65, ADR-0008); goods keep a store delivery fee.
+      // Sales tax is the order's own line (#65, ADR-0008); goods keep a store delivery fee. Postage the store topped up
+      // after a re-quote (#568) is in the net, not the goods.
       row.paidInPayout = true;
-      row.goodsCents = captured - order.serviceFeeCents - order.tipCents - order.taxCents - courierFeeCents(order) + order.discountCents;
+      const passedThrough = passesThroughDeliveryFee(order.fulfillment) ? order.deliveryFeeCents : 0;
+      row.goodsCents = captured - order.serviceFeeCents - order.tipCents - order.taxCents - passedThrough + order.discountCents;
       row.discountCents = order.discountCents;
       row.taxCents = order.taxCents;
       row.tipCents = order.tipCents;

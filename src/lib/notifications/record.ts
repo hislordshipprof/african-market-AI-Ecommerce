@@ -7,6 +7,8 @@ export const ORDER_NOTIFY_EVENTS = [
   "accepted",
   "ready",
   "out_for_delivery",
+  "shipped",
+  "in_transit",
   "delivered",
   "completed",
   "cancelled",
@@ -16,7 +18,10 @@ export const ORDER_NOTIFY_EVENTS = [
 ] as const;
 export type OrderNotifyEvent = (typeof ORDER_NOTIFY_EVENTS)[number];
 
-/** The events an opted-in customer hears on WhatsApp instead of SMS (#560). A store reply stays on SMS. */
+/**
+ * The events an opted-in customer hears on WhatsApp instead of SMS (#560). A store reply stays on SMS, and so do the
+ * parcel updates (#568) until Meta approves templates for them.
+ */
 export const WHATSAPP_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set<OrderNotifyEvent>([
   "placed",
   "accepted",
