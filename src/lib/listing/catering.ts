@@ -4,6 +4,8 @@
  * longest lead time and inside the 5-day card hold, so the lead stays under 5 days.
  */
 
+import { ListingInputError } from "./parse-variants";
+
 export const MAX_CATERING_LEAD_HOURS = 96;
 export const MAX_CATERING_MIN_QTY = 500;
 
@@ -30,12 +32,12 @@ export function cateringFields(
   minQty: number | null,
 ): CateringFields {
   if (leadHours == null && minQty == null) return { cateringLeadHours: null, cateringMinQty: null };
-  if (prepared == null) throw new Error(CATERING_NEEDS_PREPARED);
+  if (prepared == null) throw new ListingInputError(CATERING_NEEDS_PREPARED);
   if (leadHours == null || !Number.isInteger(leadHours) || leadHours < 1 || leadHours > MAX_CATERING_LEAD_HOURS) {
-    throw new Error(`Catering lead time must be 1 to ${MAX_CATERING_LEAD_HOURS} hours (4 days)`);
+    throw new ListingInputError(`Catering lead time must be 1 to ${MAX_CATERING_LEAD_HOURS} hours (4 days)`);
   }
   if (minQty == null || !Number.isInteger(minQty) || minQty < 1 || minQty > MAX_CATERING_MIN_QTY) {
-    throw new Error(`Catering minimum must be a whole number, 1 to ${MAX_CATERING_MIN_QTY}`);
+    throw new ListingInputError(`Catering minimum must be a whole number, 1 to ${MAX_CATERING_MIN_QTY}`);
   }
   return { cateringLeadHours: leadHours, cateringMinQty: minQty };
 }
