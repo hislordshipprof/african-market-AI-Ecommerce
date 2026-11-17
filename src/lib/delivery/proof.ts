@@ -7,21 +7,23 @@ const FETCH_TIMEOUT_MS = 15_000;
 
 /**
  * Hosts a courier provider's drop-off photo link may point at, matched exactly or as a parent domain.
- * tb-static.uber.com is in Uber's documented webhook sample; DoorDash documents no production photo host,
- * so its own domains and its static bucket and image CDN are listed.
+ * Only uber.com (tb-static.uber.com in Uber's webhook sample) and doordash.com (its simulator sample) are documented;
+ * DoorDash's production photo host is not, so cdn4dd.com and the doordash-static bucket are unverified guesses.
+ * A refused link is logged with its host, so a real provider host can be added.
  */
 const PROOF_IMAGE_HOSTS = ["uber.com", "doordash.com", "cdn4dd.com", "doordash-static.s3.amazonaws.com"];
 
-function isProviderImageUrl(raw: string): boolean {
+/** Null when the link is an https link on a provider image host; else the host to log (never the signed link). */
+function refusedHost(raw: string): string | null {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    return false;
+    return "unparseable";
   }
-  if (url.protocol !== "https:" || url.port !== "" || url.username !== "" || url.password !== "") return false;
   const host = url.hostname.toLowerCase();
-  return PROOF_IMAGE_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+  if (url.protocol !== "https:" || url.port !== "" || url.username !== "" || url.password !== "") return host;
+  return PROOF_IMAGE_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`)) ? null : host;
 }
 
 export interface ProofCopyDeps {
@@ -46,7 +48,8 @@ export async function copyCourierProof(storeId: string, deliveryId: string, deps
     console.error(JSON.stringify({ event: "courier_proof_storage_missing", storeId, deliveryId }));
     return "skipped";
   }
-  if (!isProviderImageUrl(delivery.proofUrl)) return dropped(storeId, deliveryId, "host_not_allowed");
+  const refused = refusedHost(delivery.proofUrl);
+  if (refused !== null) return dropped(storeId, deliveryId, "host_not_allowed", refused);
   const res = await (deps.fetch ?? fetch)(delivery.proofUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "error" });
   if (!res.ok) throw new Error(`Proof photo download failed with ${res.status}`);
   if (Number(res.headers.get("content-length") ?? 0) > DELIVERY_PROOF_MAX_BYTES) return dropped(storeId, deliveryId, "too_large");
@@ -66,7 +69,7 @@ export async function copyCourierProof(storeId: string, deliveryId: string, deps
   return "copied";
 }
 
-function dropped(storeId: string, deliveryId: string, reason: string): "skipped" {
-  console.error(JSON.stringify({ event: "courier_proof_unusable", storeId, deliveryId, reason }));
+function dropped(storeId: string, deliveryId: string, reason: string, host?: string): "skipped" {
+  console.error(JSON.stringify({ event: "courier_proof_unusable", storeId, deliveryId, reason, ...(host && { host }) }));
   return "skipped";
 }

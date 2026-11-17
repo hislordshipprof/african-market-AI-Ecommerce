@@ -65,6 +65,9 @@ describe.skipIf(!hasDb)("store applications and the recipe base: a store-scoped 
     expect(await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`UPDATE recipes SET name = 'Changed' WHERE id = ${recipeId}`)).toBe(0);
     expect(await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`DELETE FROM recipe_ingredients WHERE recipe_id = ${recipeId}`)).toBe(0);
     expect(await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`DELETE FROM recipes WHERE id = ${recipeId}`)).toBe(0);
+    // FORCE: the owning login cannot change the recipe base outside the admin either.
+    expect((await raw.recipe.updateMany({ where: { id: recipeId }, data: { name: "Owner changed" } })).count).toBe(0);
+    expect((await raw.recipeIngredient.deleteMany({ where: { recipeId } })).count).toBe(0);
     const kept = await platformAdminTransaction((tx) => tx.recipe.findUniqueOrThrow({ where: { id: recipeId }, include: { ingredients: true } }));
     expect(kept).toMatchObject({ name: `RLS curated ${stamp}`, ingredients: [{ name: "rice" }] });
   });
