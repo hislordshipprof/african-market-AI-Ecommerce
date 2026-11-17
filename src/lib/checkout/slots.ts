@@ -1,8 +1,9 @@
 import type { PrismaClient } from "@prisma/client";
 import type { Fulfillment } from "../customer-flow/contracts";
 import { ASAP_SLOT, type PickupSlot } from "../order/pickup-slots";
-import { pickupSlotsFor, readSlotSchedule, scheduledSlots, type SlotStore } from "../order/slot-schedule";
+import { MAX_DAYS_AHEAD, pickupSlotsFor, readSlotSchedule, scheduledSlots, type SlotStore } from "../order/slot-schedule";
 import { orderPrepMinutes } from "../listing/prepared";
+import { cateringLeadMinutes } from "../listing/catering";
 
 export interface SlotStoreRow extends SlotStore {
   storeDeliverySlotSettings: unknown;
@@ -14,18 +15,28 @@ export interface SlotOptions {
   slots: PickupSlot[];
   /** Pickup: the basket's prep minutes, the store's plus its longest prepared item (#570). */
   prepMinutes?: number;
+  /** A catering basket's longest lead (#571); its times start at least this far ahead. */
+  leadMinutes?: number;
 }
 
 type SlotClient = Pick<PrismaClient, "order" | "cartLine">;
 
-/** The store's prep plus the cart's longest prepared item, so no pickup time comes before the food is ready (#570). */
-async function cartPrepMinutes(client: SlotClient, cartId: string | null, storePrepMinutes: number): Promise<number> {
-  if (!cartId) return storePrepMinutes;
+/**
+ * The basket's prep minutes, the store's plus its longest prepared item, so no pickup time comes
+ * before the food is ready (#570); and its longest catering lead (#571).
+ */
+async function cartBasket(
+  client: SlotClient,
+  cartId: string | null,
+  storePrepMinutes: number,
+): Promise<{ prepMinutes: number; leadMinutes: number }> {
+  if (!cartId) return { prepMinutes: storePrepMinutes, leadMinutes: 0 };
   const lines = await client.cartLine.findMany({
     where: { cartId, variant: { listing: { prepared: { not: null } } } },
-    select: { variant: { select: { listing: { select: { prepared: true, prepMinutes: true } } } } },
+    select: { variant: { select: { listing: { select: { prepared: true, prepMinutes: true, cateringLeadHours: true } } } } },
   });
-  return orderPrepMinutes(storePrepMinutes, lines.map((line) => line.variant.listing));
+  const listings = lines.map((line) => line.variant.listing);
+  return { prepMinutes: orderPrepMinutes(storePrepMinutes, listings), leadMinutes: cateringLeadMinutes(listings) };
 }
 
 export class SlotUnavailableError extends Error {
@@ -66,8 +77,10 @@ export async function slotOptions(
   now: Date,
   cartId: string | null,
 ): Promise<SlotOptions> {
+  const basket = await cartBasket(client, cartId, store.prepTimeMinutes);
+  if (basket.leadMinutes > 0) return cateringSlotOptions(client, storeId, store, fulfillment, now, basket);
   if (fulfillment === "pickup") {
-    const prepMinutes = await cartPrepMinutes(client, cartId, store.prepTimeMinutes);
+    const prepMinutes = basket.prepMinutes;
     const slots = pickupSlotsFor({ ...store, prepTimeMinutes: prepMinutes }, now, await bookedCounts(client, storeId, fulfillment))
       .filter((slot) => slot.id !== ASAP_SLOT.id);
     // Without a schedule the times are today's and carry no date.
@@ -78,6 +91,34 @@ export async function slotOptions(
   if (!schedule) return { required: false, slots: [] };
   const booked = await bookedCounts(client, storeId, fulfillment);
   return { required: true, slots: scheduledSlots(schedule, store.timezone, now, booked) };
+}
+
+/**
+ * A catering basket (#571) must take a scheduled slot at or past its longest lead time. Its days
+ * ahead widen to the 5-day hold so a multi-day lead still finds a time. With no schedule for the
+ * fulfillment, courier and shipping included, no time is offered and the order cannot be placed.
+ */
+async function cateringSlotOptions(
+  client: SlotClient,
+  storeId: string,
+  store: SlotStoreRow,
+  fulfillment: Fulfillment,
+  now: Date,
+  basket: { prepMinutes: number; leadMinutes: number },
+): Promise<SlotOptions> {
+  const pickup = fulfillment === "pickup";
+  const schedule = pickup
+    ? (store.pickupEnabled ? readSlotSchedule(store.pickupSlotSettings) : null)
+    : fulfillment === "store-delivery" ? readSlotSchedule(store.storeDeliverySlotSettings) : null;
+  const prep = { ...(pickup && { prepMinutes: basket.prepMinutes }), leadMinutes: basket.leadMinutes };
+  if (!schedule) return { required: true, slots: [], ...prep };
+  const leadMinutes = Math.max(schedule.leadMinutes, basket.leadMinutes, pickup ? basket.prepMinutes : 0);
+  const booked = await bookedCounts(client, storeId, fulfillment);
+  return {
+    required: true,
+    slots: scheduledSlots({ ...schedule, leadMinutes, daysAhead: MAX_DAYS_AHEAD }, store.timezone, now, booked),
+    ...prep,
+  };
 }
 
 /** Refuses a slot that is not offered now, or ASAP where a slot is required. Run under the store lock to reserve. */

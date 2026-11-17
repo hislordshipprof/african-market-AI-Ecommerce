@@ -50,3 +50,12 @@ export function pickupSlotsToday(store: PickupStore, now: Date): PickupSlot[] {
   }
   return slots;
 }
+
+/** A booked slot's start for the customer (#571): "Sat, Nov 21, 2:00 PM CST" in the store's zone; null when unreadable. */
+export function scheduledTimeLabel(slot: string | null, timezone: string): string | null {
+  const at = slot ? new Date(slot) : null;
+  if (!at || Number.isNaN(at.getTime()) || !isValidTimezone(timezone)) return null;
+  return at
+    .toLocaleString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })
+    .replace(/[  ]/g, " ");
+}

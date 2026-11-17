@@ -123,3 +123,22 @@ describe("renderWhatsApp (#560)", () => {
     expect(renderWhatsApp(order("AUTHORIZED"), "placed", "https://adas.markets.example", "+1", sender)).toBeNull();
   });
 });
+
+describe("#571: a scheduled order's emails show its time", () => {
+  // 20:00 UTC on Saturday 2026-11-21 is 2:00 PM in Chicago.
+  const scheduled = { ...order("ACCEPTED"), fulfillment: "pickup", pickupSlot: "2026-11-21T20:00:00.000Z" };
+
+  it("placed and accepted emails carry the slot in the store's zone, not a ready time from acceptance", () => {
+    for (const event of ["placed", "accepted"] as const) {
+      const html = renderEmail(scheduled, event, URL, "orders@example.com").html!;
+      expect(html).toContain("Sat, Nov 21, 2:00 PM CST");
+      expect(html).not.toContain("Ready around");
+    }
+  });
+
+  it("an order without a slot keeps its ready time", () => {
+    const html = renderEmail({ ...order("ACCEPTED"), pickupSlot: null }, "accepted", URL, "orders@example.com").html!;
+    expect(html).toContain("Ready around");
+    expect(html).not.toContain("Scheduled for");
+  });
+});
