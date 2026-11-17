@@ -41,6 +41,10 @@ export type NotifyOrder = {
   prepEstimateMinutes: number | null;
   acceptedAt: Date | null;
   trackingToken: string | null;
+  /** A shipped order's carrier, tracking number and the carrier's tracking page (#568). */
+  shippingCarrier?: string | null;
+  shippingTrackingNumber?: string | null;
+  shippingTrackingUrl?: string | null;
   customer: { name: string; email: string | null; phone: string | null };
   store: {
     name: string;
@@ -100,6 +104,10 @@ export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied" 
       return fulfilledStatus(fulfillment);
     case "out_for_delivery":
       return "OUT_FOR_DELIVERY";
+    case "shipped":
+      return "SHIPPED";
+    case "in_transit":
+      return "IN_TRANSIT";
     case "delivered":
       return "DELIVERED";
     case "completed":
@@ -171,7 +179,19 @@ function cancelCopy(order: NotifyOrder): string {
 }
 
 /** Events after capture: the order is picked and the final amount is charged. */
-const CHARGED_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set(["ready", "out_for_delivery", "delivered", "completed"]);
+const CHARGED_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set(["ready", "out_for_delivery", "shipped", "in_transit", "delivered", "completed"]);
+
+/** The carrier's tracking page, on each parcel update of a shipped order (#568). */
+function carrierLink(order: NotifyOrder, event: OrderNotifyEvent): string | null {
+  if (order.fulfillment !== "ship" || !["shipped", "in_transit", "delivered"].includes(event)) return null;
+  const url = order.shippingTrackingUrl;
+  if (!url) return null;
+  try {
+    return new URL(url).protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
 
 function promoLine(order: NotifyOrder): string {
   if (order.discountCents <= 0) return "";
@@ -261,6 +281,8 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   }
   const linkText = event === "store_replied" ? "Read the reply" : event === "substitution" ? "Choose now" : "Track your order";
   parts.push(`<p><a href="${escapeHtml(url)}" style="display:inline-block;background:${escapeHtml(color)};color:${ink};padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">${linkText}</a></p>`);
+  const carrier = carrierLink(order, event);
+  if (carrier) parts.push(`<p>Carrier tracking: <a href="${escapeHtml(carrier)}">${escapeHtml(order.shippingCarrier ?? "carrier")} ${escapeHtml(order.shippingTrackingNumber ?? "")}</a></p>`);
   parts.push(`</div>`);
   parts.push(`<p style="font-size:12px">Powered by the Platform</p>`);
   return {
@@ -289,12 +311,15 @@ export function renderSms(order: NotifyOrder, event: OrderNotifyEvent, url: stri
     return { to: order.customer.phone ?? "", text: `${name}: an item in order #${order.number} is short. Choose a swap or refund within 10 min: ${url}` };
   }
   const status = headline(order, event);
-  let text = `${name}: order #${order.number} ${status}. Track it: ${url}`;
+  const carrier = carrierLink(order, event);
+  let text = carrier
+    ? `${name}: order #${order.number} ${status}. Carrier tracking: ${carrier}`
+    : `${name}: order #${order.number} ${status}. Track it: ${url}`;
   if (event === "placed") text += " Reply STOP to opt out.";
   return { to: order.customer.phone ?? "", text };
 }
 
-type WhatsAppEvent = Exclude<OrderNotifyEvent, "store_replied">;
+type WhatsAppEvent = Exclude<OrderNotifyEvent, "store_replied" | "shipped" | "in_transit">;
 
 function whatsappTemplate(order: NotifyOrder, event: WhatsAppEvent) {
   if (event === "ready") {

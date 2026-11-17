@@ -20,7 +20,9 @@ import { recordCapture } from "./capture-record";
 import { CLOSED_DISPUTE_STATUSES } from "../disputes/status";
 import { orderPrepMinutes } from "../listing/prepared";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
-import { buyShippingLabel, fixPostage, type LabelDeps } from "../shipping/label";
+import { buyShippingLabel, fixPostage, SHIPPING_UNAVAILABLE, type LabelDeps } from "../shipping/label";
+import { ShippingProviderError, type ShippingProvider } from "../shipping/provider";
+import { shippingProvider } from "../shipping/settings";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -36,6 +38,8 @@ export type OrderStatus =
   | "COURIER_ASSIGNED"
   | "PICKED_UP"
   | "OUT_FOR_DELIVERY"
+  | "SHIPPED"
+  | "IN_TRANSIT"
   | "DELIVERED"
   | "COMPLETED"
   | "CANCELLED"
@@ -302,6 +306,8 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "COURIER_ASSIGNED",
   "PICKED_UP",
   "OUT_FOR_DELIVERY",
+  "SHIPPED",
+  "IN_TRANSIT",
   "REFUND_FAILED",
 ];
 
@@ -1569,6 +1575,64 @@ export async function cancelOrder(
     return { ok: false, error: "Order status changed during cancellation" };
   }
 
+  return { ok: true };
+}
+
+export const SHIPMENT_SCANNED = "The carrier has scanned this parcel, so it can no longer be cancelled";
+
+/**
+ * Cancels a shipped order after Ready but before the carrier's first scan (#568): the label is voided with Shippo,
+ * then the whole capture, postage included, is refunded and the order cancelled. Shippo refuses the void once the
+ * label is scanned, and a SHIPPED or later order is refused here; either way nothing changes.
+ */
+export async function cancelShipment(
+  storeId: string,
+  orderId: string,
+  actor: { id: string; email: string },
+  deps: { provider?: ShippingProvider | null } = {},
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const scoped = storeScoped(storeId);
+  const order = await scoped.order.findUnique({ where: { id: orderId } });
+  if (!order || order.fulfillment !== "ship") return { ok: false, error: "Order not found" };
+  if (order.status !== "READY") {
+    return { ok: false, error: ["SHIPPED", "IN_TRANSIT", "DELIVERED"].includes(order.status) ? SHIPMENT_SCANNED : `Cannot cancel order in status ${order.status}` };
+  }
+  if (order.shippingLabelStatus === "buying") return { ok: false, error: "The label is being bought. Try again in a minute" };
+  if (order.shippingLabelStatus === "bought" && order.shippingLabelId) {
+    const provider = deps.provider === undefined ? shippingProvider() : deps.provider;
+    if (!provider) return { ok: false, error: SHIPPING_UNAVAILABLE };
+    let outcome;
+    try {
+      outcome = await provider.voidLabel(order.shippingLabelId);
+    } catch (error) {
+      if (!(error instanceof ShippingProviderError)) throw error;
+      console.error(JSON.stringify({ event: "shipping_void_failed", storeId, orderId, status: error.status }));
+      return { ok: false, error: SHIPPING_UNAVAILABLE };
+    }
+    if (outcome === "refused") return { ok: false, error: SHIPMENT_SCANNED };
+    await scoped.order.updateMany({ where: { id: orderId, shippingLabelStatus: "bought" }, data: { shippingLabelStatus: "voided" } });
+  }
+
+  // The claim: a scan that lands now finds CANCELLING and moves nothing.
+  const claimed = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const { count } = await tx.order.updateMany({ where: { id: orderId, status: "READY", fulfillment: "ship" }, data: { status: "CANCELLING" } });
+    if (count === 0) return false;
+    await tx.auditLog.create({
+      data: causeAuditData(storeId, orderId, { action: "store_cancel", actor, reason: "other", note: "Shipment cancelled before the carrier's first scan" }),
+    });
+    return true;
+  });
+  if (!claimed) {
+    console.error(JSON.stringify({ event: "shipping_cancel_lost_race", storeId, orderId, labelVoided: order.shippingLabelStatus === "bought" }));
+    return { ok: false, error: "Order status changed during cancellation" };
+  }
+  if (!order.paymentIntentId) return { ok: false, error: "Order has no payment intent" };
+  const refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
+  if (refundBlocked(refund)) return { ok: false, error: "Order status changed during cancellation" };
+  if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank" };
+  const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
+  if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
   return { ok: true };
 }
 

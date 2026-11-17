@@ -14,7 +14,9 @@ import {
   markOutForDelivery,
   markDelivered,
   cancelOrder,
+  cancelShipment,
 } from "./service";
+import { buyShippingLabel } from "../shipping/label";
 import { STORE_CANCEL_REASONS } from "./constants";
 import {
   BATCH_LINE_DONE,
@@ -194,12 +196,35 @@ export async function markLineShortAction(lineId: string, qtyFound: number) {
   return runStaffAction("markLineShort", id.data, () => markLineShort(session.store.id, id.data, found.data));
 }
 
-export async function markReadyAction(orderId: string) {
+/** `confirmPostageCents`: staff accepted a re-quoted postage more than $2 above what the shopper paid (#568). */
+export async function markReadyAction(orderId: string, confirmPostageCents?: number) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
-  return runStaffAction("markReady", id.data, () => markReady(session.store.id, id.data));
+  const confirm = parseInput(z.number().int().min(0).max(1_000_000).optional(), confirmPostageCents);
+  if (!confirm.ok) return { ok: false as const, error: "Postage not recognised. Mark ready again" };
+  return runStaffAction("markReady", id.data, () => markReady(session.store.id, id.data, { confirmPostageCents: confirm.data }));
+}
+
+/** Buys the label again when the one at Ready failed (#568). */
+export async function buyShippingLabelAction(orderId: string) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("buyShippingLabel", id.data, () => buyShippingLabel(session.store.id, id.data));
+}
+
+/** Voids the label and refunds the order, only before the carrier's first scan (#568). */
+export async function cancelShipmentAction(orderId: string) {
+  const session = await requireStoreWriter();
+  if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("cancelShipment", id.data, () =>
+    cancelShipment(session.store.id, id.data, { id: session.user.id, email: session.user.email }),
+  );
 }
 
 /** The store's one "5 more minutes" on a courier order that is packing (#562). */

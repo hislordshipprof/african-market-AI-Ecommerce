@@ -11,6 +11,9 @@ const RANK: Record<OrderNotifyEvent, number> = {
   accepted: 1,
   ready: 2,
   out_for_delivery: 3,
+  // A parcel's two steps on the way (#568): the same step, so the customer hears both.
+  shipped: 3,
+  in_transit: 3,
   // A store-delivery order ends at delivered, a pickup order at completed: same step, so neither supersedes the other.
   delivered: 4,
   completed: 4,
