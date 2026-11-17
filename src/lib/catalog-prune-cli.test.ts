@@ -167,6 +167,14 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
     process.env.VERCEL_ENV = "preview";
     const logs: string[] = [];
     try {
+      // The test admin is refused on a preview before anything is written (#714).
+      await expect(runSeed({
+        csvPath: csv(previewId, "high"),
+        log: (line) => logs.push(line),
+      })).rejects.toThrow(/preview deployment/);
+      const refused = await asAdmin(prisma, (tx) => tx.masterProduct.findUnique({ where: { id: previewId } }));
+      expect(refused).toBeNull();
+      delete process.env.SEED_TEST_ADMIN;
       await runSeed({
         csvPath: csv(previewId, "high"),
         log: (line) => logs.push(line),
@@ -174,8 +182,6 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
       const preview = await asAdmin(prisma, (tx) => tx.masterProduct.findUnique({ where: { id: previewId } }));
       expect(preview?.id).toBe(previewId);
       expect(logs.join("\n")).toContain("Catalog prune skipped");
-      const admin = await prisma.user.findUnique({ where: { email: "admin@platform.test" } });
-      expect(admin?.email).toBe("admin@platform.test");
       process.env.VERCEL_ENV = "production";
       delete process.env.SEED_PRUNE_R2;
       delete process.env.SEED_TEST_ADMIN;
