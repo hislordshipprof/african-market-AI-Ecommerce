@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
@@ -7,6 +7,9 @@ import { storeScoped } from "@/lib/db";
 import { POST } from "./route";
 
 const signingKey = "whsec-route-test-key";
+const signatureEvents = (warn: { mock: { calls: unknown[][] } }) =>
+  warn.mock.calls.map((call) => JSON.parse(String(call[0]))).filter((e) => e.event === "webhook_signature_invalid");
+
 
 function post(raw: string, signature?: string) {
   const headers = new Headers({ "content-type": "application/json" });
@@ -98,10 +101,14 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/uber-direct", () 
 
   it("rejects a missing or wrong signature with 401 and a malformed signed body with 400, recording nothing", async () => {
     const body = event("delivered");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect((await post(body)).status).toBe(401);
     expect((await post(body, sign(body, "another-key"))).status).toBe(401);
     expect((await post(body, sign(event("canceled")))).status).toBe(401);
     expect((await post("{not json", sign("{not json"))).status).toBe(400);
+    expect(signatureEvents(warn)).toEqual([{ event: "webhook_signature_invalid", provider: "uber", ip: expect.stringMatching(/^[0-9a-f]{16}$/) }, { event: "webhook_signature_invalid", provider: "uber", ip: expect.stringMatching(/^[0-9a-f]{16}$/) }, { event: "webhook_signature_invalid", provider: "uber", ip: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(sign(body, "another-key"));
+    warn.mockRestore();
     expect(await storeScoped(storeId).deliveryEvent.count({ where: { type: { in: ["delivered", "cancelled"] } } })).toBe(0);
   });
 

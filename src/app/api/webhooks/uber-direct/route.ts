@@ -3,6 +3,7 @@ import { z } from "zod";
 import { UberDirectProvider, UberWebhookSignatureError } from "@/lib/delivery/uber-direct";
 import type { DeliveryWebhookEvent } from "@/lib/delivery/provider";
 import { applyCourierWebhook } from "@/lib/delivery/webhook";
+import { logInvalidWebhookSignature } from "@/lib/security/events";
 import { parseInput } from "@/lib/security/parse-input";
 
 const eventIdsSchema = z.looseObject({
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
     event = new UberDirectProvider().handleWebhook(raw, req.headers);
   } catch (error) {
     if (error instanceof UberWebhookSignatureError) {
+      logInvalidWebhookSignature("uber", req.headers);
       return NextResponse.json({ error: error.message }, { status: 401 });
     }
     return NextResponse.json({ error: "Malformed webhook body" }, { status: 400 });

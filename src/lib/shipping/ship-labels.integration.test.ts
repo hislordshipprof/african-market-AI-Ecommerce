@@ -202,8 +202,12 @@ describe.skipIf(!hasDb)("shipping labels, tracking and the Shipped state (#568, 
     const { store, orderId, labelId, scoped } = await readyShipOrder();
     const status = async () => (await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).status;
 
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect((await track(labelId, "TRANSIT", { secret: "wrong" })).status).toBe(401);
     expect((await track(labelId, "TRANSIT", { signedAt: new Date(Date.now() - 10 * 60_000) })).status).toBe(401);
+    const signatureEvents = warn.mock.calls.map((call) => JSON.parse(String(call[0]))).filter((e) => e.event === "webhook_signature_invalid");
+    expect(signatureEvents).toEqual([{ event: "webhook_signature_invalid", provider: "shippo", ip: expect.stringMatching(/^[0-9a-f]{16}$/) }, { event: "webhook_signature_invalid", provider: "shippo", ip: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
+    warn.mockRestore();
     expect((await track("txn_unknown", "TRANSIT")).status).toBe(404);
     expect(await status()).toBe("READY");
 

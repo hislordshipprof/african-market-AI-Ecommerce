@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DoorDashDriveProvider, DoorDashWebhookAuthError } from "@/lib/delivery/doordash";
 import type { DeliveryWebhookEvent } from "@/lib/delivery/provider";
 import { applyCourierWebhook } from "@/lib/delivery/webhook";
+import { logInvalidWebhookSignature } from "@/lib/security/events";
 import { parseInput } from "@/lib/security/parse-input";
 
 const eventIdsSchema = z.looseObject({
@@ -27,7 +28,10 @@ export async function POST(req: NextRequest) {
   try {
     event = new DoorDashDriveProvider().handleWebhook(raw, req.headers);
   } catch (error) {
-    if (error instanceof DoorDashWebhookAuthError) return NextResponse.json({ error: error.message }, { status: 401 });
+    if (error instanceof DoorDashWebhookAuthError) {
+      logInvalidWebhookSignature("doordash", req.headers);
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
     return NextResponse.json({ error: "Malformed webhook body" }, { status: 400 });
   }
   if (!parseInput(eventIdsSchema, event).ok) return NextResponse.json({ error: "Malformed webhook body" }, { status: 400 });
