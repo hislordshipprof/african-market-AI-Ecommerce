@@ -14,14 +14,14 @@ vi.mock("next/headers", () => ({
 
 import { POST } from "./route";
 import { authPrisma, storeScoped } from "@/lib/db";
-import { authPost, collectCookies } from "../../../../lib/test-auth";
+import { authPost, testSignUp, collectCookies } from "../../../../lib/test-auth";
 
 const suffix = `${Date.now()}-inv`;
 const password = "GuardPass-123!";
 const email = `invite-309-${suffix}@test.example`;
 
 async function verifiedCookies(): Promise<string> {
-  const signedUp = await authPost("/sign-up/email", { email, password, name: "Invite 309" });
+  const signedUp = await testSignUp({ email, password, name: "Invite 309" });
   expect(signedUp.status, await signedUp.clone().text()).toBe(200);
   const signedIn = await authPost("/sign-in/email", { email, password });
   expect(signedIn.status, await signedIn.clone().text()).toBe(200);

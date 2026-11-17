@@ -2,6 +2,7 @@ import { storeUrl, E2E_PORT } from "./urls";
 import { test, expect } from "@playwright/test";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 import { deleteGuestOrder, insertGuestOrder } from "./order-fixture";
+import { insertShopperAccount } from "./account-fixture";
 
 const base = storeUrl("mama-ngozi");
 const apiBase = `http://localhost:${E2E_PORT}`;
@@ -9,17 +10,8 @@ const email = `e2e-customer-${Date.now()}@test.example`;
 
 test.describe("Customer magic-link auth", () => {
   test("sign in via magic link → /account → sign out", async ({ page, request }) => {
-    // 1. Sign up the test user (sign-up/email is not a customer-only path, no slug needed)
-    const signupRes = await request.post(
-      `${apiBase}/api/auth/sign-up/email`,
-      {
-        data: { email, password: "E2eTestPass-123!", name: "E2E Customer" },
-      },
-    );
-    expect(
-      signupRes.ok(),
-      `Sign-up failed ${signupRes.status()}: ${await signupRes.text()}`,
-    ).toBe(true);
+    // 1. The test user exists with a name (public sign-up is closed, so the fixture writes it)
+    await insertShopperAccount({ email, password: "E2eTestPass-123!", name: "E2E Customer" });
 
     // 2. Navigate to the store sign-in page and submit via UI (browser resolves subdomain)
     await page.goto(`${base}/account/sign-in`);

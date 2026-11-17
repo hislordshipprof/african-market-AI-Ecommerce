@@ -17,6 +17,40 @@ export async function authPost(
   );
 }
 
+/**
+ * Tests only: an email-and-password account like the old public sign-up made (unverified), created
+ * server-side because /sign-up/email is closed. Returns the user id.
+ */
+export async function createTestUser(input: {
+  email: string;
+  password: string;
+  name: string;
+  emailVerified?: boolean;
+}): Promise<string> {
+  const ctx = await auth.$context;
+  const user = await ctx.internalAdapter.createUser({
+    email: input.email.toLowerCase(),
+    name: input.name,
+    emailVerified: input.emailVerified ?? false,
+  }, { method: "email-password" });
+  await ctx.internalAdapter.linkAccount({
+    userId: user.id,
+    providerId: "credential",
+    accountId: user.id,
+    password: await ctx.password.hash(input.password),
+  });
+  return user.id;
+}
+
+/** Tests only: creates the account, then signs in by password. Returns the sign-in response. */
+export async function testSignUp(
+  input: { email: string; password: string; name: string },
+  extra?: Record<string, string>,
+): Promise<Response> {
+  await createTestUser(input);
+  return authPost("/sign-in/email", { email: input.email, password: input.password }, undefined, extra);
+}
+
 export async function authGet(
   url: string,
   cookies?: string,

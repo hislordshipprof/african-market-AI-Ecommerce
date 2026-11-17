@@ -28,14 +28,14 @@ import { addLine, getCartWithLines, getOrCreateCart } from "../cart/service";
 import { authPrisma, storeScoped } from "../db";
 import { createListingAction, updateListingAction } from "./actions";
 import { commitImport, generatePreview } from "./csv-import";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `w216-act-${Date.now().toString(36)}`;
 const password = "Placeholder-123!";
 
 async function signUp(email: string, name: string): Promise<void> {
-  const res = await authPost("/sign-up/email", { email, password, name });
+  const res = await testSignUp({ email, password, name });
   expect(res.status, await res.clone().text()).toBe(200);
 }
 

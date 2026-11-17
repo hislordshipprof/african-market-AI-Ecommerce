@@ -63,7 +63,7 @@ import { issuesToReview } from "./issue-review";
 import { acceptOrder, markLinePicked, markLineShort } from "./service";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import sharp from "sharp";
-import { authPost } from "../test-auth";
+import { authPost, testSignUp } from "../test-auth";
 
 const RUN = `t186-${Date.now()}`;
 const password = "StaffIso-186!";
@@ -138,7 +138,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
       [emailA, "Owner A"],
       [emailB, "Owner B"],
     ] as const) {
-      const res = await authPost("/sign-up/email", { email, password, name });
+      const res = await testSignUp({ email, password, name });
       expect(res.status, await res.clone().text()).toBe(200);
     }
     ownerAId = (await authPrisma.user.findFirstOrThrow({ where: { email: emailA } })).id;

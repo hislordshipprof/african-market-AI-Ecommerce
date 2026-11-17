@@ -34,7 +34,7 @@ import { clearTestSentEmails, getTestSentEmails } from "./email/send";
 import { syncCustomerForRequest } from "./customer-sync";
 import { createInvite, setInviteePassword } from "./invite/service";
 import { sendSignInLinkAction } from "./customer-sign-in/actions";
-import { AUTH_BASE, authGet, authPost, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
+import { AUTH_BASE, authGet, authPost, testSignUp, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
 import { storeScoped } from "./db";
 
 const suffix = `${Date.now()}-c1`;
@@ -45,7 +45,7 @@ function cookiePairs(res: Response): string {
 }
 
 async function signUp(email: string, name: string): Promise<void> {
-  const res = await authPost("/sign-up/email", { email, password, name });
+  const res = await testSignUp({ email, password, name });
   expect(res.status, await res.clone().text()).toBe(200);
 }
 
@@ -324,7 +324,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
   it("a staff member opening the storefront account page is not synced into its customers", async () => {
     const email = `c1-staff-shopper-${suffix}@test.example`;
     try {
-      const res = await authPost("/sign-up/email", { email, password, name: "C1 Staff Shopper" });
+      const res = await testSignUp({ email, password, name: "C1 Staff Shopper" });
       expect(res.status).toBe(200);
       const userId = (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
       await insertOwnerMembership(storeId, userId);

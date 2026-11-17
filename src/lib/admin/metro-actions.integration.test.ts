@@ -29,7 +29,7 @@ import MetroPage from "@/app/admin/(shell)/metros/[id]/page";
 import { saveMetroAction, setStoreMetroAction } from "./metro-actions";
 import { authPrisma, platformAdmin, platformAdminTransaction } from "../db";
 import { readStoreCourierSettings } from "../delivery/courier-settings";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const suffix = `${Date.now()}-m577`;
 const password = "GuardPass-123!";
@@ -42,7 +42,7 @@ const storeId = crypto.randomUUID();
 const metroIds: string[] = [];
 
 async function signUpAndIn(email: string): Promise<{ userId: string; cookies: string }> {
-  const signedUp = await authPost("/sign-up/email", { email, password, name: "Metro 577" });
+  const signedUp = await testSignUp({ email, password, name: "Metro 577" });
   expect(signedUp.status, await signedUp.clone().text()).toBe(200);
   const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
   const signedIn = await authPost("/sign-in/email", { email, password });

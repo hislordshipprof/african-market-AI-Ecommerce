@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
 import { SAVED_CARD_UNAVAILABLE } from "../src/lib/customer-account/consent";
 import { E2E_PORT } from "./urls";
+import { insertShopperAccount } from "./account-fixture";
 
 const apiBase = `http://localhost:${E2E_PORT}`;
 
@@ -43,10 +44,7 @@ test("signed-in checkout: save tick starts unticked, a saved card is reused, a r
       await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 } });
     });
 
-    const signup = await request.post(`${apiBase}/api/auth/sign-up/email`, {
-      data: { email, password: "E2eTestPass-123!", name: "Ada Saver" },
-    });
-    expect(signup.ok(), await signup.text()).toBe(true);
+    await insertShopperAccount({ email, password: "E2eTestPass-123!", name: "Ada Saver" });
     await page.context().addCookies([{ name: "e2e_stripe_harness", value: "1", url: apiBase }]);
     await expect(async () => {
       await page.goto(`/?store=${slug}`);

@@ -15,7 +15,7 @@ import { authPrisma, storeScoped } from "./db";
 import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
 import { resolveDirectUrl } from "./env";
-import { AUTH_BASE, authGet, authPost, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
+import { AUTH_BASE, authGet, authPost, testSignUp, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
 import { customerRlsErrorText, isCustomerRlsRejection } from "./customer-rls-error";
 import { syncCustomerForStore } from "./customer-claim";
 import { listAccountOrders } from "./customer-account/order-history";
@@ -53,7 +53,7 @@ describe("auth integration (real DB, app_runtime)", () => {
       [staffEmail, "Integ Staff"],
       [adminEmail, "Integ Admin"],
     ] as const) {
-      const res = await authPost("/sign-up/email", {
+      const res = await testSignUp({
         email,
         password: "IntegPass-123!",
         name,
@@ -557,7 +557,7 @@ describe("auth integration (real DB, app_runtime)", () => {
       const storeB = crypto.randomUUID();
       const slugA = `integ-race-a-${stamp}`;
       const slugB = `integ-race-b-${stamp}`;
-      const signedUp = await authPost("/sign-up/email", {
+      const signedUp = await testSignUp({
         email,
         password: "IntegPass-123!",
         name: "Race Customer",
@@ -806,7 +806,7 @@ describe("auth integration (real DB, app_runtime)", () => {
       const guest = await seedGuestOrder(storeId, {
         number: 11, email: unprovenEmail, name: "Real Owner", phone: "+15550001011", createdAt: new Date(),
       });
-      const signUp = await authPost("/sign-up/email", {
+      const signUp = await testSignUp({
         email: unprovenEmail,
         password: "IntegPass-123!",
         name: "Squatter",

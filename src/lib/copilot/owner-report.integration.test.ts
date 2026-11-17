@@ -68,7 +68,7 @@ import { replyToThreadAction } from "../support/store-actions";
 import { READ_ONLY_MESSAGE } from "../store-admin/session";
 import { listPendingOwnerReports, matchReportItem, REPORTS_LOCKED_MESSAGE } from "./owner-report";
 import { confirmOwnerReportItems, submitPhotoReport, submitVoiceReport } from "./report-actions";
-import { authPost } from "../test-auth";
+import { authPost, testSignUp } from "../test-auth";
 
 const RUN = `t21-${Date.now()}`;
 const password = "Owner-Report-21!";
@@ -135,7 +135,7 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
     vi.stubEnv("R2_SECRET_ACCESS_KEY", "test");
 
     for (const email of Object.values(emails)) {
-      const res = await authPost("/sign-up/email", { email, password, name: email.split("@")[0] });
+      const res = await testSignUp({ email, password, name: email.split("@")[0] });
       expect(res.status, await res.clone().text()).toBe(200);
     }
     const userId = async (email: string) => (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
