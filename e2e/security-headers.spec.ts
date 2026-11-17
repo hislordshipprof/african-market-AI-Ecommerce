@@ -61,7 +61,7 @@ test("non-platform host (chromium --host-resolver-rules) loads with zero violati
   await watch(page);
   const response = await page.goto(`http://mama-ngozi.example.test:${port}/`);
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole("button", { name: /shopping cart/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /in basket$|^Basket$/ })).toBeVisible();
   expect(response?.headers()["content-security-policy"]).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
   expect(response?.headers()["content-security-policy-report-only"]).toContain("'self'");
   expect(response?.headers()["x-content-type-options"]).toBe("nosniff");
