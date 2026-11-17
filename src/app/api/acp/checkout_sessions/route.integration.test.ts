@@ -194,9 +194,11 @@ describe.skipIf(!hasDb)("ACP checkout sessions (#574)", () => {
     const second = await tokenForHold("a", session.id);
     const before = (await ordersAt("a")).length;
     const results = await Promise.all([completeWith("a", session.id, first.token), completeWith("a", session.id, second.token)]);
-    expect(results.filter((result) => result.status === 200)).toHaveLength(1);
-    expect(results.filter((result) => result.status !== 200).map((result) => result.body.code)).toEqual(["idempotency_in_flight"]);
     expect((await ordersAt("a")).length).toBe(before + 1);
+    // The loser is told the complete is in flight, or, if it came after, gets the same order.
+    const orderIds = new Set(results.filter((result) => result.status === 200).map((result) => result.body.order.id));
+    expect(orderIds.size).toBe(1);
+    for (const result of results.filter((r) => r.status !== 200)) expect(result.body.code).toBe("idempotency_in_flight");
     // Exactly one of the two tokens was spent: the other still pays for a new session.
     const spare = [];
     for (const token of [first.token, second.token]) spare.push((await completeWith("a", (await newSession()).id, token)).status);

@@ -41,18 +41,19 @@ function hostOrigin(request: Request): string | null {
 
 /**
  * The gate every ACP checkout route passes first (#574): the flag (fake payments only), an open, opted-in
- * store on this host, the agent platform's bearer key, then 60 calls a minute per IP.
+ * store on this host, 60 calls a minute per IP, then the agent platform's bearer key.
  */
 export async function acpGate(request: Request): Promise<{ store: ValidatedStore; origin: string } | Response> {
   if (!acpCheckoutEnabled()) return acpError(404, "not_found", "Not found");
   const store = await findStoreForHeaders(await headers());
   const origin = hostOrigin(request);
   if (!acpStoreOpen(store) || !origin) return acpError(404, "not_found", "Not found");
-  if (!acpAuthorized(request.headers.get("authorization"))) return acpError(401, "unauthorized", "A valid bearer key is required.");
+  // Counted before the key check, so wrong-key guesses use up the limit too.
   const limit = await takeRateLimit(`acp:ip:${clientIp(request.headers)}`, CALLS_PER_MINUTE, WINDOW_MS);
   if (!limit.ok) {
     return Response.json({ type: "invalid_request", code: "rate_limited", message: "Too many requests" }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
   }
+  if (!acpAuthorized(request.headers.get("authorization"))) return acpError(401, "unauthorized", "A valid bearer key is required.");
   return { store, origin };
 }
 
