@@ -706,6 +706,11 @@ test.describe("quick add limits and recovery", () => {
     await expectNoCrash(page);
     await expect(page.locator("[data-sonner-toast]").first()).toBeVisible();
     await expect(page.getByTestId("storefront-header").locator("[data-cart-attention]")).toBeVisible();
+    // The closed basket keeps a visible, named failure until it saves (#708 P1).
+    const status = page.getByTestId("storefront-header").getByTestId("cart-sync-status");
+    await expect(status).toBeVisible();
+    await expect(status).toHaveAttribute("data-state", "failed");
+    await expect(page.getByTestId("storefront-header").getByRole("button", { name: /^Changes not saved\. .*in basket$/ })).toBeVisible();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
     await settle(page);
     await page.unroute("**/*");
@@ -713,6 +718,7 @@ test.describe("quick add limits and recovery", () => {
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
     await settle(page);
     await expect(page.getByTestId("storefront-header").locator("[data-cart-attention]")).toHaveCount(0);
+    await expect(status).toHaveCount(0);
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
   });
