@@ -92,6 +92,15 @@ interface FakeLedger {
   calls: number;
   cardSeq: number;
   failNext: "timeout" | "500" | null;
+  grantedTokens: Map<string, FakeGrantedToken>;
+}
+
+/** A Stripe Shared Payment Token an AI agent grants the seller (#574): one use, up to an amount, until a time. */
+interface FakeGrantedToken {
+  currency: string;
+  maxAmount: number;
+  expiresAt: number;
+  used: boolean;
 }
 
 // Server actions and route handlers can load this module twice. The fake
@@ -106,7 +115,10 @@ const ledger: FakeLedger = ((globalThis as { __fakeCheckoutLedger?: FakeLedger }
   calls: 0,
   cardSeq: 0,
   failNext: null,
+  grantedTokens: new Map(),
 });
+// A ledger made by an older module load in the same process has no token map yet.
+ledger.grantedTokens ??= new Map();
 const { customers, cards, intents, intentModes, idempotency, detachCalls } = ledger;
 
 const FIXTURES: Record<string, Pick<NormalizedCard, "brand" | "last4" | "expMonth" | "expYear" | "behavior">> = {
@@ -157,6 +169,30 @@ export function resetFakeCheckoutPayments(): void {
   detachCalls.length = 0;
   ledger.cardSeq = 0;
   ledger.failNext = null;
+  ledger.grantedTokens.clear();
+}
+
+/** The fake agent's side of ACP (#574): a shared payment token for this seller, usable once, up to `maxAmount`. */
+export function grantFakeSharedPaymentToken(limits: { maxAmount: number; expiresAt: Date; currency?: string }): string {
+  const id = `spt_fake_${randomBytes(12).toString("hex")}`;
+  ledger.grantedTokens.set(id, {
+    currency: limits.currency ?? "usd",
+    maxAmount: limits.maxAmount,
+    expiresAt: limits.expiresAt.getTime(),
+    used: false,
+  });
+  return id;
+}
+
+/** Spends a shared payment token on an intent of this amount, or refuses as Stripe would: unknown, used, expired or over its limit. */
+function spendGrantedToken(id: string, amount: number, currency: string): void {
+  const token = ledger.grantedTokens.get(id);
+  if (!token) throw invalid(`No such shared_payment_granted_token: '${id}'`, "resource_missing", 404);
+  if (token.used) throw invalid("This shared payment token has already been used.", "shared_payment_granted_token_used");
+  if (token.expiresAt <= Date.now()) throw invalid("This shared payment token has expired.", "shared_payment_granted_token_expired");
+  if (token.currency !== currency) throw invalid("This shared payment token is for another currency.", "shared_payment_granted_token_limit");
+  if (amount > token.maxAmount) throw invalid("The amount exceeds this shared payment token's usage limits.", "shared_payment_granted_token_limit");
+  token.used = true;
 }
 
 export function fakeDetachCalls(): string[] {
@@ -308,6 +344,8 @@ const fakeMethods: CheckoutPayments = {
     assertAmount(Number(params.amount));
     const paymentMethodId = emptyToNull(params.payment_method);
     if (paymentMethodId) assertPaymentMethodUsable(paymentMethodId, customerId);
+    const granted = emptyToNull((params.payment_method_data as { shared_payment_granted_token?: string } | undefined)?.shared_payment_granted_token);
+    if (granted) spendGrantedToken(granted, Number(params.amount), String(params.currency ?? "usd"));
     const id = `pi_fake_${process.pid}_${randomBytes(8).toString("hex")}`;
     const metadata = (params.metadata ?? {}) as Record<string, string>;
     const transfer = params.transfer_data as { destination?: string } | undefined;
@@ -326,6 +364,12 @@ const fakeMethods: CheckoutPayments = {
       capture_method: emptyToNull(params.capture_method),
       authorized_at: null,
     };
+    // A token confirmed at create is the whole card authorization: manual capture leaves it held.
+    if (granted && params.confirm === true) {
+      intent.payment_method = `pm_fake_${granted}`;
+      intent.status = intent.capture_method === "manual" ? "requires_capture" : "succeeded";
+      intent.authorized_at = Date.now();
+    }
     intents.set(id, intent);
     intentModes.set(id, keyMode());
     if (key) idempotency.set(key, { hash: hashParams(params), customerId: id, expired: false });
