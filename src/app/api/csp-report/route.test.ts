@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "./route";
 
@@ -10,7 +10,7 @@ function post(body: string, contentType: string, ip = `10.9.${Math.floor(Math.ra
   }));
 }
 
-function warnings(spy: ReturnType<typeof vi.spyOn>) {
+function warnings(spy: MockInstance<typeof console.warn>) {
   return spy.mock.calls.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>);
 }
 
