@@ -138,6 +138,7 @@ const STORE_SCOPED_MODELS = [
   "copilotAlert",
   "copilotClientMessage",
   "copilotConversation",
+  "courierQuoteDay",
   "customer",
   "delivery",
   "deliveryEvent",
@@ -355,6 +356,7 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "listing",
   "masterProduct",
   "masterProductIngredient",
+  "metro",
   "order",
   "paymentDispute",
   "paymentDisputeEvent",
@@ -407,6 +409,7 @@ const STORE_SCOPED_TX_MODELS = [
   "copilotConversation",
   "copilotDigest",
   "copilotWeeklyReport",
+  "courierQuoteDay",
   "customer",
   "delivery",
   "deliveryEvent",
@@ -630,6 +633,57 @@ export async function lockStoreAddress(
 /** Locks the one platform settings row, so a concurrent settings save waits for this one (#535). */
 export async function lockPlatformSettingsRow(tx: Pick<PrismaClient, "$queryRaw">): Promise<void> {
   await tx.$queryRaw`SELECT id FROM platform_settings WHERE id = 'platform' FOR UPDATE`;
+}
+
+/** Locks one metro row, so a concurrent metro save waits for this one (#577). */
+export async function lockMetroRow(tx: Pick<PrismaClient, "$queryRaw">, metroId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM metros WHERE id = ${metroId} FOR UPDATE`;
+}
+
+/**
+ * Adds one quote round to the store's counts for the UTC day (#577): each courier asked, and whether it quoted. An
+ * unknown store inserts nothing.
+ */
+export async function countCourierQuotes(storeId: string, outcomes: Array<{ provider: string; quoted: boolean }>): Promise<void> {
+  if (outcomes.length === 0) return;
+  const rows = Prisma.join(outcomes.map((o) => Prisma.sql`(${o.provider}::text, ${o.quoted ? 1 : 0}::int)`));
+  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+    INSERT INTO courier_quote_days (store_id, provider, day, attempts, successes)
+    SELECT s.id, v.provider, (now() AT TIME ZONE 'UTC')::date, 1, v.quoted
+    FROM stores s CROSS JOIN (VALUES ${rows}) AS v(provider, quoted)
+    WHERE s.id = ${storeId}
+    ON CONFLICT (store_id, provider, day) DO UPDATE
+      SET attempts = courier_quote_days.attempts + 1, successes = courier_quote_days.successes + EXCLUDED.successes`);
+}
+
+/** Quote counts per courier for a metro's stores from `firstDay` (a UTC date, YYYY-MM-DD) on (#577). */
+export function metroQuoteTotals(tx: Pick<PrismaClient, "$queryRaw">, metroId: string, firstDay: string) {
+  return tx.$queryRaw<Array<{ provider: string; attempts: number; successes: number }>>`
+    SELECT q.provider, sum(q.attempts)::int AS attempts, sum(q.successes)::int AS successes
+    FROM courier_quote_days q JOIN stores s ON s.id = q.store_id
+    WHERE s.metro_id = ${metroId} AND q.day >= ${firstDay}::date
+    GROUP BY q.provider ORDER BY q.provider`;
+}
+
+/**
+ * The median wait for a courier over a metro's deliveries booked since `since` that got one (#577): from the later of
+ * booking and the ready time, as the assignment timer and the incident log count it (#536), to the first
+ * courier_assigned. A courier assigned before the ready time counts as 0.
+ */
+export async function metroAssignmentMedian(tx: Pick<PrismaClient, "$queryRaw">, metroId: string, since: Date): Promise<{ medianSeconds: number | null; deliveries: number }> {
+  const [row] = await tx.$queryRaw<Array<{ median: number | null; deliveries: number }>>`
+    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY t.secs)::float8 AS median, count(*)::int AS deliveries
+    FROM (
+      SELECT GREATEST(0, EXTRACT(EPOCH FROM (a.first_at - GREATEST(d.created_at, d.pickup_ready_at)))) AS secs
+      FROM deliveries d
+      JOIN stores s ON s.id = d.store_id
+      JOIN LATERAL (
+        SELECT min(e.created_at) AS first_at FROM delivery_events e
+        WHERE e.store_id = d.store_id AND e.delivery_id = d.id AND e.type = 'courier_assigned'
+      ) a ON a.first_at IS NOT NULL
+      WHERE s.metro_id = ${metroId} AND d.created_at >= ${since}::timestamp(3)
+    ) t`;
+  return { medianSeconds: row?.median ?? null, deliveries: row?.deliveries ?? 0 };
 }
 
 /** Locks the store and returns the delivery settings read under that lock. */
@@ -3172,9 +3226,10 @@ export async function findCourierIncidentRows(
               WHERE f.store_id = e.store_id AND f.order_id = e.order_id AND f.delivery_id = e.delivery_id
                 AND (f.type = 'failover_triggered' OR (f.type = 'cancelled' AND f.payload->>'by' = 'platform'))
             ) THEN 'provider_cancelled'
-          -- The deadline the assignment timer uses: the later of the timeout after booking and the ready time.
+          -- The deadline the assignment timer uses: the later of the timeout after booking and the ready time. The
+          -- timeout is the store's metro's when it sets one (#577).
           WHEN e.type = 'courier_assigned'
-            AND e.created_at > GREATEST(d.created_at + make_interval(secs => ps.courier_assignment_timeout_s), d.pickup_ready_at)
+            AND e.created_at > GREATEST(d.created_at + make_interval(secs => COALESCE(m.courier_assignment_timeout_s, ps.courier_assignment_timeout_s)), d.pickup_ready_at)
             THEN 'assigned_late'
           WHEN e.type = 'delivered' AND d.proof_url IS NULL AND d.pin IS NULL THEN 'delivered_no_proof'
         END AS kind
@@ -3182,6 +3237,8 @@ export async function findCourierIncidentRows(
       JOIN orders o ON o.id = e.order_id AND o.store_id = e.store_id
       LEFT JOIN deliveries d ON d.id = e.delivery_id AND d.store_id = e.store_id
       CROSS JOIN (SELECT courier_assignment_timeout_s FROM platform_settings WHERE id = 'platform') ps
+      LEFT JOIN stores st ON st.id = e.store_id
+      LEFT JOIN metros m ON m.id = st.metro_id
       WHERE e.type IN ('failover_triggered', 'both_failed', 'cancelled', 'returned', 'courier_assigned', 'delivered')
         AND o.fulfillment = 'courier'
         ${eventScope[0]} ${eventScope[1]}
