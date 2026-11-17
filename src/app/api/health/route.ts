@@ -2,17 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { clientIp } from "@/lib/assistant/client-ip";
 import { healthQueryRaw } from "@/lib/db";
 import { runHealthChecks, toMinimalResult } from "@/lib/health";
-import { isRateLimited } from "@/lib/rate-limit";
+import { takeRateLimit, type RateLimitResult } from "@/lib/rate-limit/app-limiter";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const ip = clientIp(req.headers);
 
-  if (isRateLimited(ip)) {
+  // With the database down the limiter cannot count; the probe must still answer and report it.
+  const limit: RateLimitResult = await takeRateLimit(`health:ip:${ip}`, 10, 60_000).catch(() => ({ ok: true, count: 0 }));
+  if (!limit.ok) {
     return NextResponse.json(
       { error: "Too many requests" },
-      { status: 429, headers: { "Retry-After": "60" } },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
     );
   }
 
