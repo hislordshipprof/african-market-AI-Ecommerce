@@ -43,6 +43,29 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/csp-report", () => {
     expect(line).not.toContain("203.0.113.7");
   });
 
+  it.each([
+    "/order/SECRETTOKEN123",
+    "/driver/SECRETTOKEN123",
+    "/invite/SECRETTOKEN123",
+    "/api/checkout-link/SECRETTOKEN123",
+    "/api/delivery-proof/SECRETTOKEN123",
+    "/api/order-messages/SECRETTOKEN123",
+  ])("never logs the link token in %s", async (path) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await post(JSON.stringify({
+      "csp-report": {
+        "document-uri": `https://shop.example${path}?x=1`,
+        "blocked-uri": `https://shop.example${path}/photo`,
+        "effective-directive": "script-src-attr",
+      },
+    }), "application/csp-report");
+    expect(res.status).toBe(204);
+    const [event] = warnings(warn);
+    const pattern = path.replace("SECRETTOKEN123", "[token]");
+    expect(event).toMatchObject({ document: `https://shop.example${pattern}`, blocked: `https://shop.example${pattern}/photo` });
+    expect(String(warn.mock.calls[0][0])).not.toContain("SECRETTOKEN123");
+  });
+
   it("drops a malformed body without logging a violation", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await post("not json", "application/csp-report");

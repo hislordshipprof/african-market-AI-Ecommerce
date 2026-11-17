@@ -21,13 +21,16 @@ const reportSchema = z.looseObject({
   }),
 });
 
-/** Origin and path only: a query string can carry a sign-in token. Keywords such as "inline" pass through. */
+/** Path prefixes whose next segment is a link token, the only key to that page (the [token] routes under src/app). */
+const TOKEN_PATH = /^(\/(?:order|driver|invite|api\/checkout-link|api\/delivery-proof|api\/order-messages)\/)[^/]+/;
+
+/** Origin and path only: a query string can carry a sign-in token, and a link token becomes "[token]". Keywords such as "inline" pass through. */
 function safeUrl(value: string | undefined): string | null {
   if (!value) return null;
   if (/^[a-z-]{1,32}$/.test(value)) return value;
   try {
     const url = new URL(value);
-    return `${url.origin}${url.pathname}`.slice(0, 300);
+    return `${url.origin}${url.pathname.replace(TOKEN_PATH, "$1[token]")}`.slice(0, 300);
   } catch {
     return null;
   }
