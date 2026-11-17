@@ -17,7 +17,7 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/directory/request-actions.ts",
 ]);
 const GUARDS = ["requireStoreOwner", "requireStoreMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
-const ROUTE_GUARDS = [...GUARDS, "platformAdminApiDenial"];
+const ROUTE_GUARDS = [...GUARDS, "platformAdminApiDenial", "platformAdminApiActor"];
 /** Route methods with no session guard. Each is public or checks its own secret, signature or token. */
 const PUBLIC_ROUTES = new Map<string, string>([
   ["src/app/api/acp/checkout_sessions/[id]/cancel/route.ts POST", "acpGate: ACP_API_KEY bearer"],
@@ -31,6 +31,7 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ["src/app/api/auth/[...all]/route.ts POST", "Better Auth"],
   ["src/app/api/catalog-image/[...key]/route.ts GET", "public catalog images"],
   ["src/app/api/checkout-link/[token]/route.ts GET", "holder of the checkout link token"],
+  ["src/app/api/csp-report/route.ts POST", "public browser CSP reports, rate limited"],
   ["src/app/api/delivery-proof/[token]/route.ts GET", "holder of the tracking token"],
   ["src/app/api/directory/near/route.ts GET", "public, rate limited"],
   ["src/app/api/e2e/fake-confirm/route.ts POST", "testOnlyRoutesAllowed"],
