@@ -241,13 +241,15 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
 
   /** What an agent-built cart left in the database, read as the store. */
   async function storeRows(storeId: string) {
-    const [, , carts, orders, listing] = await prisma.$transaction([
-      ...scoped(storeId),
-      prisma.cart.findMany({ where: { storeId }, include: { lines: true } }),
-      prisma.order.count({ where: { storeId } }),
-      prisma.listing.findUnique({ where: { id: ids.listingA }, select: { qty: true } }),
-    ]);
-    return { carts, orders, listing };
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
+      return {
+        carts: await tx.cart.findMany({ where: { storeId }, include: { lines: true } }),
+        orders: await tx.order.count({ where: { storeId } }),
+        listing: await tx.listing.findUnique({ where: { id: ids.listingA }, select: { qty: true } }),
+      };
+    });
   }
 
   /** The shopper opens the link on the store's host, with whatever cart cookie their browser holds. */
