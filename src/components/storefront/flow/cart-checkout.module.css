@@ -13,7 +13,7 @@
 .stack,
 .formFields {
   display: grid;
-  gap: 20px;
+  gap: 24px;
   min-width: 0;
 }
 .stack p,
@@ -108,7 +108,8 @@
 }
 .lineActions {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   margin-top: 8px;
 }
@@ -402,9 +403,10 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   color: var(--color-deal);
-  font-size: 13px;
-  line-height: 1.6;
-  margin: 10px 0;
+  /* Actionable errors read at body size (#708 P2). */
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 8px 0;
 }
 /* The quote could not settle: a visible failure with Retry, never a stuck "estimating" (#708 AC2b). */
 .quoteRetry {
@@ -590,15 +592,15 @@
 }
 @media (max-width: 767px) {
   .page {
-    /* Fixed stack above the viewport bottom: nav (12px offset + 73px bar)
-       + 11px gap, then the 74px checkout bar, then a 12px scroll margin. */
-    --cart-bar-bottom: calc(96px + env(safe-area-inset-bottom));
+    /* One bottom region on the basket page: the checkout bar takes the nav's place
+       (the nav hides here), so the first line is never under two bars (#708 P1). */
+    --cart-bar-bottom: calc(12px + env(safe-area-inset-bottom));
     --cart-bar-height: 74px;
     padding-bottom: calc(var(--cart-bar-bottom) + var(--cart-bar-height) + 12px);
   }
-  /* Keyboard focus scrolls clear of the nav and the checkout bar (96 + 120 + 12). */
+  /* Keyboard focus scrolls clear of the checkout bar (12 + 120 + 12). */
   :global(html):has(.mobileAction) {
-    scroll-padding-bottom: calc(228px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(144px + env(safe-area-inset-bottom));
   }
   /* The bar names why Checkout is off, on up to two more lines. */
   .page:has(.mobileAction[data-blocked]) {
@@ -651,7 +653,8 @@
     height: 64px;
   }
 }
-@media (max-width: 900px) {
+/* Side panel from 1024px (DESIGN Layout); one column below. */
+@media (max-width: 1023px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -665,7 +668,7 @@
     padding-top: 24px;
   }
   .line {
-    gap: 10px;
+    gap: 16px;
   }
   .photo {
     width: 64px;

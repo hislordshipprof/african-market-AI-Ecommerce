@@ -60,7 +60,7 @@ test.describe("Storefront redesign interactions", () => {
     const header = page.getByTestId("storefront-header");
     await expect(header.getByTestId("cart-count")).toHaveText("2");
     await header
-      .getByRole("button", { name: /basket/i })
+      .getByRole("button", { name: /in basket$|^Basket$/ })
       .click();
     const cart = page.getByRole("dialog", { name: "Your basket" });
     await expect(cart).toBeVisible();
@@ -176,7 +176,7 @@ test.describe("Storefront redesign interactions", () => {
     await detail.getByTestId("quick-add-btn").click();
     await page
       .getByTestId("storefront-header")
-      .getByRole("button", { name: /basket/i })
+      .getByRole("button", { name: /in basket$|^Basket$/ })
       .click();
     await expect(page.getByRole("dialog", { name: "Your basket" })).toContainText(
       packLabel,
@@ -206,11 +206,68 @@ test.describe("Storefront redesign interactions", () => {
         nav.getByRole("link", { name: label, exact: true }),
       ).toHaveAttribute("aria-current", "page");
     }
-    await nav.getByRole("button", { name: /basket/i }).click();
+    await nav.getByRole("button", { name: /in basket$|^Basket$/ }).click();
     const cart = page.getByRole("dialog", { name: "Your basket" });
     await expect(cart).toBeVisible();
     await expect(cart).toContainText("Your basket is empty");
     await cart.getByRole("button", { name: "Close basket" }).click();
     await expect(cart).not.toBeVisible();
+  });
+});
+
+test.describe("phone occlusion (#708 P1, #717 AC5)", () => {
+  test.use({ reducedMotion: "reduce", viewport: { width: 390, height: 844 } });
+
+  type Box = { x: number; y: number; width: number; height: number };
+  const overlaps = (a: Box, b: Box) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+  test("Shop with AI never covers card copy or quick add while the grid scrolls", async ({ page }) => {
+    await page.goto(`${BASE}/categories/grains-and-flours`);
+    const launcher = page.getByTestId("assistant-launcher");
+    await expect(launcher).toBeVisible();
+    await expect(page.getByTestId("listing-card").first()).toBeVisible();
+    for (const y of [0, 500, 1000, 1600]) {
+      await page.evaluate((top) => window.scrollTo(0, top), y);
+      await page.waitForTimeout(100);
+      const box = await launcher.boundingBox();
+      if (!box) continue;
+      const targets = await page.locator(".sf-product-copy, .sf-quick-add").evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const rect = node.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        }),
+      );
+      for (const target of targets) expect(overlaps(box, target), `launcher over a card at scrollY ${y}`).toBe(false);
+    }
+  });
+
+  test("the first basket line is clear of the checkout bar and nav at the top of the page", async ({ page }) => {
+    await page.goto(`${BASE}/categories/grains-and-flours`);
+    const card = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
+    await card.getByTestId("quick-add-btn").click();
+    await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden({ timeout: 20_000 });
+    await page.goto(`${BASE}/cart`);
+    const line = page.locator("main").getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await expect(line).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const fixed = await page.evaluate(() =>
+      [...document.querySelectorAll("body *")]
+        .filter((node) => {
+          const style = getComputedStyle(node);
+          return style.position === "fixed" && style.display !== "none" && style.visibility !== "hidden" && node.getBoundingClientRect().height > 0;
+        })
+        .map((node) => {
+          const rect = node.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        })
+        .filter((rect) => rect.y > 300),
+    );
+    for (const part of [line.getByRole("heading"), line.getByTestId("stepper-qty")]) {
+      const box = await part.boundingBox();
+      expect(box, "line part rendered").not.toBeNull();
+      expect(box!.y + box!.height, "line part inside the viewport").toBeLessThanOrEqual(844);
+      for (const rect of fixed) expect(overlaps(box!, rect), "a fixed bar covers the first line").toBe(false);
+    }
   });
 });

@@ -30,7 +30,6 @@ export function ListingCard({
         >
           <ViewTransition name={selected === instance ? `product-${listing.id}` : "auto"} share="sf-product-morph" default="none"><ProductImage category={listing.categorySlug} src={listing.imageUrl} name={listing.displayName} /></ViewTransition>
         </Link>
-        <button className="sf-quick-view-trigger" onClick={() => openQuickView(listing)} aria-label={`Quick view ${listing.displayName}`}>Quick view</button>
         {listing.frozen && <span className="sf-photo-tag">Frozen</span>}
         <div className="sf-quick-add">
           <QuickAddStepper
@@ -58,6 +57,8 @@ export function ListingCard({
           <StockBadgeChip badge={listing.badge} />
         </div>
       </div>
+      {/* Out of the photo on phones and touch; over it, until hover, on desktop (motion.css). */}
+      <button type="button" className="sf-quick-view-trigger" onClick={() => openQuickView(listing)} aria-label={`Quick view ${listing.displayName}`}>Quick view</button>
     </article>
   );
 }

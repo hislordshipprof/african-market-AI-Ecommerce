@@ -47,13 +47,32 @@
 .stepper[data-active="true"] {
   width: 132px;
 }
-@media (max-width: 380px) {
+/* Chosen by the card's own width, not the viewport: 112px when 132 + 8px insets no longer fit (#708 P1). */
+@container card (max-width: 147px) {
   .stepper[data-active="true"] {
     width: 112px;
   }
   .stepper[data-active="true"] span {
     width: 24px;
   }
+}
+/* Primary add in quick view and on the product page: 48px (DESIGN button-primary). */
+:global(.sf-quick-view-add) .stepper,
+:global(.sf-add-bar) .stepper {
+  height: 48px;
+  min-width: 48px;
+}
+:global(.sf-quick-view-add) .stepper:not([data-active="true"]),
+:global(.sf-add-bar) .stepper:not([data-active="true"]) {
+  width: 48px;
+}
+:global(.sf-quick-view-add) .stepper button,
+:global(.sf-add-bar) .stepper button {
+  width: 48px;
+}
+:global(.sf-quick-view-add) .stepper[data-active="true"],
+:global(.sf-add-bar) .stepper[data-active="true"] {
+  width: 144px;
 }
 .stepper button {
   width: 44px;
@@ -539,6 +558,10 @@
   }
   .navSlot {
     display: contents;
+  }
+  /* The basket page's checkout bar is the one bottom region there (#708 P1). */
+  :global(html):has([data-basket-action]) .mobileNav {
+    display: none;
   }
   .navLink,
   .activeNav {

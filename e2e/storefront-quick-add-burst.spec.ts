@@ -534,7 +534,7 @@ test.describe("quick add limits and recovery", () => {
     await openGrains(page);
     await addGarri(page);
     await burst(garri(page).getByTestId("stepper-plus"), 3);
-    await page.getByRole("button", { name: /basket/i }).click();
+    await page.getByRole("button", { name: /in basket$|^Basket$/ }).click();
     await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await settle(page);
     // The drawer's "Removed Yellow Garri (Ijebu). Undo" bar names the item, so check the lines only.
@@ -865,7 +865,7 @@ test.describe("quick add limits and recovery", () => {
     await writeListingStock("mama-ngozi", "mn_thyme", { ...thymeStock, stockMode: "status", status: "out_of_stock", qty: null });
     await revalidateMama(page);
     await page.reload();
-    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
     const sheet = page.getByRole("dialog");
     const line = sheet.locator("li[data-unavailable]");
     await expect(line).toContainText("Thyme");
@@ -1000,7 +1000,7 @@ test.describe("quick add limits and recovery", () => {
       }
       await route.fallback();
     });
-    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
     const sheet = page.getByRole("dialog", { name: "Your basket" });
     await sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-minus").click();
     await expect.poll(() => held).toBe(true);
@@ -1055,7 +1055,7 @@ test.describe("quick add limits and recovery", () => {
       }
       await route.fallback();
     });
-    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
     const sheet = page.getByRole("dialog", { name: "Your basket" });
     const curryRow = sheet.getByRole("listitem").filter({ hasText: "Curry Powder" });
     await curryRow.getByTestId("stepper-minus").click();
@@ -1218,7 +1218,7 @@ test.describe("quick add recovery gaps", () => {
     });
     await garri(page).getByTestId("quick-add-btn").click();
     await expect.poll(() => held).toBe(true);
-    await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
+    await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
     await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from basket" }).click();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     release();
@@ -1600,7 +1600,7 @@ async function openSavedYellowCart(page: Page) {
 }
 
 async function openSheet(page: Page) {
-  await page.getByTestId("storefront-header").getByRole("button", { name: /basket/i }).click();
+  await page.getByTestId("storefront-header").getByRole("button", { name: /in basket$|^Basket$/ }).click();
   const sheet = page.getByRole("dialog", { name: "Your basket" });
   await expect(sheet).toBeVisible();
   return sheet;

@@ -1211,7 +1211,8 @@ export function CartProvider({
 export function CartAnnouncement({ testId }: { testId?: string }) {
   const { announcement } = useCart();
   return (
-    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid={testId}>
+    // A polite live region without role=status, so it never competes with a surface's own status text.
+    <div className="sr-only" aria-live="polite" aria-atomic="true" data-testid={testId}>
       {announcement}
     </div>
   );

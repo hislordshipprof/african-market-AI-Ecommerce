@@ -220,8 +220,7 @@ export function CartPage({
         backHref="/"
         backLabel="Keep shopping"
       />
-      <AssistantSlot label="Shop with AI" />
-      <DemoNotice />
+      {!lines.length && <DemoNotice />}
       {!lines.length ? (
         loadFailed ? (
           // Failed-to-load is distinct from a confirmed-empty basket (#708 AC3).
@@ -325,6 +324,9 @@ export function CartPage({
                 })}
               </ul>
             </FlowCard>
+            {/* After the lines, so a phone shows the first line without scrolling (#708 P1). */}
+            <AssistantSlot label="Shop with AI" />
+            <DemoNotice />
             {!!related.length && (
               <FlowCard>
                 <RailScroller
@@ -424,7 +426,7 @@ export function CartPage({
         </div>
       )}
       {!!lines.length && (
-        <div className={styles.mobileAction} data-blocked={blockedReason ? "" : undefined}>
+        <div className={styles.mobileAction} data-basket-action="" data-blocked={blockedReason ? "" : undefined}>
           <div>
             <small>Subtotal</small>
             <strong>{money(subtotal)}</strong>

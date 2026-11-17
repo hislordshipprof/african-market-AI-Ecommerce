@@ -53,10 +53,10 @@ async function openEgusi(page: Page) {
 }
 
 async function settleCart(page: Page) {
-  const cart = page.getByRole("button", { name: /basket/i });
+  const cart = page.getByRole("button", { name: /in basket$|^Basket$/ });
   await expect(cart).not.toHaveAttribute("data-cart-pending");
   await page.reload();
-  await page.getByRole("button", { name: /basket/i }).click();
+  await page.getByRole("button", { name: /in basket$|^Basket$/ }).click();
   return page.getByRole("dialog", { name: "Your basket" });
 }
 
@@ -283,7 +283,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(other.getByRole("button", { name: "5 lb bag", exact: true })).toHaveCount(0);
     await other.getByTestId("quick-add-btn").click();
     await expect(other.getByTestId("stepper-qty")).toHaveText("1");
-    await expect(page.getByRole("button", { name: /basket/i })).not.toHaveAttribute("data-cart-pending");
+    await expect(page.getByRole("button", { name: /in basket$|^Basket$/ })).not.toHaveAttribute("data-cart-pending");
     await other.press("Escape");
     const ofadaCart = await settleCart(page);
     await expect(ofadaCart.getByRole("listitem")).toHaveCount(1);
@@ -313,7 +313,7 @@ test.describe("Phase 3 motion and depth", () => {
     await dialog.getByRole("button", { name: "5 lb bag", exact: true }).click();
     await dialog.getByTestId("quick-add-btn").click();
     await expect(dialog.getByTestId("stepper-qty")).toHaveText("1");
-    const cartButton = page.getByRole("button", { name: /basket/i });
+    const cartButton = page.getByRole("button", { name: /in basket$|^Basket$/ });
     await expect(cartButton).toHaveAttribute("data-cart-pending", "true");
     await dialog.getByTestId("stepper-plus").click();
     await expect(dialog.getByTestId("stepper-qty")).toHaveText("2");
@@ -331,7 +331,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(again.dialog.getByTestId("stepper-qty")).toHaveText("2");
     await again.dialog.getByTestId("stepper-plus").click();
     await expect(again.dialog.getByTestId("stepper-qty")).toHaveText("3");
-    await expect(page.getByRole("button", { name: /basket/i })).not.toHaveAttribute("data-cart-pending");
+    await expect(page.getByRole("button", { name: /in basket$|^Basket$/ })).not.toHaveAttribute("data-cart-pending");
     const settled = await settleCart(page);
     await expect(settled.getByRole("listitem")).toHaveCount(1);
     await expect(settled.getByTestId("stepper-qty")).toHaveText("3");
@@ -344,7 +344,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "true");
     await dialog.getByTestId("quick-add-btn").click();
     await expect(dialog.getByTestId("stepper-qty")).toHaveText("1");
-    await expect(page.getByRole("button", { name: /basket/i })).not.toHaveAttribute("data-cart-pending");
+    await expect(page.getByRole("button", { name: /in basket$|^Basket$/ })).not.toHaveAttribute("data-cart-pending");
     await dialog.press("Escape");
     const release = await holdListingDetail(page);
     const loading = await openEgusi(page);
