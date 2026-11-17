@@ -31,8 +31,9 @@ export function AiCatalogCard({ initial }: { initial: boolean }) {
       <CardHeader>
         <CardTitle className="text-base">AI assistants</CardTitle>
         <CardDescription>
-          Shopping assistants such as ChatGPT or Claude can search your products, prices and stock, then send shoppers
-          to your storefront to buy. They never see your customers or orders, and cannot place an order.
+          Shopping assistants such as ChatGPT or Claude can search your products, prices and stock, and fill a cart that
+          shoppers check out and pay for on your storefront. They never see your customers or orders, and cannot place an
+          order.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

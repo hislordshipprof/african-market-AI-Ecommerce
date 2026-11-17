@@ -16,8 +16,8 @@ function seeOther(location: string, cookie?: string): Response {
 }
 
 /**
- * A WhatsApp checkout link (#559): opens this store's normal checkout with the
- * cart the chat filled, by setting the cart cookie. The order is placed only
+ * A checkout link from the WhatsApp shopper (#559) or an AI agent over MCP (#573):
+ * opens this store's normal checkout with the cart they filled, by setting the cart cookie. The order is placed only
  * on that page. A used, expired or unknown link, or one opened on another
  * store's host, goes to the expired page.
  */

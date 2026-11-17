@@ -33,7 +33,7 @@ async function isBatch(request: Request): Promise<boolean> {
 }
 
 /**
- * The store host's read-only catalog for AI agents (#572), streamable HTTP, no auth.
+ * The store host's catalog for AI agents (#572), streamable HTTP, no auth. Its one write is a checkout link (#573).
  * Not there (404) unless the host is an open store whose owner turned on "Let AI assistants read my catalog".
  */
 async function handle(request: Request): Promise<Response> {
