@@ -9,6 +9,7 @@ import {
   FolderTree,
   Gauge,
   House,
+  MapPinned,
   MessagesSquare,
   Package,
   PackageSearch,
@@ -43,6 +44,7 @@ export const ADMIN_NAV = [
   { href: "/admin/ai/eval-spend", label: "AI eval and spend", icon: Gauge },
   { href: "/admin/billing/ledger", label: "Fee ledger", icon: ReceiptText },
   { href: "/admin/settings/couriers", label: "Courier settings", icon: Truck },
+  { href: "/admin/metros", label: "Metros", icon: MapPinned },
   { href: "/admin/settings/ai-onboarding", label: "AI and onboarding", icon: SlidersHorizontal },
 ] as const;
 

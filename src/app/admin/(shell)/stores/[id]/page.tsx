@@ -4,6 +4,8 @@ import { billingStatusLabel, PLAN_NAMES, type Plan } from "@/lib/billing/plan";
 import { PILOT_FREE_MONTHS, PILOT_STORE_CAP, PLAN_OVERRIDE_MAX_DAYS } from "@/lib/billing/service";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { getStoreNumber, storeNumberLinkMode } from "@/lib/whatsapp/store-number";
+import { setStoreMetroAction } from "@/lib/admin/metro-actions";
+import { listMetros } from "@/lib/admin/metros";
 import { StoreForm } from "../store-form";
 import { InviteOwnerForm } from "./invite-owner-form";
 import { WhatsAppNumberSection } from "./whatsapp-number-section";
@@ -20,14 +22,14 @@ export default async function EditStorePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ pilotError?: string; courierRetry?: string; override?: string; overrideError?: string; goLive?: string; goLiveError?: string }>;
+  searchParams: Promise<{ pilotError?: string; courierRetry?: string; override?: string; overrideError?: string; goLive?: string; goLiveError?: string; metro?: string }>;
 }) {
   await requirePlatformAdmin();
   const { id } = await params;
-  const { pilotError, courierRetry, override, overrideError, goLive, goLiveError } = await searchParams;
+  const { pilotError, courierRetry, override, overrideError, goLive, goLiveError, metro } = await searchParams;
   const store = await getStoreById(id);
   if (!store) notFound();
-  const [subscription, storeNumber] = await Promise.all([getStoreSubscription(store.id), getStoreNumber(store.id)]);
+  const [subscription, storeNumber, metros] = await Promise.all([getStoreSubscription(store.id), getStoreNumber(store.id), listMetros()]);
   const plan = PLAN_NAMES[subscription?.plan ?? "starter"];
 
   return (
@@ -97,6 +99,35 @@ export default async function EditStorePage({
             </span>
           </form>
         )}
+      </section>
+      <section aria-labelledby="metro" className="mb-8 rounded-lg border border-border bg-card p-5">
+        <h2 id="metro" className="text-base font-semibold text-foreground">Metro</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Groups the store for operations and courier settings. Shoppers never see it.
+        </p>
+        <form action={setStoreMetroAction} className="mt-4 flex flex-wrap items-end gap-3">
+          <input type="hidden" name="storeId" value={store.id} />
+          <div>
+            <label htmlFor="metroId" className="block text-sm font-medium text-foreground">Metro</label>
+            <select
+              id="metroId"
+              name="metroId"
+              defaultValue={store.metroId ?? ""}
+              className="mt-1 min-h-11 rounded-md border border-input bg-card px-3 text-sm text-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="">No metro</option>
+              {metros.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+          <button type="submit" className="min-h-11 rounded-full border border-primary px-5 text-sm font-medium text-primary hover:bg-secondary">
+            Save metro
+          </button>
+          <span role="status" className="text-sm text-muted-foreground">
+            {metro === "saved" ? "Saved." : metro === "missing" ? "That metro no longer exists. Pick another." : ""}
+          </span>
+        </form>
       </section>
       <WhatsAppNumberSection
         storeId={store.id}

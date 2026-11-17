@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { readCourierSettings, saveCourierSettings, type CourierSettings } from "./courier-settings";
+import { readCourierSettings, saveCourierSettings, withMetroOverrides, type CourierSettings } from "./courier-settings";
 
 /**
  * Every field changes here, so the save runs in a transaction that is rolled back: the shared platform row that other
@@ -42,5 +42,23 @@ describe.skipIf(!process.env.DATABASE_URL)("saveCourierSettings (#535)", () => {
       throw rollback;
     });
     await expect(run).rejects.toBe(rollback);
+  });
+});
+
+describe("metro courier overrides (#577)", () => {
+  const platformWide: CourierSettings = { selectionMode: "cheapest", assignmentTimeoutSeconds: 600, doordashEnabled: true, uberEnabled: true, weightLimitLb: 50 };
+
+  it("AC2: a metro's mode and timeout replace the platform's; unset follows the platform; the weight limit stays platform-wide", () => {
+    expect(withMetroOverrides(platformWide, { selectionMode: "uber_first", assignmentTimeoutSeconds: 900, doordashEnabled: true, uberEnabled: true }))
+      .toEqual({ ...platformWide, selectionMode: "uber_first", assignmentTimeoutSeconds: 900 });
+    expect(withMetroOverrides(platformWide, { selectionMode: null, assignmentTimeoutSeconds: null, doordashEnabled: true, uberEnabled: true })).toEqual(platformWide);
+    expect(withMetroOverrides(platformWide, null)).toEqual(platformWide);
+  });
+
+  it("AC2: a courier off in the metro is off there, but a metro never turns on a courier the platform switched off", () => {
+    expect(withMetroOverrides(platformWide, { selectionMode: null, assignmentTimeoutSeconds: null, doordashEnabled: false, uberEnabled: true }))
+      .toMatchObject({ doordashEnabled: false, uberEnabled: true });
+    expect(withMetroOverrides({ ...platformWide, uberEnabled: false }, { selectionMode: null, assignmentTimeoutSeconds: null, doordashEnabled: true, uberEnabled: true }))
+      .toMatchObject({ doordashEnabled: true, uberEnabled: false });
   });
 });

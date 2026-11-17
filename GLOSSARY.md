@@ -217,8 +217,11 @@ _Avoid_: Confirm card (the parked 2026-11-04 design; replaced 2026-11-14)
 Not used. The assistant-only 10-minute cancel window was dropped on 2026-11-14 (#247), because assistant orders are placed by normal checkout.
 
 **Catalog endpoint**:
-A store host's read-only catalog for outside AI assistants such as ChatGPT or Claude, at `/api/mcp` over MCP (#572): `search_catalog`, `get_product`, `get_store_info` and `check_delivery_area`, answering with storefront links, prices and stock badges. No customer data, no cart or checkout, no sign-in; 60 calls a minute per IP. It answers only for an open store whose owner turned on "Let AI assistants read my catalog" (off by default); otherwise 404. Not the Shopper assistant, which runs on the storefront.
+A store host's catalog for outside AI assistants such as ChatGPT or Claude, at `/api/mcp` over MCP (#572): `search_catalog`, `get_product`, `get_store_info` and `check_delivery_area`, answering with storefront links, prices and stock badges, plus `create_checkout_link`, which returns an **Agent checkout link** (#573). No customer data, no payment and no order placed, no sign-in; 60 calls a minute per IP. It answers only for an open store whose owner turned on "Let AI assistants read my catalog" (off by default); otherwise 404. Not the Shopper assistant, which runs on the storefront.
 _Avoid_: Agent API, AI API
+
+**Agent checkout link**:
+The link an outside AI agent gets from the Catalog endpoint's `create_checkout_link` (#573). It puts the agent's variants in a new guest cart and opens the store's normal checkout with it, works once and for 60 minutes, and reserves and places nothing: the shopper pays on that page. At most 10 links an hour per IP. The order placed from that cart is counted as from an AI agent link in analytics (`source = agent`). It shares the WhatsApp checkout link's table and opening route.
 
 **Store copilot**:
 The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp.
@@ -426,7 +429,11 @@ A 4-digit code the courier must get from the customer at the door. Required for 
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
 
 **Courier settings**:
-The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. Per-metro settings are not built (#577).
+The platform-wide rules a platform admin sets for courier delivery: the selection mode (cheapest, DoorDash first or Uber first), the assignment timeout, which couriers are on, and the weight limit. A store's Metro can replace the mode and the timeout, and switch a courier off for its stores; it cannot switch on a courier that is off platform-wide.
+
+**Metro**:
+A group of stores in one area that a platform admin sets up for operations (#577): its own courier settings, and a readiness report (stores live and in setup, courier registration, quote success, the median wait for a courier, tax sign-off per state, directory city pages). Customers never see it. A store is in one metro or none.
+_Avoid_: Market, region (to customers)
 
 **AI and onboarding settings**:
 The platform-wide numbers a platform admin sets at `/admin/settings/ai-onboarding` (#561): the go-live listing floor (1 to 200, default 20), the Daily sample size per store (0 to 20, default 5), the Auto-flag cost threshold (1 to 100 cents, default 2) and how long a rejected store application is kept (1 to 24 months, default 12). Out of range is refused, never clamped; every save writes an audit row, and the page shows who changed them last and when.

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { storeMayUse } from "../billing/plan";
-import type { AcquisitionSource } from "../directory/attribution";
+import { AGENT_REF, type AcquisitionSource } from "../directory/attribution";
 import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS, storeHasWhatsAppNumber } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
@@ -28,7 +28,7 @@ import { readShippingStates, shippingProvider } from "../shipping/settings";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, quoteCourier } from "../delivery/dispatch";
 import { checkCourierEligibility } from "../delivery/eligibility";
-import { anyCourierEnabled, readCourierSettings, type CourierSettings } from "../delivery/courier-settings";
+import { anyCourierEnabled, readStoreCourierSettings, type CourierSettings } from "../delivery/courier-settings";
 import { courierOffered } from "../delivery/courier-offered";
 import type { DeliveryProvider } from "../delivery/provider";
 import { validPhone } from "../customer-account/phone";
@@ -263,7 +263,7 @@ async function untaxedQuote(
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
   }
   if (fulfillment === "courier") {
-    const courierSettings = options.courierSettings ?? (await readCourierSettings());
+    const courierSettings = options.courierSettings ?? (await readStoreCourierSettings(storeId));
     if (!anyCourierEnabled(courierSettings, cartId)) {
       const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
       return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
@@ -349,7 +349,7 @@ async function courierQuoteFor(
     tipCents: 0,
     hasFrozenLine: cart.lines.some((line) => line.variant.listing.frozen),
   });
-  const quoted = await quoteCourier({ referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders(), settings);
+  const quoted = await quoteCourier({ storeId: store.id, referenceId: cart.id, request: courierRequest, registrations }, options.couriers ?? courierProviders(), settings);
   await storeScoped(store.id).cart.update({
     where: { id: cart.id },
     data: {
@@ -923,7 +923,7 @@ export async function recordAuthorizedOrder(
           couponId,
           discountCents: currentQuote.discountCents,
           couponCustomerKey: couponId ? couponCustomerKey(couponUserId, input.contact.email) : null,
-          acquisitionSource: input.acquisitionSource ?? null,
+          acquisitionSource: cart.source === AGENT_REF ? AGENT_REF : (input.acquisitionSource ?? null),
           serviceFeeCents: currentQuote.serviceFeeCents,
           taxCents: tax.taxCents,
           taxLines: tax.lines as unknown as Prisma.InputJsonValue,
@@ -987,6 +987,8 @@ export async function recordAuthorizedOrder(
           paymentIntentId: null,
           paymentAttemptToken: null,
           purchaseEpoch: { increment: 1 },
+          // The agent built this basket only; the next order from the reused cart is the shopper's own (#573).
+          source: "manual",
           couponCode: null,
           taxCents: null,
           taxLines: Prisma.DbNull,

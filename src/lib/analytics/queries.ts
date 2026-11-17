@@ -63,7 +63,10 @@ export interface CustomersView {
   repeatRatePct: number;
   repeatShoppers: number;
   orders: number;
+  /** Orders the shopping assistant built, not counting agent orders. */
   assistantOrders: number;
+  /** Orders placed from an AI agent's checkout link (#573). */
+  agentOrders: number;
   browsingOrders: number;
 }
 
@@ -270,7 +273,7 @@ export async function customersView(storeId: string, range: AnalyticsRange, time
   const [row] = await storeScopedRawQuery<Omit<CustomersView, "returningShoppers" | "repeatRatePct" | "browsingOrders">>(storeId, Prisma.sql`
     WITH b AS (${bounds(range, timeZone)}),
     o AS (
-      SELECT o.id, o.source_cart_id, COALESCE(c.claimed_by_customer_id, c.id) AS shopper
+      SELECT o.id, o.source_cart_id, o.acquisition_source, COALESCE(c.claimed_by_customer_id, c.id) AS shopper
       FROM orders o JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id, b
       WHERE o.store_id = ${storeId} AND o.created_at >= b.lo AND o.created_at < b.hi AND o.captured_amount_cents > 0
     ),
@@ -285,12 +288,14 @@ export async function customersView(storeId: string, range: AnalyticsRange, time
            (SELECT COUNT(*) FROM hist, b WHERE hist.first_at >= b.lo)::int AS "newShoppers",
            (SELECT COUNT(*) FROM hist WHERE hist.orders >= 2)::int AS "repeatShoppers",
            (SELECT COUNT(*) FROM o)::int AS orders,
-           (SELECT COUNT(*) FROM o WHERE o.source_cart_id IS NOT NULL AND ${ASSISTANT_CART(Prisma.sql`o.source_cart_id`, storeId)})::int AS "assistantOrders"`);
+           (SELECT COUNT(*) FROM o WHERE o.acquisition_source = 'agent')::int AS "agentOrders",
+           (SELECT COUNT(*) FROM o WHERE o.acquisition_source IS DISTINCT FROM 'agent' AND o.source_cart_id IS NOT NULL
+              AND ${ASSISTANT_CART(Prisma.sql`o.source_cart_id`, storeId)})::int AS "assistantOrders"`);
   return {
     ...row,
     returningShoppers: row.shoppers - row.newShoppers,
     repeatRatePct: row.shoppers > 0 ? Math.round((row.repeatShoppers * 100) / row.shoppers) : 0,
-    browsingOrders: row.orders - row.assistantOrders,
+    browsingOrders: row.orders - row.assistantOrders - row.agentOrders,
   };
 }
 

@@ -123,6 +123,7 @@ test("the owner opts in, and each store host's MCP endpoint answers with its own
     expect(tools.status).toBe(200);
     expect(((tools.body?.result as { tools: { name: string }[] }).tools).map((t) => t.name).sort()).toEqual([
       "check_delivery_area",
+      "create_checkout_link",
       "get_product",
       "get_store_info",
       "search_catalog",

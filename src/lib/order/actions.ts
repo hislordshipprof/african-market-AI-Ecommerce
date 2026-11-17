@@ -33,7 +33,7 @@ import {
 } from "./batch";
 import { courierProviders, pushReadyTime, READY_ALREADY_PUSHED, READY_NOT_PUSHABLE } from "../delivery/dispatch";
 import { emitCourierEvent } from "../delivery/courier-functions";
-import { readCourierSettings } from "../delivery/courier-settings";
+import { readStoreCourierSettings } from "../delivery/courier-settings";
 import {
   DELIVERY_PROOF_MAX_BYTES,
   PROOF_PHOTO_MISSING,
@@ -245,7 +245,7 @@ export async function pushReadyTimeAction(orderId: string) {
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("pushReadyTime", id.data, () =>
-    pushReadyTime(session.store.id, id.data, { providers: courierProviders(), emit: emitCourierEvent, settings: () => readCourierSettings() }),
+    pushReadyTime(session.store.id, id.data, { providers: courierProviders(), emit: emitCourierEvent, settings: readStoreCourierSettings }),
   );
 }
 
