@@ -349,11 +349,11 @@ export function OrderInbox({
     });
   }
 
-  function handleBuyLabel(orderId: string) {
+  function handleBuyLabel(orderId: string, pdfOnly: boolean) {
     startTransition(async () => {
       const result = await buyShippingLabelAction(orderId);
       if (result.ok) {
-        toast.success("Label bought");
+        toast.success(pdfOnly ? "Label saved" : "Label bought");
         pollOrders();
       } else {
         toast.error(result.error);
@@ -767,7 +767,7 @@ export function OrderInbox({
                         </a>
                       </div>
                     ) : selectedOrder.shippingLabelStatus === "bought" || selectedOrder.status === "READY" ? (
-                      <Button className="w-full rounded-full" onClick={() => handleBuyLabel(selectedOrder.id)} disabled={isPending}>
+                      <Button className="w-full rounded-full" onClick={() => handleBuyLabel(selectedOrder.id, selectedOrder.shippingLabelStatus === "bought")} disabled={isPending}>
                         <Printer className="mr-2 size-4" /> {selectedOrder.shippingLabelStatus === "bought" ? "Get the label PDF" : "Buy label"}
                       </Button>
                     ) : null}
