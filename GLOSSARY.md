@@ -223,6 +223,10 @@ _Avoid_: Agent API, AI API
 **Agent checkout link**:
 The link an outside AI agent gets from the Catalog endpoint's `create_checkout_link` (#573). It puts the agent's variants in a new guest cart and opens the store's normal checkout with it, works once and for 60 minutes, and reserves and places nothing: the shopper pays on that page. At most 10 links an hour per IP. The order placed from that cart is counted as from an AI agent link in analytics (`source = agent`). It shares the WhatsApp checkout link's table and opening route.
 
+**ACP checkout session**:
+An outside AI agent's checkout at one store over the Agentic Commerce Protocol (#574, ADR-0024): the agent sends items and the buyer's contact, the store answers with its own prices, and the agent pays in the chat with a shared payment token, a one-time card permission for at most an amount. Pickup only. Built behind a flag on the Stripe fake: no live agent payment yet.
+_Avoid_: agent order, ACP order
+
 **Store copilot**:
 The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp.
 _Avoid_: Store AI, store assistant
