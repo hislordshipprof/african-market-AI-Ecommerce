@@ -126,6 +126,7 @@ function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
 
 /** Store-scoped delegates, one per line in sorted order: adding a model is one line here. */
 const STORE_SCOPED_MODELS = [
+  "acpCheckoutSession",
   "aiAction",
   "aiConversation",
   "aiReviewFlag",
