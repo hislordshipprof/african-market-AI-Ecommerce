@@ -405,6 +405,25 @@
   line-height: 1.6;
   margin: 10px 0;
 }
+/* The quote could not settle: a visible failure with Retry, never a stuck "estimating" (#708 AC2b). */
+.quoteRetry {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--color-deal);
+  border-radius: 12px;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.quoteRetry p {
+  margin: 0;
+}
+.quoteRetry button {
+  justify-self: start;
+}
 .addressResult {
   display: flex;
   align-items: center;

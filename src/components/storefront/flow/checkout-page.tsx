@@ -42,6 +42,7 @@ import {
   QuoteLines,
 } from "./common";
 import { PayButton } from "./feedback";
+import { settleWithTimeout } from "./settle";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
 import { placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
@@ -58,6 +59,9 @@ type Outcome =
   | "out-of-stock"
   | "outside-radius"
   | "session-expired";
+
+/** A quote request that takes longer than this is treated as failed, so checkout never hangs (#708 AC2b). */
+const QUOTE_TIMEOUT_MS = 12_000;
 
 interface StripeConfig {
   publishableKey: string;
@@ -333,6 +337,9 @@ function RealCheckoutForm({
   // Server-computed times for the chosen fulfillment, in store time (#565).
   const [slotOptions, setSlotOptions] = useState<SlotOptions | null>(stripeConfig.pickupSlots ?? null);
   const [quoteKey, setQuoteKey] = useState("");
+  // The quote refused, rejected, or timed out: a visible failure with Retry, never a stuck "estimating" (#708 AC2b).
+  const [quoteFailed, setQuoteFailed] = useState(false);
+  const [quoteNonce, setQuoteNonce] = useState(0);
   const [error, setError] = useState("");
   const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -396,21 +403,37 @@ function RealCheckoutForm({
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
-      quoteCheckoutAction(contact, fulfillment, delivery).then((result) => {
+      // Always settles: a rejected or hanging quote ends in a visible failure, not a stuck UI (#708 AC2b).
+      settleWithTimeout(() => quoteCheckoutAction(contact, fulfillment, delivery), QUOTE_TIMEOUT_MS).then((settled) => {
         if (!active) return;
+        if (!settled.ok) {
+          // Rejected or timed out: offer Retry instead of estimating forever.
+          setQuoteFailed(true);
+          return;
+        }
+        const result = settled.value;
         if (result.ok) {
           setQuote(result.quote);
           setSlotOptions(result.slots);
           setQuoteKey(JSON.stringify({ contact, fulfillment, delivery, couponRev }));
+          setQuoteFailed(false);
         } else {
+          // The server refused the quote (a real reason): keep showing it, as before.
           setError(result.error);
+          setQuoteFailed(true);
         }
       });
     }, 300);
     return () => { active = false; clearTimeout(timer); };
-    // currentKey already covers contact, fulfillment, and the confirmed address.
+    // currentKey already covers contact, fulfillment, and the confirmed address; quoteNonce drives Retry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentKey]);
+  }, [currentKey, quoteNonce]);
+
+  function retryQuote() {
+    setQuoteFailed(false);
+    setError("");
+    setQuoteNonce((nonce) => nonce + 1);
+  }
 
   const slotRequired = slotOptions?.required === true;
   const slots = (slotOptions?.slots ?? []).map((option) => ({ value: option.id, label: option.label }));
@@ -677,6 +700,15 @@ function RealCheckoutForm({
               setCity(result.city);
               setRegion(result.state);
               setZip(result.zip);
+            }).catch(() => {
+              // A rejected address check must release the button, not leave it stuck "Checking…" (#708 AC2b).
+              setConfirming(false);
+              setConfirmed(null);
+              setError(
+                fulfillment === "ship"
+                  ? "We couldn't check that shipping address. Try again."
+                  : "We couldn't check that address. Try again.",
+              );
             });
           }}
           confirming={confirming}
@@ -724,6 +756,8 @@ function RealCheckoutForm({
       setCustomTip={() => {}}
       quote={quote}
       quotePending={quotePending}
+      quoteFailed={quoteFailed}
+      onRetryQuote={retryQuote}
       error={error}
       errorHref={errorHref}
       submitted={submitted}
@@ -947,6 +981,9 @@ interface CheckoutLayoutProps {
   setCustomTip: (v: string) => void;
   quote: CheckoutQuote | null;
   quotePending: boolean;
+  /** Real checkout: the quote refused, rejected or timed out, so it offers Retry (#708 AC2b). */
+  quoteFailed?: boolean;
+  onRetryQuote?: () => void;
   error: string;
   errorHref?: string | null;
   submitted: boolean;
@@ -1001,7 +1038,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     slot, setSlot, slots, slotRequired = false, cateringLead, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage, coupon,
     tipPercent, setTipPercent, customTip, setCustomTip,
-    quote, quotePending, error, errorHref, submitted, payState,
+    quote, quotePending, quoteFailed = false, onRetryQuote, error, errorHref, submitted, payState,
     frozen, hot = false, prepMinutes, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     signedIn = false, identityLocked = false, whatsapp,
@@ -1427,7 +1464,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             )}
             {quote ? (
               <QuoteLines quote={quote} fulfillment={fulfillment} />
-            ) : (
+            ) : quoteFailed ? null : (
               <p role="status">Estimating your order…</p>
             )}
             <p className={styles.notice}>
@@ -1437,9 +1474,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               funds are released. Any higher-priced swap requires your approval
               and must fit within this hold.
             </p>
-            {quotePending && (
+            {quoteFailed && onRetryQuote ? (
+              <div className={styles.quoteRetry} role="alert">
+                <p>We couldn&rsquo;t update your estimate. Check your connection, then try again.</p>
+                <Button type="button" onClick={onRetryQuote}>Retry estimate</Button>
+              </div>
+            ) : quotePending ? (
               <p className={styles.muted} role="status">Updating estimate…</p>
-            )}
+            ) : null}
             {error && (
               <FlowError title="Let's review that" message={error}>
                 {errorHref ? <Link className="sf-text-link" href={errorHref}>View your orders</Link> : null}
