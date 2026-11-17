@@ -44,7 +44,5 @@ async function handle(request: Request): Promise<Response> {
   return handler.fetch(request);
 }
 
-// GET and DELETE are 2025 session operations; the stateless SDK answers them 405.
-export const GET = handle;
+// POST only: the endpoint is stateless, so there is no session stream (GET) or session to end (DELETE).
 export const POST = handle;
-export const DELETE = handle;

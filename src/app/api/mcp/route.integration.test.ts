@@ -34,6 +34,8 @@ async function post(slug: string, body: object, ip = `10.57.2.${run}`) {
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
         "x-forwarded-for": ip,
+        // A 2025 client sends the negotiated version on every request after initialize.
+        ...("method" in body && body.method !== "initialize" ? { "mcp-protocol-version": "2025-06-18" } : {}),
       },
       body: JSON.stringify({ jsonrpc: "2.0", ...body }),
     }),
@@ -137,6 +139,8 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
     });
     expect(init.status).toBe(200);
     expect((await rpc(init)).result).toMatchObject({ serverInfo: expect.any(Object), capabilities: { tools: expect.any(Object) } });
+    const initialized = await post(slugA, { method: "notifications/initialized" });
+    expect(initialized.status).toBe(202);
 
     const list = await rpc(await post(slugA, { id: 2, method: "tools/list" }));
     expect(list.result?.tools?.map((t) => t.name).sort()).toEqual(["check_delivery_area", "get_product", "get_store_info", "search_catalog"]);

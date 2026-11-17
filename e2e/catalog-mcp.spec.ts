@@ -150,8 +150,11 @@ test("the owner opts in, and each store host's MCP endpoint answers with its own
     await page.goto(`${mamaNgozi}/`);
     expect((await mcp(page, "tools/list")).status).toBe(404);
   } finally {
-    await setReadable(root, "mama-ngozi", false);
-    await setReadable(root, "tante-marie", false);
-    await running.stop();
+    try {
+      await setReadable(root, "mama-ngozi", false);
+      await setReadable(root, "tante-marie", false);
+    } finally {
+      await running.stop();
+    }
   }
 });
