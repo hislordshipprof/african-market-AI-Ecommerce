@@ -96,18 +96,28 @@ export class ShippoProvider implements ShippingProvider {
     });
   }
 
-  /** POST /transactions buys the rate as a 4×6 PDF label (https://docs.goshippo.com/api-reference/transactions/create-a-shipping-label). */
+  /**
+   * POST /transactions buys the rate as a 4×6 PDF label (https://docs.goshippo.com/api-reference/transactions/create-a-shipping-label).
+   * Shippo's ERROR is a settled refusal (422); any other answer leaves the sale unknown (status 0).
+   */
   async buyLabel(rateId: string, orderId: string): Promise<BoughtLabel> {
     const json = await this.post("/transactions/", { rate: rateId, label_file_type: "PDF_4x6", async: false, metadata: orderId });
-    const ok = json.status === "SUCCESS" && typeof json.object_id === "string" && typeof json.tracking_number === "string"
-      && typeof json.label_url === "string" && json.label_url.startsWith("https://");
-    if (!ok) throw new ShippingProviderError(422, `Shippo label not bought (${String(json.status)}): ${JSON.stringify(json.messages ?? []).slice(0, 300)}`);
-    return {
-      labelId: json.object_id as string,
-      trackingNumber: json.tracking_number as string,
-      trackingUrl: typeof json.tracking_url_provider === "string" && json.tracking_url_provider.startsWith("https://") ? json.tracking_url_provider : null,
-      labelUrl: json.label_url as string,
-    };
+    const label = boughtLabel(json);
+    if (label) return label;
+    throw new ShippingProviderError(json.status === "ERROR" ? 422 : 0, `Shippo label not bought (${String(json.status)}): ${JSON.stringify(json.messages ?? []).slice(0, 300)}`);
+  }
+
+  /**
+   * GET /transactions?rate= lists the labels bought from a rate (https://docs.goshippo.com/api-reference/transactions/list-all-shipping-labels),
+   * so a purchase whose answer was lost is found. Null when none sold; throws while one is still queued.
+   */
+  async findLabel(rateId: string): Promise<BoughtLabel | null> {
+    const json = await this.request("GET", `/transactions/?rate=${encodeURIComponent(rateId)}`);
+    const results = Array.isArray(json.results) ? (json.results as Json[]) : [];
+    const sold = results.map(boughtLabel).find((label) => label !== null);
+    if (sold) return sold;
+    if (results.some((txn) => txn.status === "QUEUED" || txn.status === "WAITING")) throw new ShippingProviderError(0, `Shippo label for rate ${rateId} is still queued`);
+    return null;
   }
 
   /** GET /transactions/{id} returns the label with a fresh label_url (https://docs.goshippo.com/api-reference/transactions/retrieve-a-shipping-label). */
@@ -134,6 +144,17 @@ export class ShippoProvider implements ShippingProvider {
     if (["QUEUED", "PENDING", "SUCCESS"].includes(json.status as string)) return "voided";
     throw new ShippingProviderError(422, `Shippo refund answered ${String(json.status)}`);
   }
+}
+
+function boughtLabel(json: Json): BoughtLabel | null {
+  if (json.status !== "SUCCESS" || typeof json.object_id !== "string" || typeof json.tracking_number !== "string"
+    || typeof json.label_url !== "string" || !json.label_url.startsWith("https://")) return null;
+  return {
+    labelId: json.object_id,
+    trackingNumber: json.tracking_number,
+    trackingUrl: typeof json.tracking_url_provider === "string" && json.tracking_url_provider.startsWith("https://") ? json.tracking_url_provider : null,
+    labelUrl: json.label_url,
+  };
 }
 
 export const LABEL_MAX_BYTES = 2 * 1024 * 1024;

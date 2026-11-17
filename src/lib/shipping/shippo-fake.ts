@@ -3,10 +3,11 @@
  * (decision 2026-11-14-05). It refuses what Shippo refuses: a missing or wrong ShippoToken (401), missing address or
  * parcel fields, an unknown unit or a non-positive weight (400), and returns no rates unless async is false.
  * GET /transactions/{id} returns a bought label again.
+ * GET /transactions?rate=<id> lists the labels sold from a rate.
  * A label is bought only from a rate it quoted less than 7 days ago [ASSUMPTION: Shippo does not document the error
- * for an older rate; the fake answers ERROR]; a rate already bought returns the same transaction [ASSUMPTION: not
- * documented by Shippo; the code never relies on it, a retry after a sold label reads it with GET instead]. A refund after
- * `scan()` is an ERROR, as Shippo rejects a scanned label.
+ * for an older rate; the fake answers ERROR]; a rate POSTed again sells a second label [ASSUMPTION: not documented by
+ * Shippo; the worst case, so a test sees a double purchase]. A refund after `scan()` is an ERROR, as Shippo rejects a
+ * scanned label.
  */
 export interface FakeShippoOptions {
   token: string;
@@ -95,6 +96,11 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
       const label = labels.get(id);
       return label ? labelReply(200, id, label.rateId) : reply(404, { detail: "Not found." });
     }
+    if (init?.method === "GET" && url.pathname === "/transactions/") {
+      const rateId = url.searchParams.get("rate");
+      const results = [...labels.entries()].filter(([, label]) => label.rateId === rateId).map(([id, label]) => labelJson(id, label.rateId));
+      return reply(200, { next: null, previous: null, results });
+    }
     if (init?.method !== "POST" || !["/shipments/", "/transactions/", "/refunds/"].includes(url.pathname)) return reply(404, { detail: "Not found." });
     let body: Json;
     try {
@@ -136,20 +142,21 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
     if (typeof body.rate !== "string" || !body.rate) return reply(400, { rate: ["This field is required."] });
     const rate = rates.get(body.rate);
     if (!rate) return reply(400, { rate: ["Invalid pk - object does not exist."] });
-    const existing = [...labels.entries()].find(([, label]) => label.rateId === body.rate);
-    // Shippo object ids are unique across the account, so two fakes never share one.
-    const id = existing?.[0] ?? `txn_fake_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    if (!existing) {
-      if (now().getTime() - rate.quotedAt.getTime() >= RATE_WINDOW_MS) {
-        return reply(201, { object_id: `txn_fake_err_${labels.size + 1}`, status: "ERROR", messages: [{ text: "Rate has expired. Please create a new shipment." }] });
-      }
-      labels.set(id, { rateId: body.rate, scanned: false, refunded: false });
+    if (now().getTime() - rate.quotedAt.getTime() >= RATE_WINDOW_MS) {
+      return reply(201, { object_id: `txn_fake_err_${labels.size + 1}`, status: "ERROR", messages: [{ text: "Rate has expired. Please create a new shipment." }] });
     }
+    // Shippo object ids are unique across the account, so two fakes never share one.
+    const id = `txn_fake_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    labels.set(id, { rateId: body.rate, scanned: false, refunded: false });
     return labelReply(201, id, body.rate);
   }
 
   function labelReply(status: number, id: string, rateId: string): Response {
-    return reply(status, {
+    return reply(status, labelJson(id, rateId));
+  }
+
+  function labelJson(id: string, rateId: string): Json {
+    return {
       object_id: id,
       status: "SUCCESS",
       rate: rateId,
@@ -157,7 +164,7 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
       tracking_url_provider: `https://tools.usps.com/go/TrackConfirmAction?tLabels=${trackingNumber(id)}`,
       label_url: `${FAKE_LABEL_HOST}/labels/${id}.pdf`,
       messages: [],
-    });
+    };
   }
 
   function trackingNumber(id: string): string {

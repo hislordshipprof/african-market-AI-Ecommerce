@@ -1,6 +1,6 @@
 import { storeScoped } from "../db";
 import { deliveryProofBucket, shippingLabelKey, uploadShippingLabel } from "../r2";
-import { cheapestRate, ShippingProviderError, type ShippingProvider } from "./provider";
+import { cheapestRate, ShippingProviderError, type BoughtLabel, type ShippingProvider } from "./provider";
 import { shippingProvider } from "./settings";
 
 /** The store absorbs a re-quoted rate up to this much above what the shopper paid (decision #568). */
@@ -91,13 +91,15 @@ export type LabelResult = { ok: true } | { ok: false; error: string };
 /**
  * Buys the label for a captured shipped order and keeps its PDF in the private proof bucket. The order is claimed
  * first, so two clicks never buy two labels; a claim lost to a crash is retaken after five minutes. A sold label is
- * saved before its PDF, so a failed download or upload never loses it: a retry fetches only the PDF again.
+ * saved before its PDF, so a failed download or upload never loses it: a retry fetches only the PDF again. A purchase
+ * whose answer was lost, or a claim retaken, first looks the rate's label up, so Shippo never sells it twice.
  */
 export async function buyShippingLabel(storeId: string, orderId: string, deps: LabelDeps = {}): Promise<LabelResult> {
   const now = (deps.now ?? (() => new Date()))();
   const scoped = storeScoped(storeId);
   if (!(deps.hasStorage ?? (() => deliveryProofBucket() !== null))()) return { ok: false, error: LABEL_STORAGE_NOT_SET_UP };
   const provider = deps.provider === undefined ? shippingProvider() : deps.provider;
+  const before = await scoped.order.findUnique({ where: { id: orderId }, select: { shippingLabelStatus: true, shippingRateId: true } });
   const claimed = await scoped.order.updateMany({
     where: {
       id: orderId,
@@ -123,15 +125,41 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
     await release();
     return { ok: false, error: SHIPPING_UNAVAILABLE };
   }
-  const order = await scoped.order.findUniqueOrThrow({ where: { id: orderId }, select: { shippingRateId: true } });
-  let label;
-  try {
-    label = await provider.buyLabel(order.shippingRateId as string, orderId);
-  } catch (error) {
-    await release();
+  const rateId = before?.shippingRateId as string;
+  const fail = (error: unknown, event: string) => {
     if (!(error instanceof ShippingProviderError)) throw error;
-    console.error(JSON.stringify({ event: "shipping_label_failed", storeId, orderId, status: error.status, message: error.message.slice(0, 200) }));
-    return { ok: false, error: LABEL_NOT_BOUGHT };
+    console.error(JSON.stringify({ event, storeId, orderId, status: error.status, message: error.message.slice(0, 200) }));
+    return { ok: false as const, error: LABEL_NOT_BOUGHT };
+  };
+  let label: BoughtLabel | null = null;
+  // A claim retaken after a crash or failed write may have sold a label already: look for it before buying again.
+  if (before?.shippingLabelStatus === "buying") {
+    try {
+      label = await provider.findLabel(rateId);
+    } catch (error) {
+      return fail(error, "shipping_label_lookup_failed");
+    }
+  }
+  if (!label) {
+    try {
+      label = await provider.buyLabel(rateId, orderId);
+    } catch (error) {
+      if (!(error instanceof ShippingProviderError) || (error.status >= 400 && error.status < 500)) {
+        await release();
+        return fail(error, "shipping_label_failed");
+      }
+      // The answer was lost (timeout, 5xx, queued): Shippo may have sold it. The claim is kept unless the lookup says no sale.
+      console.error(JSON.stringify({ event: "shipping_label_unknown", storeId, orderId, status: error.status, message: error.message.slice(0, 200) }));
+      try {
+        label = await provider.findLabel(rateId);
+      } catch (lookupError) {
+        return fail(lookupError, "shipping_label_lookup_failed");
+      }
+      if (!label) {
+        await release();
+        return { ok: false, error: LABEL_NOT_BOUGHT };
+      }
+    }
   }
   // Logged before the write, so a label sold while the database is down can still be found and voided.
   console.info(JSON.stringify({ event: "shipping_label_bought", storeId, orderId, labelId: label.labelId }));
@@ -139,7 +167,8 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
     where: { id: orderId, shippingLabelStatus: "buying" },
     data: { shippingLabelStatus: "bought", shippingLabelId: label.labelId, shippingTrackingNumber: label.trackingNumber, shippingTrackingUrl: label.trackingUrl },
   });
-  return savePdf(storeId, orderId, label.labelId, async () => label.labelUrl, provider, deps);
+  const bought = label;
+  return savePdf(storeId, orderId, bought.labelId, async () => bought.labelUrl, provider, deps);
 }
 
 async function savePdf(storeId: string, orderId: string, labelId: string, labelUrl: () => Promise<string>, provider: ShippingProvider, deps: LabelDeps): Promise<LabelResult> {

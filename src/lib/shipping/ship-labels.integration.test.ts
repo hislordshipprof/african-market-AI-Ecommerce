@@ -292,4 +292,43 @@ describe.skipIf(!hasDb)("shipping labels, tracking and the Shipped state (#568, 
       }
     }
   });
+  it("B1: a label Shippo sold whose answer was lost is found by its rate; a retry buys no second label and a cancel voids it", async () => {
+    for (const next of ["retry", "cancel"] as const) {
+      // Shippo sells the label, then the answer never arrives (the 30 s timeout).
+      const inner = fakeShippo({ token: TOKEN });
+      const lost = Object.assign(async (input: string | URL | Request, init?: RequestInit) => {
+        const res = await inner(input, init);
+        if (init?.method === "POST" && String(input).endsWith("/transactions/")) throw new DOMException("The operation timed out.", "TimeoutError");
+        return res;
+      }, inner);
+      const { store, orderId, paymentIntentId, quote, fake, deps, scoped } = await pickedShipOrder(lost);
+
+      expect(await markReady(store.id, orderId, { label: deps })).toEqual({ ok: true, capturedAmountCents: quote.totalCents });
+      const [labelId] = [...fake.labels.keys()];
+      const order = await scoped.order.findUniqueOrThrow({ where: { id: orderId } });
+      expect(order).toMatchObject({ status: "READY", shippingLabelStatus: "bought", shippingLabelId: labelId, shippingTrackingNumber: expect.stringMatching(/^9400/) });
+      expect(uploads.get(order.shippingLabelKey as string)).toBeDefined();
+
+      if (next === "retry") {
+        expect(await buyShippingLabel(store.id, orderId, deps)).toEqual({ ok: true });
+        expect(fake.labels.size).toBe(1);
+      } else {
+        expect(await cancelShipment(store.id, orderId, staff, { provider: deps.provider })).toEqual({ ok: true });
+        expect(fake.labels.get(labelId)?.refunded).toBe(true);
+        expect(refundedPayments.get(paymentIntentId)).toBe(quote.totalCents);
+      }
+    }
+  });
+  it("B1: a stale claim whose label was sold but never saved is taken again without buying a second label", async () => {
+    const { store, orderId, fake, provider, deps, scoped } = await pickedShipOrder();
+    await markReady(store.id, orderId, { label: { ...deps, provider: null } });
+    // A label sold, then the "bought" write failed: the row is left "buying" with no label id.
+    const order = await scoped.order.findUniqueOrThrow({ where: { id: orderId } });
+    const sold = await provider.buyLabel(order.shippingRateId as string, orderId);
+    await scoped.order.update({ where: { id: orderId }, data: { shippingLabelStatus: "buying", shippingLabelClaimedAt: new Date(Date.now() - 6 * 60_000) } });
+
+    expect(await buyShippingLabel(store.id, orderId, deps)).toEqual({ ok: true });
+    expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ shippingLabelStatus: "bought", shippingLabelId: sold.labelId });
+    expect(fake.labels.size).toBe(1);
+  });
 });

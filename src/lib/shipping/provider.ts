@@ -48,7 +48,10 @@ export type VoidOutcome = "voided" | "refused";
 export interface ShippingProvider {
   readonly name: "shippo";
   rates(req: ParcelRequest): Promise<ParcelRate[]>;
+  /** Throws status 4xx when the provider refused the sale, any other status when the sale is unknown. */
   buyLabel(rateId: string, orderId: string): Promise<BoughtLabel>;
+  /** The label already sold from this rate, for a purchase whose answer was lost; throws while it is still queued. */
+  findLabel(rateId: string): Promise<BoughtLabel | null>;
   /** A fresh link to a bought label's PDF, for a retry after the first download or upload failed. */
   labelUrl(labelId: string): Promise<string>;
   downloadLabel(labelUrl: string): Promise<Uint8Array>;
