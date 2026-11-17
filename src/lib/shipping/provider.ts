@@ -1,6 +1,6 @@
 /**
  * Parcel shipping seam (ADR-0023, #567). Shippo implements it; checkout shows the cheapest rate,
- * at the carrier's price with no markup (ADR-0006). Labels and tracking come with #568.
+ * at the carrier's price with no markup (ADR-0006). At Ready the store buys the label (#568).
  */
 
 export interface ParcelAddress {
@@ -32,9 +32,30 @@ export interface ParcelRate {
   expiresAt: Date;
 }
 
+export interface BoughtLabel {
+  /** The provider's transaction id; tracking webhooks name it. */
+  labelId: string;
+  trackingNumber: string;
+  /** The carrier's own tracking page. */
+  trackingUrl: string | null;
+  /** A short-lived link to the label PDF. */
+  labelUrl: string;
+}
+
+/** "voided" once the provider accepted the refund (it may still settle for days); "refused" after a carrier scan. */
+export type VoidOutcome = "voided" | "refused";
+
 export interface ShippingProvider {
   readonly name: "shippo";
   rates(req: ParcelRequest): Promise<ParcelRate[]>;
+  /** Throws status 4xx when the provider refused the sale, any other status when the sale is unknown. */
+  buyLabel(rateId: string, orderId: string): Promise<BoughtLabel>;
+  /** The label already sold from this rate, for a purchase whose answer was lost; throws while it is still queued. */
+  findLabel(rateId: string): Promise<BoughtLabel | null>;
+  /** A fresh link to a bought label's PDF, for a retry after the first download or upload failed. */
+  labelUrl(labelId: string): Promise<string>;
+  downloadLabel(labelUrl: string): Promise<Uint8Array>;
+  voidLabel(labelId: string): Promise<VoidOutcome>;
 }
 
 export class ShippingProviderError extends Error {

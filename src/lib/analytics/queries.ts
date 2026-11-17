@@ -123,8 +123,8 @@ type MoneyRow = {
   refund_store_cost: number;
 };
 
-/** What the platform kept at capture: card fee plus courier fee, capped at captured (applicationFeeForCapture). */
-const APPLICATION_FEE = Prisma.sql`LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents ELSE 0 END, o.captured_amount_cents)`;
+/** What the platform kept at capture: card fee plus courier fee or postage (courierFeeCents), capped at captured. */
+const APPLICATION_FEE = Prisma.sql`LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents WHEN o.fulfillment = 'ship' THEN COALESCE(o.shipping_postage_cents, o.delivery_fee_cents) ELSE 0 END, o.captured_amount_cents)`;
 
 /** The store's card fee: the stored platform fee is the service fee plus this (captureSplit), so take the service fee off. */
 const CARD_FEE = Prisma.sql`GREATEST(COALESCE(o.platform_fee_cents, 0) - o.service_fee_cents, 0)`;

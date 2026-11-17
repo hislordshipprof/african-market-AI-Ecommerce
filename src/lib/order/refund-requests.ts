@@ -11,7 +11,7 @@ import type { RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
 import { recordCapture } from "./capture-record";
-import { refundShares, type LineTax, type RefundOrder, type RefundShares } from "./platform-fee";
+import { passesThroughDeliveryFee, refundShares, type LineTax, type RefundOrder, type RefundShares } from "./platform-fee";
 import { lineChargeCents, type ChargeLine } from "./substitution-pricing";
 import { allocateLineDiscounts, lineDiscountShareCents } from "../coupon/discount";
 import type { TaxReversalPlan } from "../tax/calculator";
@@ -380,9 +380,9 @@ export function platformRefundKey(orderId: string, submissionId: string): string
   return `refund:${orderId}:platform:${submissionId}`;
 }
 
-/** Courier recovery is kept on a courier order (spec §10, owner decision 3). */
+/** Courier recovery is kept on a courier order (spec §10, owner decision 3), and postage on a shipped one (#568). */
 function refundsApplicationFee(cause: RefundCause, fulfillment: string): boolean {
-  return cause.cause === "cancel" || fulfillment !== "courier";
+  return cause.cause === "cancel" || !passesThroughDeliveryFee(fulfillment);
 }
 
 /**

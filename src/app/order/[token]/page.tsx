@@ -92,6 +92,14 @@ export default async function OrderPage({
             {realOrder.fulfillment === "ship" && realOrder.shippingCarrier && (
               <p><strong>Carrier:</strong> {[realOrder.shippingCarrier, realOrder.shippingService].filter(Boolean).join(" ")} · {money(realOrder.deliveryFeeCents)}</p>
             )}
+            {realOrder.fulfillment === "ship" && realOrder.shippingTrackingNumber && realOrder.trackingToken === token && (
+              <p>
+                <strong>Tracking:</strong>{" "}
+                {realOrder.shippingTrackingUrl?.startsWith("https://") ? (
+                  <a href={realOrder.shippingTrackingUrl} target="_blank" rel="noopener noreferrer">{realOrder.shippingTrackingNumber}</a>
+                ) : realOrder.shippingTrackingNumber}
+              </p>
+            )}
             {realOrder.customer && (
               <p><strong>Customer:</strong> {realOrder.customer.name}</p>
             )}
