@@ -171,16 +171,13 @@
   outline: 2px solid var(--color-ink);
   outline-offset: 2px;
 }
-/* The count badge settles from 1.2x, as the old spring did (stiffness 400, damping 20). */
+/* One subtle cart bump on change: ~5% overshoot, under 300ms (#708 AC1; reduced motion off). */
 .countBump {
-  animation: countBump 0.35s ease-out;
+  animation: countBump 0.25s ease-out;
 }
 @keyframes countBump {
   from {
-    transform: scale(1.2);
-  }
-  55% {
-    transform: scale(0.96);
+    transform: scale(1.05);
   }
   to {
     transform: scale(1);

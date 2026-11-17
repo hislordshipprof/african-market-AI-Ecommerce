@@ -3,7 +3,6 @@ import { Plus, Minus } from "lucide-react";
 import { cartItemKey, type CartItem } from "@/lib/storefront/cart-store";
 import { cartQuantityCeiling } from "@/lib/storefront/cart-quantity";
 import { useCart } from "./cart-provider";
-import { flyToCart } from "./cart-flight";
 import styles from "./cart.module.css";
 export function QuickAddStepper({
   item,
@@ -43,7 +42,7 @@ export function QuickAddStepper({
             type="button"
             data-testid="stepper-plus"
             disabled={disabled || qty >= ceiling}
-            onClick={e => { store.adjust(item, 1, maxQuantity); flyToCart(e.currentTarget); }}
+            onClick={() => store.adjust(item, 1, maxQuantity)}
             aria-label={`Add another ${item.name}`}
           >
             <Plus size={18} />
@@ -54,7 +53,7 @@ export function QuickAddStepper({
           type="button"
           data-testid="quick-add-btn"
           disabled={disabled || ceiling < 1}
-          onClick={e => { store.adjust(item, 1, maxQuantity); flyToCart(e.currentTarget); }}
+          onClick={() => store.adjust(item, 1, maxQuantity)}
           aria-label={`Add ${item.name} to cart`}
         >
           <Plus size={20} />

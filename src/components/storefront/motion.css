@@ -65,8 +65,8 @@
 @media (prefers-color-scheme:dark) { :root { --sf-photo-edge: inset 0 0 0 1px rgb(0 0 0 / 28%), inset 0 1px 8px rgb(0 0 0 / 14%); } body { --sf-thumb-well: var(--color-photo-well); } }
 .sf-product-image[data-image-kind="cutout"]:has(img)::after { content:""; position:absolute; z-index:-1; bottom:10%; left:24%; width:52%; height:9%; border-radius:50%; background:radial-gradient(ellipse,rgb(var(--sf-scrim) / 14%),transparent 70%); }
 .sf-product-image img { object-fit:cover; padding:0; filter:none; transition:transform .4s var(--sf-motion-ease); }
-.sf-product-card { position:relative; padding:8px 8px 16px; border:1px solid transparent; border-radius:12px; background:var(--color-surface); transition:transform .3s var(--sf-motion-ease); }
-.sf-product-card::after { content:""; position:absolute; inset:0; border-radius:inherit; box-shadow:var(--sf-shadow-lift); pointer-events:none; opacity:0; transition:opacity .3s; }
+/* Flat by default: no tilt, no hover lift (DESIGN "Flat by default"; #708 AC1). */
+.sf-product-card { position:relative; padding:8px 8px 16px; border:1px solid transparent; border-radius:12px; background:var(--color-surface); transition:border-color .2s var(--sf-motion-ease); }
 .sf-product-copy { padding-inline:4px; }
 .sf-product-card:focus-within { border-color:var(--color-primary); }
 .sf-rail-scroll { padding-block:10px 24px; touch-action:pan-x pan-y; }
@@ -143,9 +143,8 @@
 ::view-transition-group(.sf-product-morph) { animation-duration:450ms; animation-timing-function:cubic-bezier(.22,1,.36,1); }
 ::view-transition { pointer-events:none; }
 @media (hover:hover) and (pointer:fine) {
-  .sf-product-card:hover { transform:perspective(800px) translateY(-5px) rotateX(var(--tilt-x,0deg)) rotateY(var(--tilt-y,0deg)); border-color:var(--color-primary); }
-  .sf-product-card:hover::after { opacity:1; }
-  .sf-product-card:hover .sf-product-image img { transform:scale(1.08); }
+  .sf-product-card:hover { border-color:var(--color-line); }
+  .sf-product-card:hover .sf-product-image img { transform:scale(1.04); }
   .sf-quick-view-trigger { opacity:0; transition:opacity .2s; }
   .sf-product-card:is(:hover,:focus-within) .sf-quick-view-trigger { opacity:1; }
   .sf-category-tile:hover img { transform:scale(1.08); }
