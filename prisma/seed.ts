@@ -5,12 +5,12 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
 import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
-import { assertNotProduction } from "../src/lib/seed-guard";
+import { assertNotProduction, assertTestAdminSeedTarget } from "../src/lib/seed-guard";
 import { seedDemoCatalog } from "./seed-demo-catalog";
 import { readCategoryAdminChanges, withoutAdminChanges } from "./master-catalog-upsert";
 import { decideCliCatalogPrune, seedMasterCatalog, type SeedMasterCatalogDeps } from "./seed-master-catalog";
 import { readCatalogImageReferences } from "../src/lib/catalog-prune-reader";
-import { CatalogPruneRefusal, type DatabaseIdentity } from "../src/lib/catalog-prune";
+import { CatalogPruneRefusal, databaseIdentityFromUrl, type DatabaseIdentity } from "../src/lib/catalog-prune";
 import { revalidateSeededStores } from "../scripts/revalidate-storefront";
 import { seedRecipeBase, type SeedRecipe } from "../src/lib/assistant/recipe-base";
 import recipeBase from "./recipe-base.json";
@@ -821,6 +821,13 @@ async function observeSeedConnection(): Promise<DatabaseIdentity> {
 
 export async function runSeed(deps: SeedMasterCatalogDeps = {}) {
   const execution = deps.execution ?? { kind: "cli" as const };
+  if (process.env.SEED_TEST_ADMIN === "1") {
+    const observed = await observeSeedConnection();
+    assertTestAdminSeedTarget(process.env, {
+      observedHost: observed.host,
+      urlHost: databaseIdentityFromUrl(resolveDirectUrl())?.host ?? null,
+    });
+  }
   let priorReferences: string[] = [];
   if (execution.kind === "cli") {
     const decision = await decideCliCatalogPrune(process.env, () => observeSeedConnection());
