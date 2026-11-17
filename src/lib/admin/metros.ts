@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { platformAdminTransaction } from "../db";
+import { lockMetroRow, metroAssignmentMedian, metroQuoteTotals, platformAdminTransaction } from "../db";
 import type { CourierSelectionMode } from "../delivery/courier-settings";
 import type { DeliveryProviderName } from "../delivery/provider";
 import { DIRECTORY_STORE_WHERE } from "../directory/stores";
@@ -63,7 +63,7 @@ export async function saveMetro(tx: Tx, actor: Actor, id: string | null, input: 
     });
     return created.id;
   }
-  await tx.$queryRaw`SELECT id FROM metros WHERE id = ${id} FOR UPDATE`;
+  await lockMetroRow(tx, id);
   const before = await tx.metro.findUnique({ where: { id }, select: METRO_FIELDS });
   if (!before) return null;
   const unchanged = (Object.keys(input) as Array<keyof MetroInput>).every((key) => JSON.stringify(before[key]) === JSON.stringify(input[key]));
@@ -119,24 +119,8 @@ export async function metroReadiness(metroId: string, now: Date = new Date()): P
         orderBy: { name: "asc" },
         select: { id: true, name: true, status: true, city: true, state: true, doordashStoreId: true, doordashRegistrationError: true, uberLocationId: true, uberRegistrationError: true },
       }),
-      tx.$queryRaw<Array<{ provider: DeliveryProviderName; attempts: number; successes: number }>>`
-        SELECT q.provider, sum(q.attempts)::int AS attempts, sum(q.successes)::int AS successes
-        FROM courier_quote_days q JOIN stores s ON s.id = q.store_id
-        WHERE s.metro_id = ${metroId} AND q.day >= ${firstDay}::date
-        GROUP BY q.provider ORDER BY q.provider`,
-      // The clock starts at the later of booking and the ready time, as the assignment timer and incident log do (#536).
-      tx.$queryRaw<Array<{ median: number | null; deliveries: number }>>`
-        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY t.secs)::float8 AS median, count(*)::int AS deliveries
-        FROM (
-          SELECT GREATEST(0, EXTRACT(EPOCH FROM (a.first_at - GREATEST(d.created_at, d.pickup_ready_at)))) AS secs
-          FROM deliveries d
-          JOIN stores s ON s.id = d.store_id
-          JOIN LATERAL (
-            SELECT min(e.created_at) AS first_at FROM delivery_events e
-            WHERE e.store_id = d.store_id AND e.delivery_id = d.id AND e.type = 'courier_assigned'
-          ) a ON a.first_at IS NOT NULL
-          WHERE s.metro_id = ${metroId} AND d.created_at >= ${since}::timestamp(3)
-        ) t`,
+      metroQuoteTotals(tx, metroId, firstDay) as Promise<Array<{ provider: DeliveryProviderName; attempts: number; successes: number }>>,
+      metroAssignmentMedian(tx, metroId, since),
       tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" }, select: { taxSignedOffStates: true } }),
     ]);
 
@@ -168,7 +152,7 @@ export async function metroReadiness(metroId: string, now: Date = new Date()): P
         suspended: stores.filter((s) => s.status === "suspended").length,
       },
       quotes,
-      assignment: { medianSeconds: assignment[0]?.median ?? null, deliveries: assignment[0]?.deliveries ?? 0 },
+      assignment,
       taxStates: metro.states.filter(isStateCode).map((code) => ({ code, name: STATE_NAMES[code], signedOff: settings.taxSignedOffStates.includes(code) })),
       cityPages,
     };
