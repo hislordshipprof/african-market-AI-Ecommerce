@@ -2,6 +2,9 @@ import { auth, onCustomDomain, registeredCustomDomain } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { clientIp } from "@/lib/assistant/client-ip";
+import { isLocalCallbackPath } from "@/lib/security/callback-path";
+import { hashTag, logSecurityEvent } from "@/lib/security/events";
 import { parseInput } from "@/lib/security/parse-input";
 
 const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
@@ -13,9 +16,7 @@ const CUSTOMER_ONLY_PATHS = [
 
 const CALLBACK_PARAMS = ["callbackURL", "newUserCallbackURL", "errorCallbackURL"];
 
-const callbackValue = z.string().max(2000).refine(
-  (value) => value.startsWith("/") && !value.startsWith("//"),
-);
+const callbackValue = z.string().max(2000).refine(isLocalCallbackPath);
 
 function rejectCallback(param: string, value: unknown): NextResponse | null {
   if (value === undefined || value === null) return null;
@@ -67,10 +68,25 @@ async function keepOnCustomDomain(req: NextRequest, res: Response): Promise<Resp
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+const TWO_FACTOR_PATHS = ["/two-factor/verify-totp", "/two-factor/verify-backup-code"];
+
+/** One event per refused sign-in, second step or rate-limited call (#712). No email, password or code. */
+function logAuthOutcome(req: NextRequest, res: Response): Response {
+  const path = new URL(req.url).pathname.replace(/^\/api\/auth/, "");
+  const ip = hashTag(clientIp(req.headers));
+  if (res.status === 429) {
+    logSecurityEvent("rate_limited", { source: "auth", path: path.slice(0, 64), ip });
+  } else if (res.status >= 400 && res.status < 500) {
+    if (path === "/sign-in/email") logSecurityEvent("auth_sign_in_failed", { path, status: res.status, ip });
+    else if (TWO_FACTOR_PATHS.includes(path)) logSecurityEvent("auth_two_factor_failed", { path, status: res.status, ip });
+  }
+  return res;
+}
+
 export async function GET(req: NextRequest) {
   const bad = rejectIfBadCallback(req) ?? (await rejectIfAdminHost(req));
   if (bad) return bad;
-  return keepOnCustomDomain(req, await rawGET(req));
+  return keepOnCustomDomain(req, logAuthOutcome(req, await rawGET(req)));
 }
 
 export async function POST(req: NextRequest) {
@@ -86,5 +102,5 @@ export async function POST(req: NextRequest) {
       if (rejected) return rejected;
     }
   }
-  return rawPOST(req);
+  return logAuthOutcome(req, await rawPOST(req));
 }

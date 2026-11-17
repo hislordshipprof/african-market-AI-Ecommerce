@@ -275,25 +275,24 @@ describe("security headers on the proxy", () => {
     vi.stubEnv("VERCEL_ENV", "");
     const redirect = proxy(makeRequest("http://localhost:3000/?store=mama-ngozi"));
     expect(redirect.status).toBe(307);
-    expect(redirect.headers.get("content-security-policy")).toBe(
-      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
-    );
+    expect(redirect.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(redirect.headers.get("content-security-policy")).toContain("report-uri /api/csp-report");
     expect(redirect.headers.get("content-security-policy-report-only")).toContain("default-src 'self'");
-    expect(redirect.headers.get("strict-transport-security")).toBe("max-age=63072000");
+    expect(redirect.headers.get("strict-transport-security")).toBe("max-age=63072000; includeSubDomains");
 
     vi.stubEnv("NODE_ENV", "production");
     const pass = proxy(makeRequest("http://localhost:3000/"));
     expect(pass.headers.get("x-content-type-options")).toBe("nosniff");
     expect(pass.headers.get("x-frame-options")).toBe("DENY");
     expect(pass.headers.get("content-security-policy-report-only")).not.toContain("unsafe-eval");
-    expect(pass.headers.get("content-security-policy")).toBe(
-      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
-    );
+    expect(pass.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(pass.headers.get("permissions-policy")).toContain("camera=()");
 
     const nextConfig = (await import("../next.config")).default;
     if (!nextConfig.headers) throw new Error("next config does not set headers");
     const configured = await nextConfig.headers();
     expect(configured.map((entry: { source: string }) => entry.source)).toContain("/_next/static/:path*");
+    expect(nextConfig.poweredByHeader).toBe(false);
   });
 
   it("an SVG path gets a no-script, sandboxed policy (#124)", () => {
@@ -400,6 +399,19 @@ describe("proxy on the platform root domain (store directory)", () => {
       expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/_directory-not-here");
     });
   }
+
+  it("the not-found rewrite forwards the sanitised headers, so a forged x-store-slug never reaches the render", () => {
+    const req = new NextRequest("http://unknown-host.test/stores/texas", {
+      headers: { host: "unknown-host.test", "x-store-slug": "victim-store", "x-platform-root": "1" },
+    });
+    const res = proxy(req);
+    expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/_directory-not-here");
+    const forwarded = res.headers.get("x-middleware-override-headers")?.split(",") ?? [];
+    expect(forwarded).toContain("host");
+    expect(forwarded).not.toContain("x-store-slug");
+    expect(forwarded).not.toContain("x-platform-root");
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+  });
 
   it("leaves a store's own /stores-like paths alone", () => {
     const res = proxy(makeRequest("http://mama-ngozi.example.com/storesx"));

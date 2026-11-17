@@ -39,7 +39,7 @@ import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction 
 import { listOrdersToCheck } from "./orders-to-check";
 import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 import { parseRepaidDollars } from "./repaid-dollars";
-import { authPost } from "../test-auth";
+import { authPost, testSignUp } from "../test-auth";
 
 const RUN = `t264-${Date.now()}`;
 const password = "RefundResolve-186!";
@@ -133,7 +133,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       [emailOwner, "Store Owner"],
       [emailBare, "Bare Admin"],
     ] as const) {
-      const res = await authPost("/sign-up/email", { email, password, name });
+      const res = await testSignUp({ email, password, name });
       expect(res.status, await res.clone().text()).toBe(200);
     }
     adminId = (await authPrisma.user.findFirstOrThrow({ where: { email: emailAdmin } })).id;

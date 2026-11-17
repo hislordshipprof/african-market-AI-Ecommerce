@@ -6,6 +6,8 @@ vi.hoisted(() => {
   (process.env as Record<string, string>).NODE_ENV = "production";
   process.env.BETTER_AUTH_SECRET ||= "test-secret-at-least-32-characters-long!!";
   process.env.EMAIL_FROM ||= "Rate Limit Test <signin@test.example>";
+  // A deployment trusts only its own base URL's hosts, never bare localhost (#710).
+  process.env.BETTER_AUTH_URL ||= "http://localhost:3000";
 });
 // Production would pick the live Resend sender: record sends instead.
 const { sent } = vi.hoisted(() => ({ sent: [] as { to: string; html?: string }[] }));
@@ -14,7 +16,9 @@ vi.mock("./email/send", () => ({
     sent.push(message);
   },
 }));
+import { NextRequest } from "next/server";
 import { auth } from "./auth";
+import { POST as authRoutePOST } from "@/app/api/auth/[...all]/route";
 import { authPrisma } from "./db";
 import { verifyUrlFromEmail } from "./test-auth";
 
@@ -132,6 +136,9 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
   it("relaxed limits let one IP make more than 100 password sign-ins in one window (a whole e2e run)", async () => {
     const ip = `10.190.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
     process.env.AUTH_RATE_LIMIT_RELAXED = "1";
+    // Relaxed limits apply only to the CI e2e server (CI=true); a deployment ignores them (#710).
+    const ci = process.env.CI;
+    process.env.CI = "true";
     vi.resetModules();
     try {
       const { auth: relaxed } = await import("./auth");
@@ -149,9 +156,35 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
       expect([...statuses]).toEqual([401]);
     } finally {
       delete process.env.AUTH_RATE_LIMIT_RELAXED;
+      if (ci === undefined) delete process.env.CI;
+      else process.env.CI = ci;
       await authPrisma.rateLimit.deleteMany({ where: { key: { startsWith: `${ip}|` } } });
     }
   }, 60_000);
+
+  it("a refused password sign-in logs auth_sign_in_failed, and the limit hit logs rate_limited once per 429", async () => {
+    const ip = `10.190.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const statuses: number[] = [];
+    try {
+      for (let i = 0; i < 6; i++) {
+        const res = await authRoutePOST(new NextRequest("http://localhost:3000/api/auth/sign-in/email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-forwarded-for": ip },
+          body: JSON.stringify({ email: `rl-events-${stamp}@test.example`, password: "not-the-password" }),
+        }));
+        statuses.push(res.status);
+      }
+      expect(statuses).toEqual([401, 401, 401, 401, 401, 429]);
+      const events = warn.mock.calls.map((call) => String(call[0])).filter((line) => line.startsWith("{")).map((line) => JSON.parse(line).event);
+      expect(events.filter((event) => event === "auth_sign_in_failed")).toHaveLength(5);
+      expect(events.filter((event) => event === "rate_limited")).toHaveLength(1);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(ip);
+    } finally {
+      warn.mockRestore();
+      await authPrisma.rateLimit.deleteMany({ where: { key: { startsWith: `${ip}|` } } });
+    }
+  });
 
   it("an address containing % is refused before any link is stored", async () => {
     const victim = `rl%pct-${stamp}@test.example`;

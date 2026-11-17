@@ -27,7 +27,7 @@ import IncidentPage from "@/app/admin/(shell)/couriers/incidents/[orderId]/page"
 import { addCourierIncidentNoteAction, getCourierIncident, listCourierIncidents } from "./courier-incidents";
 import { testPrismaClient } from "../test-prisma";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const suffix = `${Date.now()}-ci536`;
 const password = "GuardPass-123!";
@@ -41,7 +41,7 @@ const storeB = crypto.randomUUID();
 const ids = { orderA: "", orderB: "", quietOrder: "", deliveryA: "" };
 
 async function signUpAndIn(email: string): Promise<{ userId: string; cookies: string }> {
-  const signedUp = await authPost("/sign-up/email", { email, password, name: "Incident 536" });
+  const signedUp = await testSignUp({ email, password, name: "Incident 536" });
   expect(signedUp.status, await signedUp.clone().text()).toBe(200);
   const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
   const signedIn = await authPost("/sign-in/email", { email, password });

@@ -88,6 +88,11 @@ export interface DeliveryProvider {
   handleWebhook(raw: string, headers: Headers): DeliveryWebhookEvent;
 }
 
+/** A provider link we show to shoppers is kept only when it is https, as for Shippo (#712). */
+export function httpsUrl(value: unknown): string | null {
+  return typeof value === "string" && value.startsWith("https://") ? value : null;
+}
+
 export class DeliveryProviderError extends Error {
   constructor(
     readonly provider: DeliveryProviderName,

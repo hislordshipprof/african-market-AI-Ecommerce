@@ -3,13 +3,28 @@ import { createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
 import { authPrisma, countMagicLinksForEmail, platform } from "./db";
-import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
+import { isPrivilegedEmail, isPrivilegedUser, isStaffUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
 import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { isSlugRoutable, slugFromHost } from "./slug";
+import { testOnlyRoutesAllowed } from "./security/test-only-routes";
 
-const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
+/**
+ * A real deployment: VERCEL set, or NODE_ENV=production without CI=true (the /api/e2e rule).
+ * The CI and e2e server is `next start` with CI=true, so it keeps its test settings.
+ */
+function isDeployment(env: Record<string, string | undefined>): boolean {
+  return !testOnlyRoutesAllowed(env, "1");
+}
+
+export function resolveAuthRateLimitRelaxed(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return testOnlyRoutesAllowed(env, env.AUTH_RATE_LIMIT_RELAXED);
+}
+
+const relaxedAuth = resolveAuthRateLimitRelaxed();
 
 export function resolveAuthBaseUrl(
   env: Record<string, string | undefined> = process.env,
@@ -48,13 +63,14 @@ export function resolveAuthAllowedHosts(
     hosts.push(env.PLATFORM_ROOT_DOMAIN, `*.${env.PLATFORM_ROOT_DOMAIN}`);
   }
 
-  const port = env.PORT ?? "3000";
-  hosts.push(`localhost:${port}`, `*.localhost:${port}`);
-  if (port !== "3000") {
-    hosts.push("localhost:3000", "*.localhost:3000");
+  if (!isDeployment(env)) {
+    const port = env.PORT ?? "3000";
+    hosts.push(`localhost:${port}`, `*.localhost:${port}`);
+    if (port !== "3000") {
+      hosts.push("localhost:3000", "*.localhost:3000");
+    }
+    hosts.push("127.0.0.1:3000", `127.0.0.1:${port}`);
   }
-
-  hosts.push("127.0.0.1:3000", `127.0.0.1:${port}`);
 
   return [...new Set(hosts)];
 }
@@ -76,10 +92,12 @@ export function resolveAuthTrustedOrigins(
     origins.push(`https://${env.VERCEL_URL}`);
   }
 
-  const port = env.PORT ?? "3000";
-  origins.push(`http://localhost:${port}`, `http://*.localhost:${port}`);
-  if (port !== "3000") {
-    origins.push("http://localhost:3000", "http://*.localhost:3000");
+  if (!isDeployment(env)) {
+    const port = env.PORT ?? "3000";
+    origins.push(`http://localhost:${port}`, `http://*.localhost:${port}`);
+    if (port !== "3000") {
+      origins.push("http://localhost:3000", "http://*.localhost:3000");
+    }
   }
 
   return [...new Set(origins)];
@@ -98,6 +116,16 @@ export function validateAuthSecret(
         "Generate one with: openssl rand -base64 32",
     );
   }
+  // The committed CI secret (.env.e2e, ci.yml) is marked do-not-use; the CI server itself still runs on it.
+  if (isDeployment(env) && secret.includes("do-not-use")) {
+    throw new Error("BETTER_AUTH_SECRET is a committed test secret. Generate one with: openssl rand -base64 32");
+  }
+}
+
+export function resolveAuthSecureCookies(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return isDeployment(env) || resolveAuthBaseUrl(env).startsWith("https://");
 }
 
 export const RESEND_SANDBOX_FROM = "onboarding@resend.dev";
@@ -134,6 +162,8 @@ async function inboxCapReached(email: string): Promise<boolean> {
 
 const baseUrl = resolveAuthBaseUrl();
 
+const promotedOnVerify = new WeakSet<object>();
+
 function requestHeaders(ctx: unknown): Headers | null {
   if (!ctx || typeof ctx !== "object") return null;
   const record = ctx as { headers?: unknown; request?: { headers?: unknown } };
@@ -164,23 +194,28 @@ async function trustedOriginsForRequest(request?: Request): Promise<string[]> {
   return domain ? [...origins, customDomainOrigin(domain)] : origins;
 }
 
+function onOrigin(url: string, origin: string): string {
+  const target = new URL(url, baseUrl);
+  if (target.origin !== new URL(baseUrl).origin) return url;
+  return new URL(`${target.pathname}${target.search}${target.hash}`, origin).toString();
+}
+
 // Better Auth builds links and redirects on its fallback base URL for hosts outside
 // allowedHosts, which is static; move those onto the store's custom domain.
 export function onCustomDomain(url: string, domain: string): string {
-  const target = new URL(url, baseUrl);
-  if (target.origin !== new URL(baseUrl).origin) return url;
-  return new URL(`${target.pathname}${target.search}${target.hash}`, customDomainOrigin(domain)).toString();
+  return onOrigin(url, customDomainOrigin(domain));
 }
 
-async function magicLinkUrlForHost(url: string, ctx: unknown): Promise<string> {
-  const headers = requestHeaders(ctx);
-  const domain = headers ? await registeredCustomDomain(headers) : null;
-  return domain ? onCustomDomain(url, domain) : url;
-}
+type RequestStore = {
+  id: string;
+  name: string;
+  slug: string;
+  customDomain: string | null;
+  customDomainVerifiedAt: Date | null;
+};
 
-async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
-  const headers = requestHeaders(ctx);
-  if (!headers) return null;
+// The store a request is on: its subdomain slug, or a domain a store has registered.
+async function storeForRequest(headers: Headers): Promise<RequestStore | null> {
   const headerSlug = headers.get("x-store-slug")?.toLowerCase() ?? null;
   const customDomain = headers.get("x-custom-domain");
   const host = headers.get("host");
@@ -191,12 +226,17 @@ async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
         ? slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN)
         : null;
   if (!slug && !customDomain) return null;
+  return platform.store.findUnique({
+    where: slug ? { slug } : { customDomain: customDomain! },
+    select: { id: true, name: true, slug: true, customDomain: true, customDomainVerifiedAt: true },
+  });
+}
+
+async function storeForMagicLink(ctx: unknown): Promise<RequestStore | null> {
+  const headers = requestHeaders(ctx);
+  if (!headers) return null;
   try {
-    const store = await platform.store.findUnique({
-      where: slug ? { slug } : { customDomain: customDomain! },
-      select: { name: true },
-    });
-    return store?.name ?? null;
+    return await storeForRequest(headers);
   } catch (error) {
     const message = error instanceof Error ? error.message : "lookup failed";
     console.error(
@@ -204,6 +244,43 @@ async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
     );
     return null;
   }
+}
+
+// A link asked for on a custom domain goes there only once Vercel has verified it for this
+// store (#711); otherwise to the store's platform subdomain, which the platform controls.
+function magicLinkUrlForStore(url: string, ctx: unknown, store: RequestStore | null): string {
+  if (!store?.customDomain || !requestHeaders(ctx)?.get("x-custom-domain")) return url;
+  if (store.customDomainVerifiedAt) return onCustomDomain(url, store.customDomain);
+  const root = process.env.PLATFORM_ROOT_DOMAIN;
+  if (!root) return url;
+  const base = new URL(baseUrl);
+  return onOrigin(url, `${base.protocol}//${store.slug}.${root}${base.port ? `:${base.port}` : ""}`);
+}
+
+const MAGIC_LINK_TTL_SECONDS = 900;
+const magicLinkStoreIdentifier = (token: string) => `magic-link-store:${token}`;
+
+// A token is redeemable only on the store it was asked for on (#711); a live token with no store
+// record is refused too. An unknown or expired token falls through to Better Auth's INVALID_TOKEN.
+async function refuseTokenFromAnotherStore(ctx: {
+  query?: Record<string, unknown>;
+  context: { internalAdapter: { findVerificationValue(identifier: string): Promise<{ value: string } | null> } };
+}): Promise<void> {
+  const token = ctx.query?.token;
+  if (typeof token !== "string") return;
+  const adapter = ctx.context.internalAdapter;
+  const binding = await adapter.findVerificationValue(magicLinkStoreIdentifier(token));
+  if (!binding) {
+    if (await adapter.findVerificationValue(`magic-link:${token}`)) throw refusedHere();
+    return;
+  }
+  const headers = requestHeaders(ctx);
+  const store = headers ? await storeForRequest(headers) : null;
+  if (binding.value !== (store?.id ?? "")) throw refusedHere();
+}
+
+function refusedHere(): APIError {
+  return new APIError("FORBIDDEN", { message: "This sign-in link is not valid here" });
 }
 
 export const auth = betterAuth({
@@ -215,6 +292,8 @@ export const auth = betterAuth({
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
+    // Accounts come from magic links (shoppers) or staff invites (/api/invite/password), never open sign-up.
+    disableSignUp: true,
     // Account recovery (ADR-0015): a reset never skips the second step, and ends every session.
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
@@ -231,7 +310,7 @@ export const auth = betterAuth({
       issuer: "African Markets Platform",
     }),
     magicLink({
-      expiresIn: 900,
+      expiresIn: MAGIC_LINK_TTL_SECONDS,
       sendMagicLink: async ({ email, url, token }, ctx) => {
         const normalizedEmail = email.trim().toLowerCase();
         const privileged = await isPrivilegedEmail(normalizedEmail);
@@ -240,11 +319,19 @@ export const auth = betterAuth({
           await authPrisma.verification.deleteMany({ where: { identifier: `magic-link:${token}` } });
           return;
         }
-        const storeName = await storeNameForMagicLink(ctx);
+        const store = await storeForMagicLink(ctx);
+        await authPrisma.verification.create({
+          data: {
+            id: crypto.randomUUID(),
+            identifier: magicLinkStoreIdentifier(token),
+            value: store?.id ?? "",
+            expiresAt: new Date(Date.now() + MAGIC_LINK_TTL_SECONDS * 1000),
+          },
+        });
         const message = magicLinkMessage({
           to: normalizedEmail,
-          url: confirmLinkUrl(await magicLinkUrlForHost(url, ctx)),
-          storeName,
+          url: confirmLinkUrl(magicLinkUrlForStore(url, ctx, store)),
+          storeName: store?.name ?? null,
           fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
         });
         scheduleAfterResponse(() => sendEmail(message), "magic_link_delivery_failed");
@@ -270,6 +357,7 @@ export const auth = betterAuth({
     // A trusted-device cookie skips the second step but leaves twoFactorVerified false, so guards
     // would reject that session anyway: never issue one.
     before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === "/magic-link/verify") await refuseTokenFromAnotherStore(ctx);
       if (ctx.path.startsWith("/two-factor/") && ctx.body?.trustDevice) {
         return { context: { body: { ...ctx.body, trustDevice: false } } };
       }
@@ -277,9 +365,35 @@ export const auth = betterAuth({
       if (ctx.path === "/sign-in/magic-link" && ctx.body?.name) {
         return { context: { body: { ...ctx.body, name: "" } } };
       }
+      // Accounts carry no picture, and a name is at most 80 characters. Edited in place: a returned
+      // body is merged over the original, which would bring a dropped image back.
+      if (ctx.path === "/update-user" && ctx.body && typeof ctx.body === "object") {
+        const body = ctx.body as Record<string, unknown>;
+        delete body.image;
+        if (typeof body.name === "string") body.name = body.name.slice(0, 80);
+      }
     }),
   },
   databaseHooks: {
+    user: {
+      update: {
+        // On /magic-link/verify, Better Auth sets emailVerified only when it promotes an unproven
+        // account (revokeUnprovenAccountAccess), so any 2FA on it was enrolled before the mailbox was
+        // proven: a squatter's. Mark the request here; the after hook has the user id.
+        before: async (data, ctx) => {
+          const path = (ctx as Record<string, unknown> | null)?.path;
+          if (path === "/magic-link/verify" && data.emailVerified === true && ctx) promotedOnVerify.add(ctx);
+        },
+        // Clear the squatter's factor so the mailbox owner can sign in. Staff keep theirs (pre-#710
+        // invitees were never verified); their magic-link session is refused anyway.
+        after: async (user, ctx) => {
+          if (!ctx || !promotedOnVerify.has(ctx) || !user.twoFactorEnabled) return;
+          if (await isStaffUser(user.id)) return;
+          await authPrisma.twoFactor.deleteMany({ where: { userId: user.id } });
+          await authPrisma.user.update({ where: { id: user.id }, data: { twoFactorEnabled: false } });
+        },
+      },
+    },
     session: {
       create: {
         before: async (session, ctx) => {
@@ -335,7 +449,9 @@ export const auth = betterAuth({
   },
   trustedOrigins: trustedOriginsForRequest,
   advanced: {
-    useSecureCookies: baseUrl.startsWith("https://"),
+    useSecureCookies: resolveAuthSecureCookies(),
+    // Vercel sets the first two; a multi-hop x-forwarded-for alone resolves to no IP (one shared bucket).
+    ipAddress: { ipAddressHeaders: ["x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"] },
   },
 });
 

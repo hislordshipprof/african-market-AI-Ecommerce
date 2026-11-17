@@ -4,6 +4,7 @@ import { StoryCard, StorySurface } from "@/components/story-surface/story-surfac
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getStore } from "@/lib/get-store";
+import { isLocalCallbackPath } from "@/lib/security/callback-path";
 
 export const metadata: Metadata = {
   title: "Finish signing in",
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 };
 
 const relative = (value: string | undefined) =>
-  value && value.startsWith("/") && !value.startsWith("//") ? value : "/account";
+  value && isLocalCallbackPath(value) ? value : "/account";
 
 /**
  * The emailed sign-in link lands here. Only the Continue button (a form, which link

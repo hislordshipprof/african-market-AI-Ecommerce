@@ -28,7 +28,7 @@ import { CARD_NOT_FOUND, CARDS_UNAVAILABLE, SAVED_CARD_PURPOSE, SAVED_CARD_TERMS
 import { ensureStripeCustomer } from "./stripe-customer";
 import { CheckoutProviderError, fakeCheckoutPayments, fakeDetachCalls, getCheckoutPayments, type NormalizedCard } from "../stripe/checkout-payments";
 import { getStripeClient } from "../stripe/provider";
-import { AUTH_BASE, authGet, authPost, verifyUrlFromEmail } from "../test-auth";
+import { AUTH_BASE, authGet, authPost, testSignUp, verifyUrlFromEmail } from "../test-auth";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const password = "AccountAuth-248!";
@@ -62,7 +62,7 @@ class CookieJar {
 }
 
 async function customerCookie(email: string, name: string): Promise<{ id: string; cookie: string }> {
-  const signup = await authPost("/sign-up/email", { email, password, name });
+  const signup = await testSignUp({ email, password, name });
   expect(signup.status, await signup.clone().text()).toBe(200);
   const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
   clearTestSentEmails();

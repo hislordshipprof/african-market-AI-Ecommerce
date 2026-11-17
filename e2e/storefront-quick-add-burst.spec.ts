@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import {
   deleteCartLine,
@@ -3291,6 +3292,10 @@ test("cart recovery works with production Vercel flags and no provider keys", as
       E2E_STORE_OVERRIDE: "",
       E2E_FAKE_STRIPE: "",
       CI: "",
+      // A deployment trusts only its own base URL's hosts and refuses the committed test secret (#710).
+      BETTER_AUTH_URL: `http://localhost:${port}`,
+      BETTER_AUTH_TRUSTED_ORIGINS: `http://localhost:${port}`,
+      BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
       STRIPE_SECRET_KEY: "",
       STRIPE_PUBLISHABLE_KEY: "",
       STRIPE_WEBHOOK_SECRET: "",

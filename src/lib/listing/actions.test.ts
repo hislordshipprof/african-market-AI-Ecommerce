@@ -59,7 +59,7 @@ describe("createListingAction", () => {
 
   it("does not invalidate a failed listing mutation", async () => {
     mockCreateListing.mockRejectedValueOnce(new Error("Not saved"));
-    expect(await createListingAction(formData(VALID_LISTING))).toEqual({ error: "Not saved" });
+    expect(await createListingAction(formData(VALID_LISTING))).toEqual({ error: "Failed to create listing" });
     expect(revalidateStorefront).not.toHaveBeenCalled();
   });
 
@@ -192,7 +192,7 @@ describe("updateListingAction", () => {
   it("returns error on service failure", async () => {
     mockUpdateListing.mockRejectedValueOnce(new Error("Not found"));
     const result = await updateListingAction(formData({ listingId: "x" }));
-    expect(result.error).toBe("Not found");
+    expect(result.error).toBe("Failed to update listing");
     expect(revalidateStorefront).not.toHaveBeenCalled();
   });
 });
@@ -275,5 +275,59 @@ describe("parseVariantsJson", () => {
     }));
     expect(fractional.error).toBe("Variant 1: price must be a whole number of cents");
     expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+});
+
+describe("listing form limits and error text (#713)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("refuses a stock status outside in stock, low and out of stock on update", async () => {
+    const result = await updateListingAction(formData({ listingId: "listing-1", stockMode: "status", status: "hacked" }));
+    expect(result.error).toBeTruthy();
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+
+    mockUpdateListing.mockResolvedValueOnce({ id: "listing-1", qty: null });
+    expect(await updateListingAction(formData({ listingId: "listing-1", stockMode: "status", status: "low" }))).toMatchObject({ success: true });
+  });
+
+  it("takes max per order only as a whole number from 1 to 999, on create and update", async () => {
+    for (const maxPerOrder of ["0", "1000", "1.5", "abc", "-3"]) {
+      expect((await createListingAction(formData({ ...VALID_LISTING, maxPerOrder }))).error, maxPerOrder).toBeTruthy();
+      expect((await updateListingAction(formData({ listingId: "listing-1", maxPerOrder }))).error, maxPerOrder).toBeTruthy();
+    }
+    expect(mockCreateListing).not.toHaveBeenCalled();
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+
+    mockCreateListing.mockResolvedValueOnce({ id: "created" });
+    await createListingAction(formData({ ...VALID_LISTING, maxPerOrder: "999" }));
+    expect(mockCreateListing).toHaveBeenCalledWith(expect.objectContaining({ maxPerOrder: 999 }));
+    mockUpdateListing.mockResolvedValueOnce({ id: "listing-1", qty: 1 });
+    await updateListingAction(formData({ listingId: "listing-1", maxPerOrder: "" }));
+    expect(mockUpdateListing).toHaveBeenCalledWith(expect.objectContaining({ maxPerOrder: null }));
+  });
+
+  it("refuses a price or quantity past the database integer range", async () => {
+    const tooBig = String(INT4_MAX + 1);
+    expect((await createListingAction(formData({ ...VALID_LISTING, price: tooBig }))).error).toBeTruthy();
+    expect((await createListingAction(formData({ ...VALID_LISTING, qty: tooBig }))).error).toBeTruthy();
+    expect((await updateListingAction(formData({ listingId: "listing-1", price: tooBig }))).error).toBeTruthy();
+    expect((await updateListingAction(formData({ listingId: "listing-1", qty: tooBig }))).error).toBeTruthy();
+    expect((await updateListingAction(formData({ listingId: "listing-1", qtyLoaded: tooBig }))).error).toBeTruthy();
+    expect(mockCreateListing).not.toHaveBeenCalled();
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+
+  it("never returns the text of an unexpected error", async () => {
+    const leak = 'insert into "listings" violates constraint at host db.internal';
+    mockCreateListing.mockRejectedValueOnce(new Error(leak));
+    mockUpdateListing.mockRejectedValueOnce(new Error(leak));
+    const created = await createListingAction(formData(VALID_LISTING));
+    const updated = await updateListingAction(formData({ listingId: "listing-1" }));
+    const badJson = await updateListingAction(formData({ listingId: "listing-1", variants: "{not json" }));
+    for (const result of [created, updated, badJson]) {
+      expect(result.error).toBeTruthy();
+      expect(result.error).not.toContain("db.internal");
+      expect(result.error).not.toMatch(/JSON|token/i);
+    }
   });
 });

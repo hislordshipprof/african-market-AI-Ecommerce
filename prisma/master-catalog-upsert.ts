@@ -234,6 +234,12 @@ export async function readRecipeAdminChanges(tx: Prisma.TransactionClient, recip
   return { fields };
 }
 
+/** Makes the seed's transaction the platform admin, which the recipe tables' forced RLS asks of the owner too (#713). */
+export async function seedAsPlatformAdmin(tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$executeRaw`SET LOCAL ROLE app_user`;
+  await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+}
+
 /**
  * The recipe a seeded dish key names, the row with that key or the one an admin renamed away from it, locked until
  * the seed's transaction ends so an admin save cannot land between the read and the write.

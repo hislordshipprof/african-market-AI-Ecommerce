@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logInvalidWebhookSignature } from "@/lib/security/events";
 import { parseInput } from "@/lib/security/parse-input";
 import { readWhatsAppConfig } from "@/lib/whatsapp/config";
 import { messageRef } from "@/lib/whatsapp/code";
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!verifyWhatsAppSignature(raw, req.headers.get("x-hub-signature-256"), appSecret)) {
+    logInvalidWebhookSignature("whatsapp", req.headers);
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 

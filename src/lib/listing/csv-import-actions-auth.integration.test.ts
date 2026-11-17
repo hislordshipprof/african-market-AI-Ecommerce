@@ -39,7 +39,7 @@ import { authPrisma, healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
 import { csvCommitAction, csvPreviewAction } from "./csv-import-actions";
 import type { CommitSelection, CsvPreviewResult } from "./csv-import";
-import { AUTH_BASE, authGet, authPost, verifyUrlFromEmail } from "../test-auth";
+import { AUTH_BASE, authGet, authPost, testSignUp, verifyUrlFromEmail } from "../test-auth";
 
 // DATABASE_URL absent: the suite skips. Lane and hosted CI set it, so a real run skips 0.
 // APP_RUNTIME_PASSWORD absent is not a skip: under NODE_ENV=test the app falls back to the
@@ -389,7 +389,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
 
   async function signUp(email: string, name: string): Promise<CookieJar> {
     const jar = new CookieJar();
-    const res = await authPost("/sign-up/email", { email, password, name });
+    const res = await testSignUp({ email, password, name });
     expect(res.status, await res.clone().text()).toBe(200);
     jar.apply(res);
     return jar;

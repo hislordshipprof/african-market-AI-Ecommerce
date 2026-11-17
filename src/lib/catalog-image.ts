@@ -48,8 +48,8 @@ export function toThumbnailUrl(originalUrl: string, width: number): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Read a body into memory, cancelling the stream once it passes `MAX_IMAGE_BYTES`. */
-async function readCapped(body: ReadableStream<Uint8Array> | null): Promise<Buffer | null> {
+/** Read a body into memory, cancelling the stream once it passes `maxBytes`. Null when empty or too large. */
+export async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes = MAX_IMAGE_BYTES): Promise<Buffer | null> {
   if (!body) return null;
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
@@ -58,7 +58,7 @@ async function readCapped(body: ReadableStream<Uint8Array> | null): Promise<Buff
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_IMAGE_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel();
       return null;
     }

@@ -7,6 +7,7 @@ import { requireSameOrigin } from "@/lib/security/same-origin";
 const bodySchema = z.strictObject({
   token: z.string().min(1).max(512),
   password: z.string().min(1).max(256),
+  name: z.string().trim().min(1).max(80),
 });
 
 export async function POST(req: NextRequest) {
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (!body.ok) {
     return NextResponse.json({ error: "Missing invite token" }, { status: 400 });
   }
-  const result = await setInviteePassword(body.data.token, body.data.password);
+  const result = await setInviteePassword(body.data.token, body.data.password, body.data.name);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
   return NextResponse.json({ ok: true });
 }

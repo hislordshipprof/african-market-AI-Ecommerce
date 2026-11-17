@@ -30,7 +30,7 @@ import { POST } from "./route";
 import { authPrisma, storeScopedTransaction } from "@/lib/db";
 import { setStripeProvider } from "@/lib/stripe";
 import { fakeStripeProvider } from "@/lib/stripe/fake";
-import { authPost, collectCookies } from "../../../../lib/test-auth";
+import { authPost, testSignUp, collectCookies } from "../../../../lib/test-auth";
 
 const suffix = `${Date.now()}-con`;
 const password = "GuardPass-123!";
@@ -67,7 +67,7 @@ describe("stripe connect origin and store", () => {
         return fakeStripeProvider.createConnectAccount(input);
       },
     });
-    const signedUp = await authPost("/sign-up/email", { email, password, name: "Connect 309" });
+    const signedUp = await testSignUp({ email, password, name: "Connect 309" });
     expect(signedUp.status, await signedUp.clone().text()).toBe(200);
     const signedIn = await authPost("/sign-in/email", { email, password });
     const cookies = collectCookies(signedIn);

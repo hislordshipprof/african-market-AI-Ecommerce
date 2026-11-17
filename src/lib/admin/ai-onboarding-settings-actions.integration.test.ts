@@ -26,7 +26,7 @@ import { saveAiOnboardingSettingsAction } from "./ai-onboarding-settings-actions
 import { authPrisma, platformAdmin } from "../db";
 import { lastAiOnboardingChange, readAiOnboardingSettings, type AiOnboardingSettings } from "./ai-onboarding-settings";
 import { withAiOnboardingSettings } from "./platform-settings-test-lock";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const suffix = `${Date.now()}-aio561`;
 const password = "GuardPass-123!";
@@ -39,7 +39,7 @@ const storeId = crypto.randomUUID();
 type Field = keyof AiOnboardingSettings;
 
 async function signUpAndIn(email: string): Promise<{ userId: string; cookies: string }> {
-  const signedUp = await authPost("/sign-up/email", { email, password, name: "Settings 561" });
+  const signedUp = await testSignUp({ email, password, name: "Settings 561" });
   expect(signedUp.status, await signedUp.clone().text()).toBe(200);
   const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
   const signedIn = await authPost("/sign-in/email", { email, password });

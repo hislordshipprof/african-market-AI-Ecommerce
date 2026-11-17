@@ -36,7 +36,7 @@ import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction } from "
 import { removeWhatsAppLinkAction, startWhatsAppLinkAction } from "../whatsapp/actions";
 import { fakeWhatsAppProvider, getFakeOutbox, resetFake } from "../whatsapp/fake";
 import { setWhatsAppProvider } from "../whatsapp/index";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const suffix = `${Date.now()}-az`;
 const password = "GuardPass-123!";
@@ -47,7 +47,7 @@ const slugB = `az-b-${suffix}`;
 const slugC = `az-c-${suffix}`;
 
 async function signUp(email: string, name: string): Promise<string> {
-  const res = await authPost("/sign-up/email", { email, password, name });
+  const res = await testSignUp({ email, password, name });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
   return user.id;

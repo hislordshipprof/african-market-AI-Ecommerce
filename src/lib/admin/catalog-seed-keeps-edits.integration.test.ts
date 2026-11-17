@@ -36,7 +36,7 @@ import sharp from "sharp";
 import type { PrismaClient } from "@prisma/client";
 import { authPrisma } from "../db";
 import { resolveDirectUrl } from "../env";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 import { testPrismaClient } from "../test-prisma";
 import { seedMasterCatalog } from "../../../prisma/seed-master-catalog";
 import { seedCategoryMetadata, type SeedCategory } from "../../../prisma/seed";
@@ -78,7 +78,7 @@ function writeCsv(rows: Array<Record<Column, string>>): string {
 }
 
 async function signInPlatformAdmin(): Promise<{ id: string; cookies: string }> {
-  const signedUp = await authPost("/sign-up/email", { email: adminEmail, password, name: RUN });
+  const signedUp = await testSignUp({ email: adminEmail, password, name: RUN });
   expect(signedUp.status, await signedUp.clone().text()).toBe(200);
   const id = (await authPrisma.user.findFirstOrThrow({ where: { email: adminEmail } })).id;
   await authPrisma.user.update({ where: { id }, data: { role: "platform_admin" } });

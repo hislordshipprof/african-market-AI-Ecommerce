@@ -1,5 +1,6 @@
 import { storeUrl, E2E_PORT } from "./urls";
 import { test, expect } from "@playwright/test";
+import { insertShopperAccount } from "./account-fixture";
 
 const base = storeUrl("mama-ngozi");
 const apiBase = `http://localhost:${E2E_PORT}`;
@@ -7,10 +8,7 @@ const apiBase = `http://localhost:${E2E_PORT}`;
 test.describe("Customer address book", () => {
   test("signed-in customer saves, edits, and removes an address", async ({ page, request }) => {
     const email = `e2e-address-${Date.now()}@test.example`;
-    const signupRes = await request.post(`${apiBase}/api/auth/sign-up/email`, {
-      data: { email, password: "E2eTestPass-123!", name: "Ada Address" },
-    });
-    expect(signupRes.ok(), await signupRes.text()).toBe(true);
+    await insertShopperAccount({ email, password: "E2eTestPass-123!", name: "Ada Address" });
 
     await page.goto(`${base}/account/sign-in`);
     await page.getByLabel("Email address").fill(email);
@@ -75,11 +73,7 @@ test.describe("Customer address book", () => {
     await expect(page.getByText("9 Market St")).toHaveCount(0);
 
     const other = `e2e-address-b-${Date.now()}@test.example`;
-    const otherSignup = await request.post(`${apiBase}/api/auth/sign-up/email`, {
-      headers: { origin: apiBase },
-      data: { email: other, password: "E2eTestPass-123!", name: "Bea Address" },
-    });
-    expect(otherSignup.ok(), await otherSignup.text()).toBe(true);
+    await insertShopperAccount({ email: other, password: "E2eTestPass-123!", name: "Bea Address" });
     await page.getByLabel("Email address").fill(other);
     await page.getByRole("button", { name: "Send sign-in link" }).click();
     await expect(page.locator("[data-slot='card-title']")).toContainText("Check your email", { timeout: 10000 });

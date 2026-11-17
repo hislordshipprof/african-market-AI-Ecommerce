@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logInvalidWebhookSignature } from "@/lib/security/events";
 import { parseInput } from "@/lib/security/parse-input";
 import { parseTrackUpdated, verifyShippoSignature } from "@/lib/shipping/shippo";
 import { applyTrackingWebhook } from "@/lib/shipping/tracking";
@@ -24,6 +25,7 @@ export async function POST(req: NextRequest) {
   const raw = await req.text();
   if (raw.length > MAX_BODY_BYTES) return NextResponse.json({ error: "Body too large" }, { status: 413 });
   if (!verifyShippoSignature(raw, req.headers.get("shippo-auth-signature"), secret)) {
+    logInvalidWebhookSignature("shippo", req.headers);
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
   const event = parseTrackUpdated(raw);

@@ -159,6 +159,14 @@ describe.skipIf(!hasDb)("ACP checkout sessions (#574)", () => {
     expect(await storeScoped(stores.a.id).acpCheckoutSession.count()).toBe(0);
   });
 
+  it("a body over 64 KB in bytes is refused before it is parsed, even when it is fewer characters", async () => {
+    const before = await storeScoped(stores.a.id).acpCheckoutSession.count();
+    // 40,000 two-byte characters: 80,000 bytes on the wire.
+    const res = await create(call(stores.a.slug, "POST", "", { line_items: [{ id: stores.a.variantId, quantity: 2 }], buyer: BUYER, note: "é".repeat(40_000) }));
+    expect(res.status).toBe(400);
+    expect(await storeScoped(stores.a.id).acpCheckoutSession.count()).toBe(before);
+  });
+
   it("prices come from the store's quote: an agent's unit_amount and totals are ignored", async () => {
     const res = await create(call(stores.a.slug, "POST", "", {
       line_items: [{ id: stores.a.variantId, quantity: 2, unit_amount: 1 }],

@@ -27,7 +27,6 @@ export const AUTH_IP_ENV = "CSV_COMMIT_AUTH_IP";
 export const IDENTITY_EVIDENCE_PREFIX = "CSV_COMMIT_IDENTITY_EVIDENCE ";
 export const WINDOW_RESET_PREFIX = "CSV_COMMIT_WINDOW_RESET ";
 export const AUTH_PATHS = [
-  "/sign-up/email",
   "/sign-in/email",
   "/two-factor/enable",
   "/two-factor/verify-totp",

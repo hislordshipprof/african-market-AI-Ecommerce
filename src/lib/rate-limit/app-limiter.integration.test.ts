@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { Client } from "pg";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { appRateLimitCleanup, authPrisma } from "../db";
 import { waitForLockWaiters } from "../listing/import-lock-test-helpers";
 import { takeRateLimit } from "./app-limiter";
@@ -31,6 +31,19 @@ describe.skipIf(!hasDb || process.env.TZ_CHILD === "1")("app rate limit", () => 
     expect((await takeRateLimit(blockedKey, 1, 60_000, now + 1)).ok).toBe(false);
     expect((await takeRateLimit(otherKey, 1, 60_000, now + 1)).ok).toBe(true);
     await authPrisma.appRateLimit.deleteMany({ where: { key: { in: [blockedKey, otherKey] } } });
+  });
+
+  it("logs one rate_limited event per window, naming the scope but not the key", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ip = `203.0.113.${Math.floor(Math.random() * 250)}`;
+    const key = `directory-near:ip:${ip}-${Date.now()}`;
+    const now = Date.now();
+    for (let i = 0; i < 5; i++) await takeRateLimit(key, 2, 60_000, now + i);
+    const events = warn.mock.calls.map((call) => JSON.parse(String(call[0]))).filter((e) => e.event === "rate_limited");
+    expect(events).toEqual([{ event: "rate_limited", source: "app", scope: "directory-near", key: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(ip);
+    warn.mockRestore();
+    await authPrisma.appRateLimit.delete({ where: { key } });
   });
 
   it("exactly max of 20 concurrent", async () => {

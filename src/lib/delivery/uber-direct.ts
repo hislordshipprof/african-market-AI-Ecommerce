@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   DeliveryProviderError,
+  httpsUrl,
   type CourierEventType,
   type CreatedDelivery,
   type DeliveryAddress,
@@ -242,7 +243,7 @@ export class UberDirectProvider implements DeliveryProvider {
     const pin = field(res, "dropoff", "verification_requirements", "pincode", "value");
     return {
       externalId: res.id,
-      trackingUrl: typeof res.tracking_url === "string" ? res.tracking_url : null,
+      trackingUrl: httpsUrl(res.tracking_url),
       pin: req.dropoffPin && typeof pin === "string" ? pin : null,
     };
   }
@@ -294,7 +295,7 @@ export class UberDirectProvider implements DeliveryProvider {
       externalEventId: eventId,
       type,
       occurredAt,
-      trackingUrl: text(data.tracking_url),
+      trackingUrl: httpsUrl(data.tracking_url),
       actualFeeCents: type === "delivered" && data.fee !== undefined ? feeCents(data.fee) : null,
       courier: courier ? { name: text(courier.name), vehicle, pickupEta: optionalDate(data.pickup_eta), dropoffEta: optionalDate(data.dropoff_eta) } : null,
       proof: {

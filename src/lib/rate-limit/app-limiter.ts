@@ -1,4 +1,5 @@
 import { appRateLimitCleanup, appRateLimitUpsert } from "../db";
+import { hashTag, logSecurityEvent } from "../security/events";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_BATCH = 100;
@@ -23,6 +24,8 @@ export async function takeRateLimit(
   const row = await appRateLimitUpsert(key, nowMs, boundary);
   await cleanupExpired(BigInt(Date.now()));
   if (row.count <= max) return { ok: true, count: row.count };
+  // The first refusal in a window only: the count only rises, so a flood logs once. Keys hold IPs and ids.
+  if (row.count === max + 1) logSecurityEvent("rate_limited", { source: "app", scope: key.split(":")[0], key: hashTag(key) });
   const retryAfter = Math.max(
     1,
     Math.ceil((Number(row.windowStart) + windowMs - now) / 1000),

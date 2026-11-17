@@ -38,10 +38,17 @@ export async function requirePlatformAdmin(opts?: { allowUnenrolled2FA?: boolean
 
 /** Route-handler variant: a JSON 401/403 to return, or null when the caller is a verified platform admin. */
 export async function platformAdminApiDenial(): Promise<NextResponse | null> {
+  return (await platformAdminApiActor()).denial;
+}
+
+/** As platformAdminApiDenial, and names the admin for an audit row. */
+export async function platformAdminApiActor(): Promise<
+  { denial: NextResponse; actor: null } | { denial: null; actor: { id: string; email: string } }
+> {
   const check = await checkPlatformAdmin();
-  if (check.ok) return null;
+  if (check.ok) return { denial: null, actor: { id: check.session.user.id, email: check.session.user.email } };
   if (check.reason === "sign-in") {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    return { denial: NextResponse.json({ error: "Not authenticated" }, { status: 401 }), actor: null };
   }
-  return NextResponse.json({ error: "Two-factor authentication required" }, { status: 403 });
+  return { denial: NextResponse.json({ error: "Two-factor authentication required" }, { status: 403 }), actor: null };
 }

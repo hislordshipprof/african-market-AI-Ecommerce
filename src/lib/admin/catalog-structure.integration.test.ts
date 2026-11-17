@@ -43,7 +43,7 @@ import { getMasterProductEditor } from "./master-catalog";
 import { authPrisma, storeScoped } from "../db";
 import { searchListings } from "../storefront/service";
 import { searchListingMatches } from "../copilot/search";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const RUN = `cs${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 // Search terms share nothing with RUN, so the products' names are not trigram look-alikes of them.
@@ -53,7 +53,7 @@ const adminEmail = `${RUN}-admin@test.example`;
 const ownerEmail = `${RUN}-owner@test.example`;
 
 async function signUp(email: string): Promise<string> {
-  const res = await authPost("/sign-up/email", { email, password, name: RUN });
+  const res = await testSignUp({ email, password, name: RUN });
   expect(res.status, await res.clone().text()).toBe(200);
   return (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
 }

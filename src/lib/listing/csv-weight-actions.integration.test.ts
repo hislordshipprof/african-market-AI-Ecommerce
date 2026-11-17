@@ -28,14 +28,14 @@ vi.mock("next/navigation", () => ({
 
 import { authPrisma, storeScoped } from "../db";
 import { csvCommitAction, csvPreviewAction } from "./csv-import-actions";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `w215-act-${Date.now()}`;
 const password = "WeightPass-123!";
 
 async function signUp(email: string, name: string): Promise<void> {
-  const res = await authPost("/sign-up/email", { email, password, name });
+  const res = await testSignUp({ email, password, name });
   expect(res.status, await res.clone().text()).toBe(200);
 }
 

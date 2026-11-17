@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { platformAdminApiDenial } from "@/lib/admin/session";
+import { platformAdminApiActor, platformAdminApiDenial } from "@/lib/admin/session";
 import {
   addDomainToStore,
   getDomainStatus,
@@ -46,8 +46,8 @@ function toResponse(result: DomainResult) {
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const denied = await platformAdminApiDenial();
-  if (denied) return denied;
+  const { denial, actor } = await platformAdminApiActor();
+  if (denial) return denial;
   if (!requireSameOrigin(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = parseInput(bodySchema, raw);
   if (!body.ok) return badRequest("Invalid domain format");
 
-  return toResponse(await addDomainToStore(storeId, body.data.domain));
+  return toResponse(await addDomainToStore(storeId, body.data.domain, actor));
 }
 
 export async function GET(_req: NextRequest, ctx: Ctx) {
@@ -78,8 +78,8 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function DELETE(req: NextRequest, ctx: Ctx) {
-  const denied = await platformAdminApiDenial();
-  if (denied) return denied;
+  const { denial, actor } = await platformAdminApiActor();
+  if (denial) return denial;
   if (!requireSameOrigin(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -87,7 +87,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const storeId = await storeIdFrom(ctx);
   if (!storeId) return badRequest("Invalid store id");
 
-  const result = await removeDomainFromStore(storeId);
+  const result = await removeDomainFromStore(storeId, actor);
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }

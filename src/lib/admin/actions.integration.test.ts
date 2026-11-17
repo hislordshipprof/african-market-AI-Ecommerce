@@ -28,7 +28,7 @@ import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
 import { inngest } from "../inngest/client";
 import { STORE_LISTED } from "../directory/store-requests";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const suffix = `${Date.now()}-hrs`;
 const password = "GuardPass-123!";
@@ -74,7 +74,7 @@ describe("store hours schema", () => {
   let userId = "";
 
   beforeAll(async () => {
-    const signedUp = await authPost("/sign-up/email", { email, password, name: "Hours 309" });
+    const signedUp = await testSignUp({ email, password, name: "Hours 309" });
     expect(signedUp.status, await signedUp.clone().text()).toBe(200);
     const user = await authPrisma.user.findFirstOrThrow({ where: { email } });
     userId = user.id;

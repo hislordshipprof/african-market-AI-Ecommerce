@@ -8,6 +8,7 @@ import { applyProviderRefund, evaluateOrderRefundState } from "@/lib/order/refun
 import { CANCELLABLE_BEFORE_CAPTURE } from "@/lib/order/constants";
 import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
 import type { RefundResult } from "@/lib/stripe/types";
+import { logInvalidWebhookSignature } from "@/lib/security/events";
 import { parseInput } from "@/lib/security/parse-input";
 import { applyBillingEvent, isBillingEvent } from "@/lib/billing/service";
 import { applyDisputeEvent, isDisputeEvent } from "@/lib/disputes/service";
@@ -94,6 +95,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("stripe-signature");
   if (!signature) {
+    logInvalidWebhookSignature("stripe", req.headers);
     return NextResponse.json(
       { error: "Missing stripe-signature header" },
       { status: 400 },
@@ -127,6 +129,7 @@ export async function POST(req: NextRequest) {
         { status: 500 },
       );
     }
+    logInvalidWebhookSignature("stripe", req.headers);
     return NextResponse.json(
       { error: "Invalid webhook signature" },
       { status: 400 },

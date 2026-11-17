@@ -44,7 +44,7 @@ import { matchToMasterProducts } from "../listing/csv-import";
 import { searchMasterProducts } from "../listing/photo-drafts";
 import { listMasterProducts } from "../listing/service";
 import { getListingDetail, searchListings } from "../storefront/service";
-import { authPost, collectCookies } from "../test-auth";
+import { authPost, testSignUp, collectCookies } from "../test-auth";
 
 const RUN = `mc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const password = "GuardPass-123!";
@@ -52,7 +52,7 @@ const adminEmail = `${RUN}-admin@test.example`;
 const ownerEmail = `${RUN}-owner@test.example`;
 
 async function signUp(email: string): Promise<string> {
-  const res = await authPost("/sign-up/email", { email, password, name: RUN });
+  const res = await testSignUp({ email, password, name: RUN });
   expect(res.status, await res.clone().text()).toBe(200);
   return (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
 }
