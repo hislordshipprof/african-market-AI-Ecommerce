@@ -29,6 +29,8 @@ export async function insertInboxOrder(input: {
   platformResolved?: boolean;
   /** Goods discount from a store coupon (#557); subtotal stays the goods before it. */
   discountCents?: number;
+  /** A store-delivery order to this address, with its fee in the total (#742). */
+  delivery?: { line1: string; city: string; state: string; zip: string; feeCents: number };
 }): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
@@ -54,11 +56,16 @@ export async function insertInboxOrder(input: {
         number: input.number,
         customerId: customer.id,
         status: input.status,
-        fulfillment: "pickup",
+        fulfillment: input.delivery ? "store-delivery" : "pickup",
         subtotalCents: amount,
         bufferCents: 100,
-        totalAuthorizedCents: amount + 100,
-        totalCents: amount,
+        totalAuthorizedCents: amount + (input.delivery?.feeCents ?? 0) + 100,
+        totalCents: amount + (input.delivery?.feeCents ?? 0),
+        deliveryFeeCents: input.delivery?.feeCents ?? 0,
+        deliveryLine1: input.delivery?.line1 ?? null,
+        deliveryCity: input.delivery?.city ?? null,
+        deliveryState: input.delivery?.state ?? null,
+        deliveryZip: input.delivery?.zip ?? null,
         capturedAmountCents: input.capturedAmountCents,
         discountCents,
         couponId: coupon?.id ?? null,
@@ -272,16 +279,24 @@ export async function deleteDriverRouteOrders(numbers: number[], slot: string): 
  * Accepted orders for batch picking (#564), oldest first, sharing the store's first listing.
  * Order i gets the shared item ×(i === 0 ? 2 : 1) plus one item of its own. Remove with deleteBatchOrders.
  */
-export async function insertBatchOrders(numbers: number[], fulfillments: string[]): Promise<void> {
+export async function insertBatchOrders(numbers: number[], fulfillments: string[], sharedProduct?: string): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: { in: numbers } } });
     const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
-    const listings = await tx.listing.findMany({
-      where: { storeId, active: true, variants: { some: {} } },
+    // sharedProduct puts that master product's listing first, as the item every order shares.
+    const named = sharedProduct ? { masterProduct: { name: sharedProduct } } : {};
+    const first = await tx.listing.findFirstOrThrow({
+      where: { storeId, active: true, variants: { some: {} }, ...named },
       include: { variants: { take: 1 } },
       orderBy: { id: "asc" },
-      take: numbers.length + 1,
     });
+    const rest = await tx.listing.findMany({
+      where: { storeId, active: true, variants: { some: {} }, id: { not: first.id } },
+      include: { variants: { take: 1 } },
+      orderBy: { id: "asc" },
+      take: numbers.length,
+    });
+    const listings = [first, ...rest];
     if (listings.length < numbers.length + 1) throw new Error("mama-ngozi needs more listings");
     const [shared, ...own] = listings;
     for (const [i, number] of numbers.entries()) {

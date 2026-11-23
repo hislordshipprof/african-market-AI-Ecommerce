@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { viewOrderDetail, type OrderDetail } from "@/lib/admin/order-detail";
-import { money } from "@/lib/format";
+import { formatUsPhone, money } from "@/lib/format";
 import { FULFILLMENT_LABELS, placedAt } from "../order-labels";
 import { PLATFORM_REFUNDABLE_FROM, remainingCaptureCents } from "@/lib/order/refund-requests";
 import { AuditedView } from "./audited-view";
@@ -114,7 +114,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
               rows={[
                 ["Name", order.customer.name],
                 ["Email", order.customer.email ?? "—"],
-                ["Phone", order.customer.phone ?? "—"],
+                ["Phone", order.customer.phone ? formatUsPhone(order.customer.phone) : "—"],
                 ...(order.deliveryAddress ? ([["Deliver to", order.deliveryAddress]] as Array<[string, React.ReactNode]>) : []),
                 ["Tracking link", order.trackingTokenHint ? <span data-testid="tracking-hint">ends {order.trackingTokenHint}</span> : "—"],
               ]}

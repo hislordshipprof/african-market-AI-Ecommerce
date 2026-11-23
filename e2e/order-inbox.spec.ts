@@ -111,7 +111,7 @@ test.describe("Order inbox", () => {
 
     await expect(page.locator("text=Order marked ready")).toBeVisible({ timeout: 15000 });
 
-    const awaitingBadge = page.locator("text=Awaiting pickup");
+    const awaitingBadge = page.getByText("Ready for pickup", { exact: true });
     await expect(awaitingBadge).toBeVisible({ timeout: 15000 });
 
     const handOffBtn = page.getByRole("button", { name: "Hand off" });
@@ -151,6 +151,35 @@ test.describe("Order inbox", () => {
       await page.goto(ORDERS_URL);
       await page.locator("button", { hasText: `#${number}` }).click();
       await expect(page.getByTestId("order-discount")).toHaveText("−$2.00");
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("#742: a new delivery order shows its items, how it leaves and a breakdown that adds up, before accepting", async ({ page }) => {
+    const number = 18604;
+    await insertInboxOrder({
+      number,
+      status: "AUTHORIZED",
+      capturedAmountCents: null,
+      delivery: { line1: "3700 Main St", city: "Houston", state: "TX", zip: "77002", feeCents: 499 },
+    });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByRole("button", { name: "Accept order" })).toBeVisible();
+
+      const items = page.getByRole("region", { name: "Items" });
+      await expect(items.getByTestId("pick-line")).toHaveCount(1);
+      await expect(items.getByTestId("pick-line-name")).not.toHaveText("");
+      await expect(items.getByTestId("pick-line")).toContainText("Qty: 1");
+      await expect(items.getByRole("button", { name: "Pick" })).toHaveCount(0);
+
+      await expect(page.getByTestId("order-fulfillment")).toContainText("Store delivery");
+      await expect(page.getByTestId("order-fulfillment")).toContainText("Houston, TX 77002");
+      await expect(page.getByTestId("order-delivery")).toHaveText("$4.99");
+      await expect(page.getByTestId("order-total")).toHaveText("$14.99");
     } finally {
       await deleteInboxOrder(number);
     }

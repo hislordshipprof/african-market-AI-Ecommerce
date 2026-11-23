@@ -1,5 +1,5 @@
 import { formatListDate, money } from "../format";
-import type { OrderStatus } from "../order/service";
+import { orderStatusLabel } from "../order/status-labels";
 
 export const ACCOUNT_ORDER_LIMIT = 50;
 
@@ -7,6 +7,7 @@ export type AccountOrderRecord = {
   id: string;
   number: number;
   status: string;
+  fulfillment: string;
   createdAt: Date;
   subtotalCents: number;
   tipCents: number;
@@ -28,34 +29,6 @@ export type AccountOrderRow = {
   statusLabel: string;
   amountLabel: string;
 };
-
-const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
-  AUTHORIZED: "Order placed",
-  ACCEPTED: "Store accepted",
-  PICKING: "Shopping your order",
-  SUBSTITUTION_PENDING: "Waiting for your answer",
-  CANCELLING: "Cancelling",
-  CAPTURING: "Finalizing your total",
-  READY: "Packed and ready",
-  AWAITING_PICKUP: "Ready for pickup",
-  COURIER_REQUESTED: "Finding a courier",
-  COURIER_ASSIGNED: "Courier on the way to the store",
-  PICKED_UP: "Courier on the way to you",
-  OUT_FOR_DELIVERY: "Out for delivery",
-  SHIPPED: "Shipped",
-  IN_TRANSIT: "On its way",
-  DELIVERED: "Delivered",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-  REFUND_FAILED: "Refund in progress",
-  PARTIALLY_REFUNDED: "Partly refunded",
-  REFUNDED: "Refunded",
-};
-
-/** `orders.status` is a free string with no database check, so an unknown value still gets a label. */
-export function customerStatusLabel(status: string): string {
-  return CUSTOMER_STATUS_LABELS[status as OrderStatus] ?? "In progress";
-}
 
 /**
  * Never the hold: an amount that is not captured yet reads as an estimate, not a charge.
@@ -84,7 +57,7 @@ export function accountOrderRow(order: AccountOrderRecord, timeZone: string, now
     href: `/order/${encodeURIComponent(order.trackingToken ?? order.id)}`,
     dateLabel: formatListDate(order.createdAt, timeZone, now),
     itemsLabel: `${order.itemCount} ${order.itemCount === 1 ? "item" : "items"}`,
-    statusLabel: customerStatusLabel(order.status),
+    statusLabel: orderStatusLabel(order.status, order.fulfillment),
     amountLabel: amountLabel(order),
   };
 }

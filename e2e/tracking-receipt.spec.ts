@@ -34,7 +34,7 @@ test.describe("tracking receipt adds up and names fulfilment in words (#741)", (
     const token = `e2e-741-held-${RUN}`;
     await insertTrackingOrder({ number: HELD, token, status: "ACCEPTED", ...ORDER_1007 });
     await page.goto(`${base}/order/${token}`);
-    await expect(page.getByRole("region", { name: "Store accepted" })).toContainText(/Fulfillment:?\s*Store delivery/);
+    await expect(page.getByRole("region", { name: "Accepted" })).toContainText(/Fulfillment:?\s*Store delivery/);
     expect(await receiptRows(page)).toEqual([
       ["Subtotal", "$41.94"],
       ["Store delivery", "$4.99"],
@@ -52,7 +52,7 @@ test.describe("tracking receipt adds up and names fulfilment in words (#741)", (
       ...ORDER_1007, money: { ...ORDER_1007.money, captureCents: 4819 }, line: { ...ORDER_1007.line, qtyPicked: 6, status: "picked" },
     });
     await page.goto(`${base}/order/${token}`);
-    await expect(page.getByRole("region", { name: "Packed and ready" })).toContainText(/Fulfillment:?\s*Store delivery/);
+    await expect(page.getByRole("region", { name: "Ready for delivery" })).toContainText(/Fulfillment:?\s*Store delivery/);
     expect(await receiptRows(page)).toEqual([
       ["Subtotal", "$41.94"],
       ["Store delivery", "$4.99"],

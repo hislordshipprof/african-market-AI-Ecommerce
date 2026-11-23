@@ -95,7 +95,7 @@ export async function readPickBatch(storeId: string, batchId: string): Promise<P
                     customName: true,
                     frozen: true,
                     perishable: true,
-                    masterProduct: { select: { name: true, imageUrl: true, category: { select: { name: true, sortOrder: true } } } },
+                    masterProduct: { select: { name: true, imageUrl: true, category: { select: { name: true, sortOrder: true, slug: true } } } },
                   },
                 },
               },

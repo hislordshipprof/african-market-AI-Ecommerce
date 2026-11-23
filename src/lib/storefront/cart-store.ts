@@ -9,6 +9,8 @@ export interface CartItem {
   /** Unit price in cents. */
   price: number;
   imageUrl?: string;
+  /** Picks the missing-photo glyph, so the basket shows the same placeholder as the shelf (#742). */
+  categorySlug?: string;
   packLabel?: string;
   /** The listing's per-order maximum, when the page knows it. Steppers stop there. */
   maxPerOrder?: number;
@@ -44,7 +46,7 @@ function validItem(value: unknown): value is CartItem {
     item.name.length > 0 &&
     Number.isSafeInteger(item.price) &&
     (item.price as number) >= 0 &&
-    ["variantId", "packLabel"].every(
+    ["variantId", "packLabel", "categorySlug"].every(
       (key) => item[key] === undefined || typeof item[key] === "string",
     )
   );
@@ -91,6 +93,7 @@ function sanitizeItem(item: CartItem): CartItem {
     price: item.price,
     packLabel: item.packLabel,
     imageUrl: safeImageUrl(item.imageUrl),
+    categorySlug: item.categorySlug,
   };
 }
 function decode(raw: string | null): readonly CartLine[] {

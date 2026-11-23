@@ -58,10 +58,11 @@ import {
 import type { StoreOrderRow } from "@/lib/order/service";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
-import { formatClockInZone, money } from "@/lib/format";
+import { orderStatusLabel } from "@/lib/order/status-labels";
+import { formatClockInZone, formatUsPhone, money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
-import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine, storeOrderBreakdown } from "@/lib/order/staff-copy";
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { ActionError } from "./action-error";
@@ -70,30 +71,31 @@ import { BatchPicking, packingHref } from "./batch-picking";
 import { orderPrepMinutes } from "@/lib/listing/prepared";
 import { UpdatesPaused } from "./updates-paused";
 
-const STATUS_CONFIG: Record<
+/** How each state looks in the inbox; its name comes from the shared vocabulary (#742). */
+const STATUS_STYLE: Record<
   string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: typeof Clock }
+  { variant: "default" | "secondary" | "destructive" | "outline"; icon: typeof Clock }
 > = {
-  AUTHORIZED: { label: "New", variant: "destructive", icon: Bell },
-  ACCEPTED: { label: "Accepted", variant: "default", icon: Check },
-  PICKING: { label: "Picking", variant: "secondary", icon: Package },
-  SUBSTITUTION_PENDING: { label: "Waiting on customer", variant: "secondary", icon: Clock },
-  CAPTURING: { label: "Capturing…", variant: "secondary", icon: RefreshCw },
-  CANCELLING: { label: "Cancelling…", variant: "destructive", icon: RefreshCw },
-  READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
-  AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
-  COURIER_REQUESTED: { label: "Finding courier", variant: "secondary", icon: Truck },
-  COURIER_ASSIGNED: { label: "Courier assigned", variant: "secondary", icon: Truck },
-  PICKED_UP: { label: "Courier picked up", variant: "secondary", icon: Truck },
-  OUT_FOR_DELIVERY: { label: "Out for delivery", variant: "secondary", icon: Truck },
-  SHIPPED: { label: "Shipped", variant: "secondary", icon: Truck },
-  IN_TRANSIT: { label: "In transit", variant: "secondary", icon: Truck },
-  DELIVERED: { label: "Delivered", variant: "outline", icon: CheckCircle2 },
-  COMPLETED: { label: "Completed", variant: "outline", icon: CheckCircle2 },
-  REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
-  PARTIALLY_REFUNDED: { label: "Partly refunded", variant: "outline", icon: RefreshCw },
-  REFUNDED: { label: "Refunded", variant: "outline", icon: CheckCircle2 },
-  CANCELLED: { label: "Cancelled", variant: "outline", icon: CheckCircle2 },
+  AUTHORIZED: { variant: "destructive", icon: Bell },
+  ACCEPTED: { variant: "default", icon: Check },
+  PICKING: { variant: "secondary", icon: Package },
+  SUBSTITUTION_PENDING: { variant: "secondary", icon: Clock },
+  CAPTURING: { variant: "secondary", icon: RefreshCw },
+  CANCELLING: { variant: "destructive", icon: RefreshCw },
+  READY: { variant: "default", icon: CheckCircle2 },
+  AWAITING_PICKUP: { variant: "outline", icon: ShoppingBag },
+  COURIER_REQUESTED: { variant: "secondary", icon: Truck },
+  COURIER_ASSIGNED: { variant: "secondary", icon: Truck },
+  PICKED_UP: { variant: "secondary", icon: Truck },
+  OUT_FOR_DELIVERY: { variant: "secondary", icon: Truck },
+  SHIPPED: { variant: "secondary", icon: Truck },
+  IN_TRANSIT: { variant: "secondary", icon: Truck },
+  DELIVERED: { variant: "outline", icon: CheckCircle2 },
+  COMPLETED: { variant: "outline", icon: CheckCircle2 },
+  REFUND_FAILED: { variant: "destructive", icon: Bell },
+  PARTIALLY_REFUNDED: { variant: "outline", icon: RefreshCw },
+  REFUNDED: { variant: "outline", icon: CheckCircle2 },
+  CANCELLED: { variant: "outline", icon: CheckCircle2 },
 };
 
 const STORE_CANCEL_REASON_LABELS: Record<StoreCancelReason, string> = {
@@ -105,10 +107,26 @@ const STORE_CANCEL_REASON_LABELS: Record<StoreCancelReason, string> = {
 
 const STORE_CANCELLABLE: readonly string[] = CANCELLABLE_BEFORE_CAPTURE;
 
+/** Before accepting the owner sees what was ordered; after, the same lines are the pick list. */
+const LINES_SHOWN: readonly string[] = ["AUTHORIZED", "ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
+
+/** How the order leaves the store, so the owner can decide before accepting (#742). */
+function fulfillmentLine(order: StoreOrderRow): string {
+  const street = [order.deliveryLine1, order.deliveryLine2].filter(Boolean).join(", ");
+  const area = order.deliveryCity ? `${order.deliveryCity}, ${order.deliveryState} ${order.deliveryZip}` : "";
+  if (order.fulfillment === "pickup") return "Pickup at the store";
+  if (order.fulfillment === "store-delivery") {
+    return `Store delivery to ${[street, area].filter(Boolean).join(", ")}${order.leaveAtDoor ? " · Leave at door" : ""}`;
+  }
+  if (order.fulfillment === "courier") return area ? `Courier delivery to ${area}` : "Courier delivery";
+  const carrier = [order.shippingCarrier, order.shippingService].filter(Boolean).join(" ");
+  return `Shipping${carrier ? ` · ${carrier}` : ""}${street ? ` to ${[street, area].filter(Boolean).join(", ")}` : ""}`;
+}
+
 function orderCustomerLabel(name: string, phone: string | null): string {
   const trimmed = phone?.trim() ?? "";
   if (!trimmed) return name;
-  return `${name} · ${trimmed}`;
+  return `${name} · ${formatUsPhone(trimmed)}`;
 }
 
 /** Not a status, so it does not look like one. */
@@ -543,13 +561,8 @@ export function OrderInbox({
                   </CardTitle>
                   <div className="flex flex-wrap items-center justify-end gap-1.5">
                     {selectedOrder.disputed && <DisputedBadge />}
-                    <Badge
-                      variant={
-                        STATUS_CONFIG[selectedOrder.status]?.variant ?? "outline"
-                      }
-                    >
-                      {STATUS_CONFIG[selectedOrder.status]?.label ??
-                        selectedOrder.status}
+                    <Badge variant={STATUS_STYLE[selectedOrder.status]?.variant ?? "outline"}>
+                      {orderStatusLabel(selectedOrder.status, selectedOrder.fulfillment)}
                     </Badge>
                   </div>
                 </div>
@@ -567,32 +580,13 @@ export function OrderInbox({
                     {selectedOrder.notes}
                   </p>
                 )}
-                {selectedOrder.fulfillment === "store-delivery" && selectedOrder.deliveryLine1 && (
-                  <p className="mt-2 text-sm text-foreground">
-                    {selectedOrder.deliveryLine1}
-                    {selectedOrder.deliveryLine2 ? `, ${selectedOrder.deliveryLine2}` : ""}
-                    {", "}
-                    {selectedOrder.deliveryCity}, {selectedOrder.deliveryState} {selectedOrder.deliveryZip}
-                    {selectedOrder.leaveAtDoor ? " · Leave at door" : ""}
-                  </p>
-                )}
-                {selectedOrder.fulfillment === "ship" && (
-                  <p className="mt-2 flex items-start gap-1.5 text-sm text-foreground">
-                    <Package className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span>
-                      Shipping{selectedOrder.shippingCarrier ? ` · ${[selectedOrder.shippingCarrier, selectedOrder.shippingService].filter(Boolean).join(" ")}` : ""}
-                      {selectedOrder.deliveryLine1 && (
-                        <>
-                          {" to "}
-                          {selectedOrder.deliveryLine1}
-                          {selectedOrder.deliveryLine2 ? `, ${selectedOrder.deliveryLine2}` : ""}
-                          {", "}
-                          {selectedOrder.deliveryCity}, {selectedOrder.deliveryState} {selectedOrder.deliveryZip}
-                        </>
-                      )}
-                    </span>
-                  </p>
-                )}
+                <p className="mt-2 flex items-start gap-1.5 text-sm text-foreground" data-testid="order-fulfillment">
+                  {(() => {
+                    const Icon = selectedOrder.fulfillment === "pickup" ? ShoppingBag : selectedOrder.fulfillment === "ship" ? Package : Truck;
+                    return <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />;
+                  })()}
+                  <span>{fulfillmentLine(selectedOrder)}</span>
+                </p>
                 {selectedOrder.status === "REFUND_FAILED" && (
                   <p className="mt-2 text-sm text-destructive">
                     {REFUND_FAILED_STAFF_COPY}
@@ -622,22 +616,10 @@ export function OrderInbox({
                     timeZone={timeZone}
                   />
                 )}
-                {selectedOrder.status === "AUTHORIZED" && (
-                  <Button
-                    className="mb-4 min-h-12 w-full rounded-full"
-                    onClick={() => handleAcceptClick(selectedOrder.id)}
-                    disabled={isPending}
-                  >
-                    <Check className="mr-2 size-4" /> Accept order
-                  </Button>
-                )}
-
-                {(selectedOrder.status === "ACCEPTED" ||
-                  selectedOrder.status === "PICKING" ||
-                  selectedOrder.status === "SUBSTITUTION_PENDING") && (
-                  <div className="mb-4">
-                    <h3 className="mb-2 text-sm font-semibold text-foreground">
-                      Pick list
+                {LINES_SHOWN.includes(selectedOrder.status) && (
+                  <section className="mb-4" aria-labelledby="order-lines-heading">
+                    <h3 id="order-lines-heading" className="mb-2 text-sm font-semibold text-foreground">
+                      {selectedOrder.status === "AUTHORIZED" ? "Items" : "Pick list"}
                     </h3>
                     {selectedOrder.pickBatchId && (
                       <p className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm text-foreground">
@@ -687,7 +669,7 @@ export function OrderInbox({
                               </div>
                             )}
                           </div>
-                          {line.status === "pending" && selectedOrder.pickBatchId ? null : line.status === "pending" ? (
+                          {line.status === "pending" && (selectedOrder.pickBatchId || selectedOrder.status === "AUTHORIZED") ? null : line.status === "pending" ? (
                             <div className="ml-auto flex shrink-0 gap-2">
                               <Button
                                 variant="ghost"
@@ -719,7 +701,17 @@ export function OrderInbox({
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </section>
+                )}
+
+                {selectedOrder.status === "AUTHORIZED" && (
+                  <Button
+                    className="mb-4 min-h-12 w-full rounded-full"
+                    onClick={() => handleAcceptClick(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <Check className="mr-2 size-4" /> Accept order
+                  </Button>
                 )}
 
                 <ActionError message={errorFor(selectedOrder.id)} className="mb-4" />
@@ -862,28 +854,14 @@ export function OrderInbox({
                 )}
 
                 <div className="mt-6 space-y-1.5 border-t pt-4">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span className="tabular-nums">{money(selectedOrder.subtotalCents)}</span>
-                  </div>
-                  {selectedOrder.discountCents > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Promo discount{selectedOrder.coupon ? ` ${selectedOrder.coupon.code}` : ""} (your store funds it)</span>
-                      <span className="tabular-nums" data-testid="order-discount">−{money(selectedOrder.discountCents)}</span>
+                  {storeOrderBreakdown(selectedOrder).map((line) => (
+                    <div key={line.key} className="flex justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">{line.label}</span>
+                      <span className="tabular-nums" data-testid={`order-${line.key}`}>
+                        {line.cents < 0 ? `−${money(-line.cents)}` : money(line.cents)}
+                      </span>
                     </div>
-                  )}
-                  {selectedOrder.serviceFeeCents > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Service fee (platform)</span>
-                      <span className="tabular-nums">{money(selectedOrder.serviceFeeCents)}</span>
-                    </div>
-                  )}
-                  {selectedOrder.tipCents > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Tip</span>
-                      <span className="tabular-nums">{money(selectedOrder.tipCents)}</span>
-                    </div>
-                  )}
+                  ))}
                   <div className="flex justify-between pt-1.5 text-base font-semibold">
                     <span>Total</span>
                     <span className="tabular-nums" data-testid="order-total">
@@ -936,7 +914,7 @@ export function OrderInbox({
             ) : (
               <div className="space-y-3">
                 {orders.map((order) => {
-                  const config = STATUS_CONFIG[order.status];
+                  const config = STATUS_STYLE[order.status];
                   return (
                     <button
                       key={order.id}
@@ -960,7 +938,7 @@ export function OrderInbox({
                               <Badge
                                 variant={config?.variant ?? "outline"}
                               >
-                                {config?.label ?? order.status}
+                                {orderStatusLabel(order.status, order.fulfillment)}
                               </Badge>
                               {order.fulfillment === "ship" && <Badge variant="outline">Shipping</Badge>}
                               {order.disputed && <DisputedBadge />}

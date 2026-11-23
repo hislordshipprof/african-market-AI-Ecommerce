@@ -23,6 +23,7 @@ export function ProductDetail({
     name: listing.displayName,
     price,
     imageUrl: listing.imageUrl,
+    categorySlug: listing.categorySlug,
     packLabel: variant?.label ?? "Each",
     maxPerOrder: listing.maxPerOrder,
   };

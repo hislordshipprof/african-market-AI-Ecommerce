@@ -23,6 +23,7 @@ export async function listAccountOrders(
       id: true,
       number: true,
       status: true,
+      fulfillment: true,
       createdAt: true,
       subtotalCents: true,
       tipCents: true,

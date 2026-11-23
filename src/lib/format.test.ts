@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { formatInZone, formatListDate, formatListTime, money } from "./format";
+import { formatInZone, formatListDate, formatListTime, formatUsPhone, money } from "./format";
 
 const AT = new Date("2026-11-03T19:05:00.000Z");
 const OPTIONS: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
@@ -80,5 +80,23 @@ describe("formatListTime", () => {
   it("joins the list day to the store's labelled clock time", () => {
     expect(formatListTime(new Date("2026-11-03T19:05:00.000Z"), "America/Chicago", NOW)).toBe("Today, 1:05 PM CST");
     expect(formatListTime(new Date("2026-11-01T19:05:00.000Z"), "America/Chicago", NOW)).toBe("Nov 1, 2026, 1:05 PM CST");
+  });
+});
+
+describe("formatUsPhone", () => {
+  it("formats ten digits however they were typed", () => {
+    expect(formatUsPhone("2025550100")).toBe("(202) 555-0100");
+    expect(formatUsPhone("202.555.0100")).toBe("(202) 555-0100");
+    expect(formatUsPhone(" 202-555-0100 ")).toBe("(202) 555-0100");
+  });
+
+  it("drops the US country code", () => {
+    expect(formatUsPhone("+1 202 555 0100")).toBe("(202) 555-0100");
+    expect(formatUsPhone("12025550100")).toBe("(202) 555-0100");
+  });
+
+  it("leaves a number that is not a US number as typed", () => {
+    expect(formatUsPhone("+234 803 123 4567")).toBe("+234 803 123 4567");
+    expect(formatUsPhone("555-0100")).toBe("555-0100");
   });
 });

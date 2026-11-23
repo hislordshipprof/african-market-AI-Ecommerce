@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, Check, CheckCircle2, Clock, ImageOff, Package, Truck } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Clock, Package, Truck } from "lucide-react";
+import { ProductImage } from "@/components/storefront/product-image";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,21 +27,9 @@ import type { PickBatchView } from "@/lib/order/batch";
 import type { BatchPickLine, BatchSplit } from "@/lib/order/batch-pick-list";
 import { STAFF_GENERIC_ERROR } from "@/lib/order/staff-copy";
 import { formatClockInZone } from "@/lib/format";
+import { orderStatusLabel } from "@/lib/order/status-labels";
 import { UpdatesPaused } from "../../updates-paused";
 import { ActionError } from "../../action-error";
-
-const STATUS_LABELS: Record<string, string> = {
-  ACCEPTED: "Not started",
-  PICKING: "Packing",
-  SUBSTITUTION_PENDING: "Waiting on customer",
-  CAPTURING: "Capturing",
-  CANCELLING: "Cancelling",
-  READY: "Ready",
-  AWAITING_PICKUP: "Ready for pickup",
-  COURIER_REQUESTED: "Ready, finding courier",
-  COURIER_ASSIGNED: "Ready, courier assigned",
-  CANCELLED: "Cancelled",
-};
 
 const PACKING = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
 
@@ -101,13 +90,8 @@ function PickRow(props: {
       data-testid="batch-line"
     >
       <div className="flex gap-3">
-        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted">
-          {line.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={line.imageUrl} alt="" className="size-full object-contain" loading="lazy" />
-          ) : (
-            <ImageOff className="size-5 text-muted-foreground" aria-hidden />
-          )}
+        <div className="size-16 shrink-0">
+          <ProductImage src={line.imageUrl ?? undefined} name={line.name} category={line.categorySlug ?? undefined} sizes="64px" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -262,7 +246,7 @@ export function PackingScreen({ initial, storeParam, timeZone }: { initial: Pick
               <ToteLetter letter={tote.letter} size="lg" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold tabular-nums text-foreground">#{tote.number}</p>
-                <p className="text-xs text-muted-foreground">{STATUS_LABELS[tote.status] ?? tote.status}</p>
+                <p className="text-xs text-muted-foreground">{orderStatusLabel(tote.status, tote.fulfillment)}</p>
                 {tote.fulfillment === "courier" && (
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Truck className="size-3" aria-hidden />

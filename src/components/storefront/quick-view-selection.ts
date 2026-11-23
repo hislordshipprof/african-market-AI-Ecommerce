@@ -23,6 +23,7 @@ export type QuickViewSelectionInput = {
   listingId: string;
   name: string;
   imageUrl?: string;
+  categorySlug?: string;
   maxPerOrder?: number;
   listPacks: readonly QuickViewPack[];
   listBasePrice: number;
@@ -67,6 +68,7 @@ function cartItem(
     name: input.name,
     price,
     imageUrl: input.imageUrl,
+    categorySlug: input.categorySlug,
     packLabel,
     maxPerOrder: input.maxPerOrder,
   };

@@ -36,6 +36,34 @@ export function showCapturedLine(status: string, capturedAmountCents: number | n
   );
 }
 
+const FULFILLMENT_FEE_LABELS: Record<string, string> = {
+  "store-delivery": "Delivery fee",
+  courier: "Courier fee",
+  ship: "Shipping",
+};
+
+/** The store's money lines for an order, read from the amounts stored on it; they add up to its total. */
+export function storeOrderBreakdown(order: {
+  fulfillment: string;
+  subtotalCents: number;
+  discountCents: number;
+  coupon: { code: string } | null;
+  serviceFeeCents: number;
+  deliveryFeeCents: number;
+  taxCents: number;
+  tipCents: number;
+}): { key: string; label: string; cents: number }[] {
+  const lines = [
+    { key: "subtotal", label: "Subtotal", cents: order.subtotalCents },
+    { key: "discount", label: `Promo discount${order.coupon ? ` ${order.coupon.code}` : ""} (your store funds it)`, cents: -order.discountCents },
+    { key: "service-fee", label: "Service fee (platform)", cents: order.serviceFeeCents },
+    { key: "delivery", label: FULFILLMENT_FEE_LABELS[order.fulfillment] ?? "Delivery fee", cents: order.deliveryFeeCents },
+    { key: "tax", label: "Tax", cents: order.taxCents },
+    { key: "tip", label: "Tip", cents: order.tipCents },
+  ];
+  return lines.filter((line) => line.key === "subtotal" || line.cents !== 0);
+}
+
 export type StaffCourier = { provider: string; status: string; pickupReadyAt: Date | string | null; courierJson: unknown };
 
 const COURIER_BRAND: Record<string, string> = { uber: "Uber Direct", doordash: "DoorDash Drive" };
