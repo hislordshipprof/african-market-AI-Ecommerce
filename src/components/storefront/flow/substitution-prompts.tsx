@@ -42,14 +42,14 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
 
   async function answer(requestId: string, decision: "swap" | "refund") {
     setBusy(requestId);
-    const fail = (message: string) => setErrors((all) => ({ ...all, [requestId]: message }));
-    setErrors(({ [requestId]: _cleared, ...rest }) => rest);
+    const show = (message: string) => setErrors((all) => ({ ...all, [requestId]: message }));
+    show("");
     try {
       const result = await answerSubstitutionAction({ token, requestId, decision });
       if (result.prompts) setPrompts(result.prompts);
-      if (!result.ok) fail(result.error);
+      if (!result.ok) show(result.error);
     } catch {
-      fail("We couldn't save your choice. Try again.");
+      show("We couldn't save your choice. Try again.");
     } finally {
       setBusy("");
     }
