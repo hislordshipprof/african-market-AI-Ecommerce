@@ -125,7 +125,9 @@ export default async function OrderPage({
                 <p>
                   {courierInfo.name}
                   {courierInfo.vehicle && ` · ${courierInfo.vehicle}`}
-                  {eta && courier.status !== "delivered" && ` · arriving about ${eta}`}
+                  {eta && courier.status !== "delivered" && (
+                    <> · arriving about <span style={{ whiteSpace: "nowrap" }}>{eta}</span></>
+                  )}
                 </p>
               ) : (
                 <p>We&rsquo;re matching your order with a courier.</p>
