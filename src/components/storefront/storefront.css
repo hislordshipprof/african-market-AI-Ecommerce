@@ -1242,11 +1242,11 @@
 }
 .sf-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   margin-block: 24px;
   border-block: 1px solid var(--color-line);
-  padding-block: 18px;
-  gap: 12px;
+  padding-block: 16px;
+  gap: 16px;
 }
 .sf-stats dt {
   font-size: 13px;

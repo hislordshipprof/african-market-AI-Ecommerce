@@ -15,7 +15,10 @@ export type CardStore = DirectoryStore & { href: string; distanceMi?: number; de
 // Store photos ship as .svg placeholders until the owner adds one, as on the storefront's story strip.
 const ownerPhoto = (url: string | null) => (url && !url.endsWith(".svg") ? url : null);
 
-/** The directory's one card (#453, #690): the home, its search results and the state and city pages. */
+/**
+ * The directory's one card (#453, #690): the home, its search results and the state and city pages.
+ * Pickup and delivery sit under the header so cards compare at a glance; the whole card is the link (#728).
+ */
 export function StoreCard({ store }: { store: CardStore }) {
   const delivery = deliveryLine(store);
   const photo = ownerPhoto(store.ownerPhotoUrl);
@@ -42,16 +45,8 @@ export function StoreCard({ store }: { store: CardStore }) {
           </span>
         ) : null}
       </span>
-      {store.listingBlurb ? <span className={styles.blurb}>{store.listingBlurb}</span> : null}
-      {store.ownerName || store.ownerStory ? (
-        <span className={styles.owner}>
-          {store.ownerName ? <span className={styles.ownerName}>Run by {store.ownerName}</span> : null}
-          {store.ownerStory ? <span className={styles.story}>{store.ownerStory}</span> : null}
-        </span>
-      ) : null}
-      {cuisines.length > 0 || store.pickupEnabled || delivery ? (
+      {store.pickupEnabled || delivery ? (
         <span className={styles.flags}>
-          {cuisines.map((label) => <span key={label} className={styles.tag}>{label}</span>)}
           {store.pickupEnabled ? (
             <span className={styles.flag}><ShoppingBag aria-hidden="true" size={14} />Pickup</span>
           ) : null}
@@ -63,9 +58,21 @@ export function StoreCard({ store }: { store: CardStore }) {
           ) : null}
         </span>
       ) : null}
+      {store.listingBlurb ? <span className={styles.blurb}>{store.listingBlurb}</span> : null}
+      {store.ownerName || store.ownerStory ? (
+        <span className={styles.owner}>
+          {store.ownerName ? <span className={styles.ownerName}>Run by {store.ownerName}</span> : null}
+          {store.ownerStory ? <span className={styles.story}>{store.ownerStory}</span> : null}
+        </span>
+      ) : null}
+      {cuisines.length > 0 ? (
+        <span className={styles.flags}>
+          {cuisines.map((label) => <span key={label} className={styles.tag}>{label}</span>)}
+        </span>
+      ) : null}
       <span className={styles.visit} aria-hidden="true">
-        Visit {store.name}
-        <ArrowRight size={18} />
+        Visit store
+        <ArrowRight size={16} />
       </span>
     </a>
   );

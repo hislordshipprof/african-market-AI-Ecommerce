@@ -168,7 +168,7 @@ function SearchInput({ storeId }: { storeId: string }) {
             ) : !results.length ? (
               <p>No matches yet. Try egusi, garri or ugu.</p>
             ) : (
-              <span className="sr-only">{results.length} listings found</span>
+              <span className="sr-only">{results.length} {results.length === 1 ? "product" : "products"} found</span>
             )}
           </div>
           {results.slice(0, 5).map((result) => (

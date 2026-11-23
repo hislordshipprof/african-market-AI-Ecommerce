@@ -65,7 +65,7 @@ test.describe("Customer address book", () => {
     await expect(work.getByText("Default")).toBeVisible();
 
     await page.getByLabel("Phone").fill("(301) 555-0100");
-    await page.getByRole("button", { name: "Save phone" }).click();
+    await page.getByRole("button", { name: "Save details" }).click();
     await expect(page.getByText("Phone saved.")).toBeVisible();
 
     await page.getByRole("button", { name: "Sign out" }).click();

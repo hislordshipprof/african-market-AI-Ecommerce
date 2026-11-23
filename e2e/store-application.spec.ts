@@ -84,7 +84,26 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     // Native required fields stop an empty form before it is sent.
     await expect(page.getByLabel("Store name")).toBeFocused();
 
+    // #728: a submit the server rejects moves focus to the first field it flagged.
+    await page.getByLabel("Store name").fill(approveName);
+    await page.getByLabel("Kind of store").selectOption("african");
+    await page.getByLabel("Street address").fill("2100 Bissonnet St");
+    await page.getByLabel("City").fill("Houston");
+    await page.getByLabel("State").selectOption("TX");
+    await page.getByLabel("ZIP").fill("ABCDE");
+    await page.getByLabel("Your name").fill("Ada Obi");
+    await page.getByLabel("Email").fill(`approve-${run}@example.com`);
+    await page.getByLabel("Phone").fill(`713555${digits.slice(-4)}`);
+    await page.getByRole("button", { name: "Send application" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Check the highlighted fields." })).toBeVisible();
+    await expect(page.getByLabel("ZIP")).toBeFocused();
+    await expect(page.getByLabel("ZIP")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByLabel("ZIP")).toHaveAccessibleDescription(/5-digit ZIP code/);
+    await shoot(page, "sell-rejected");
+
     await apply(page, root, approveName, `approve-${run}@example.com`, `713555${digits.slice(-4)}`);
+    // #728: the thank-you leads back to the directory.
+    await expect(page.getByRole("link", { name: "Return to directory" })).toHaveAttribute("href", "/");
     await shoot(page, "sell-thanks");
     await apply(page, root, rejectName, `reject-${run}@example.com`, `832555${digits.slice(-4)}`);
 

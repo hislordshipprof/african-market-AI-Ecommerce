@@ -19,8 +19,9 @@ const profile: StoreProfile = {
 describe("TrustStoryStrip", () => {
   it("shows the default trust copy from named constants", () => {
     const html = renderToStaticMarkup(createElement(TrustStoryStrip, { profile }));
-    expect(TRUST_COPY.approvalNote).toBe("Nothing is swapped without your approval. If an item is short, you choose a swap or a refund.");
-    expect(TRUST_COPY.hoursNote).toBe("No swaps without your approval.");
+    // A prompt that times out takes the store's proposed swap, so the copy may not promise approval.
+    expect(html).not.toMatch(/without your approval/i);
+    expect(TRUST_COPY.hoursNote).toBe("We ask before any swap.");
     for (const text of Object.values(TRUST_COPY)) expect(html).toContain(text);
   });
 

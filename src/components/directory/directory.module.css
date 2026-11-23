@@ -12,6 +12,7 @@
   --d-primary-deep: #0a4527;
   --d-soft: #eaf4ec;
   --d-success: #2e7d4f;
+  --d-error: #b42335;
   --d-scrim: 8 10 9;
   min-height: 100dvh;
   background: var(--d-bg);
@@ -22,17 +23,18 @@
 @media (prefers-color-scheme: dark) {
   .page {
     --d-bg: #121211;
-    --d-surface: #1c1c1a;
-    --d-raised: #272725;
+    --d-surface: #21211f;
+    --d-raised: #30302d;
     --d-ink: #f2f2ee;
     --d-muted: #a8a8a0;
-    --d-line: #33332f;
+    --d-line: #3a3a36;
     --d-line-strong: #8a8a82;
     --d-primary: #5fd08a;
     --d-on-primary: #0b2615;
     --d-primary-deep: #1d3a2b;
     --d-soft: #1f2a23;
     --d-success: #5fd08a;
+    --d-error: #f28793;
     color-scheme: dark;
   }
 }
@@ -271,23 +273,17 @@
   color: var(--d-muted);
 }
 
+/* A quiet text affordance: the whole card is the link, so no filled button repeats on every card (#728). */
 .visit {
   margin-top: auto;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 48px;
-  padding: 10px 20px;
-  border-radius: 999px;
-  background: var(--d-primary);
-  color: var(--d-on-primary);
-  font-size: 16px;
+  gap: 6px;
+  align-self: flex-start;
+  color: var(--d-primary);
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.25;
-  text-align: center;
-  overflow-wrap: anywhere;
-  transition: background-color 160ms cubic-bezier(0.4, 0.4, 0, 1);
 }
 
 .visit svg {
@@ -296,17 +292,12 @@
 }
 
 .card:hover .visit {
-  background: var(--d-primary-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .card:hover .visit svg {
   translate: 3px 0;
-}
-
-@media (prefers-color-scheme: dark) {
-  .card:hover .visit {
-    background: var(--d-primary);
-  }
 }
 
 /* Reserves the line on the server, where it stays empty: hours are read in the browser (#453). */
@@ -358,6 +349,7 @@
   .card,
   .visit,
   .visit svg,
+  .results[data-refreshing] > .grid,
   .chip {
     transition: none;
   }
@@ -482,8 +474,11 @@
 }
 
 .choiceButton {
-  min-height: 40px;
-  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
   border: 1px solid var(--d-line-strong);
   border-radius: 999px;
   background: var(--d-surface);
@@ -494,8 +489,48 @@
   cursor: pointer;
 }
 
+.choiceButton:hover:not(:disabled) {
+  border-color: var(--d-ink);
+}
+
+.choiceButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .results {
   margin-bottom: 40px;
+}
+
+.failure,
+.noneTagged {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.noneTagged {
+  margin-top: 16px;
+}
+
+.resultsHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+.refreshing {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--d-muted);
+}
+
+/* The last results stay readable while a new search runs, dimmed so they read as not yet current. */
+.results[data-refreshing] > .grid {
+  opacity: 0.6;
+  transition: opacity 160ms ease-out;
 }
 
 /* "Tell me when a store opens near me" (#455): a quiet panel; the button is the only colour. */

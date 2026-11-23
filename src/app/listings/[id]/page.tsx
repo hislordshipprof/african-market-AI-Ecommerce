@@ -43,7 +43,7 @@ export default async function ListingDetailPage({
         {related && (
           <div className="sf-section">
             <ProductRail
-              title="Often bought with"
+              title="More from this aisle"
               listings={related.listings.filter((l) => l.id !== id).slice(0, 8)}
               seeAllHref={`/categories/${listing.categorySlug}`}
             />
