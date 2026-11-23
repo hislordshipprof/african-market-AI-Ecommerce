@@ -349,6 +349,8 @@ export const auth = betterAuth({
       "/sign-in/email": { window: 60, max: relaxedAuth ? 1000 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 1000 : 5 },
       "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 1000 : 5 },
+      // The magic-link plugin's own rule (5 a minute) covers verify too; 5 is that default.
+      "/magic-link/verify": { window: 60, max: relaxedAuth ? 1000 : 5 },
       "/request-password-reset": { window: 60, max: relaxedAuth ? 1000 : 3 },
       "/two-factor/verify-backup-code": { window: 60, max: relaxedAuth ? 1000 : 5 },
     },

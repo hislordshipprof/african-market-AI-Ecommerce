@@ -461,6 +461,20 @@ describe("the auth config built in production", () => {
     const built = (await import("./auth")).auth.options;
     expect(built.rateLimit?.max).toBe(10);
     expect(built.rateLimit?.customRules?.["/sign-in/email"]).toEqual({ window: 60, max: 5 });
+    expect(built.rateLimit?.customRules?.["/magic-link/verify"]).toEqual({ window: 60, max: 5 });
     expect(built.advanced?.useSecureCookies).toBe(true);
+  });
+
+  // The magic-link plugin caps /magic-link/verify at 5 a minute per IP on its own rule (#748).
+  it("relaxes the magic-link verify limit on the CI e2e server", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("AUTH_RATE_LIMIT_RELAXED", "1");
+    vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3148");
+    vi.stubEnv("BETTER_AUTH_SECRET", "p".repeat(40));
+    vi.resetModules();
+    const built = (await import("./auth")).auth.options;
+    expect(built.rateLimit?.customRules?.["/magic-link/verify"]).toEqual({ window: 60, max: 1000 });
   });
 });
