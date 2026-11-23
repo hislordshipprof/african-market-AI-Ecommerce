@@ -10,7 +10,7 @@ export default function StorefrontError({ retry }: { retry: () => void }) {
         </span>
         <h2>We couldn’t reach the shelves</h2>
         <p>
-          Something interrupted the connection to your store. Your saved cart is
+          Something interrupted the connection to your store. Your saved basket is
           still on this device.
         </p>
         <button className="sf-button" onClick={() => retry()}>

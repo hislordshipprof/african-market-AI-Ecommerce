@@ -13,7 +13,7 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
   const cache = { addAll: async (urls: string[]) => void added.push(...urls), put, add: put };
   const caches = {
     open: async () => cache,
-    keys: async () => ["offline-v0", "offline-v1"],
+    keys: async () => ["offline-v1", "offline-v2"],
     delete: vi.fn(async () => true),
     match: async (url: string) => (added.includes(url) ? offline : undefined),
   };
@@ -76,7 +76,7 @@ describe("service worker (#563)", () => {
   it("activation drops older offline caches", async () => {
     const worker = loadWorker(async () => new Response("live"));
     await dispatch(worker.listeners, "activate", {});
-    expect(worker.caches.delete).toHaveBeenCalledWith("offline-v0");
-    expect(worker.caches.delete).not.toHaveBeenCalledWith("offline-v1");
+    expect(worker.caches.delete).toHaveBeenCalledWith("offline-v1");
+    expect(worker.caches.delete).not.toHaveBeenCalledWith("offline-v2");
   });
 });
