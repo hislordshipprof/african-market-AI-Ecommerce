@@ -8,6 +8,7 @@ import { money } from "@/lib/format";
 import { RANGE_PRESETS, resolveRange, storeToday, type AnalyticsRange } from "@/lib/analytics/range";
 import { CANCEL_REASON_LABELS, storeAnalytics, type SalesDay } from "@/lib/analytics/queries";
 import { FULFILLMENT_LABELS, type AnalyticsView } from "@/lib/analytics/csv";
+import { dayChartScale } from "./day-chart-scale";
 
 type Search = { store?: string; range?: string; from?: string; to?: string };
 
@@ -106,7 +107,7 @@ function SplitBar({ label, parts }: { label: string; parts: Array<{ name: string
 
 /** Net to store per day. Net includes tips and store delivery fees, so it is drawn alone, not inside goods. */
 function DayChart({ days }: { days: SalesDay[] }) {
-  const max = Math.max(1, ...days.map((d) => d.netCents));
+  const { max, peakCents } = dayChartScale(days);
   return (
     <figure>
       <div className="flex h-40 items-end gap-px border-b border-border sm:gap-0.5" aria-hidden>
@@ -121,7 +122,7 @@ function DayChart({ days }: { days: SalesDay[] }) {
       </div>
       <figcaption className="mt-1 flex justify-between text-xs tabular-nums text-muted-foreground">
         <span>{fmtDay(days[0].day)}</span>
-        <span>Net to store by day · peak {money(max)}</span>
+        <span>Net to store by day · {peakCents === null ? "no sales yet" : `peak ${money(peakCents)}`}</span>
         <span>{fmtDay(days[days.length - 1].day)}</span>
       </figcaption>
     </figure>
@@ -312,14 +313,14 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
             <Ranked title="Top sellers by revenue" empty="No sales in this range." rows={byRevenue.map((p) => ({ key: p.listingId, name: p.name, value: money(p.revenueCents) }))} />
             <Ranked
               title="Most often short or swapped"
-              empty="Every item was found in full."
+              empty="No short or swapped items recorded yet."
               rows={products.shortOrSwapped.slice(0, 10).map((p) => ({ key: p.listingId, name: p.name, value: `${count(p.shortLines)} short · ${count(p.swappedLines)} swapped` }))}
             />
             <div className="min-w-0">
               <h3 className="text-sm font-semibold text-foreground">Searched for, not carried</h3>
               <p className="text-xs text-muted-foreground">What shoppers asked the shopping assistant for and found nothing.</p>
               {products.missedSearches.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">Every search found something.</p>
+                <p className="mt-2 text-sm text-muted-foreground">No missed searches recorded yet.</p>
               ) : (
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {products.missedSearches.slice(0, 20).map((s) => (

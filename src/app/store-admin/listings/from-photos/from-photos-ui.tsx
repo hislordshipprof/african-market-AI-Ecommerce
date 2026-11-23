@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { toast } from "sonner";
-import { ArrowLeft, Camera, CheckCircle2, ImageOff, Info } from "lucide-react";
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, ImageOff, Info, RotateCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import { dismissListingDrafts, publishListingDrafts, uploadShelfPhoto } from "@/
 import type { StoreProposalRow } from "@/lib/catalog/product-proposals";
 import type { DraftCard, PublishRefusal } from "@/lib/listing/photo-drafts";
 import { SuggestionFields, SuggestionList, type SuggestionState } from "./catalog-suggestion";
+import { queuePhotos, readPhotoQueue, type PhotoAttempt, type QueuedPhoto } from "./photo-queue";
 
 const BATCH_MAX = 10;
 const PRICE_RE = /^\$?\s*(\d{1,5})(?:\.(\d{1,2}))?$/;
@@ -80,7 +81,7 @@ interface Props {
 export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, proposals, categories }: Props) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<File[]>([]);
+  const [queue, setQueue] = useState<QueuedPhoto[]>([]);
   const [progress, setProgress] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [isPending, startTransition] = useTransition();
@@ -94,39 +95,37 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, 
   function pickFiles(list: FileList | null) {
     const picked = [...(list ?? [])].filter((file) => file.type.startsWith("image/"));
     if (picked.length > BATCH_MAX) toast.error(`Add up to ${BATCH_MAX} photos at a time. The first ${BATCH_MAX} are kept.`);
-    setFiles(picked.slice(0, BATCH_MAX));
+    setQueue(queuePhotos(picked.slice(0, BATCH_MAX)));
   }
 
-  function readPhotos() {
+  /** Reads the queued photos, or only `ids`. Photos that fail or are never sent stay queued with their error. */
+  function readPhotos(ids?: string[]) {
     startTransition(async () => {
       let created = 0;
-      let failed = 0;
-      for (const [index, file] of files.entries()) {
-        setProgress(`Reading photo ${index + 1} of ${files.length}`);
+      const read = async (file: File, index: number, count: number): Promise<PhotoAttempt> => {
+        setProgress(`Reading photo ${index + 1} of ${count}`);
         try {
           const form = new FormData();
           form.set("photo", await jpegBlob(file, PHOTO_UPLOAD_MAX_BYTES), "shelf.jpg");
           const result = await uploadShelfPhoto(form);
           if (!result.ok) {
-            failed += 1;
-            toast.error(`${file.name}: ${result.message}`);
-            if (result.code === "rate_limited" || result.code === "copilot_resting") break;
-            continue;
+            return { ok: false, message: result.message, stop: result.code === "rate_limited" || result.code === "copilot_resting" };
           }
           created += result.created;
           if (result.overflow) toast.message(`${file.name}: only the first 30 items were read. Take a closer photo of the rest.`);
           if (result.created === 0) toast.message(`${file.name}: no products could be read. Try a sharper, closer photo.`);
+          return { ok: true };
         } catch (error) {
           if (isRedirectError(error)) throw error;
-          failed += 1;
-          toast.error(`${file.name}: the photo could not be sent. Try again.`);
+          return { ok: false, message: "The photo could not be sent. Check your connection and retry.", stop: false };
         }
-      }
+      };
+      const left = await readPhotoQueue(queue, read, ids);
       setProgress(null);
-      setFiles([]);
+      setQueue(left);
       if (fileRef.current) fileRef.current.value = "";
       if (created > 0) toast.success(`${created} ${created === 1 ? "item" : "items"} read. Check them below.`);
-      else if (failed === 0) toast.message("No new items were read.");
+      else if (left.length === 0) toast.message("No new items were read.");
       router.refresh();
     });
   }
@@ -195,6 +194,7 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, 
   }
 
   const selectedCount = toReview.filter((draft) => rowOf(draft).selected).length;
+  const failedCount = queue.filter((photo) => photo.error).length;
 
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-ink)]">
@@ -231,7 +231,11 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, 
               >
                 <Camera className="h-7 w-7 text-[var(--color-muted)]" aria-hidden />
                 <span className="text-sm font-medium">
-                  {files.length > 0 ? `${files.length} ${files.length === 1 ? "photo" : "photos"} ready` : "Take or choose shelf photos"}
+                  {failedCount > 0
+                    ? `${failedCount} ${failedCount === 1 ? "photo" : "photos"} to retry`
+                    : queue.length > 0
+                      ? `${queue.length} ${queue.length === 1 ? "photo" : "photos"} ready`
+                      : "Take or choose shelf photos"}
                 </span>
                 <input
                   id="shelf-photos"
@@ -244,19 +248,42 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, 
                   disabled={isPending}
                 />
               </label>
-              {files.length > 0 && (
-                <ul className="mt-3 flex flex-wrap gap-2" aria-label="Photos to read">
-                  {files.map((file, index) => (
-                    <li key={`${file.name}-${index}`} className="rounded-full border border-[var(--color-line)] px-3 py-1 text-xs">
-                      {file.name}
+              {queue.length > 0 && (
+                <ul className="mt-4 flex flex-col gap-2" aria-label="Photos to read">
+                  {queue.map((photo) => (
+                    <li
+                      key={photo.id}
+                      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-sm font-medium">{photo.file.name}</p>
+                        {photo.error && (
+                          <p className="mt-1 flex items-start gap-1 text-sm text-destructive">
+                            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                            {photo.error}
+                          </p>
+                        )}
+                      </div>
+                      {photo.error && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="min-h-11"
+                          disabled={isPending}
+                          onClick={() => readPhotos([photo.id])}
+                          aria-label={`Retry ${photo.file.name}`}
+                        >
+                          <RotateCw className="h-4 w-4" aria-hidden /> Retry
+                        </Button>
+                      )}
                     </li>
                   ))}
                 </ul>
               )}
               <div className="mt-4 flex items-center justify-end gap-3">
                 {progress && <span className="text-sm text-[var(--color-muted)]" role="status">{progress}</span>}
-                <Button onClick={readPhotos} disabled={files.length === 0 || isPending}>
-                  {progress ? "Reading..." : "Read photos"}
+                <Button onClick={() => readPhotos()} disabled={queue.length === 0 || isPending}>
+                  {progress ? "Reading..." : failedCount > 0 ? "Retry all" : "Read photos"}
                 </Button>
               </div>
             </CardContent>

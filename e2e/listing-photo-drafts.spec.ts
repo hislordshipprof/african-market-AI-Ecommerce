@@ -144,6 +144,36 @@ test.describe("Listings from shelf photos", () => {
     expect([proposal.status, proposal.listing.masterProductId, proposal.listing.customName, proposal.listing.price]).toEqual(["approved", proposal.masterProductId, null, 275]);
   });
 
+  test("photos that fail to send stay listed with their error, and Retry sends only that photo", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(PAGE_URL);
+    // A 1x1 PNG; every upload is dropped, so nothing reaches the photo reader.
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    let sent = 0;
+    await page.route("**/store-admin/listings/from-photos**", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      sent += 1;
+      await route.abort("failed");
+    });
+    await page.getByLabel("Take or choose shelf photos").setInputFiles([
+      { name: "shelf-one.png", mimeType: "image/png", buffer: png },
+      { name: "shelf-two.png", mimeType: "image/png", buffer: png },
+    ]);
+    await page.getByRole("button", { name: "Read photos" }).click();
+
+    const photos = page.getByRole("list", { name: "Photos to read" });
+    await expect(photos.getByRole("listitem")).toHaveCount(2);
+    await expect(photos.getByText("The photo could not be sent. Check your connection and retry.")).toHaveCount(2);
+    expect(sent).toBe(2);
+
+    await page.getByRole("button", { name: "Retry shelf-two.png" }).click();
+    await expect.poll(() => sent).toBe(3);
+    await expect(page.getByRole("button", { name: "Retry all" })).toBeEnabled();
+    await expect(photos.getByText("shelf-one.png")).toBeVisible();
+    await expect(photos.getByText("shelf-two.png")).toBeVisible();
+    expect(sent).toBe(3);
+  });
+
   test("the products page links to it", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin/listings?store=${E2E_STORE_SLUG}`);
