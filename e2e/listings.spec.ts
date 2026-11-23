@@ -123,9 +123,11 @@ test.describe("Listing management (authenticated)", () => {
     await expect(active.getByText(/^\d+ listings$/)).toBeVisible();
   });
 
-  test("row actions are 44px touch targets", async ({ page }) => {
+  test("row actions are 44px touch targets and the page fits 390px", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(LISTINGS_URL);
+    await expect(page.getByRole("button", { name: "Edit Palm Oil", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     for (const name of ["Edit Palm Oil", "Ingredients and allergens for Palm Oil"]) {
       const box = await page.getByRole("button", { name, exact: true }).boundingBox();
       expect(box?.width).toBeGreaterThanOrEqual(44);

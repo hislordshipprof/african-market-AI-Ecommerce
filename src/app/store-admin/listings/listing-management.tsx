@@ -761,29 +761,31 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   return (
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-2xl flex-wrap items-center gap-3 px-4 py-3">
           <Link href={`/store-admin?store=${storeParam}`}>
-            <Button variant="ghost" size="icon" className="size-9">
+            <Button variant="ghost" size="icon" className="size-11" aria-label="Back to dashboard">
               <ArrowLeft className="size-4" />
             </Button>
           </Link>
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <h1 className="text-base font-semibold text-foreground">Products</h1>
             <p className="text-xs text-muted-foreground">{storeName}</p>
           </div>
-          <Link href={`/store-admin/listings/import?store=${storeParam}`}>
-            <Button size="sm" variant="outline">
-              <Upload className="size-4" /> Import CSV
+          <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+            <Link href={`/store-admin/listings/import?store=${storeParam}`}>
+              <Button size="sm" variant="outline">
+                <Upload className="size-4" /> Import CSV
+              </Button>
+            </Link>
+            <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
+              <Button size="sm" variant="outline">
+                <Camera className="size-4" /> From photos
+              </Button>
+            </Link>
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="size-4" /> Add listing
             </Button>
-          </Link>
-          <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
-            <Button size="sm" variant="outline">
-              <Camera className="size-4" /> From photos
-            </Button>
-          </Link>
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="size-4" /> Add listing
-          </Button>
+          </div>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
