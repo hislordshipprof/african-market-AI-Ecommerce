@@ -58,7 +58,7 @@ import {
 import type { StoreOrderRow } from "@/lib/order/service";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
-import { money } from "@/lib/format";
+import { formatClockInZone, money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
@@ -343,7 +343,7 @@ export function OrderInbox({
   function handlePushReady(orderId: string) {
     runAction(orderId, () => pushReadyTimeAction(orderId), (result) => {
       if (!result.ok) return;
-      const when = new Date(result.readyEstimateAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const when = formatClockInZone(result.readyEstimateAt, timeZone);
       const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The courier already on the way keeps the first time.", none: "" }[result.courier];
       toast.success(`Ready by ${when}.${courier}`);
       pollOrders();
@@ -619,6 +619,7 @@ export function OrderInbox({
                     courier={selectedOrder.deliveries[0] ?? null}
                     disabled={isPending}
                     onPush={() => handlePushReady(selectedOrder.id)}
+                    timeZone={timeZone}
                   />
                 )}
                 {selectedOrder.status === "AUTHORIZED" && (

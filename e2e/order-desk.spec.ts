@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { deleteBatchOrders, deleteInboxOrder, insertBatchOrders, insertInboxOrder, setOrderReadyEstimate } from "./order-fixture";
+import { deleteBatchOrders, deleteInboxOrder, insertBatchOrders, insertInboxOrder, setInboxOrderStatus, setOrderReadyEstimate } from "./order-fixture";
 import { storeOwnerSignIn } from "./store-owner-auth";
 
 const DASHBOARD_URL = "/store-admin?store=mama-ngozi";
@@ -237,7 +237,7 @@ test.describe("Order desk (#725)", () => {
   test.describe("in a browser away from the store's zone", () => {
     test.use({ timezoneId: "Pacific/Honolulu" });
 
-    test("packing ready times show in the store's zone, labelled", async ({ page }, testInfo) => {
+    test("packing ready times show in the store's zone, labelled, on the packing screen and in the inbox", async ({ page }, testInfo) => {
       const base = 72900 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex * 2;
       await insertBatchOrders([base, base + 1], ["courier", "pickup"]);
       try {
@@ -247,6 +247,11 @@ test.describe("Order desk (#725)", () => {
         await setOrderReadyEstimate(base, new Date("2026-11-23T21:05:00Z"));
         await page.reload();
         await expect(page.getByTestId("tote").first()).toContainText("Ready by 3:05 PM CST");
+        // The inbox's Courier timing for the same order, once PICKING, shows the same labelled time.
+        await setInboxOrderStatus(base, "PICKING");
+        await page.goto(ORDERS_URL);
+        await page.locator("button", { hasText: `#${base}` }).click();
+        await expect(page.getByLabel("Courier timing")).toContainText("Ready by 3:05 PM CST");
       } finally {
         await deleteBatchOrders([base, base + 1]);
       }
