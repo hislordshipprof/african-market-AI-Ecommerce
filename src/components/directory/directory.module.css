@@ -349,6 +349,7 @@
   .card,
   .visit,
   .visit svg,
+  .results[data-refreshing] > .grid,
   .chip {
     transition: none;
   }
@@ -486,6 +487,10 @@
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.choiceButton:hover:not(:disabled) {
+  border-color: var(--d-ink);
 }
 
 .choiceButton:disabled {

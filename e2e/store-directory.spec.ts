@@ -251,7 +251,13 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await expect(kept).not.toHaveAttribute("aria-busy", "true");
     await expect(kept.getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^\d+ markets?$/ })).toHaveCount(0);
-    await page.getByRole("button", { name: "Retry" }).focus();
+    await expect(page.locator("[aria-live=polite]").getByText(/stores? found/)).toHaveCount(0);
+    // Keyboard: ZIP field, Find stores, Use my location, then Retry.
+    await page.getByLabel("ZIP code or city").focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Retry" })).toBeFocused();
     await shoot(page, "728-near-timeout", "Stores near 77002");
     await page.unroute("**/api/directory/near**");
     await page.getByRole("button", { name: "Retry" }).click();
@@ -271,8 +277,10 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await page.getByRole("button", { name: "West African" }).click();
     await expect(page.getByText("None of these markets list West African.")).toBeVisible();
     await expect(page.locator("[aria-live=polite]").getByText("0 stores found")).toBeAttached();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Clear filter" })).toBeFocused();
     await shoot(page, "728-cuisine-empty", "Stores near 77002");
-    await page.getByRole("button", { name: "Clear filter" }).click();
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("button", { name: "West African" })).toHaveAttribute("aria-pressed", "false");
     await expect(page.getByRole("region", { name: "Stores near 77002" }).getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
     await page.unroute("**/api/directory/near**");
@@ -448,6 +456,13 @@ test("unlisting the only Houston store turns its city page into a 404 at once, a
     expect((await request.get(city)).status()).toBe(404);
     expect((await request.get(`${root}/stores/texas`)).status()).toBe(404);
     expect(await (await request.get(`${root}/sitemap.xml`)).text()).not.toContain("/stores/texas");
+    // #728: an empty directory offers the tell-me-when-a-store-opens form, not only "check back soon".
+    const home = await page.context().newPage();
+    await home.goto(`${root}/`);
+    await expect(home.getByRole("heading", { name: "No stores are listed yet" })).toBeVisible();
+    await expect(home.getByRole("region", { name: "Tell me when a store opens near me" })).toBeVisible();
+    await shoot(home, "728-empty-directory", "No stores are listed yet");
+    await home.close();
 
     await listed.click();
     await page.getByRole("button", { name: "Save listing" }).click();

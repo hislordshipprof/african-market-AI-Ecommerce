@@ -123,7 +123,7 @@ export function NearMe({ states, stores, chips, backdrop, intro, counts }: {
             ) : null}
           </div>
         ) : null}
-        {!pending && found !== null ? <p className={styles.srOnly}>{found === 1 ? "1 store found" : `${found} stores found`}</p> : null}
+        {!pending && !failure && found !== null ? <p className={styles.srOnly}>{found === 1 ? "1 store found" : `${found} stores found`}</p> : null}
         {answer?.kind === "none" ? <p className={styles.note}>We don&apos;t have that ZIP code or city on our map. Some ZIP codes, like PO boxes, aren&apos;t on it: try your city, or add the state.</p> : null}
         {answer?.kind === "outside" ? <p className={styles.note}>You look to be outside the US. Our stores are all in the US: browse them by state below.</p> : null}
         {answer?.kind === "ambiguous" ? (
