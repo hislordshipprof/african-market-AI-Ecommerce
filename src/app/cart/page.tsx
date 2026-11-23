@@ -18,7 +18,8 @@ export default async function CartRoute() {
   );
   return (
     <StorefrontShell store={store}>
-      {enabled ? (
+      {/* Same rule as checkout: the basket shows whenever checkout does (#740). */}
+      {enabled || realCheckout ? (
         <CartPage
           settings={settings}
           catalog={catalog}
