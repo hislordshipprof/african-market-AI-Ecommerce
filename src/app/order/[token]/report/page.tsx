@@ -41,7 +41,10 @@ export default async function ReportPage({
                 .filter((line) => line.qtyPicked > 0)
                 .map((line) => ({
                   id: line.id,
-                  name: line.listingVariant?.listing?.customName ?? line.listingVariant?.label ?? "Item",
+                  // Product, then pack: a pack size alone ("8 oz") does not say which item (#743).
+                  name: [line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant?.label]
+                    .filter(Boolean)
+                    .join(" · ") || "Item",
                   qtyPicked: line.qtyPicked,
                   unitPriceCents: line.unitPriceCents,
                 }))}

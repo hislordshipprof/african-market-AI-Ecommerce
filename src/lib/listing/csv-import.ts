@@ -441,7 +441,7 @@ export function parseCsvText(raw: string): {
         errors.push({
           row: rowNum,
           csvName: rawName,
-          reason: `Unrecognised stock_mode: "${stockModeCell}". Use "counted" or "status".`,
+          reason: `Unrecognized stock_mode: "${stockModeCell}". Use "counted" or "status".`,
         });
         continue;
       }
@@ -454,7 +454,7 @@ export function parseCsvText(raw: string): {
         errors.push({
           row: rowNum,
           csvName: rawName,
-          reason: `Unrecognised status: "${statusCell}". Use "in_stock", "low", or "out_of_stock".`,
+          reason: `Unrecognized status: "${statusCell}". Use "in_stock", "low", or "out_of_stock".`,
         });
         continue;
       }

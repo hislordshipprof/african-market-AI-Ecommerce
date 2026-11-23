@@ -320,17 +320,20 @@ export async function deleteBatchOrders(numbers: number[]): Promise<void> {
  * A completed order opened by `token` (#724): two picked lines, inside the problem-report window.
  * With `substitutions`, each line also has a pending swap prompt. Remove with deleteBatchOrders.
  */
-export async function insertRecoveryOrder(input: { number: number; token: string; substitutions?: boolean }): Promise<void> {
-  await withMama(async (tx, storeId) => {
+export async function insertRecoveryOrder(input: { number: number; token: string; substitutions?: boolean }): Promise<{ names: string[] }> {
+  return withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
     const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
     const listings = await tx.listing.findMany({
-      where: { storeId, active: true, variants: { some: {} } },
-      include: { variants: { take: 1 } },
+      // Named products only: a CSV import from another spec can leave a nameless custom listing first by id.
+      where: { storeId, active: true, variants: { some: {} }, OR: [{ customName: { not: null } }, { masterProductId: { not: null } }] },
+      include: { variants: { take: 1 }, masterProduct: { select: { name: true } } },
       orderBy: { id: "asc" },
       take: 3,
     });
     if (listings.length < 3) throw new Error("mama-ngozi needs more listings");
+    // What the customer reads for each line: product name, then pack (#743).
+    const names = listings.slice(0, 2).map((listing) => [listing.customName ?? listing.masterProduct?.name, listing.variants[0].label].filter(Boolean).join(" · "));
     const [first, second, swap] = listings.map((listing) => listing.variants[0]);
     const order = await tx.order.create({
       data: {
@@ -346,7 +349,7 @@ export async function insertRecoveryOrder(input: { number: number; token: string
       },
       include: { lines: true },
     });
-    if (!input.substitutions) return;
+    if (!input.substitutions) return { names };
     for (const line of order.lines) {
       await tx.substitutionRequest.create({
         data: {
@@ -355,6 +358,7 @@ export async function insertRecoveryOrder(input: { number: number; token: string
         },
       });
     }
+    return { names };
   });
 }
 

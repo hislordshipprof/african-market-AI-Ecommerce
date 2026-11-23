@@ -127,10 +127,8 @@ export function PayoutsSettings({
               <Store className="size-5" />
             </div>
             <div>
-              <h1 className="text-base font-semibold text-foreground">
-                {storeName}
-              </h1>
-              <p className="text-xs text-muted-foreground">Payouts</p>
+              <h1 className="text-base font-semibold text-foreground">Payouts</h1>
+              <p className="text-xs text-muted-foreground">{storeName}</p>
             </div>
           </div>
         </div>

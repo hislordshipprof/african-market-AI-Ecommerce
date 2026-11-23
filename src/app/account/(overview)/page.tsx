@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { getRequestSession, syncCustomerForRequest } from "@/lib/customer-sync";
 import { loadAccountBook } from "@/lib/customer-account/checkout-profile";
-import { listAccountOrders } from "@/lib/customer-account/order-history";
+import { lastOrderContact, listAccountOrders } from "@/lib/customer-account/order-history";
+import { USPS_STATE_CODES } from "@/lib/customer-account/address-validation";
 import { accountOrderRow } from "@/lib/customer-account/order-history-view";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { AccountFlow } from "@/components/storefront/flow/account-flow";
@@ -23,14 +24,16 @@ export default async function AccountPage({
     redirect(`/account/sign-in${query}`);
   }
   // After the sync: the history must include orders the sync just claimed.
-  const [accountBook, accountOrders] = customer
+  const [accountBook, accountOrders, lastContact] = customer
     ? await Promise.all([
         session?.user?.id ? loadAccountBook(session.user.id) : null,
         listAccountOrders(store.id, customer.id).then((orders) =>
           orders.map((order) => accountOrderRow(order, store.timezone)),
         ),
+        lastOrderContact(store.id, customer.id),
       ])
-    : [null, null];
+    : [null, null, null];
+  const storeState = USPS_STATE_CODES.find((code) => code === store.state?.trim().toUpperCase()) ?? "MD";
   return (
     <StorefrontShell store={store}>
       <AccountFlow
@@ -40,6 +43,8 @@ export default async function AccountPage({
         customer={customer}
         accountBook={accountBook}
         accountOrders={accountOrders}
+        lastContact={lastContact}
+        storeState={storeState}
       />
     </StorefrontShell>
   );

@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState, type FormEvent } from "react";
+import { CircleAlert } from "lucide-react";
 import { reportIssueAction, type ReportIssueResult } from "@/lib/order/issue-actions";
+import { ISSUE_PHOTO_INVALID, issuePhotoRequired, type IssueType } from "@/lib/order/issue-photo";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { money } from "@/lib/format";
 import { FlowCard, FlowError } from "./common";
@@ -28,6 +30,17 @@ async function submitReport(previous: ReportIssueResult, form: FormData): Promis
 
 export function IssueReportForm({ token, lines }: { token: string; lines: ReportLine[] }) {
   const [result, action, pending] = useActionState<ReportIssueResult, FormData>(submitReport, null);
+  const [type, setType] = useState<IssueType>("missing");
+  const [photoError, setPhotoError] = useState(false);
+  const photoRequired = issuePhotoRequired(type);
+  // Checked here, not with `required`: the browser's bubble is easy to miss and is not read beside the field.
+  function checkPhoto(event: FormEvent<HTMLFormElement>) {
+    const photo = new FormData(event.currentTarget).get("photo");
+    if (!photoRequired || (photo instanceof File && photo.size > 0)) return;
+    event.preventDefault();
+    setPhotoError(true);
+    event.currentTarget.querySelector<HTMLInputElement>("#issue-photo")?.focus();
+  }
   if (result?.ok) {
     const refunded = result.state === "auto_refunded";
     const failed = result.state === "refund_failed";
@@ -45,12 +58,20 @@ export function IssueReportForm({ token, lines }: { token: string; lines: Report
     );
   }
   return (
-    <form action={action} className="of-stack">
+    <form action={action} onSubmit={checkPhoto} className="of-stack">
       <input type="hidden" name="token" value={token} />
       <FlowCard title="What went wrong?">
         <div className="of-form">
           <label htmlFor="issue-type">Problem</label>
-          <select id="issue-type" name="type" defaultValue="missing">
+          <select
+            id="issue-type"
+            name="type"
+            value={type}
+            onChange={(event) => {
+              setType(event.target.value as IssueType);
+              setPhotoError(false);
+            }}
+          >
             <option value="missing">Missing item</option>
             <option value="damaged">Damaged item</option>
             <option value="wrong">Wrong item</option>
@@ -75,8 +96,23 @@ export function IssueReportForm({ token, lines }: { token: string; lines: Report
           </fieldset>
           <label htmlFor="issue-note">Anything the store should know? (optional)</label>
           <textarea id="issue-note" name="note" maxLength={1000} />
-          <label htmlFor="issue-photo">One photo of the problem</label>
-          <input id="issue-photo" name="photo" type="file" required accept="image/jpeg,image/png,image/webp" />
+          <label htmlFor="issue-photo">One photo of the problem {photoRequired ? "(required)" : "(optional)"}</label>
+          <input
+            id="issue-photo"
+            name="photo"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            aria-required={photoRequired}
+            aria-invalid={photoError}
+            aria-describedby={photoError ? "issue-photo-error" : undefined}
+            onChange={() => setPhotoError(false)}
+          />
+          {photoError && (
+            <p className="of-error of-field-error" id="issue-photo-error" role="alert">
+              <CircleAlert size={16} aria-hidden />
+              {ISSUE_PHOTO_INVALID}
+            </p>
+          )}
         </div>
       </FlowCard>
       <FlowCard title="Your refund">

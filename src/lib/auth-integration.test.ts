@@ -18,7 +18,7 @@ import { resolveDirectUrl } from "./env";
 import { AUTH_BASE, authGet, authPost, testSignUp, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
 import { customerRlsErrorText, isCustomerRlsRejection } from "./customer-rls-error";
 import { syncCustomerForStore } from "./customer-claim";
-import { listAccountOrders } from "./customer-account/order-history";
+import { lastOrderContact, listAccountOrders } from "./customer-account/order-history";
 import {
   getTestSentEmails,
   clearTestSentEmails,
@@ -912,6 +912,9 @@ describe("auth integration (real DB, app_runtime)", () => {
       expect(bobRow?.claimedByCustomerId).toBeNull();
       const bRowBefore = await storeScoped(storeBId).customer.findFirst({ where: { id: atB.guestId } });
       expect(bRowBefore?.claimedByCustomerId).toBeNull();
+
+      // #743: the newest claimed order supplies the contact; Bob's newer order and the other store's never do.
+      expect(await lastOrderContact(storeId, account.id)).toEqual({ name: "Ada O.", phone: "+15550001002" });
 
       const direct = await storeScoped(storeId).order.create({
         data: {

@@ -36,3 +36,22 @@ export async function listAccountOrders(
   });
   return rows.map(({ _count, ...row }) => ({ ...row, itemCount: _count.lines }));
 }
+
+/** Name and phone from this store's newest order on the account or a guest row it claimed; null with no orders. */
+export async function lastOrderContact(
+  storeId: string,
+  accountCustomerId: string,
+): Promise<{ name: string; phone: string | null } | null> {
+  const order = await storeScoped(storeId).order.findFirst({
+    where: {
+      storeId,
+      OR: [
+        { customerId: accountCustomerId },
+        { customer: { storeId, claimedByCustomerId: accountCustomerId } },
+      ],
+    },
+    orderBy: [{ createdAt: "desc" }, { number: "desc" }],
+    select: { customer: { select: { name: true, phone: true } } },
+  });
+  return order?.customer ?? null;
+}

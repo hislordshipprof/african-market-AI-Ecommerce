@@ -28,7 +28,7 @@ import { setStripeProvider } from "../stripe";
 import { feeRefundParts, fakeStripeProvider, refundRequests, reset, storeFundedRefundCents, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { systemAuditData } from "../system-actor";
 import { countedListing } from "./stock-ledger-test-helpers";
-import { ISSUE_ALREADY_REPORTED, submitIssueReport } from "./issue-report";
+import { ISSUE_ALREADY_REPORTED, ISSUE_PHOTO_INVALID, submitIssueReport } from "./issue-report";
 import { evaluateOrderRefundState } from "./refund-requests";
 import { captureSplit } from "./platform-fee";
 import { reconcileStuckOrder } from "./service";
@@ -641,6 +641,30 @@ describe.skipIf(!hasDb)("customer issue report", () => {
       expect(after.order.status).toBe("COMPLETED");
     }
     expect(refundRequests.length).toBe(calls);
+    expect(bucket.size).toBe(0);
+  });
+  it("#743 AC1: a missing item needs no photo, so the report is saved with none and nothing is uploaded", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 2, unitPriceCents: 450 }], 3);
+    const result = await submitIssueReport(store, token, {
+      type: "missing",
+      lines: [{ lineId: order.lines[0].id, qty: 1 }],
+      note: null,
+      photo: null,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 450 });
+    const after = await written(order.id);
+    expect(after.issues).toHaveLength(1);
+    expect(after.issues[0].photoKey).toBeNull();
+    expect(bucket.size).toBe(0);
+  });
+
+  it("#743 AC1: a damaged or wrong item with no photo is refused and nothing is written", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 900 }], 3);
+    for (const type of ["damaged", "wrong"] as const) {
+      const result = await submitIssueReport(store, token, { type, lines: [{ lineId: order.lines[0].id, qty: 1 }], note: null, photo: null });
+      expect(result).toEqual({ ok: false, error: ISSUE_PHOTO_INVALID });
+    }
+    expect((await written(order.id)).issues).toHaveLength(0);
     expect(bucket.size).toBe(0);
   });
 });
