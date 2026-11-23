@@ -100,6 +100,7 @@
 :global(.sf-storefront) .stepper button:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: -5px;
+  border-radius: 999px;
 }
 .stepper button:disabled {
   opacity: 0.5;
