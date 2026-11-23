@@ -40,6 +40,18 @@ describe("account order history link", () => {
   });
 });
 
+describe("account order history date", () => {
+  // By the store's day (#737): 9:30 PM in New York on Nov 1 is already Nov 2 in UTC.
+  const NOW = new Date("2026-11-02T01:30:00Z");
+  const date = (createdAt: string) => accountOrderRow(order({ createdAt: new Date(createdAt) }), "America/New_York", NOW).dateLabel;
+
+  it("says Today, Yesterday, then the full date", () => {
+    expect(date("2026-11-01T15:00:00Z")).toBe("Today");
+    expect(date("2026-10-31T15:00:00Z")).toBe("Yesterday");
+    expect(date("2026-10-30T15:00:00Z")).toBe("Oct 30, 2026");
+  });
+});
+
 describe("tracking outcome (#736)", () => {
   const outcome = (status: string, over: { refundId?: string | null; capturedAmountCents?: number | null } = {}, refundedCents = 0) =>
     orderOutcomeMessage({ status, refundId: null, capturedAmountCents: null, ...over }, refundedCents);

@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { formatInZone, money } from "@/lib/format";
+import { formatListTime, money } from "@/lib/format";
 import { approveIssueAction, declineIssueAction } from "@/lib/order/actions";
 import type { IssueToReview } from "@/lib/order/issue-review";
 import type { IssueType } from "@/lib/order/issue-report";
@@ -64,7 +64,7 @@ function ProblemCard({ issue, timeZone }: { issue: IssueToReview; timeZone: stri
           <Badge variant="destructive">{TYPE_LABEL[issue.type as IssueType] ?? issue.type}</Badge>
         </div>
         <p className="text-xs text-muted-foreground">
-          {issue.customerName} · reported {formatInZone(issue.createdAt, timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+          {issue.customerName} · reported {formatListTime(issue.createdAt, timeZone)}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">

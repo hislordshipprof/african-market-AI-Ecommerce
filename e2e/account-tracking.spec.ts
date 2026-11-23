@@ -36,7 +36,8 @@ test.describe("account and tracking lead with what the customer needs now (#736)
       await expect(row).toHaveAttribute("href", `/order/${seeded.orderId}`);
       await expect(row).toContainText("Completed");
       await expect(row).toContainText("$12.50");
-      await expect(row).toContainText(/\w{3} \d{1,2}, \d{4}/);
+      // Placed just now, so the store-day label reads Today (#737).
+      await expect(row).toContainText("Today");
       expect(await top(page, "Your orders")).toBeLessThan(await top(page, "Personal details"));
       expect(await top(page, "Your orders")).toBeLessThan(await top(page, "Saved addresses"));
     } finally {

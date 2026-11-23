@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { money } from "@/lib/format";
 import { Switch } from "@/components/ui/switch";
 import {
   Card,
@@ -109,10 +110,6 @@ interface Props {
   /** The store has opted in to shipping (#567). */
   storeShips: boolean;
   listings: Listing[];
-}
-
-function formatPrice(cents: number) {
-  return `$${(cents / 100).toFixed(2)}`;
 }
 
 function stockLabel(listing: Listing) {
@@ -982,7 +979,7 @@ function ListingRow({
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-xs text-muted-foreground">
-            {formatPrice(listing.price)}
+            {money(listing.price)}
           </span>
           {listing.variants.length > 0 && (
             <span className="text-xs text-muted-foreground">

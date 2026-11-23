@@ -16,14 +16,10 @@ import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
 import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
+import { formatClockInZone, money } from "@/lib/format";
 import styles from "./tracking.module.css";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
-
-const money = (cents: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-    cents / 100,
-  );
 
 export default async function OrderPage({
   params,
@@ -46,7 +42,7 @@ export default async function OrderPage({
     const courier = realOrder.fulfillment === "courier" ? realOrder.deliveries[0] : undefined;
     const courierInfo = courier?.courierJson as CourierJson | undefined;
     const eta = courierInfo?.dropoffEta
-      ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: context.store.timezone }).format(new Date(courierInfo.dropoffEta))
+      ? formatClockInZone(courierInfo.dropoffEta, context.store.timezone)
       : null;
     const scheduled = scheduledTimeLabel(realOrder.pickupSlot, context.store.timezone);
     // Only the tracking token opens the thread: an order id opens the page but never the messages.
@@ -140,7 +136,9 @@ export default async function OrderPage({
                   <p>
                     {courierInfo.name}
                     {courierInfo.vehicle && ` · ${courierInfo.vehicle}`}
-                    {eta && courier.status !== "delivered" && ` · arriving about ${eta}`}
+                    {eta && courier.status !== "delivered" && (
+                      <> · arriving about <span style={{ whiteSpace: "nowrap" }}>{eta}</span></>
+                    )}
                   </p>
                 ) : (
                   <p>We&rsquo;re matching your order with a courier.</p>

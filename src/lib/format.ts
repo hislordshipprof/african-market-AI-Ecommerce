@@ -1,9 +1,3 @@
-export function formatPrice(cents: number): string {
-  const dollars = Math.floor(cents / 100);
-  const remainder = cents % 100;
-  return `$${dollars}${remainder > 0 ? `.${String(remainder).padStart(2, "0")}` : ""}`;
-}
-
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 export const money = (cents: number) => usd.format(cents / 100);
 
@@ -21,6 +15,25 @@ export function formatWeight(grams: number): string {
   return `${grams} g`;
 }
 
+/** A date in a list (#737): "Today", "Yesterday" or "Nov 1, 2026", by the store's calendar day. */
+export function formatListDate(date: Date | string, timeZone: string, now: Date = new Date()): string {
+  let calendar: Intl.DateTimeFormat;
+  try {
+    calendar = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric", day: "numeric" });
+  } catch {
+    calendar = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "numeric", day: "numeric" });
+  }
+  const day = (at: Date | string) => {
+    const parts = calendar.formatToParts(new Date(at));
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value);
+    return Date.UTC(part("year"), part("month") - 1, part("day"));
+  };
+  const daysAgo = (day(now) - day(date)) / 86_400_000;
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+  return formatInZone(date, timeZone, { month: "short", day: "numeric", year: "numeric" });
+}
+
 /** A date in the store's zone. `stores.timezone` is free text in the DB, so an unknown zone falls back to New York instead of throwing. */
 export function formatInZone(date: Date | string, timeZone: string, options: Intl.DateTimeFormatOptions): string {
   const at = new Date(date);
@@ -34,4 +47,9 @@ export function formatInZone(date: Date | string, timeZone: string, options: Int
 /** An operational clock time in the store's zone, labelled with the zone: "3:05 PM CST". */
 export function formatClockInZone(date: Date | string, timeZone: string): string {
   return formatInZone(date, timeZone, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+}
+
+/** A time in a list (#737): "Today, 3:05 PM CST". */
+export function formatListTime(date: Date | string, timeZone: string, now: Date = new Date()): string {
+  return `${formatListDate(date, timeZone, now)}, ${formatClockInZone(date, timeZone)}`;
 }

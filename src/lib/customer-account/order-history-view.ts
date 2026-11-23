@@ -1,4 +1,4 @@
-import { formatInZone } from "../format";
+import { formatListDate, money } from "../format";
 import type { OrderStatus } from "../order/service";
 
 export const ACCOUNT_ORDER_LIMIT = 50;
@@ -57,9 +57,6 @@ export function customerStatusLabel(status: string): string {
   return CUSTOMER_STATUS_LABELS[status as OrderStatus] ?? "In progress";
 }
 
-const money = (cents: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
-
 /**
  * Never the hold: an amount that is not captured yet reads as an estimate, not a charge.
  * refundId alone does not mean refunded: the order service also writes it on a failed refund
@@ -80,12 +77,12 @@ function amountLabel(order: AccountOrderRecord): string {
   return `Estimated ${money(order.subtotalCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents)}`;
 }
 
-export function accountOrderRow(order: AccountOrderRecord, timeZone: string): AccountOrderRow {
+export function accountOrderRow(order: AccountOrderRecord, timeZone: string, now: Date = new Date()): AccountOrderRow {
   return {
     id: order.id,
     number: order.number,
     href: `/order/${encodeURIComponent(order.trackingToken ?? order.id)}`,
-    dateLabel: formatInZone(order.createdAt, timeZone, { month: "short", day: "numeric", year: "numeric" }),
+    dateLabel: formatListDate(order.createdAt, timeZone, now),
     itemsLabel: `${order.itemCount} ${order.itemCount === 1 ? "item" : "items"}`,
     statusLabel: customerStatusLabel(order.status),
     amountLabel: amountLabel(order),

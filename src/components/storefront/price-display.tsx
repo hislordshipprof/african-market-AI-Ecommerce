@@ -1,3 +1,5 @@
+import { money } from "@/lib/format";
+
 export function PriceDisplay({
   cents,
   prefix,
@@ -16,7 +18,7 @@ export function PriceDisplay({
 
   return (
     <span className={`sf-price ${className ?? ""}`}>
-      <span aria-label={`${prefix ?? ""}$${(cents / 100).toFixed(2)}`}>
+      <span aria-label={`${prefix ?? ""}${money(cents)}`}>
         <span aria-hidden="true">
           {prefix}
           {cents < 0 ? "−" : ""}${dollars}
@@ -25,8 +27,8 @@ export function PriceDisplay({
       </span>
       <small>
         {weightG && weightG > 0
-          ? `$${(cents / weightG).toFixed(2)} / 100 g`
-          : `$${(cents / 100).toFixed(2)} / ${unit}`}
+          ? `${money((cents * 100) / weightG)} / 100 g`
+          : `${money(cents)} / ${unit}`}
       </small>
     </span>
   );

@@ -150,6 +150,28 @@ export async function setOrderReadyEstimate(number: number, readyEstimateAt: Dat
   });
 }
 
+/** Pins when an order was placed and when its substitution requests expire, so a test can expect a fixed clock time (#737). */
+export async function setOrderTimes(number: number, times: { createdAt: Date; substitutionExpiresAt?: Date }): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.updateMany({ where: { storeId, number }, data: { createdAt: times.createdAt } });
+    if (times.substitutionExpiresAt) {
+      await tx.substitutionRequest.updateMany({ where: { storeId, order: { number } }, data: { expiresAt: times.substitutionExpiresAt } });
+    }
+  });
+}
+
+/** Gives a courier order a tracking token and the courier a drop-off ETA (#737). */
+export async function setCourierDropoff(number: number, token: string, dropoffEta: Date): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    const order = await tx.order.findFirstOrThrow({ where: { storeId, number }, include: { deliveries: true } });
+    await tx.order.update({ where: { id: order.id }, data: { trackingToken: token } });
+    for (const delivery of order.deliveries) {
+      const courier = (delivery.courierJson ?? {}) as Record<string, unknown>;
+      await tx.delivery.update({ where: { id: delivery.id }, data: { courierJson: { ...courier, dropoffEta: dropoffEta.toISOString() } } });
+    }
+  });
+}
+
 export async function seedCaptureLabel(number: number): Promise<string> {
   return withMama(async (tx, storeId) => {
     const order = await tx.order.findFirstOrThrow({

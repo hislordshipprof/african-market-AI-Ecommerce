@@ -7,7 +7,7 @@ import type { StorefrontListing, StorefrontListingDetail } from "@/lib/storefron
 import { Sheet } from "./sheet";
 import { ProductImage } from "./product-image";
 import { PriceDisplay } from "./price-display";
-import { formatPrice } from "@/lib/format";
+import { money } from "@/lib/format";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { CartAnnouncement } from "./cart-provider";
 import { selectQuickViewPack, type QuickViewDetailState } from "./quick-view-selection";
@@ -138,7 +138,7 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
             {/* The chosen pack and its price, beside the control that adds it. */}
             {!selection.addDisabled && !selection.addBlockedReason && (
               <small>
-                {selection.cartItem.packLabel ?? "Each"} · {formatPrice(selection.price)}
+                {selection.cartItem.packLabel ?? "Each"} · {money(selection.price)}
               </small>
             )}
           </span>

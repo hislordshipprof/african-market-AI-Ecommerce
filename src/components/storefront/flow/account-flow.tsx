@@ -29,6 +29,7 @@ import { RealAccountBook } from "./account-book";
 import { saveNameAction, savePhoneAction } from "@/lib/customer-account/actions";
 import type { AccountBookSnapshot } from "@/lib/customer-account/checkout-profile";
 import { ACCOUNT_ORDER_LIMIT, type AccountOrderRow } from "@/lib/customer-account/order-history-view";
+import { formatListDate, money } from "@/lib/format";
 import "./account.css";
 type Props = {
   settings: FlowStore;
@@ -198,7 +199,7 @@ export function AccountFlow(props: Props) {
                     <span>
                       <strong>{o.number}</strong>
                       <small>
-                        {new Date(o.createdAt).toLocaleDateString()} ·{" "}
+                        {formatListDate(o.createdAt, Intl.DateTimeFormat().resolvedOptions().timeZone)} ·{" "}
                         {o.lines.length}{" "}
                         {o.lines.length === 1 ? "item" : "items"}
                       </small>
@@ -206,10 +207,7 @@ export function AccountFlow(props: Props) {
                     <span>
                       {statusLabel(o.status)}
                       <small>
-                        {new Intl.NumberFormat("en-US", {
-                          style: "currency",
-                          currency: "USD",
-                        }).format((o.finalCents ?? o.quote.totalCents) / 100)}
+                        {money(o.finalCents ?? o.quote.totalCents)}
                       </small>
                     </span>
                   </Link>
