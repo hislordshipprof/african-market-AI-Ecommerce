@@ -182,7 +182,8 @@ test.describe("Order desk (#725)", () => {
       await expect(row.getByRole("alert")).toHaveCount(0);
 
       await page.emulateMedia({ colorScheme: "dark" });
-      expect(await textContrast(row.getByTestId("pick-line-name"))).toBeGreaterThanOrEqual(4.5);
+      // The row's colours transition when the scheme flips, so wait for them to settle.
+      await expect.poll(() => textContrast(row.getByTestId("pick-line-name"))).toBeGreaterThanOrEqual(4.5);
     } finally {
       await deleteInboxOrder(number);
     }
