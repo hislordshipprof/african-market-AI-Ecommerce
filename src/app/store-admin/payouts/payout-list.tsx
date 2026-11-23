@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { money } from "@/lib/format";
 import { DASHBOARD_ERROR, storePayouts } from "@/lib/payouts/service";
 import { Notice, StripeDashboardButton, arrivalDate, payoutStatus } from "./payout-parts";
+import { RetryButton } from "./retry-button";
 
 /** The store's last payouts, each opening its orders (#548). */
 export async function PayoutList({
@@ -25,7 +26,10 @@ export async function PayoutList({
       </div>
       {dashboardFailed && <div className="mb-4"><Notice>{DASHBOARD_ERROR}</Notice></div>}
       {!result.ok ? (
-        <Notice>{result.error}</Notice>
+        <div className="flex flex-col items-start gap-4">
+          <Notice>{result.error}</Notice>
+          <RetryButton />
+        </div>
       ) : result.payouts.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border bg-card p-4 text-sm text-muted-foreground">
           No payouts yet. Stripe sends your first payout a few days after your first order is paid.
