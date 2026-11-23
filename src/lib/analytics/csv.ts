@@ -3,10 +3,12 @@ import { CANCEL_REASON_LABELS, type StoreAnalytics } from "./queries";
 export const ANALYTICS_VIEWS = ["sales", "products", "customers", "operations", "assistant"] as const;
 export type AnalyticsView = (typeof ANALYTICS_VIEWS)[number];
 
+/** Keyed by the stored `orders.fulfillment` value; `delivery` is the value older orders carry. */
 export const FULFILLMENT_LABELS: Record<string, string> = {
   pickup: "Pickup",
-  store_delivery: "Store delivery",
-  courier: "Courier",
+  "store-delivery": "Store delivery",
+  delivery: "Store delivery",
+  courier: "Courier delivery",
   ship: "Shipping",
 };
 

@@ -156,9 +156,11 @@ export function FeeLine({
 export function AddressCard({
   address,
   title = "Your address",
+  demo = true,
 }: {
   address: FlowAddress | string;
   title?: string;
+  demo?: boolean;
 }) {
   const text =
     typeof address === "string"
@@ -166,15 +168,22 @@ export function AddressCard({
       : `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
   return (
     <div className="flow-address-card">
-      <div
-        className="flow-map"
-        role="img"
-        aria-label="Illustrative demo map, not a real location"
-      >
-        <span className="flow-map-road" />
-        <MapPin size={28} aria-hidden />
-        <small>Demo map</small>
-      </div>
+      {demo ? (
+        <div
+          className="flow-map"
+          role="img"
+          aria-label="Illustrative demo map, not a real location"
+        >
+          <span className="flow-map-road" />
+          <MapPin size={28} aria-hidden />
+          <small>Demo map</small>
+        </div>
+      ) : (
+        <div className="flow-map" aria-hidden>
+          <span className="flow-map-road" />
+          <MapPin size={28} />
+        </div>
+      )}
       <div>
         <strong>{title}</strong>
         <p>{text}</p>
