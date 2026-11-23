@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { OrderFlow } from "@/components/storefront/flow/order-flow";
-import { FlowCard, FlowHeading } from "@/components/storefront/flow/common";
+import { FeeLine, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
+import { orderReceipt } from "@/lib/order/receipt";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { customerStatusLabel, orderOutcomeMessage } from "@/lib/customer-account/order-history-view";
@@ -58,6 +59,7 @@ export default async function OrderPage({
     const fulfillment = FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment;
     const issue = realOrder.issueReports[0];
     const shipped = realOrder.fulfillment === "ship";
+    const receipt = orderReceipt({ ...realOrder, couponCode: realOrder.coupon?.code ?? null });
     return (
       <StorefrontShell store={context.store}>
         <div className={styles.page}>
@@ -157,24 +159,27 @@ export default async function OrderPage({
               <p><strong>Customer:</strong> {realOrder.customer.name}</p>
             )}
             <ul className={styles.lines}>
-              {realOrder.lines.map((line) => (
+              {realOrder.lines.map((line, index) => (
                 <li key={line.id}>
-                  <span>{line.qtyOrdered} × {[line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant?.label].filter(Boolean).join(" · ") || "Item"}</span>
-                  <span>{money(line.unitPriceCents * line.qtyOrdered)}</span>
+                  <span>
+                    {line.qtyOrdered} × {[line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant?.label].filter(Boolean).join(" · ") || "Item"}
+                    {receipt.items[index].note && <small className={styles.note}>{receipt.items[index].note}</small>}
+                  </span>
+                  <span>{money(receipt.items[index].cents)}</span>
                 </li>
               ))}
             </ul>
-            <p><strong>Subtotal:</strong> {money(realOrder.subtotalCents)}</p>
-            {realOrder.discountCents > 0 && (
-              <p><strong>{realOrder.coupon ? `Promo ${realOrder.coupon.code}` : "Promo discount"}:</strong> −{money(realOrder.discountCents)}</p>
+            {receipt.lines.map((line) => (
+              <FeeLine key={line.key} label={line.label} cents={line.cents} />
+            ))}
+            <FeeLine label={receipt.total.label} cents={receipt.total.cents} strong />
+            {receipt.holdCents != null && (
+              <FeeLine
+                label="Authorization hold"
+                detail="You're charged the final amount after picking; the rest is released."
+                cents={receipt.holdCents}
+              />
             )}
-            {shipped && realOrder.shippingCarrier && (
-              <p><strong>Shipping:</strong> {money(realOrder.deliveryFeeCents)}</p>
-            )}
-            {realOrder.serviceFeeCents > 0 && (
-              <p><strong>Service fee:</strong> {money(realOrder.serviceFeeCents)}</p>
-            )}
-            <p><strong>Authorization hold:</strong> {money(realOrder.totalAuthorizedCents)}</p>
           </FlowCard>
           {proofToken && (
             <FlowCard title="Delivery photo">
