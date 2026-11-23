@@ -16,13 +16,9 @@ import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
 import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
+import { money } from "@/lib/format";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
-
-const money = (cents: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-    cents / 100,
-  );
 
 export default async function OrderPage({
   params,

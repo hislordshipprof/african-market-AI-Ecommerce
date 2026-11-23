@@ -1,7 +1,7 @@
 "use client";
 import { useState, ViewTransition } from "react";
 import type { StorefrontListingDetail } from "@/lib/storefront/service";
-import { formatPrice, formatWeight } from "@/lib/format";
+import { formatWeight, money } from "@/lib/format";
 import { ProductImage } from "./product-image";
 import { PriceDisplay } from "./price-display";
 import { StockBadgeChip } from "./stock-badge";
@@ -65,7 +65,7 @@ export function ProductDetail({
                   >
                     {v.label}
                     <small>
-                      {formatWeight(v.weightG)} / {formatPrice(v.price)}
+                      {formatWeight(v.weightG)} / {money(v.price)}
                     </small>
                   </button>
                 </li>

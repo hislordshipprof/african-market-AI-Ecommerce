@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Search, ArrowUpRight } from "lucide-react";
 import type { SearchResult } from "@/lib/storefront/service";
 import { SEARCH_QUERY_TOO_LONG, normalizedSearchQuery } from "@/lib/storefront/search-query";
+import { money } from "@/lib/format";
 import { ProductImage } from "./product-image";
 
 export function Highlight({ text, query }: { text: string; query: string }) {
@@ -195,7 +196,7 @@ function SearchInput({ storeId }: { storeId: string }) {
                   </small>
                 )}
                 <small>
-                  ${(result.price / 100).toFixed(2)} · {result.packLabel}
+                  {money(result.price)} · {result.packLabel}
                 </small>
               </span>
             </Link>
