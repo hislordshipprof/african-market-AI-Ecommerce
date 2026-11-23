@@ -26,7 +26,8 @@ const failStaffActions = (page: Page) =>
     },
   );
 
-const height = async (locator: import("@playwright/test").Locator) => (await locator.boundingBox())?.height ?? 0;
+/** Layout height, so an opening dialog's scale-in does not shrink the reading. */
+const height = (locator: import("@playwright/test").Locator) => locator.evaluate((el) => (el as HTMLElement).offsetHeight);
 
 /** Contrast of an element's text against the colour actually painted behind it (translucent layers blended). */
 const textContrast = (locator: import("@playwright/test").Locator) =>
@@ -95,7 +96,7 @@ test.describe("Order desk (#725)", () => {
     await expect(paused).toContainText(/Last updated \d{1,2}:\d{2} [AP]M [A-Z]{2,4}/);
     await expect(order).toBeVisible();
     const retry = paused.getByRole("button", { name: "Retry" });
-    expect((await retry.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await height(retry)).toBeGreaterThanOrEqual(44);
     await retry.click();
     await expect(paused).toBeVisible();
 
@@ -120,7 +121,7 @@ test.describe("Order desk (#725)", () => {
       await expect(paused).toContainText(/Last updated \d{1,2}:\d{2} [AP]M [A-Z]{2,4}/);
       await expect(totes).toHaveCount(2);
       const retry = paused.getByRole("button", { name: "Retry" });
-      expect((await retry.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expect(await height(retry)).toBeGreaterThanOrEqual(44);
 
       await page.unroute(PACKING);
       await retry.click();
@@ -186,6 +187,31 @@ test.describe("Order desk (#725)", () => {
       await expect.poll(() => textContrast(row.getByTestId("pick-line-name"))).toBeGreaterThanOrEqual(4.5);
     } finally {
       await deleteInboxOrder(number);
+    }
+  });
+
+  test("a failed Pick together shows its error under the button, and the dialog's Accept is 48px", async ({ page }, testInfo) => {
+    const base = 72400 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex * 2;
+    await insertBatchOrders([base, base + 1], ["pickup", "pickup"]);
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      const card = page.getByRole("group").filter({ hasText: "Choose 2 to 4 accepted orders" });
+      await card.getByRole("checkbox", { name: new RegExp(`#${base}\\b`) }).check();
+      await card.getByRole("checkbox", { name: new RegExp(`#${base + 1}\\b`) }).check();
+      await failStaffActions(page);
+      await page.getByRole("button", { name: "Pick 2 orders together" }).click();
+      await expect(card.getByRole("alert")).toContainText(/\w/);
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+      await page.unrouteAll({ behavior: "wait" });
+
+      await page.locator("button", { hasText: "#1001" }).click();
+      await page.getByRole("button", { name: "Accept order" }).click();
+      const dialog = page.getByRole("dialog", { name: "Accept order" });
+      expect(await height(dialog.getByRole("button", { name: "Accept", exact: true }))).toBeGreaterThanOrEqual(48);
+      expect(await height(dialog.getByRole("button", { name: "Cancel", exact: true }))).toBeGreaterThanOrEqual(44);
+    } finally {
+      await deleteBatchOrders([base, base + 1]);
     }
   });
 

@@ -1015,10 +1015,10 @@ export function OrderInbox({
             <ActionError message={errorFor("short")} className="mt-2" />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShortLine(null)} className="rounded-full">
+            <Button variant="outline" onClick={() => setShortLine(null)} className="min-h-11 rounded-full">
               Cancel
             </Button>
-            <Button onClick={handleShortConfirm} disabled={isPending} className="rounded-full">
+            <Button onClick={handleShortConfirm} disabled={isPending} className="min-h-11 rounded-full">
               Ask customer
             </Button>
           </DialogFooter>
@@ -1050,14 +1050,14 @@ export function OrderInbox({
             <Button
               variant="outline"
               onClick={() => setAcceptDialogOpen(false)}
-              className="rounded-full"
+              className="min-h-11 rounded-full"
             >
               Cancel
             </Button>
             <Button
               onClick={handleAcceptConfirm}
               disabled={isPending}
-              className="rounded-full"
+              className="min-h-12 rounded-full px-6"
             >
               Accept
             </Button>
@@ -1087,7 +1087,7 @@ export function OrderInbox({
                   type="button"
                   variant={cancelReason === reason ? "default" : "outline"}
                   aria-pressed={cancelReason === reason}
-                  className="rounded-full"
+                  className="min-h-11 rounded-full"
                   onClick={() => setCancelReason(reason)}
                 >
                   {STORE_CANCEL_REASON_LABELS[reason]}
@@ -1107,7 +1107,7 @@ export function OrderInbox({
             <Button
               variant="outline"
               onClick={() => setCancellingOrderId(null)}
-              className="rounded-full"
+              className="min-h-11 rounded-full"
             >
               Keep order
             </Button>
@@ -1115,7 +1115,7 @@ export function OrderInbox({
               variant="destructive"
               onClick={handleCancelConfirm}
               disabled={isPending || !cancelReason}
-              className="rounded-full"
+              className="min-h-12 rounded-full"
             >
               Cancel order
             </Button>
