@@ -64,6 +64,7 @@ import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
+import { ActionError } from "./action-error";
 import { CourierTiming } from "./courier-timing";
 import { BatchPicking, packingHref } from "./batch-picking";
 import { orderPrepMinutes } from "@/lib/listing/prepared";
@@ -172,6 +173,8 @@ export function OrderInbox({
   const [qtyFound, setQtyFound] = useState("0");
   const [cancelReason, setCancelReason] = useState<StoreCancelReason | null>(null);
   const [cancelNote, setCancelNote] = useState("");
+  /** The last failed action, keyed by the order, line or dialog it was for. */
+  const [actionError, setActionError] = useState<{ key: string; message: string } | null>(null);
   const prevOrderIdsRef = useRef(new Set(initialOrders.map((o) => o.id)));
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -243,6 +246,7 @@ export function OrderInbox({
   /** Every selection change drops the picked photo, so it can never ride along to another visit. */
   function selectOrder(orderId: string | null) {
     setProofPhoto(null);
+    setActionError(null);
     setSelectedOrderId(orderId);
   }
   const allLinesResolved =
@@ -253,32 +257,54 @@ export function OrderInbox({
       : false;
 
   function handleAcceptClick(orderId: string) {
+    setActionError(null);
     setAcceptingOrderId(orderId);
     const order = orders.find((o) => o.id === orderId);
     setPrepMinutes(String(orderPrepMinutes(defaultPrepMinutes, order?.lines.map((l) => l.listingVariant.listing) ?? [])));
     setAcceptDialogOpen(true);
   }
 
+  /**
+   * Runs a staff action. A failure stays beside the order, line or dialog it was for (`key`) until the next
+   * action or selection; success is a transient toast (#725).
+   */
+  function runAction<R extends { ok: boolean }>(key: string, action: () => Promise<R>, onDone: (result: R) => void) {
+    setActionError(null);
+    startTransition(async () => {
+      let result: R;
+      try {
+        result = await action();
+      } catch {
+        setActionError({ key, message: STAFF_GENERIC_ERROR });
+        return;
+      }
+      if (!result.ok) {
+        const error = (result as { error?: string }).error;
+        setActionError({ key, message: error ?? STAFF_GENERIC_ERROR });
+        return;
+      }
+      onDone(result);
+    });
+  }
+
+  const errorFor = (key: string) => (actionError?.key === key ? actionError.message : null);
+
   function handleAcceptConfirm() {
     if (!acceptingOrderId) return;
     const mins = parseInt(prepMinutes, 10);
     if (isNaN(mins) || mins < 1) {
-      toast.error("Enter a valid prep time");
+      setActionError({ key: "accept", message: "Enter a valid prep time" });
       return;
     }
-    startTransition(async () => {
-      const result = await acceptOrderAction(acceptingOrderId, mins);
-      if (result.ok) {
-        toast.success("Order accepted");
-        setAcceptDialogOpen(false);
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction("accept", () => acceptOrderAction(acceptingOrderId, mins), () => {
+      toast.success("Order accepted");
+      setAcceptDialogOpen(false);
+      pollOrders();
     });
   }
 
   function handleCancelClick(orderId: string) {
+    setActionError(null);
     setCancellingOrderId(orderId);
     setCancelReason(null);
     setCancelNote("");
@@ -286,15 +312,10 @@ export function OrderInbox({
 
   function handleCancelConfirm() {
     if (!cancellingOrderId || !cancelReason) return;
-    startTransition(async () => {
-      const result = await cancelOrderAction(cancellingOrderId, { reason: cancelReason, note: cancelNote });
-      if (result.ok) {
-        toast.success("Order cancelled");
-        setCancellingOrderId(null);
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction("cancel", () => cancelOrderAction(cancellingOrderId, { reason: cancelReason, note: cancelNote }), () => {
+      toast.success("Order cancelled");
+      setCancellingOrderId(null);
+      pollOrders();
     });
   }
 
@@ -302,56 +323,50 @@ export function OrderInbox({
     if (!shortLine) return;
     const found = Number(qtyFound);
     if (!Number.isInteger(found) || found < 0 || found >= shortLine.qtyOrdered) {
-      toast.error(`Enter a whole number from 0 to ${shortLine.qtyOrdered - 1}`);
+      setActionError({ key: "short", message: `Enter a whole number from 0 to ${shortLine.qtyOrdered - 1}` });
       return;
     }
-    startTransition(async () => {
-      const result = await markLineShortAction(shortLine.id, found);
-      if (result.ok) {
-        toast.success("Customer asked to choose a swap or refund");
-        setShortLine(null);
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction("short", () => markLineShortAction(shortLine.id, found), () => {
+      toast.success("Customer asked to choose a swap or refund");
+      setShortLine(null);
+      pollOrders();
     });
   }
 
   function handleMarkPicked(lineId: string) {
-    startTransition(async () => {
-      const result = await markLinePickedAction(lineId);
-      if (result.ok) {
-        toast.success("Line picked");
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction(lineId, () => markLinePickedAction(lineId), () => {
+      toast.success("Line picked");
+      pollOrders();
     });
   }
 
   function handlePushReady(orderId: string) {
-    startTransition(async () => {
-      const result = await pushReadyTimeAction(orderId);
-      if (result.ok) {
-        const when = new Date(result.readyEstimateAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-        const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The courier already on the way keeps the first time.", none: "" }[result.courier];
-        toast.success(`Ready by ${when}.${courier}`);
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction(orderId, () => pushReadyTimeAction(orderId), (result) => {
+      if (!result.ok) return;
+      const when = new Date(result.readyEstimateAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const courier = { moved: " The courier is moved.", rebooked: " A courier is booked for the new time.", kept: " The courier already on the way keeps the first time.", none: "" }[result.courier];
+      toast.success(`Ready by ${when}.${courier}`);
+      pollOrders();
     });
   }
 
   function handleMarkReady(orderId: string, confirmPostageCents?: number) {
+    setActionError(null);
     startTransition(async () => {
-      const result = await markReadyAction(orderId, confirmPostageCents);
+      let result: Awaited<ReturnType<typeof markReadyAction>>;
+      try {
+        result = await markReadyAction(orderId, confirmPostageCents);
+      } catch {
+        setActionError({ key: orderId, message: STAFF_GENERIC_ERROR });
+        return;
+      }
       setPostageToConfirm(null);
       if (result.ok) {
         if (result.voided) {
           toast.success("Order cancelled — amount below capture minimum");
         } else if ("labelError" in result && result.labelError) {
-          toast.error(`Order marked ready. ${result.labelError}`);
+          toast.success("Order marked ready");
+          setActionError({ key: orderId, message: result.labelError });
         } else {
           toast.success("Order marked ready");
         }
@@ -359,102 +374,69 @@ export function OrderInbox({
       } else if ("confirmPostageCents" in result && typeof result.confirmPostageCents === "number") {
         setPostageToConfirm({ orderId, cents: result.confirmPostageCents, message: result.error });
       } else {
-        toast.error(result.error);
+        setActionError({ key: orderId, message: result.error });
       }
     });
   }
 
   function handleBuyLabel(orderId: string, pdfOnly: boolean) {
-    startTransition(async () => {
-      const result = await buyShippingLabelAction(orderId);
-      if (result.ok) {
-        toast.success(pdfOnly ? "Label saved" : "Label bought");
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction(orderId, () => buyShippingLabelAction(orderId), () => {
+      toast.success(pdfOnly ? "Label saved" : "Label bought");
+      pollOrders();
     });
   }
 
   function handleCancelShipment(orderId: string) {
-    startTransition(async () => {
-      const result = await cancelShipmentAction(orderId);
-      if (result.ok) {
-        toast.success("Shipment cancelled and the customer refunded");
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction(orderId, () => cancelShipmentAction(orderId), () => {
+      toast.success("Shipment cancelled and the customer refunded");
+      pollOrders();
     });
   }
 
   function handleCompletePickup(orderId: string) {
-    startTransition(async () => {
-      const result = await completePickupAction(orderId);
-      if (result.ok) {
-        toast.success("Pickup completed");
-        selectOrder(null);
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction(orderId, () => completePickupAction(orderId), () => {
+      toast.success("Pickup completed");
+      selectOrder(null);
+      pollOrders();
     });
   }
 
   function handleOutForDelivery(orderId: string) {
-    startTransition(async () => {
-      let result: Awaited<ReturnType<typeof markOutForDeliveryAction>>;
-      try {
-        result = await markOutForDeliveryAction(orderId);
-      } catch {
-        toast.error(STAFF_GENERIC_ERROR);
-        return;
-      }
-      if (result.ok) {
-        toast.success("Out for delivery");
-        pollOrders();
-      } else {
-        toast.error(result.error);
-      }
+    runAction(orderId, () => markOutForDeliveryAction(orderId), () => {
+      toast.success("Out for delivery");
+      pollOrders();
     });
   }
 
   function handleMarkDelivered(orderId: string) {
     const photo = proofPhoto?.orderId === orderId ? proofPhoto.file : null;
     if (!photo) {
-      toast.error("Add a photo of the delivered order");
+      setActionError({ key: orderId, message: "Add a photo of the delivered order" });
       return;
     }
-    startTransition(async () => {
-      let jpeg: Blob;
-      try {
-        jpeg = await jpegBlob(photo, PHOTO_UPLOAD_MAX_BYTES);
-      } catch {
-        toast.error("This browser can't read that photo. Take it again or choose another one");
-        return;
-      }
-      if (jpeg.size > PHOTO_UPLOAD_MAX_BYTES) {
-        toast.error("The delivery photo is too large. Take it again or choose a smaller one");
-        return;
-      }
-      const form = new FormData();
-      form.set("orderId", orderId);
-      form.set("photo", new File([jpeg], "delivery.jpg", { type: "image/jpeg" }));
-      let result: Awaited<ReturnType<typeof markDeliveredAction>>;
-      try {
-        result = await markDeliveredAction(form);
-      } catch {
-        toast.error(STAFF_GENERIC_ERROR);
-        return;
-      }
-      if (result.ok) {
+    runAction(
+      orderId,
+      async () => {
+        let jpeg: Blob;
+        try {
+          jpeg = await jpegBlob(photo, PHOTO_UPLOAD_MAX_BYTES);
+        } catch {
+          return { ok: false as const, error: "This browser can't read that photo. Take it again or choose another one" };
+        }
+        if (jpeg.size > PHOTO_UPLOAD_MAX_BYTES) {
+          return { ok: false as const, error: "The delivery photo is too large. Take it again or choose a smaller one" };
+        }
+        const form = new FormData();
+        form.set("orderId", orderId);
+        form.set("photo", new File([jpeg], "delivery.jpg", { type: "image/jpeg" }));
+        return markDeliveredAction(form);
+      },
+      () => {
         toast.success("Order delivered");
         selectOrder(null);
         pollOrders();
-      } else {
-        toast.error(result.error);
-      }
-    });
+      },
+    );
   }
 
   /** What the customer's answer or the timer did with a short line; the 10 s poll keeps it current. */
@@ -503,9 +485,10 @@ export function OrderInbox({
           <div className="flex items-center gap-3">
             <Link
               href={`/store-admin?store=${storeParam}`}
-              className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Back to dashboard"
+              className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <ArrowLeft className="size-5" />
+              <ArrowLeft className="size-5" aria-hidden />
             </Link>
             <div>
               <h1 className="text-base font-semibold text-foreground">
@@ -547,9 +530,9 @@ export function OrderInbox({
           <div>
             <button
               onClick={() => selectOrder(null)}
-              className="mb-4 flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              className="-ml-2 mb-2 flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <ArrowLeft className="size-4" /> Back to orders
+              <ArrowLeft className="size-4" aria-hidden /> Back to orders
             </button>
 
             <Card>
@@ -640,7 +623,7 @@ export function OrderInbox({
                 )}
                 {selectedOrder.status === "AUTHORIZED" && (
                   <Button
-                    className="mb-4 w-full rounded-full"
+                    className="mb-4 min-h-12 w-full rounded-full"
                     onClick={() => handleAcceptClick(selectedOrder.id)}
                     disabled={isPending}
                   >
@@ -670,15 +653,16 @@ export function OrderInbox({
                       {sortedPickLines.map((line) => (
                         <div
                           key={line.id}
-                          className={`flex items-center justify-between rounded-xl border p-3 transition-colors ${
+                          data-testid="pick-line"
+                          className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border p-3 transition-colors ${
                             line.status !== "pending" && line.status !== "short"
-                              ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950"
+                              ? "border-success/40 bg-success/10"
                               : "border-border bg-card"
                           }`}
                         >
-                          <div className="min-w-0 flex-1">
+                          <div className="min-w-0 flex-[1_1_12rem]">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-sm font-medium text-foreground">
+                              <span className="text-base font-medium text-foreground" data-testid="pick-line-name">
                                 {lineProductName(line)}
                               </span>
                               {line.frozen && (
@@ -703,12 +687,12 @@ export function OrderInbox({
                             )}
                           </div>
                           {line.status === "pending" && selectedOrder.pickBatchId ? null : line.status === "pending" ? (
-                            <div className="flex shrink-0 gap-2">
+                            <div className="ml-auto flex shrink-0 gap-2">
                               <Button
                                 variant="ghost"
-                                size="sm"
-                                className="rounded-full"
+                                className="min-h-11 rounded-full px-4"
                                 onClick={() => {
+                                  setActionError(null);
                                   setQtyFound("0");
                                   setShortLine({ id: line.id, name: lineProductName(line), qtyOrdered: line.qtyOrdered });
                                 }}
@@ -718,8 +702,7 @@ export function OrderInbox({
                               </Button>
                               <Button
                                 variant="outline"
-                                size="sm"
-                                className="rounded-full"
+                                className="min-h-11 rounded-full px-4"
                                 onClick={() => handleMarkPicked(line.id)}
                                 disabled={isPending}
                               >
@@ -729,17 +712,20 @@ export function OrderInbox({
                           ) : line.status === "short" ? (
                             <Clock className="size-5 shrink-0 text-muted-foreground" aria-label="Waiting for customer" />
                           ) : (
-                            <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
+                            <CheckCircle2 className="ml-auto size-5 shrink-0 text-success" aria-label="Picked" />
                           )}
+                          <ActionError message={errorFor(line.id)} className="basis-full" />
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
+                <ActionError message={errorFor(selectedOrder.id)} className="mb-4" />
+
                 {selectedOrder.status === "PICKING" && (
                   <Button
-                    className="mb-4 w-full rounded-full"
+                    className="mb-4 min-h-12 w-full rounded-full"
                     onClick={() => handleMarkReady(selectedOrder.id)}
                     disabled={isPending || !allLinesResolved}
                   >
@@ -789,14 +775,14 @@ export function OrderInbox({
                         </a>
                       </div>
                     ) : selectedOrder.shippingLabelStatus === "bought" || selectedOrder.status === "READY" ? (
-                      <Button className="w-full rounded-full" onClick={() => handleBuyLabel(selectedOrder.id, selectedOrder.shippingLabelStatus === "bought")} disabled={isPending}>
+                      <Button className="min-h-12 w-full rounded-full" onClick={() => handleBuyLabel(selectedOrder.id, selectedOrder.shippingLabelStatus === "bought")} disabled={isPending}>
                         <Printer className="mr-2 size-4" /> {selectedOrder.shippingLabelStatus === "bought" ? "Get the label PDF" : "Buy label"}
                       </Button>
                     ) : null}
                     {selectedOrder.status === "READY" && (
                       <Button
                         variant="outline"
-                        className="w-full rounded-full"
+                        className="min-h-12 w-full rounded-full"
                         onClick={() => handleCancelShipment(selectedOrder.id)}
                         disabled={isPending}
                       >
@@ -808,7 +794,7 @@ export function OrderInbox({
 
                 {STORE_CANCELLABLE.includes(selectedOrder.status) && (
                   <Button
-                    className="mb-4 w-full rounded-full"
+                    className="mb-4 min-h-12 w-full rounded-full"
                     variant="destructive"
                     onClick={() => handleCancelClick(selectedOrder.id)}
                     disabled={isPending}
@@ -819,7 +805,7 @@ export function OrderInbox({
 
                 {selectedOrder.status === "CAPTURING" && (
                   <Button
-                    className="mb-4 w-full rounded-full"
+                    className="mb-4 min-h-12 w-full rounded-full"
                     variant="outline"
                     onClick={() => handleMarkReady(selectedOrder.id)}
                     disabled={isPending}
@@ -830,7 +816,7 @@ export function OrderInbox({
 
                 {selectedOrder.status === "AWAITING_PICKUP" && (
                   <Button
-                    className="w-full rounded-full"
+                    className="min-h-12 w-full rounded-full"
                     onClick={() => handleCompletePickup(selectedOrder.id)}
                     disabled={isPending}
                   >
@@ -840,7 +826,7 @@ export function OrderInbox({
 
                 {selectedOrder.status === "READY" && selectedOrder.fulfillment === "store-delivery" && (
                   <Button
-                    className="w-full rounded-full"
+                    className="min-h-12 w-full rounded-full"
                     onClick={() => handleOutForDelivery(selectedOrder.id)}
                     disabled={isPending}
                   >
@@ -865,7 +851,7 @@ export function OrderInbox({
                       />
                     </div>
                     <Button
-                      className="w-full rounded-full"
+                      className="min-h-12 w-full rounded-full"
                       onClick={() => handleMarkDelivered(selectedOrder.id)}
                       disabled={isPending || proofPhoto?.orderId !== selectedOrder.id}
                     >
@@ -954,9 +940,9 @@ export function OrderInbox({
                     <button
                       key={order.id}
                       onClick={() => selectOrder(order.id)}
-                      className="w-full text-left"
+                      className="group/order w-full rounded-xl text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                     >
-                      <Card className="transition-all duration-200 hover:shadow-md active:scale-[0.99]">
+                      <Card className="transition-colors group-hover/order:bg-muted/40 group-hover/order:ring-foreground/25">
                         <CardContent className="flex items-center gap-4 px-4 py-3.5">
                           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10">
                             {config?.icon ? (
@@ -1026,6 +1012,7 @@ export function OrderInbox({
               onChange={(e) => setQtyFound(e.target.value)}
               className="mt-1"
             />
+            <ActionError message={errorFor("short")} className="mt-2" />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShortLine(null)} className="rounded-full">
@@ -1057,6 +1044,7 @@ export function OrderInbox({
               onChange={(e) => setPrepMinutes(e.target.value)}
               className="mt-1"
             />
+            <ActionError message={errorFor("accept")} className="mt-2" />
           </div>
           <DialogFooter>
             <Button
@@ -1113,6 +1101,7 @@ export function OrderInbox({
               value={cancelNote}
               onChange={(e) => setCancelNote(e.target.value)}
             />
+            <ActionError message={errorFor("cancel")} />
           </div>
           <DialogFooter>
             <Button
