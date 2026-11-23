@@ -7,8 +7,10 @@ const base = storeUrl("mama-ngozi");
 const apiBase = `http://localhost:${E2E_PORT}`;
 const REPORT_ORDER = 724_001;
 const SWAP_ORDER = 724_002;
+const NAMED_REPORT_ORDER = 743_001;
 const REPORT_TOKEN = `e2e-report-${Date.now()}`;
 const SWAP_TOKEN = `e2e-swap-${Date.now()}`;
+const NAMED_REPORT_TOKEN = `e2e-report-named-${Date.now()}`;
 
 /** Holds every server action until release(), then fails it the way a dropped connection does. */
 async function failServerActions(page: Page) {
@@ -27,7 +29,7 @@ async function failServerActions(page: Page) {
 
 test.describe("customer recovery (#724)", () => {
   test.afterAll(async () => {
-    await deleteBatchOrders([REPORT_ORDER, SWAP_ORDER]);
+    await deleteBatchOrders([REPORT_ORDER, SWAP_ORDER, NAMED_REPORT_ORDER]);
   });
 
   test("the real report form has 48px fields, a 120px note, 16px text and a visible focus ring", async ({ page }) => {
@@ -56,6 +58,34 @@ test.describe("customer recovery (#724)", () => {
     await page.keyboard.press("Tab");
     await expect(qty).toBeFocused();
     await expect(qty).not.toHaveCSS("outline-style", "none");
+  });
+
+  test("#743 AC1: each report row names the product and pack, and a damaged item asks for its photo inline", async ({ page }) => {
+    const { names } = await insertRecoveryOrder({ number: NAMED_REPORT_ORDER, token: NAMED_REPORT_TOKEN });
+    await page.goto(`${base}/order/${NAMED_REPORT_TOKEN}/report`);
+    const items = page.getByRole("group", { name: "Which items, and how many?" });
+    for (const name of names) {
+      await expect(items.getByText(name, { exact: false })).toBeVisible();
+      await expect(page.getByRole("spinbutton", { name: `How many ${name} had a problem`, exact: false })).toBeVisible();
+    }
+
+    const photo = page.getByLabel(/One photo of the problem/);
+    await expect(page.locator("label[for='issue-photo']")).toContainText("(optional)");
+    await expect(photo).toHaveAttribute("aria-required", "false");
+
+    await page.getByLabel("Problem", { exact: true }).selectOption("damaged");
+    await expect(photo).toHaveAttribute("aria-required", "true");
+    await expect(page.locator("label[for='issue-photo']")).toContainText("(required)");
+    await page.getByRole("spinbutton").first().fill("1");
+    await page.getByRole("button", { name: "Report the problem" }).click();
+
+    const error = page.locator("#issue-photo-error");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText("Add one photo");
+    await expect(photo).toHaveAttribute("aria-invalid", "true");
+    await expect(photo).toHaveAttribute("aria-describedby", "issue-photo-error");
+    await expect(page.getByLabel("Problem", { exact: true })).toHaveValue("damaged");
+    await expect(page.getByRole("spinbutton").first()).toHaveValue("1");
   });
 
   test("a failed swap answer shows saving and the error inside that item, and the other item stays clear", async ({ page }) => {
