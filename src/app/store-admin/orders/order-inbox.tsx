@@ -445,7 +445,7 @@ export function OrderInbox({
     if (!request) return null;
     const missing = line.qtyOrdered - line.qtyPicked;
     if (request.status === "pending") {
-      const due = new Date(request.expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const due = formatClockInZone(request.expiresAt, timeZone);
       const offer = request.proposedVariant ? `swap offered: ${variantName(request.proposedVariant)}` : "refund only";
       return `Found ${line.qtyPicked} of ${line.qtyOrdered} · waiting for customer (${offer}) · rule applies at ${due}`;
     }
@@ -977,10 +977,7 @@ export function OrderInbox({
                           </div>
                           <div className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground">
                             <Clock className="size-3" />
-                            {new Date(order.createdAt).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {formatClockInZone(order.createdAt, timeZone)}
                           </div>
                         </CardContent>
                       </Card>

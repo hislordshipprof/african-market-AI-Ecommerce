@@ -16,7 +16,7 @@ import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
 import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
-import { money } from "@/lib/format";
+import { formatClockInZone, money } from "@/lib/format";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
 
@@ -41,7 +41,7 @@ export default async function OrderPage({
     const courier = realOrder.fulfillment === "courier" ? realOrder.deliveries[0] : undefined;
     const courierInfo = courier?.courierJson as CourierJson | undefined;
     const eta = courierInfo?.dropoffEta
-      ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: context.store.timezone }).format(new Date(courierInfo.dropoffEta))
+      ? formatClockInZone(courierInfo.dropoffEta, context.store.timezone)
       : null;
     const scheduled = scheduledTimeLabel(realOrder.pickupSlot, context.store.timezone);
     // Only the tracking token opens the thread: an order id opens the page but never the messages.
