@@ -22,7 +22,6 @@
 }
 .cartTrigger:focus-visible,
 .iconButton:focus-visible,
-.stepper button:focus-visible,
 .primaryButton:focus-visible,
 .mobileNav a:focus-visible {
   outline: 2px solid var(--color-ink);
@@ -91,6 +90,16 @@
   text-align: center;
   font-weight: 700;
   flex-shrink: 0;
+}
+/*
+ * The pill clips its buttons, so the ring sits inside the button, in the pill's own text colour:
+ * on-primary is the colour the theme keeps readable on the store's primary (#743 AC2).
+ * Scoped under the storefront so it outranks the storefront's general focus ring.
+ */
+.stepper button:focus-visible,
+:global(.sf-storefront) .stepper button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -5px;
 }
 .stepper button:disabled {
   opacity: 0.5;
