@@ -2,9 +2,8 @@
 
 import { Clock, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatClockInZone } from "@/lib/format";
 import { courierLine, type StaffCourier } from "@/lib/order/staff-copy";
-
-const time = (value: Date | string) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 /**
  * A courier order's timing (#562): the ready time the courier is booked for, the store's one push while packing,
@@ -17,7 +16,9 @@ export function CourierTiming(props: {
   courier: StaffCourier | null;
   disabled: boolean;
   onPush: () => void;
+  timeZone: string;
 }) {
+  const time = (value: Date | string) => formatClockInZone(value, props.timeZone);
   const packing = props.status === "PICKING" || props.status === "SUBSTITUTION_PENDING";
   const line = courierLine(props.courier, time);
   if (!props.readyEstimateAt && !line) return null;

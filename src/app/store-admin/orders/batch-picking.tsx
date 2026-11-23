@@ -3,13 +3,13 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { Layers } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { startBatchAction } from "@/lib/order/actions";
 import { MAX_BATCH_ORDERS, MIN_BATCH_ORDERS } from "@/lib/order/batch-pick-list";
 import { STAFF_GENERIC_ERROR } from "@/lib/order/staff-copy";
+import { ActionError } from "./action-error";
 
 type Row = { id: string; number: number; status: string; pickBatchId: string | null; lines: unknown[] };
 
@@ -27,6 +27,7 @@ export function BatchPicking({ orders, storeParam }: { orders: Row[]; storeParam
   const router = useRouter();
   const [chosen, setChosen] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   const batchable = orders.filter((order) => order.status === "ACCEPTED" && order.pickBatchId === null);
   const open = new Map<string, number[]>();
@@ -42,6 +43,7 @@ export function BatchPicking({ orders, storeParam }: { orders: Row[]; storeParam
   }
 
   function start() {
+    setError(null);
     startTransition(async () => {
       let result: Awaited<ReturnType<typeof startBatchAction>>;
       try {
@@ -50,7 +52,7 @@ export function BatchPicking({ orders, storeParam }: { orders: Row[]; storeParam
         result = { ok: false, error: STAFF_GENERIC_ERROR };
       }
       if (!result.ok) {
-        toast.error(result.error);
+        setError(result.error);
         return;
       }
       router.push(packingHref(result.batchId, storeParam));
@@ -112,6 +114,7 @@ export function BatchPicking({ orders, storeParam }: { orders: Row[]; storeParam
             <Button className="mt-3 min-h-11 w-full rounded-full sm:w-auto sm:px-6" onClick={start} disabled={!ready || isPending}>
               {ready ? `Pick ${count} orders together` : "Pick together"}
             </Button>
+            <ActionError message={error} className="mt-2" />
           </fieldset>
         )}
       </CardContent>
