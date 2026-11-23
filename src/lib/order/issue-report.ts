@@ -7,9 +7,9 @@ import { prepareProofPhoto } from "./delivery-proof";
 import { evaluateOrderRefundStateAfterCommit, recordIssueRefundNotStarted, refundedLines, submitRefund, taxRefundedCents, type RefundedLine } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
 import { refundOfGoodsCents } from "./platform-fee";
+import { ISSUE_PHOTO_INVALID, issuePhotoRequired, type IssueType } from "./issue-photo";
 
-export const ISSUE_TYPES = ["missing", "damaged", "wrong", "poor_freshness"] as const;
-export type IssueType = (typeof ISSUE_TYPES)[number];
+export { ISSUE_PHOTO_INVALID, ISSUE_TYPES, issuePhotoRequired, type IssueType } from "./issue-photo";
 export type IssueState = "auto_refunded" | "in_review" | "approved" | "declined" | "refund_failed";
 
 /** A problem is reported within 48 h of `completedAt` (spec §5). */
@@ -20,7 +20,6 @@ export const ISSUE_ORDER_NOT_FOUND = "We couldn't find that order.";
 export const ISSUE_WINDOW_CLOSED = "Problems can be reported up to 48 hours after your order is complete. Please contact the store.";
 export const ISSUE_ALREADY_REPORTED = "You have already reported a problem with this order. Please contact the store.";
 export const ISSUE_LINES_INVALID = "Choose the items that had a problem from this order.";
-export const ISSUE_PHOTO_INVALID = "Add one photo of the problem: a JPEG, PNG or WebP image.";
 export const ISSUE_STORAGE_NOT_SET_UP = "Problem reports are not set up for this store yet. Please contact the store.";
 
 export type IssueReportInput = {
@@ -110,14 +109,20 @@ export async function submitIssueReport(
   const found = await storeScoped(store.id).order.findUnique({ where: { trackingToken: token }, include: orderForIssue });
   const early = refusal(found, input, now);
   if ("error" in early) return { ok: false, error: early.error };
-  if (!deliveryProofBucket()) return { ok: false, error: ISSUE_STORAGE_NOT_SET_UP };
-  const prepared = await prepareProofPhoto(input.photo);
-  if (!prepared.ok) return { ok: false, error: ISSUE_PHOTO_INVALID };
+  const hasPhoto = !!input.photo && input.photo.byteLength > 0;
+  if (!hasPhoto && issuePhotoRequired(input.type)) return { ok: false, error: ISSUE_PHOTO_INVALID };
+  let jpeg: Buffer | null = null;
+  if (hasPhoto) {
+    if (!deliveryProofBucket()) return { ok: false, error: ISSUE_STORAGE_NOT_SET_UP };
+    const prepared = await prepareProofPhoto(input.photo);
+    if (!prepared.ok) return { ok: false, error: ISSUE_PHOTO_INVALID };
+    jpeg = prepared.jpeg;
+  }
 
   const order = found!;
   const issueId = randomBytes(12).toString("hex");
-  const photoKey = issuePhotoKey(order.id, issueId);
-  await uploadIssuePhoto(photoKey, prepared.jpeg);
+  const photoKey = jpeg ? issuePhotoKey(order.id, issueId) : null;
+  if (photoKey && jpeg) await uploadIssuePhoto(photoKey, jpeg);
 
   let created: { ok: true; amount: number; state: IssueState; paymentIntentId: string } | { ok: false; error: string };
   try {
