@@ -61,7 +61,7 @@ import { sortPickListLines } from "@/lib/order/pick-sort";
 import { formatClockInZone, formatUsPhone, money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
-import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine, storeOrderBreakdown } from "@/lib/order/staff-copy";
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { ActionError } from "./action-error";
@@ -862,28 +862,14 @@ export function OrderInbox({
                 )}
 
                 <div className="mt-6 space-y-1.5 border-t pt-4">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span className="tabular-nums">{money(selectedOrder.subtotalCents)}</span>
-                  </div>
-                  {selectedOrder.discountCents > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Promo discount{selectedOrder.coupon ? ` ${selectedOrder.coupon.code}` : ""} (your store funds it)</span>
-                      <span className="tabular-nums" data-testid="order-discount">−{money(selectedOrder.discountCents)}</span>
+                  {storeOrderBreakdown(selectedOrder).map((line) => (
+                    <div key={line.key} className="flex justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">{line.label}</span>
+                      <span className="tabular-nums" data-testid={`order-${line.key}`}>
+                        {line.cents < 0 ? `−${money(-line.cents)}` : money(line.cents)}
+                      </span>
                     </div>
-                  )}
-                  {selectedOrder.serviceFeeCents > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Service fee (platform)</span>
-                      <span className="tabular-nums">{money(selectedOrder.serviceFeeCents)}</span>
-                    </div>
-                  )}
-                  {selectedOrder.tipCents > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Tip</span>
-                      <span className="tabular-nums">{money(selectedOrder.tipCents)}</span>
-                    </div>
-                  )}
+                  ))}
                   <div className="flex justify-between pt-1.5 text-base font-semibold">
                     <span>Total</span>
                     <span className="tabular-nums" data-testid="order-total">
