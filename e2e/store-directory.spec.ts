@@ -5,6 +5,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 import { storeOwnerSignIn } from "./store-owner-auth";
 import { generateTOTP } from "./totp";
+import { contrastRatio } from "../src/lib/theme";
 
 // Both tests read Mama Ngozi's listing and the second changes it, so they never overlap.
 test.describe.configure({ mode: "serial" });
@@ -235,6 +236,58 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await expect(card).toContainText(/\d\.\d mi/);
     await expect(card).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
     await shoot(page, "452-near-zip", "Stores near 77002");
+
+    // #728: a slow second search keeps these results, labelled as refreshing, until it gives up at 10 seconds.
+    await page.route("**/api/directory/near**", () => {});
+    await page.getByLabel("ZIP code or city").fill("Houston, TX");
+    await page.getByRole("button", { name: "Find stores" }).click();
+    const kept = page.getByRole("region", { name: "Stores near 77002" });
+    await expect(kept).toHaveAttribute("aria-busy", "true");
+    await expect(kept.getByText("Refreshing…")).toBeVisible();
+    await expect(kept.getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^\d+ markets?$/ })).toHaveCount(0);
+    await shoot(page, "728-near-refreshing", "Stores near 77002");
+    await expect(page.getByText("Search took too long to answer.")).toBeVisible({ timeout: 15_000 });
+    await expect(kept).not.toHaveAttribute("aria-busy", "true");
+    await expect(kept.getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^\d+ markets?$/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry" }).focus();
+    await shoot(page, "728-near-timeout", "Stores near 77002");
+    await page.unroute("**/api/directory/near**");
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.getByRole("heading", { name: "Stores near Houston, TX" })).toBeVisible();
+    await expect(page.locator("[aria-live=polite]").getByText(/^\d+ stores? found$/)).toBeAttached();
+    await expect(page.getByText("Search took too long to answer.")).toHaveCount(0);
+
+    // #728: a cuisine that leaves no store offers Clear filter. The answer is rewritten so no nearby store has the tag.
+    await page.route("**/api/directory/near**", async (route) => {
+      const body = await (await route.fetch()).json();
+      body.stores = body.stores.map((store: { cuisineTags: string[] }) => ({ ...store, cuisineTags: [] }));
+      await route.fulfill({ json: body });
+    });
+    await page.getByLabel("ZIP code or city").fill("77002");
+    await page.getByRole("button", { name: "Find stores" }).click();
+    await expect(page.getByRole("heading", { name: "Stores near 77002" })).toBeVisible();
+    await page.getByRole("button", { name: "West African" }).click();
+    await expect(page.getByText("None of these markets list West African.")).toBeVisible();
+    await expect(page.locator("[aria-live=polite]").getByText("0 stores found")).toBeAttached();
+    await shoot(page, "728-cuisine-empty", "Stores near 77002");
+    await page.getByRole("button", { name: "Clear filter" }).click();
+    await expect(page.getByRole("button", { name: "West African" })).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByRole("region", { name: "Stores near 77002" }).getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
+    await page.unroute("**/api/directory/near**");
+
+    // #728: the directory's dark layers meet the Dark Depth Rule (DESIGN.md): 1.15, 1.15 and 1.4.
+    await page.emulateMedia({ colorScheme: "dark" });
+    const layers = await page.evaluate(() => {
+      const page = [...document.querySelectorAll("div")].find((el) => getComputedStyle(el).getPropertyValue("--d-bg").trim());
+      const read = (name: string) => getComputedStyle(page!).getPropertyValue(name).trim();
+      return { bg: read("--d-bg"), surface: read("--d-surface"), raised: read("--d-raised") };
+    });
+    expect(contrastRatio(layers.surface, layers.bg)).toBeGreaterThanOrEqual(1.15);
+    expect(contrastRatio(layers.raised, layers.surface)).toBeGreaterThanOrEqual(1.15);
+    expect(contrastRatio(layers.raised, layers.bg)).toBeGreaterThanOrEqual(1.4);
+    await page.emulateMedia({ colorScheme: "light" });
 
     await page.getByLabel("ZIP code or city").fill("New York, NY");
     await page.getByRole("button", { name: "Find stores" }).click();

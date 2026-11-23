@@ -6,7 +6,7 @@ const newYork: NearAnswer = { kind: "stores", label: "New York, NY", nearby: fal
 const idle: NearState = { answer: null, pending: false, failure: null };
 
 function respond(status: number, body: unknown) {
-  return vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
+  return vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
 }
 
 /** A fetch that never answers, and rejects the way the browser does when its signal aborts. */
