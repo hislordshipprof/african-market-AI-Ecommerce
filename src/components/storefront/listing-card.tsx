@@ -39,6 +39,7 @@ export function ListingCard({
               name: listing.displayName,
               price: listing.startingPrice,
               imageUrl: listing.imageUrl,
+              categorySlug: listing.categorySlug,
               packLabel: listing.packLabel,
               maxPerOrder: listing.maxPerOrder,
             }}

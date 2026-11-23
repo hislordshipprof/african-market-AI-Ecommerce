@@ -83,6 +83,7 @@ function serverLineToClient(sl: CartLineView): CartLine {
     name: displayName,
     price: sl.variant.price,
     imageUrl: sl.imageUrl,
+    categorySlug: sl.categorySlug,
     packLabel: sl.variant.label,
     maxPerOrder: effectiveMaxPerOrder(sl.variant.listing.maxPerOrder),
     available: sl.variant.listing.available,
@@ -376,6 +377,7 @@ export function CartProvider({
       name: item.name,
       price: item.price,
       imageUrl: item.imageUrl,
+      categorySlug: item.categorySlug ?? previous?.categorySlug,
       packLabel: item.packLabel,
       // The server line's limit and availability are fresher than the page's copy of the listing.
       maxPerOrder: previous?.maxPerOrder ?? item.maxPerOrder,
@@ -1119,6 +1121,7 @@ export function CartProvider({
                   <ProductImage
                     src={line.imageUrl}
                     name={line.name}
+                    category={line.categorySlug}
                     sizes="80px"
                   />
                 </div>

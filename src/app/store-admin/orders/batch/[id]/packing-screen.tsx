@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, Check, CheckCircle2, Clock, ImageOff, Package, Truck } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Clock, Package, Truck } from "lucide-react";
+import { ProductImage } from "@/components/storefront/product-image";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -89,13 +90,8 @@ function PickRow(props: {
       data-testid="batch-line"
     >
       <div className="flex gap-3">
-        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted">
-          {line.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={line.imageUrl} alt="" className="size-full object-contain" loading="lazy" />
-          ) : (
-            <ImageOff className="size-5 text-muted-foreground" aria-hidden />
-          )}
+        <div className="size-16 shrink-0">
+          <ProductImage src={line.imageUrl ?? undefined} name={line.name} category={line.categorySlug ?? undefined} sizes="64px" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">

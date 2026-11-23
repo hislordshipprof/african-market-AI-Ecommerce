@@ -51,6 +51,7 @@ export interface CartLineView {
   swapRule: SwapRuleValue;
   substituteVariantId: string | null;
   imageUrl: string | undefined;
+  categorySlug: string | undefined;
   /** In-stock picks from the same aisle, only on an unavailable line and only on the storefront read (#717 AC2). */
   alternatives?: CartAlternative[];
   variant: {
@@ -601,7 +602,7 @@ export async function getCartWithLines(
           variant: {
             include: {
               listing: {
-                include: { masterProduct: true },
+                include: { masterProduct: { include: { category: { select: { slug: true } } } } },
               },
             },
           },
@@ -625,6 +626,7 @@ export async function getCartWithLines(
       swapRule: line.swapRule as SwapRuleValue,
       substituteVariantId: line.substituteVariantId,
       imageUrl: photo?.imageUrl || undefined,
+      categorySlug: line.variant.listing.masterProduct?.category?.slug,
       variant: {
         id: line.variant.id,
         label: line.variant.label,

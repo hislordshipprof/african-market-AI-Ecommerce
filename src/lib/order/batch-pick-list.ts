@@ -19,7 +19,7 @@ export type BatchLineInput = {
   frozen: boolean;
   perishable: boolean;
   /** The product's category, which stands in for the aisle; null when the product has none. */
-  zone: { name: string; sortOrder: number } | null;
+  zone: { name: string; sortOrder: number; slug?: string } | null;
 };
 
 export type BatchOrderInput = {
@@ -49,6 +49,8 @@ export type BatchPickLine = {
   name: string;
   label: string;
   imageUrl: string | null;
+  /** Picks the missing-photo glyph, the same one the storefront shows (#742). */
+  categorySlug: string | null;
   totalQty: number;
   /** True while any order's line still waits to be picked or answered. */
   open: boolean;
@@ -106,6 +108,7 @@ export function buildBatchPickList(orders: BatchOrderInput[]): BatchPickList {
           name: line.name,
           label: line.label,
           imageUrl: line.imageUrl,
+          categorySlug: line.zone?.slug ?? null,
           totalQty: 0,
           open: false,
           splits: [],
