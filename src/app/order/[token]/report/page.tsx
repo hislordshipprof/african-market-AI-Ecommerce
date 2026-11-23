@@ -12,7 +12,8 @@ export default async function ReportPage({
   params: Promise<{ token: string }>;
 }) {
   const [{ token }, context] = await Promise.all([params, getFlowContext()]);
-  const order = await findOrderForIssueReport(context.store.id, token).catch(() => null);
+  // No catch: a database error goes to error.tsx, so a customer never reads it as "checkout opens soon".
+  const order = await findOrderForIssueReport(context.store.id, token);
   if (order) {
     const issue = order.issueReports[0];
     return (

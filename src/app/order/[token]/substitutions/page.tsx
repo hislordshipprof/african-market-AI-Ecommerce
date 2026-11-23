@@ -14,7 +14,8 @@ export default async function SubstitutionsPage({
 }) {
   const [{ token }, context] = await Promise.all([params, getFlowContext()]);
   // The tracking token only: an order id never opens the prompt.
-  const real = await substitutionPromptsForToken(context.store.id, token).catch(() => null);
+  // No catch: a database error goes to error.tsx, so a customer never reads it as a 404.
+  const real = await substitutionPromptsForToken(context.store.id, token);
 
   if (real) {
     return (
