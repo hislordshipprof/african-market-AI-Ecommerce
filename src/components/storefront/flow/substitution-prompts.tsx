@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { answerSubstitutionAction } from "@/lib/order/substitution-actions";
 import type { SubstitutionPromptView } from "@/lib/order/substitution";
 import { Button } from "../primitives";
-import { FlowCard, FlowError } from "./common";
+import { FlowCard } from "./common";
 import { money } from "@/lib/format";
 import "./order-flow.css";
 
@@ -26,7 +26,7 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
   const [prompts, setPrompts] = useState(initial);
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const waiting = prompts.some((prompt) => prompt.status === "pending");
 
   useEffect(() => {
@@ -42,12 +42,14 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
 
   async function answer(requestId: string, decision: "swap" | "refund") {
     setBusy(requestId);
+    const fail = (message: string) => setErrors((all) => ({ ...all, [requestId]: message }));
+    setErrors(({ [requestId]: _cleared, ...rest }) => rest);
     try {
       const result = await answerSubstitutionAction({ token, requestId, decision });
       if (result.prompts) setPrompts(result.prompts);
-      setError(result.ok ? "" : result.error);
+      if (!result.ok) fail(result.error);
     } catch {
-      setError("We couldn't save your choice. Try again.");
+      fail("We couldn't save your choice. Try again.");
     } finally {
       setBusy("");
     }
@@ -102,6 +104,12 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
                   )}
                   If you don&rsquo;t answer, we&rsquo;ll {prompt.proposed ? "make the swap" : "refund this item"}.
                 </p>
+                {busy === prompt.id && (
+                  <p className="of-pending" role="status">Saving your choice…</p>
+                )}
+                {errors[prompt.id] && (
+                  <p className="of-error" role="alert">{errors[prompt.id]}</p>
+                )}
                 <div className="of-actions">
                   {prompt.proposed && (
                     <Button disabled={busy === prompt.id || seconds === 0} onClick={() => answer(prompt.id, "swap")}>
@@ -119,7 +127,6 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
           </FlowCard>
         );
       })}
-      {error && <FlowError message={error} />}
     </div>
   );
 }
