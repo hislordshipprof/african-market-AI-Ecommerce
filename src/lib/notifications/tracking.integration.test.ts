@@ -45,11 +45,13 @@ const hasDb = !!process.env.DATABASE_URL;
 
 /** Every `description` prop in the page's element tree, without rendering client components. */
 /** All text in the page's element tree, joined, without rendering client components. */
-function textOf(node: unknown): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(textOf).join("");
-  if (!node || typeof node !== "object" || !("props" in node)) return "";
-  return textOf((node as { props: { children?: unknown } }).props.children);
+/** The receipt's money rows (FeeLine props) as "label cents"; the element tree is not rendered, so their text is in props. */
+function feeLines(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(feeLines);
+  if (!node || typeof node !== "object" || !("props" in node)) return [];
+  const props = (node as { props: { label?: unknown; cents?: unknown; children?: unknown } }).props;
+  const own = typeof props.label === "string" && typeof props.cents === "number" ? [`${props.label} ${props.cents}`] : [];
+  return [...own, ...feeLines(props.children)];
 }
 
 function headingDescriptions(node: unknown): string[] {
@@ -135,14 +137,14 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
 
   it("#557: the money summary shows the promo code and the discount, and only when there is one", async () => {
     const plain = await createOrder(storeA);
-    expect(textOf(await render(slugA, plain.trackingToken!))).not.toContain("Promo");
+    expect(feeLines(await render(slugA, plain.trackingToken!)).join("|")).not.toContain("Promo");
     const order = await createOrder(storeA);
     const owner = await raw.user.create({ data: { id: `trk-${suffix}`, name: "Owner", email: `trk-${suffix}@example.com` } });
     const coupon = await storeScoped(storeA).storeCoupon.create({
       data: { storeId: storeA, code: "SAVE10", kind: "fixed", amountOffCents: 200, startsAt: new Date("2026-01-01T00:00:00Z"), createdById: owner.id },
     });
     await storeScoped(storeA).order.update({ where: { id: order.id }, data: { couponId: coupon.id, discountCents: 200 } });
-    expect(textOf(await render(slugA, order.trackingToken!))).toContain("Promo SAVE10: −$2.00");
+    expect(feeLines(await render(slugA, order.trackingToken!))).toContain("Promo SAVE10 -200");
   });
 
   it("the order id of an order that has a tracking token is a 404, with no session", async () => {
