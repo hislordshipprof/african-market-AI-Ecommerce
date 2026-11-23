@@ -64,6 +64,8 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   const [needsWeightCount, setNeedsWeightCount] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  /** The last upload or import failure, shown beside the button that caused it. */
+  const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [selectedMatches, setSelectedMatches] = useState<Set<number>>(new Set());
@@ -85,6 +87,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
 
   function resetImport() {
     setStep("upload");
+    setError(null);
     setPreview(null);
     setSelectedFile(null);
     setCreatedCount(0);
@@ -96,16 +99,18 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   function handleFileChange(file: File | null) {
     if (!file) return;
     setSelectedFile(file);
+    setError(null);
   }
 
   function handleUpload() {
     if (!selectedFile) return;
 
     if (selectedFile.size > CSV_FILE_CAP_BYTES) {
-      toast.error(CSV_FILE_TOO_LARGE_MESSAGE);
+      setError(CSV_FILE_TOO_LARGE_MESSAGE);
       return;
     }
 
+    setError(null);
     startTransition(async () => {
       const fd = new FormData();
       fd.append("file", selectedFile);
@@ -114,12 +119,12 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
       try {
         res = await csvPreviewAction(fd);
       } catch {
-        toast.error("Upload failed. The file may be too large or the server is unavailable.");
+        setError("Upload failed. The file may be too large or the server is unavailable.");
         return;
       }
 
       if (res.error) {
-        toast.error(res.error);
+        setError(res.error);
         return;
       }
 
@@ -150,22 +155,23 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
       selection.newItemRows.length === 0 &&
       selection.ambiguousResolutions.length === 0
     ) {
-      toast.error("Select at least one row to import.");
+      setError("Select at least one row to import.");
       return;
     }
 
+    setError(null);
     startTransition(async () => {
       let res: Awaited<ReturnType<typeof csvCommitAction>>;
       try {
         res = await csvCommitAction(preview.importToken, selection);
       } catch (error) {
         if (isRedirectError(error)) throw error;
-        toast.error("We couldn't confirm the import. Press Import again. Nothing will be imported twice.");
+        setError("We couldn't confirm the import. Press Import again. Nothing will be imported twice.");
         return;
       }
 
       if (res.error) {
-        toast.error(res.error);
+        setError(res.error);
         return;
       }
 
@@ -255,6 +261,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
                 onUpload={handleUpload}
                 isPending={isPending}
                 fileRef={fileRef}
+                error={error}
               />
             </motion.div>
           )}
@@ -289,6 +296,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
                 onCommit={handleCommit}
                 onBack={resetImport}
                 isPending={isPending}
+                error={error}
               />
             </motion.div>
           )}
@@ -327,6 +335,7 @@ function UploadStep({
   onUpload,
   isPending,
   fileRef,
+  error,
 }: {
   selectedFile: File | null;
   dragOver: boolean;
@@ -335,6 +344,7 @@ function UploadStep({
   onUpload: () => void;
   isPending: boolean;
   fileRef: React.RefObject<HTMLInputElement | null>;
+  error: string | null;
 }) {
   return (
     <Card>
@@ -353,7 +363,7 @@ function UploadStep({
       </CardHeader>
       <CardContent>
         <div
-          className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors ${
+          className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background ${
             dragOver
               ? "border-[var(--color-primary)] bg-[var(--color-soft)]"
               : "border-[var(--color-line)] bg-[var(--color-bg)]"
@@ -383,12 +393,14 @@ function UploadStep({
             ref={fileRef}
             type="file"
             accept=".csv,text/csv"
+            aria-label="Choose a CSV file"
             className="absolute inset-0 cursor-pointer opacity-0"
             onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
           />
         </div>
 
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+          {error && <InlineError message={error} className="mr-auto" />}
           <Button
             onClick={onUpload}
             disabled={!selectedFile || isPending}
@@ -418,6 +430,7 @@ function PreviewStep({
   onCommit,
   onBack,
   isPending,
+  error,
 }: {
   preview: CsvPreviewResult;
   selectedMatches: Set<number>;
@@ -433,6 +446,7 @@ function PreviewStep({
   onCommit: () => void;
   onBack: () => void;
   isPending: boolean;
+  error: string | null;
 }) {
   const totalSelected = selectedMatches.size + selectedNew.size + ambiguousResolutions.size;
 
@@ -605,6 +619,7 @@ function PreviewStep({
               : `Import ${countPhrase(totalSelected, "listing", "listings")}`}
           </Button>
         </div>
+        {error && <InlineError message={error} className="basis-full" />}
       </div>
     </div>
   );
@@ -657,6 +672,15 @@ function SuccessStep({
 }
 
 /* ── Small components ───────────────────────────────────────────── */
+
+function InlineError({ message, className = "" }: { message: string; className?: string }) {
+  return (
+    <p role="alert" className={`flex items-start gap-2 text-sm text-destructive ${className}`}>
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      {message}
+    </p>
+  );
+}
 
 function SummaryCard({
   icon,
