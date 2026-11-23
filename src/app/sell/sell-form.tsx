@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
+import Link from "next/link";
+import { CircleAlert } from "lucide-react";
 import { submitStoreApplicationAction, type SellFormState } from "@/lib/store-application/actions";
 import { STORE_TYPES } from "@/lib/store-application/fields";
 import { USPS_STATE_CODES } from "@/lib/customer-account/address-validation";
@@ -10,6 +12,15 @@ const INITIAL: SellFormState = { status: "idle" };
 
 export function SellForm() {
   const [state, action, pending] = useActionState(submitStoreApplicationAction, INITIAL);
+  const formRef = useRef<HTMLFormElement>(null);
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+
+  // After a rejected submit, focus goes to the first flagged field, or to the summary when no field is flagged (#728).
+  useEffect(() => {
+    if (state.status !== "error") return;
+    const first = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    (first ?? summaryRef.current)?.focus();
+  }, [state]);
 
   if (state.status === "sent") {
     return (
@@ -18,6 +29,7 @@ export function SellForm() {
         <p className={styles.doneBody}>
           We review every store by hand and reply by email. If we approve it, the email has a link to set up your shop.
         </p>
+        <Link href="/" className={styles.back}>Return to directory</Link>
       </section>
     );
   }
@@ -28,10 +40,13 @@ export function SellForm() {
   const formKey = state.status === "error" ? JSON.stringify(values) : "fresh";
 
   return (
-    <form action={action} className={styles.card} aria-labelledby="sell-form-title" key={formKey}>
+    <form ref={formRef} action={action} className={styles.card} aria-labelledby="sell-form-title" key={formKey}>
       <h2 id="sell-form-title" className={styles.formTitle}>Your store</h2>
       {state.status === "error" && (
-        <p role="alert" className={styles.formError}>{state.message}</p>
+        <p role="alert" className={styles.formError} ref={summaryRef} tabIndex={-1}>
+          <CircleAlert aria-hidden="true" size={18} className={styles.errorIcon} />
+          {state.message}
+        </p>
       )}
 
       <Field name="businessName" label="Store name" error={errors.businessName} defaultValue={values.businessName} autoComplete="organization" maxLength={120} />
@@ -52,7 +67,7 @@ export function SellForm() {
             <option key={type.value} value={type.value}>{type.label}</option>
           ))}
         </select>
-        {errors.storeType && <p id="storeType-error" className={styles.error}>{errors.storeType}</p>}
+        {errors.storeType && <FieldError id="storeType-error" text={errors.storeType} />}
       </div>
 
       <Field name="addressLine1" label="Street address" error={errors.addressLine1} defaultValue={values.addressLine1} autoComplete="address-line1" maxLength={100} />
@@ -75,7 +90,7 @@ export function SellForm() {
               <option key={code} value={code}>{code}</option>
             ))}
           </select>
-          {errors.state && <p id="state-error" className={styles.error}>{errors.state}</p>}
+          {errors.state && <FieldError id="state-error" text={errors.state} />}
         </div>
         <Field name="zip" label="ZIP" error={errors.zip} defaultValue={values.zip} autoComplete="postal-code" inputMode="numeric" maxLength={5} />
       </div>
@@ -158,7 +173,17 @@ function Field({
         className={styles.input}
         {...input}
       />
-      {error && <p id={`${name}-error`} className={styles.error}>{error}</p>}
+      {error && <FieldError id={`${name}-error`} text={error} />}
     </div>
+  );
+}
+
+/** Errors carry an icon and text, never colour alone (DESIGN.md, Separate Semantics Rule). */
+function FieldError({ id, text }: { id: string; text: string }) {
+  return (
+    <p id={id} className={styles.error}>
+      <CircleAlert aria-hidden="true" size={16} className={styles.errorIcon} />
+      {text}
+    </p>
   );
 }

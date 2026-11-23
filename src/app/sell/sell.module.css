@@ -86,7 +86,8 @@
 
 .formTitle {
   font-family: var(--font-display), system-ui, sans-serif;
-  font-size: 20px;
+  font-size: 22px;
+  line-height: 1.2;
   font-weight: 700;
   margin: 8px 0 0;
 }
@@ -96,12 +97,26 @@
 }
 
 .formError {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 0;
-  padding: 12px 14px;
+  padding: 16px;
   border-radius: 10px;
-  border: 1px solid var(--d-line-strong);
+  border: 1px solid var(--d-error);
   background: var(--d-raised);
-  font-size: 15px;
+  font-size: 16px;
+}
+
+.formError:focus-visible {
+  outline: 2px solid var(--d-ink);
+  outline-offset: 2px;
+}
+
+.errorIcon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--d-error);
 }
 
 .field {
@@ -158,23 +173,16 @@
 }
 
 .input[aria-invalid="true"] {
-  border-color: #b42318;
+  border-color: var(--d-error);
 }
 
 .error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   margin: 0;
-  color: #b42318;
+  color: var(--d-error);
   font-size: 14px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .input[aria-invalid="true"] {
-    border-color: #ff8a80;
-  }
-
-  .error {
-    color: #ff8a80;
-  }
 }
 
 .fieldset {
@@ -259,6 +267,29 @@
   color: var(--d-muted);
   font-size: 16px;
   line-height: 1.5;
+}
+
+.back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 24px;
+  border: 1px solid var(--d-line-strong);
+  border-radius: 999px;
+  color: var(--d-ink);
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.back:hover {
+  background: var(--d-raised);
+}
+
+.back:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
