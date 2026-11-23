@@ -90,10 +90,6 @@ export function ProductDetail({
         </div>
         <dl className="sf-stats">
           <div>
-            <dt>Origin</dt>
-            <dd>See packaging</dd>
-          </div>
-          <div>
             <dt>Size</dt>
             <dd>{variant ? formatWeight(variant.weightG) : "See packaging"}</dd>
           </div>

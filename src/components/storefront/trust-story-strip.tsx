@@ -5,9 +5,9 @@ import { CountUp, SectionReveal } from "./scroll-motion";
 export const TRUST_COPY = {
   stepTitle: "Good food. Familiar people.",
   approvalNote:
-    "Nothing is swapped without your approval. If an item is short, you choose a swap or a refund.",
+    "If an item is short, we ask you first: a swap or a refund. If you don’t reply in time, we use the store’s suggested swap, or refund the item.",
   hoursTitle: "Come on in",
-  hoursNote: "No swaps without your approval.",
+  hoursNote: "We ask before any swap.",
 };
 export type TrustCopy = typeof TRUST_COPY;
 const DAYS = [

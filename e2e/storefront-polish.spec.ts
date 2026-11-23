@@ -30,7 +30,7 @@ test.describe("Storefront layout on a phone (#529)", () => {
 
   test("a related product's name stays clear of its add button", async ({ page }) => {
     await page.goto(`${BASE}/listings/mn_egusi`, { waitUntil: "networkidle" });
-    const related = page.locator("section", { has: page.getByRole("heading", { name: "Often bought with" }) });
+    const related = page.locator("section", { has: page.getByRole("heading", { name: "More from this aisle" }) });
     const photos = related.locator(".sf-product-photo", { has: page.getByTestId("designed-image-fallback") });
     const count = await photos.count();
     expect(count).toBeGreaterThan(0);

@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { getStore } from "@/lib/get-store";
 import { listCategories } from "@/lib/storefront/service";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
@@ -20,7 +22,11 @@ export default async function CategoriesPage() {
           <EmptyState
             title="The aisles are being stocked"
             description="Check back soon to explore this market."
-          />
+          >
+            <Link href="/" className="sf-button">
+              Back to the store <ArrowRight size={18} aria-hidden />
+            </Link>
+          </EmptyState>
         )}
       </div>
     </StorefrontShell>
