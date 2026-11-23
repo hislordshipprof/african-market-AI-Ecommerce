@@ -31,6 +31,7 @@ export default async function OrdersPage() {
       vapidPublicKey={vapidPublicKey()}
       autoAcceptOrders={store?.autoAcceptOrders ?? false}
       defaultPrepMinutes={store?.prepTimeMinutes ?? 30}
+      timeZone={session.store.timezone}
       problems={(
         <>
           <ProblemsToReview issues={issues} timeZone={session.store.timezone} />
