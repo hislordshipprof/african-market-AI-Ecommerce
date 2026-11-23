@@ -1312,6 +1312,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 <AddressCard
                   address={settings.address}
                   title="Collect from the market"
+                  demo={!isRealPayment}
                 />
               ) : deliveryEditor ? (
                 <>
