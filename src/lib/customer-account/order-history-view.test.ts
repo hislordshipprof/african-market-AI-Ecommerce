@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountOrderRow, type AccountOrderRecord } from "./order-history-view";
+import { accountOrderRow, orderOutcomeMessage, type AccountOrderRecord } from "./order-history-view";
 
 const order = (over: Partial<AccountOrderRecord>): AccountOrderRecord => ({
   id: "order-1",
@@ -37,5 +37,36 @@ describe("account order history link", () => {
     const token = "RCEN5kMdbbYYXWjj4MQ_u-307lZa8eyHU2gizis0C4w";
     expect(accountOrderRow(order({ trackingToken: token }), "America/New_York").href).toBe(`/order/${token}`);
     expect(accountOrderRow(order({ trackingToken: null }), "America/New_York").href).toBe("/order/order-1");
+  });
+});
+
+describe("tracking outcome (#736)", () => {
+  const outcome = (status: string, over: { refundId?: string | null; capturedAmountCents?: number | null } = {}, refundedCents = 0) =>
+    orderOutcomeMessage({ status, refundId: null, capturedAmountCents: null, ...over }, refundedCents);
+
+  it("names the refunded amount on a cancelled or refunded order when the refund settled", () => {
+    expect(outcome("CANCELLED", { refundId: "re_1" }, 1250)).toMatch(/^We refunded \$12\.50 to your card\./);
+    expect(outcome("REFUNDED", { refundId: "re_1" }, 2000)).toMatch(/^We refunded \$20\.00 to your card\./);
+    expect(outcome("PARTIALLY_REFUNDED", { capturedAmountCents: 2000 }, 500)).toMatch(/^We refunded \$5\.00 of this order to your card\./);
+  });
+
+  it("says a cancelled order with no charge was never charged", () => {
+    expect(outcome("CANCELLED")).toBe("You were not charged, and your card hold was released.");
+  });
+
+  it("says refunded without an amount when none is known", () => {
+    expect(outcome("CANCELLED", { refundId: "re_1" })).toMatch(/^Your payment has been refunded\./);
+    expect(outcome("REFUNDED")).toMatch(/^Your payment has been refunded\./);
+  });
+
+  // REFUND_FAILED still holds the customer's money: never tell them it came back.
+  it("never says refunded while the refund is failed or pending", () => {
+    expect(outcome("REFUND_FAILED", { refundId: "re_1", capturedAmountCents: 1875 })).not.toMatch(/refunded/i);
+    expect(outcome("CANCELLING", { refundId: "re_1", capturedAmountCents: 3000 })).not.toMatch(/refunded/i);
+  });
+
+  it("is empty while the order is live", () => {
+    expect(outcome("PICKING")).toBeNull();
+    expect(outcome("DELIVERED", { capturedAmountCents: 1250 })).toBeNull();
   });
 });

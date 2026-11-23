@@ -9,6 +9,8 @@ const orderInclude = {
     },
   },
   issueReports: { select: { state: true, amountCents: true } },
+  // The tracking page names what was refunded (#736).
+  refundRequests: { select: { amountCents: true, providerStatus: true } },
   // The live courier delivery; failover leaves the replaced one cancelled.
   deliveries: {
     where: { status: { not: "cancelled" } },

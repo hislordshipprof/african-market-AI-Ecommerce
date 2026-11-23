@@ -21,8 +21,8 @@
 }
 .sf-account-form {
   display: grid;
-  gap: 18px;
-  margin-top: 20px;
+  gap: 16px;
+  margin-top: 16px;
 }
 .sf-account-form label {
   display: grid;
@@ -36,7 +36,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-line-strong);
   border-radius: 12px;
-  padding: 13px 14px;
+  padding: 12px 16px;
   width: 100%;
   min-height: 48px;
 }
@@ -51,7 +51,7 @@
 }
 .sf-account-address,
 .sf-account-order {
-  padding: 20px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--color-line);
 }
 .sf-account-actions {
@@ -65,14 +65,14 @@
   color: var(--color-primary-text);
 }
 .sf-account-cards h3 {
-  margin: 28px 0 8px;
+  margin: 24px 0 8px;
   font: inherit;
   font-weight: 600;
 }
 .sf-account-order {
   display: flex;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   text-decoration: none;
   color: inherit;
 }
@@ -110,9 +110,6 @@
 .sf-account-order--real:active {
   background: var(--color-soft);
 }
-.sf-account-order--real small {
-  font-size: 14px;
-}
 .sf-account-order-main {
   min-width: 0;
 }
@@ -120,7 +117,7 @@
   text-align: right;
 }
 .sf-account-order-end strong {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -152,12 +149,12 @@
 .sf-account-order small,
 .sf-account-address-result small {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
+  font-size: 13px;
   color: var(--muted-foreground);
 }
 .sf-account-order > span:last-child {
   text-align: right;
-  font-size: 13px;
 }
 .sf-account-address-result {
   display: block;

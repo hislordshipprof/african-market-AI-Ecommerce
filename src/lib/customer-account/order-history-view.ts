@@ -91,3 +91,35 @@ export function accountOrderRow(order: AccountOrderRecord, timeZone: string): Ac
     amountLabel: amountLabel(order),
   };
 }
+
+const BANK_DELAY = "Banks usually take 5 to 10 business days to show it.";
+
+/**
+ * What a cancelled or refunded order tells the customer at the top of tracking (#736); null while it is live.
+ * refundedCents is the sum of refunds Stripe reports succeeded. Same rules as amountLabel: a pending or failed
+ * refund never reads as refunded.
+ */
+export function orderOutcomeMessage(
+  order: { status: string; refundId: string | null; capturedAmountCents: number | null },
+  refundedCents: number,
+): string | null {
+  const refunded = refundedCents > 0 ? money(refundedCents) : null;
+  switch (order.status) {
+    case "CANCELLED":
+      if (refunded) return `We refunded ${refunded} to your card. ${BANK_DELAY}`;
+      if (order.capturedAmountCents == null && !order.refundId) return "You were not charged, and your card hold was released.";
+      return `Your payment has been refunded. ${BANK_DELAY}`;
+    case "REFUNDED":
+      return refunded ? `We refunded ${refunded} to your card. ${BANK_DELAY}` : `Your payment has been refunded. ${BANK_DELAY}`;
+    case "PARTIALLY_REFUNDED":
+      return refunded
+        ? `We refunded ${refunded} of this order to your card. ${BANK_DELAY}`
+        : `Part of this order has been refunded to your card. ${BANK_DELAY}`;
+    case "CANCELLING":
+      return "The store is cancelling this order. This page shows what happens to your payment once it is done.";
+    case "REFUND_FAILED":
+      return "Your refund has not gone through yet. The store and our team have been alerted and will sort it out.";
+    default:
+      return null;
+  }
+}

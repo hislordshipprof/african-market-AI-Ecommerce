@@ -80,7 +80,7 @@ test("a catering tray goes in at its minimum, takes a pickup time past its lead,
     const chosen = await pickupTime.inputValue();
     await pay.click();
     await expect(page).toHaveURL(/\/order\/.+placed=1/, { timeout: 20_000 });
-    await expect(page.getByText("Scheduled for:")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Order placed" })).toContainText("Pickup time");
     const order = await scoped((tx) => tx.order.findFirst({ where: { storeId: store.id }, include: { lines: true } }));
     expect(order).toMatchObject({ fulfillment: "pickup", pickupSlot: chosen });
     expect(order!.lines[0]!.qtyOrdered).toBe(2);
