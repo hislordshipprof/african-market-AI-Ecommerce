@@ -17,8 +17,18 @@ export function formatWeight(grams: number): string {
 
 /** A date in a list (#737): "Today", "Yesterday" or "Nov 1, 2026", by the store's calendar day. */
 export function formatListDate(date: Date | string, timeZone: string, now: Date = new Date()): string {
-  const day = (at: Date | string) => Date.parse(formatInZone(at, timeZone, { year: "numeric", month: "2-digit", day: "2-digit" }));
-  const daysAgo = Math.round((day(now) - day(date)) / 86_400_000);
+  let calendar: Intl.DateTimeFormat;
+  try {
+    calendar = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric", day: "numeric" });
+  } catch {
+    calendar = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "numeric", day: "numeric" });
+  }
+  const day = (at: Date | string) => {
+    const parts = calendar.formatToParts(new Date(at));
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value);
+    return Date.UTC(part("year"), part("month") - 1, part("day"));
+  };
+  const daysAgo = (day(now) - day(date)) / 86_400_000;
   if (daysAgo === 0) return "Today";
   if (daysAgo === 1) return "Yesterday";
   return formatInZone(date, timeZone, { month: "short", day: "numeric", year: "numeric" });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { formatInZone, formatListDate, formatListTime, money } from "./format";
 
 const AT = new Date("2026-11-03T19:05:00.000Z");
@@ -53,6 +53,24 @@ describe("formatListDate", () => {
   it("reads the day in the store's zone, not UTC", () => {
     // Nov 3, 9:00 PM in Chicago; its UTC date is Nov 4.
     expect(formatListDate("2026-11-04T03:00:00.000Z", CHICAGO, NOW)).toBe("Today");
+  });
+
+  it("does not depend on how the browser parses a date string", () => {
+    // Engines differ on "MM/DD/YYYY"; one that read it as day/month would put Nov 3 in March.
+    const parse = vi.spyOn(Date, "parse").mockReturnValue(Number.NaN);
+    try {
+      expect(formatListDate(new Date("2026-11-03T14:00:00.000Z"), CHICAGO, NOW)).toBe("Today");
+      expect(formatListDate(new Date("2026-11-03T05:30:00.000Z"), CHICAGO, NOW)).toBe("Yesterday");
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it("counts Yesterday across a month and a year boundary", () => {
+    // Jan 1, 10:00 AM in Chicago; Dec 31, 10:00 AM the day before.
+    const newYear = new Date("2027-01-01T16:00:00.000Z");
+    expect(formatListDate(new Date("2026-12-31T16:00:00.000Z"), CHICAGO, newYear)).toBe("Yesterday");
+    expect(formatListDate(new Date("2026-12-30T16:00:00.000Z"), CHICAGO, newYear)).toBe("Dec 30, 2026");
   });
 });
 
