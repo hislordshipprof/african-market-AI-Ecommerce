@@ -25,6 +25,8 @@ import {
 import type { PickBatchView } from "@/lib/order/batch";
 import type { BatchPickLine, BatchSplit } from "@/lib/order/batch-pick-list";
 import { STAFF_GENERIC_ERROR } from "@/lib/order/staff-copy";
+import { formatClockInZone } from "@/lib/format";
+import { UpdatesPaused } from "../../updates-paused";
 
 const STATUS_LABELS: Record<string, string> = {
   ACCEPTED: "Not started",
@@ -40,8 +42,6 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const PACKING = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
-
-const time = (value: Date | string) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function ToteLetter({ letter, size = "sm" }: { letter: string; size?: "sm" | "lg" }) {
   return (
@@ -142,9 +142,12 @@ function PickRow(props: {
   );
 }
 
-export function PackingScreen({ initial, storeParam }: { initial: PickBatchView; storeParam: string }) {
+export function PackingScreen({ initial, storeParam, timeZone }: { initial: PickBatchView; storeParam: string; timeZone: string }) {
   const [batch, setBatch] = useState<PickBatchView | null>(initial);
   const [isPending, startTransition] = useTransition();
+  const [isRetrying, startRetry] = useTransition();
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(() => new Date());
   const [shortLine, setShortLine] = useState<BatchPickLine | null>(null);
   const [unitsFound, setUnitsFound] = useState("0");
   const ordersHref = `/store-admin/orders?store=${encodeURIComponent(storeParam)}`;
@@ -152,8 +155,11 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
   const refresh = useCallback(async () => {
     try {
       setBatch(await readBatchAction(initial.batchId));
+      setRefreshFailed(false);
+      setLastRefreshed(new Date());
     } catch {
-      // A failed poll keeps the last list; the next one tries again.
+      // A failed poll keeps the last list and says so; the next one tries again.
+      setRefreshFailed(true);
     }
   }, [initial.batchId]);
 
@@ -234,6 +240,13 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
       </header>
 
       <main className="mx-auto max-w-2xl px-4 py-5">
+        <UpdatesPaused
+          paused={refreshFailed}
+          lastUpdated={lastRefreshed}
+          timeZone={timeZone}
+          retrying={isRetrying}
+          onRetry={() => startRetry(refresh)}
+        />
         <section aria-label="Bags" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {batch.totes.map((tote) => (
             <div key={tote.orderId} className="flex items-center gap-2.5 rounded-xl border border-border bg-card p-2.5" data-testid="tote">
@@ -244,7 +257,7 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
                 {tote.fulfillment === "courier" && (
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Truck className="size-3" aria-hidden />
-                    {tote.readyEstimateAt && PACKING.includes(tote.status) ? `Ready by ${time(tote.readyEstimateAt)}` : "Courier"}
+                    {tote.readyEstimateAt && PACKING.includes(tote.status) ? `Ready by ${formatClockInZone(tote.readyEstimateAt, timeZone)}` : "Courier"}
                   </p>
                 )}
                 {tote.fulfillment === "ship" && (

@@ -8,5 +8,5 @@ export default async function BatchPackingPage({ params }: { params: Promise<{ i
   const [session, { id }] = await Promise.all([requireStoreMember(), params]);
   const batch = await readPickBatch(session.store.id, id);
   if (!batch) notFound();
-  return <PackingScreen initial={batch} storeParam={session.store.slug} />;
+  return <PackingScreen initial={batch} storeParam={session.store.slug} timeZone={session.store.timezone} />;
 }

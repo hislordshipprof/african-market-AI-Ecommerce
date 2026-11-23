@@ -67,6 +67,7 @@ import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { CourierTiming } from "./courier-timing";
 import { BatchPicking, packingHref } from "./batch-picking";
 import { orderPrepMinutes } from "@/lib/listing/prepared";
+import { UpdatesPaused } from "./updates-paused";
 
 const STATUS_CONFIG: Record<
   string,
@@ -137,6 +138,8 @@ interface Props {
   vapidPublicKey: string | null;
   autoAcceptOrders: boolean;
   defaultPrepMinutes: number;
+  /** The store's zone, for the last-refresh time. */
+  timeZone: string;
   problems?: React.ReactNode;
 }
 
@@ -147,6 +150,7 @@ export function OrderInbox({
   vapidPublicKey,
   autoAcceptOrders,
   defaultPrepMinutes,
+  timeZone,
   problems,
 }: Props) {
   const searchParams = useSearchParams();
@@ -154,6 +158,8 @@ export function OrderInbox({
   const [orders, setOrders] = useState(initialOrders);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(() => new Date());
   /** A re-quoted postage more than $2 above what the shopper paid, waiting for staff to confirm (#568). */
   const [postageToConfirm, setPostageToConfirm] = useState<{ orderId: string; cents: number; message: string } | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -192,8 +198,18 @@ export function OrderInbox({
 
   const pollOrders = useCallback(() => {
     startTransition(async () => {
+      let fresh: StoreOrderRow[];
       try {
-        const { orders: fresh } = await fetchOrdersAction();
+        ({ orders: fresh } = await fetchOrdersAction());
+      } catch {
+        // Keep the orders shown and say updates are paused; the next poll tries again.
+        setRefreshFailed(true);
+        return;
+      }
+      setRefreshFailed(false);
+      setLastRefreshed(new Date());
+      setOrders(fresh);
+      try {
         const prevIds = prevOrderIdsRef.current;
         const newOrders = fresh.filter((o) => !prevIds.has(o.id));
         if (newOrders.length > 0 && audioEnabled && audioRef.current) {
@@ -211,9 +227,8 @@ export function OrderInbox({
           }
         }
         prevOrderIdsRef.current = new Set(fresh.map((o) => o.id));
-        setOrders(fresh);
       } catch {
-        // polling failure is non-fatal
+        // A failed alert sound or auto-accept does not stop the list updating; the next poll retries it.
       }
     });
   }, [audioEnabled, autoAcceptOrders]);
@@ -521,6 +536,13 @@ export function OrderInbox({
       </header>
 
       <main className="mx-auto max-w-4xl px-4 py-6">
+        <UpdatesPaused
+          paused={refreshFailed}
+          lastUpdated={lastRefreshed}
+          timeZone={timeZone}
+          retrying={isPending}
+          onRetry={pollOrders}
+        />
         {selectedOrder ? (
           <div>
             <button
