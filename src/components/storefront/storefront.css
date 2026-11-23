@@ -112,6 +112,16 @@
   color: var(--color-surface);
   border-color: var(--color-ink);
 }
+/* A selected chip shows a check in both themes, so the state never rests on colour alone (#743). */
+.sf-chip[aria-pressed="true"]::before,
+.sf-chip[aria-current="page"]::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
 .sf-badge {
   display: inline-flex;
   align-items: center;
@@ -1935,15 +1945,6 @@
     color: var(--color-ink);
     border: 2px solid var(--color-primary);
     padding: 7px 17px;
-  }
-  .sf-chip[aria-pressed="true"]::before,
-  .sf-chip[aria-current="page"]::before {
-    content: "";
-    flex: none;
-    width: 16px;
-    height: 16px;
-    background: currentColor;
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
   }
 }
 @media (max-width: 767px) {
