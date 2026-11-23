@@ -33,6 +33,7 @@ export function nearSearch<S>(state: NearState<S>, event: NearEvent<S>): NearSta
 
 const TIMEOUT_MS = 10_000;
 const DOWN = "Search isn't working right now. Try again in a moment.";
+const KINDS: string[] = ["stores", "ambiguous", "none", "outside"];
 const SLOW = "Search took too long to answer. Try again in a moment.";
 
 /** One near me request, given up after 10 seconds. A refused query keeps the server's message and no retry. */
@@ -41,8 +42,13 @@ export async function fetchNear<S>(params: URLSearchParams, fetchFn: typeof fetc
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetchFn(`/api/directory/near?${params}`, { signal: controller.signal });
+    if (res.ok) {
+      // A body that stalls, drops or is not an answer must fail, never fall back to the nationwide list.
+      const answer = (await res.json()) as NearAnswer<S> | null;
+      if (!KINDS.includes(answer?.kind as string)) return { ok: false, text: DOWN, retry: true };
+      return { ok: true, answer: answer as NearAnswer<S> };
+    }
     const body = await res.json().catch(() => ({}));
-    if (res.ok) return { ok: true, answer: body as NearAnswer<S> };
     if (res.status >= 500) return { ok: false, text: DOWN, retry: true };
     return { ok: false, text: typeof body.error === "string" ? body.error : DOWN, retry: false };
   } catch {

@@ -69,4 +69,29 @@ describe("fetchNear (#728 AC1)", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(settled).toMatchObject({ ok: false, retry: true, text: expect.stringMatching(/too long/) });
   });
+
+  it("gives up after 10 seconds when the body stalls after the headers", async () => {
+    vi.useFakeTimers();
+    const stalled = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              init?.signal?.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    let settled: unknown = null;
+    void fetchNear(new URLSearchParams({ q: "77002" }), stalled).then((outcome) => (settled = outcome));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(settled).toMatchObject({ ok: false, retry: true, text: expect.stringMatching(/too long/) });
+  });
+
+  it("offers a retry when a 200 is not a near me answer", async () => {
+    const html = vi.fn<typeof fetch>(async () => new Response("<html>", { status: 200 }));
+    expect(await fetchNear(new URLSearchParams({ q: "77002" }), html)).toMatchObject({ ok: false, retry: true });
+    expect(await fetchNear(new URLSearchParams({ q: "77002" }), respond(200, { kind: "weird" }))).toMatchObject({ ok: false, retry: true });
+  });
 });
