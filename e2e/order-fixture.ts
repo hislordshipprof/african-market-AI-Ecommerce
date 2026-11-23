@@ -325,14 +325,15 @@ export async function insertRecoveryOrder(input: { number: number; token: string
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
     const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
     const listings = await tx.listing.findMany({
-      where: { storeId, active: true, variants: { some: {} } },
+      // Named products only: a CSV import from another spec can leave a nameless custom listing first by id.
+      where: { storeId, active: true, variants: { some: {} }, OR: [{ customName: { not: null } }, { masterProductId: { not: null } }] },
       include: { variants: { take: 1 }, masterProduct: { select: { name: true } } },
       orderBy: { id: "asc" },
       take: 3,
     });
     if (listings.length < 3) throw new Error("mama-ngozi needs more listings");
     // What the customer reads for each line: product name, then pack (#743).
-    const names = listings.slice(0, 2).map((listing) => `${listing.customName ?? listing.masterProduct?.name} · ${listing.variants[0].label}`);
+    const names = listings.slice(0, 2).map((listing) => [listing.customName ?? listing.masterProduct?.name, listing.variants[0].label].filter(Boolean).join(" · "));
     const [first, second, swap] = listings.map((listing) => listing.variants[0]);
     const order = await tx.order.create({
       data: {
