@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { deleteBatchOrders, insertCourierPackingOrder, insertRecoveryOrder, setCourierDropoff, setOrderTimes } from "./order-fixture";
+import { deleteBatchOrders, insertCourierPackingOrder, insertInboxOrder, insertRecoveryOrder, setCourierDropoff, setOrderTimes } from "./order-fixture";
 import { storeOwnerSignIn } from "./store-owner-auth";
 import { storeUrl } from "./urls";
 
@@ -34,8 +34,34 @@ test.describe("operational times in a browser away from the store's zone", () =>
       await setCourierDropoff(number, token, new Date("2026-11-23T22:10:00Z"));
       await page.goto(`${storeUrl("mama-ngozi")}/order/${token}`);
       await expect(page.getByText("arriving about 4:10 PM CST")).toBeVisible();
+      // At phone width the zone label stays on the line with its time.
+      await page.setViewportSize({ width: 390, height: 844 });
+      const eta = page.getByText("4:10 PM CST", { exact: true });
+      const lineHeight = await eta.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      expect((await eta.boundingBox())!.height).toBeLessThan(lineHeight * 1.5);
     } finally {
       await deleteBatchOrders([number]);
     }
   });
+});
+
+test("at phone width the order card keeps the customer's full name and the status beside the number", async ({ page }, testInfo) => {
+  const number = 737_300 + testInfo.parallelIndex * 10 + testInfo.repeatEachIndex;
+  await insertInboxOrder({ number, status: "AWAITING_PICKUP", capturedAmountCents: 4996 });
+  try {
+    await storeOwnerSignIn(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(ORDERS_URL);
+    const card = page.locator("button", { hasText: `#${number}` });
+    const name = card.getByText("Adaeze Chukwu", { exact: true });
+    await expect(name).toBeVisible();
+    expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+    const numberBox = await card.getByText(`#${number}`, { exact: true }).boundingBox();
+    const badgeBox = await card.getByText("Awaiting pickup", { exact: true }).boundingBox();
+    expect(Math.abs(numberBox!.y + numberBox!.height / 2 - (badgeBox!.y + badgeBox!.height / 2))).toBeLessThan(4);
+    await expect(card).toContainText("CST");
+  } finally {
+    await deleteBatchOrders([number]);
+  }
 });

@@ -966,16 +966,22 @@ export function OrderInbox({
                               {order.disputed && <DisputedBadge />}
                               {order.hasAccount && <AccountBadge />}
                             </div>
-                            <div className="mt-0.5 flex items-baseline gap-1 text-xs text-muted-foreground">
+                            {/* At phone width the name takes its own line and the time joins the meta line (#737). */}
+                            <div className="mt-0.5 flex flex-col text-xs text-muted-foreground sm:flex-row sm:items-baseline sm:gap-1">
                               <span className="min-w-0 truncate">
                                 {order.customer.name}
                               </span>
                               <span className="shrink-0 whitespace-nowrap tabular-nums">
-                                &middot; {order.lines.length} item{order.lines.length !== 1 ? "s" : ""} &middot; {money(order.totalCents ?? order.subtotalCents)}
+                                <span className="hidden sm:inline">&middot; </span>
+                                {order.lines.length} item{order.lines.length !== 1 ? "s" : ""} &middot; {money(order.totalCents ?? order.subtotalCents)}
+                                <span className="sm:hidden">
+                                  {" "}&middot; <Clock className="inline size-3 align-[-0.125em]" />{" "}
+                                  {formatClockInZone(order.createdAt, timeZone)}
+                                </span>
                               </span>
                             </div>
                           </div>
-                          <div className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground">
+                          <div className="hidden shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground sm:flex">
                             <Clock className="size-3" />
                             {formatClockInZone(order.createdAt, timeZone)}
                           </div>
