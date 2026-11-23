@@ -287,3 +287,45 @@ export async function deleteBatchOrders(numbers: number[]): Promise<void> {
     await tx.pickBatch.deleteMany({ where: { id: { in: batchIds } } });
   });
 }
+
+/**
+ * A completed order opened by `token` (#724): two picked lines, inside the problem-report window.
+ * With `substitutions`, each line also has a pending swap prompt. Remove with deleteBatchOrders.
+ */
+export async function insertRecoveryOrder(input: { number: number; token: string; substitutions?: boolean }): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number: input.number } });
+    const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
+    const listings = await tx.listing.findMany({
+      where: { storeId, active: true, variants: { some: {} } },
+      include: { variants: { take: 1 } },
+      orderBy: { id: "asc" },
+      take: 3,
+    });
+    if (listings.length < 3) throw new Error("mama-ngozi needs more listings");
+    const [first, second, swap] = listings.map((listing) => listing.variants[0]);
+    const order = await tx.order.create({
+      data: {
+        storeId, number: input.number, customerId: customer.id, status: input.substitutions ? "SUBSTITUTION_PENDING" : "COMPLETED", fulfillment: "pickup",
+        subtotalCents: 2500, bufferCents: 250, totalAuthorizedCents: 2750, totalCents: 2500, capturedAmountCents: 2500,
+        paymentIntentId: `pi_e2e_recovery_${input.number}_${Date.now()}`, trackingToken: input.token, completedAt: new Date(),
+        lines: {
+          create: [
+            { listingVariantId: first.id, qtyOrdered: 2, qtyPicked: 2, unitPriceCents: 1000, status: "picked", swapRule: "store_suggests" },
+            { listingVariantId: second.id, qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 500, status: "picked", swapRule: "store_suggests" },
+          ],
+        },
+      },
+      include: { lines: true },
+    });
+    if (!input.substitutions) return;
+    for (const line of order.lines) {
+      await tx.substitutionRequest.create({
+        data: {
+          storeId, orderId: order.id, orderLineId: line.id, proposedVariantId: swap.id,
+          proposedUnitPriceCents: line.unitPriceCents, qty: 1, expiresAt: new Date(Date.now() + 30 * 60_000),
+        },
+      });
+    }
+  });
+}

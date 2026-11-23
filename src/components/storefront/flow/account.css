@@ -243,3 +243,8 @@
     font-size: 30px;
   }
 }
+.sf-account-error {
+  color: var(--color-deal);
+  font-size: 14px;
+  font-weight: 600;
+}

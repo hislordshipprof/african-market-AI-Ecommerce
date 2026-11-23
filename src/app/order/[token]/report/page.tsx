@@ -5,6 +5,7 @@ import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { findOrderForIssueReport } from "@/lib/notifications/lookup";
 import { ISSUE_WINDOW_CLOSED, issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
+import "@/components/storefront/flow/order-flow.css";
 
 export default async function ReportPage({
   params,
@@ -12,12 +13,13 @@ export default async function ReportPage({
   params: Promise<{ token: string }>;
 }) {
   const [{ token }, context] = await Promise.all([params, getFlowContext()]);
-  const order = await findOrderForIssueReport(context.store.id, token).catch(() => null);
+  // No catch: a database error goes to error.tsx, so a customer never reads it as "checkout opens soon".
+  const order = await findOrderForIssueReport(context.store.id, token);
   if (order) {
     const issue = order.issueReports[0];
     return (
       <StorefrontShell store={context.store}>
-        <div style={{ maxWidth: 600, margin: "0 auto", padding: "2rem 1rem" }}>
+        <div className="of-wrap" style={{ maxWidth: 640 }}>
           <FlowHeading
             title="Let's make it right"
             description={`Order #${order.number} · ${context.store.name}`}

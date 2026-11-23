@@ -64,6 +64,7 @@ export function AccountFlow(props: Props) {
   const [orders, setOrders] = useState<FlowOrder[]>([]);
   const [loading, setLoading] = useState(!customer);
   const [error, setError] = useState("");
+  const [detailsError, setDetailsError] = useState("");
   const [saved, setSaved] = useState("");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FlowAddress[]>([]);
@@ -98,6 +99,34 @@ export function AccountFlow(props: Props) {
       setSaved("Profile saved in this browser.");
     } catch (e) {
       setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveDetails(next: CustomerProfile) {
+    setBusy(true);
+    setDetailsError("");
+    try {
+      if (!customer) {
+        if (services) {
+          setProfile(await services.auth.saveProfile(next));
+          setSaved("Profile saved in this browser.");
+        }
+        return;
+      }
+      const renamed = next.name.trim() !== (realProfile?.name ?? "").trim();
+      const named = renamed ? await saveNameAction(next.name) : null;
+      const result = named && !named.ok ? named : await savePhoneAction(next.phone);
+      if (!result.ok) {
+        setDetailsError(result.error);
+        return;
+      }
+      setSaved(renamed ? "Details saved." : "Phone saved.");
+      // Back restores the router's cached page: without this it brings back the
+      // old phone, and pressing Save on that overwrites the new one.
+      router.refresh();
+    } catch {
+      setDetailsError("We couldn't save your details. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -146,27 +175,7 @@ export function AccountFlow(props: Props) {
                   className="sf-account-form"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    if (customer) {
-                      setBusy(true);
-                      setError("");
-                      const renamed = profile.name.trim() !== (realProfile?.name ?? "").trim();
-                      void (async () => {
-                        const named = renamed ? await saveNameAction(profile.name) : null;
-                        return named && !named.ok ? named : savePhoneAction(profile.phone);
-                      })().then((result) => {
-                        if (result.ok) {
-                          setSaved(renamed ? "Details saved." : "Phone saved.");
-                          // Back restores the router's cached page: without this it brings back the
-                          // old phone, and pressing Save on that overwrites the new one.
-                          router.refresh();
-                        } else {
-                          setError(result.error);
-                        }
-                        setBusy(false);
-                      });
-                      return;
-                    }
-                    void save(profile);
+                    void saveDetails(profile);
                   }}
                 >
                   <label>
@@ -203,7 +212,12 @@ export function AccountFlow(props: Props) {
                       }
                     />
                   </label>
-                  <Button disabled={busy}>{customer ? "Save phone" : "Save details"}</Button>
+                  {detailsError && (
+                    <p className="sf-account-error" role="alert">
+                      {detailsError}
+                    </p>
+                  )}
+                  <Button disabled={busy}>Save details</Button>
                   <button
                     type="button"
                     className="sf-text-link"

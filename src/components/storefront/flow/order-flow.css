@@ -12,7 +12,7 @@
 }
 .of-stack {
   display: grid;
-  gap: 20px;
+  gap: 24px;
 }
 .of-actions {
   display: flex;
@@ -115,9 +115,16 @@
 }
 .of-form {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  font-size: 16px;
+}
+.of-form label,
+.of-form legend {
+  font-weight: 600;
 }
 .of-form fieldset {
+  min-width: 0;
   border: 1px solid var(--color-line);
   border-radius: 12px;
   padding: 16px;
@@ -125,8 +132,42 @@
 .of-check {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 0;
+  gap: 16px;
+  padding: 8px 0;
+}
+.of-check span {
+  font-weight: 400;
+}
+.of-form input[type="number"] {
+  width: 88px;
+  min-height: 48px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+}
+.of-form input[type="file"] {
+  min-height: 48px;
+  font: inherit;
+  font-weight: 400;
+}
+.of-wrap select {
+  min-height: 48px;
+}
+.of-form :is(input, select, textarea):focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.of-pending {
+  color: var(--color-muted);
+  font-size: 14px;
+}
+.of-error {
+  color: var(--color-deal);
+  font-size: 14px;
+  font-weight: 600;
 }
 .of-check span {
   flex: 1;

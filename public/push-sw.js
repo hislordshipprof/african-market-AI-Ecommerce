@@ -1,6 +1,6 @@
 // Push for store alerts and customer order updates, and an offline page for navigations (#563).
 // It caches the offline page only: never a price, a cart or a page that holds money.
-const OFFLINE_CACHE = "offline-v1";
+const OFFLINE_CACHE = "offline-v2";
 const OFFLINE_URL = "/offline.html";
 
 self.addEventListener("install", (event) => {
