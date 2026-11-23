@@ -264,7 +264,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     clearTestSentSms();
     await run(deliveryId, "ready");
     const delivery = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: deliveryId } });
-    expect(getTestSentEmails().at(-1)!.html).toContain("Packed and ready");
+    expect(getTestSentEmails().at(-1)!.html).toContain("Ready for delivery");
     expect(getTestSentEmails().at(-1)!.html).toContain(`Order #${delivery.number}.`);
     expect(getTestSentSms()).toHaveLength(1);
     expect(getTestSentSms().at(-1)!.text).toContain(`Ada's Market: order #${delivery.number} `);

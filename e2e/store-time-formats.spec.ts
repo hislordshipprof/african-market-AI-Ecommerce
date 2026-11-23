@@ -58,7 +58,7 @@ test("at phone width the order card keeps the customer's full name and the statu
     expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 
     const numberBox = await card.getByText(`#${number}`, { exact: true }).boundingBox();
-    const badgeBox = await card.getByText("Awaiting pickup", { exact: true }).boundingBox();
+    const badgeBox = await card.getByText("Ready for pickup", { exact: true }).boundingBox();
     expect(Math.abs(numberBox!.y + numberBox!.height / 2 - (badgeBox!.y + badgeBox!.height / 2))).toBeLessThan(4);
     await expect(card).toContainText("CST");
   } finally {

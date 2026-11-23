@@ -65,15 +65,15 @@ test.describe("account and tracking lead with what the customer needs now (#736)
     });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/order/${token}`);
-    const status = page.getByRole("region", { name: "Waiting for your answer" });
+    const status = page.getByRole("region", { name: "Waiting for a swap choice" });
     await expect(status).toBeVisible();
     // mama-ngozi is in Houston: 20:00Z is 2:00 PM Central.
     await expect(status).toContainText("Tue, Dec 1, 2:00 PM CST");
     await expect(status.getByRole("link", { name: "Choose now" })).toHaveAttribute("href", `/order/${token}/substitutions`);
     await expect(status).toContainText("Ama");
     await expect(status.getByRole("link", { name: "Track your courier" })).toHaveAttribute("href", "https://example.com/track/736");
-    expect(await top(page, "Waiting for your answer")).toBeLessThan(await top(page, "Receipt"));
-    await expect(status.getByRole("heading", { name: "Waiting for your answer" })).toHaveCSS("font-size", "22px");
+    expect(await top(page, "Waiting for a swap choice")).toBeLessThan(await top(page, "Receipt"));
+    await expect(status.getByRole("heading", { name: "Waiting for a swap choice" })).toHaveCSS("font-size", "22px");
     await expect(page.getByRole("progressbar")).toHaveCount(0);
   });
 

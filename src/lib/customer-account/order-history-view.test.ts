@@ -5,6 +5,7 @@ const order = (over: Partial<AccountOrderRecord>): AccountOrderRecord => ({
   id: "order-1",
   number: 1001,
   status: "AUTHORIZED",
+  fulfillment: "pickup",
   createdAt: new Date("2026-11-01T15:00:00Z"),
   subtotalCents: 2500,
   tipCents: 300,

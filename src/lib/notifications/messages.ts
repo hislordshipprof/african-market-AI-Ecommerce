@@ -1,4 +1,4 @@
-import { customerStatusLabel } from "../customer-account/order-history-view";
+import { orderStatusLabel } from "../order/status-labels";
 import { quotedFrom, stripHeaderChars } from "../email/from";
 import { escapeHtml, money } from "../format";
 import { fulfilledStatus } from "../order/constants";
@@ -230,7 +230,7 @@ function headline(order: NotifyOrder, event: OrderNotifyEvent): string {
   if (event === "substitution") return "An item is short: choose a swap or a refund";
   // A refund can be part of the order, so its message never reads as the order status.
   if (event === "refunded") return "Refund issued";
-  return customerStatusLabel(statusForEvent(event, order.fulfillment));
+  return orderStatusLabel(statusForEvent(event, order.fulfillment), order.fulfillment);
 }
 
 export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: string, fromAddress: string): RenderedMessage {

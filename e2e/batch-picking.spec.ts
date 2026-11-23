@@ -62,7 +62,7 @@ test.describe("Batch picking (#564)", () => {
       await page.getByLabel("Units found").fill("2");
       await page.getByRole("button", { name: "Mark short" }).click();
       await expect(shared).toContainText(`found 0 of 1, waiting for customer`);
-      await expect(totes.nth(1)).toContainText("Waiting on customer");
+      await expect(totes.nth(1)).toContainText("Waiting for a swap choice");
 
       // Tick the rest.
       const pickAll = page.getByRole("button", { name: /^Picked all/ });

@@ -4,7 +4,8 @@ import { OrderFlow } from "@/components/storefront/flow/order-flow";
 import { FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
-import { customerStatusLabel, orderOutcomeMessage } from "@/lib/customer-account/order-history-view";
+import { orderOutcomeMessage } from "@/lib/customer-account/order-history-view";
+import { orderStatusLabel } from "@/lib/order/status-labels";
 import { notFound } from "next/navigation";
 import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications/lookup";
 import { OrderMessages } from "@/components/storefront/flow/order-messages";
@@ -50,7 +51,7 @@ export default async function OrderPage({
       ? await readCustomerMessages(context.store.id, token).catch(() => null)
       : null;
     const owner = realOrder.trackingToken === token;
-    const statusLabel = customerStatusLabel(realOrder.status);
+    const statusLabel = orderStatusLabel(realOrder.status, realOrder.fulfillment);
     const refundedCents = realOrder.refundRequests
       .filter((request) => request.providerStatus === "succeeded")
       .reduce((sum, request) => sum + request.amountCents, 0);
