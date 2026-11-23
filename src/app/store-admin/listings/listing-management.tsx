@@ -49,6 +49,7 @@ import {
 import { AttributesDialog } from "./attributes-dialog";
 import { listingNeedsWeight } from "./needs-weight";
 import { loadedVariantRow, serializeVariants } from "./variant-form";
+import { displayNameOf, searchListings } from "./listing-search";
 import {
   ArrowLeft,
   Plus,
@@ -61,6 +62,7 @@ import {
   ListChecks,
   Camera,
   Truck,
+  Search,
 } from "lucide-react";
 import { shippableRefusal } from "@/lib/shipping/eligibility";
 
@@ -221,6 +223,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   const [createOpen, setCreateOpen] = useState(false);
   const [editListing, setEditListing] = useState<Listing | null>(null);
   const [attributesListing, setAttributesListing] = useState<Listing | null>(null);
+  const [query, setQuery] = useState("");
 
   const [name, setName] = useState("");
   const [stockMode, setStockMode] = useState("counted");
@@ -427,8 +430,13 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
     });
   }
 
-  const activeListings = listings.filter((l) => l.active);
-  const inactiveListings = listings.filter((l) => !l.active);
+  const activeTotal = listings.filter((l) => l.active).length;
+  const inactiveTotal = listings.length - activeTotal;
+  const { active: activeListings, inactive: inactiveListings } = searchListings(listings, query);
+  const searching = query.trim() !== "";
+  const noMatches = searching && activeListings.length === 0 && inactiveListings.length === 0;
+  const shownOf = (shown: number, total: number, noun: string) =>
+    `${searching ? `${shown} of ${total}` : total} ${noun}${total !== 1 ? "s" : ""}`;
 
   const selectedMaster = masterProductId ? selectedMasterOption : null;
   const masterItems =
@@ -630,47 +638,47 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
             </div>
             {catering && (
               <>
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="flex w-24 flex-col gap-2">
-                    <Label htmlFor="listing-catering-lead">Lead time</Label>
-                    <Input
-                      id="listing-catering-lead"
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={cateringUnit === "days" ? 4 : 96}
-                      value={cateringLead}
-                      onChange={(e) => setCateringLead(e.target.value)}
-                    />
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="flex w-24 flex-col gap-2">
+                      <Label htmlFor="listing-catering-lead">Lead time</Label>
+                      <Input
+                        id="listing-catering-lead"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={cateringUnit === "days" ? 4 : 96}
+                        value={cateringLead}
+                        onChange={(e) => setCateringLead(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex w-28 flex-col gap-2">
+                      <Label>Unit</Label>
+                      <Select value={cateringUnit} onValueChange={(v) => setCateringUnit(v === "hours" ? "hours" : "days")}>
+                        <SelectTrigger aria-label="Lead time unit">
+                          <SelectValue>{(value: string) => (value === "hours" ? "Hours" : "Days")}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hours">Hours</SelectItem>
+                          <SelectItem value="days">Days</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex w-28 flex-col gap-2">
+                      <Label htmlFor="listing-catering-min">Minimum qty</Label>
+                      <Input
+                        id="listing-catering-min"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={500}
+                        value={cateringMinQty}
+                        onChange={(e) => setCateringMinQty(e.target.value)}
+                      />
+                    </div>
                   </div>
-                  <div className="flex w-28 flex-col gap-2">
-                    <Label>Unit</Label>
-                    <Select value={cateringUnit} onValueChange={(v) => setCateringUnit(v === "hours" ? "hours" : "days")}>
-                      <SelectTrigger aria-label="Lead time unit">
-                        <SelectValue>{(value: string) => (value === "hours" ? "Hours" : "Days")}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="hours">Hours</SelectItem>
-                        <SelectItem value="days">Days</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex w-28 flex-col gap-2">
-                    <Label htmlFor="listing-catering-min">Minimum qty</Label>
-                    <Input
-                      id="listing-catering-min"
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={500}
-                      value={cateringMinQty}
-                      onChange={(e) => setCateringMinQty(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Customers pick a time at least this far ahead, up to 5 days, from your pickup or delivery schedule. They can&rsquo;t cancel once you accept.
-                </p>
+                  <p className="text-xs text-muted-foreground">
+                    Customers pick a time at least this far ahead, up to 5 days, from your pickup or delivery schedule. They can&rsquo;t cancel once you accept.
+                  </p>
               </>
             )}
           </div>
@@ -753,29 +761,31 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   return (
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-2xl flex-wrap items-center gap-3 px-4 py-3">
           <Link href={`/store-admin?store=${storeParam}`}>
-            <Button variant="ghost" size="icon" className="size-9">
+            <Button variant="ghost" size="icon" className="size-11" aria-label="Back to dashboard">
               <ArrowLeft className="size-4" />
             </Button>
           </Link>
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <h1 className="text-base font-semibold text-foreground">Products</h1>
             <p className="text-xs text-muted-foreground">{storeName}</p>
           </div>
-          <Link href={`/store-admin/listings/import?store=${storeParam}`}>
-            <Button size="sm" variant="outline">
-              <Upload className="size-4" /> Import CSV
+          <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+            <Link href={`/store-admin/listings/import?store=${storeParam}`}>
+              <Button size="sm" variant="outline">
+                <Upload className="size-4" /> Import CSV
+              </Button>
+            </Link>
+            <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
+              <Button size="sm" variant="outline">
+                <Camera className="size-4" /> From photos
+              </Button>
+            </Link>
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="size-4" /> Add listing
             </Button>
-          </Link>
-          <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
-            <Button size="sm" variant="outline">
-              <Camera className="size-4" /> From photos
-            </Button>
-          </Link>
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="size-4" /> Add listing
-          </Button>
+          </div>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
@@ -808,56 +818,91 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
           </Card>
         ) : (
           <div className="flex flex-col gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Active listings</CardTitle>
-                <CardDescription>
-                  {activeListings.length} listing{activeListings.length !== 1 ? "s" : ""}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {activeListings.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No active listings</p>
-                ) : (
-                  <div className="flex flex-col divide-y divide-border">
-                    {activeListings.map((listing) => (
-                      <ListingRow
-                        key={listing.id}
-                        listing={listing}
-                        onEdit={() => openEdit(listing)}
-                        onAttributes={() => setAttributesListing(listing)}
-                        onToggle={() => handleToggleActive(listing)}
-                        isPending={isPending}
-                      />
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="listing-search">Search products</Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Input
+                  id="listing-search"
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Product name"
+                  autoComplete="off"
+                  className="h-12 pl-10 text-base md:text-base [&::-webkit-search-cancel-button]:appearance-none"
+                />
+              </div>
+            </div>
 
-            {inactiveListings.length > 0 && (
+            {noMatches ? (
+              <Card>
+                <CardContent className="flex flex-col items-center gap-4 py-8 text-center" role="status">
+                  <p className="text-base text-foreground">No products match &ldquo;{query.trim()}&rdquo;.</p>
+                  <Button variant="outline" className="min-h-11" onClick={() => setQuery("")}>
+                    <X className="size-4" /> Clear search
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Inactive listings</CardTitle>
+                  <CardTitle className="text-base">Active listings</CardTitle>
                   <CardDescription>
-                    {inactiveListings.length} deactivated listing{inactiveListings.length !== 1 ? "s" : ""}
+                    {shownOf(activeListings.length, activeTotal, "listing")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex flex-col divide-y divide-border">
-                    {inactiveListings.map((listing) => (
-                      <ListingRow
-                        key={listing.id}
-                        listing={listing}
-                        onEdit={() => openEdit(listing)}
-                        onAttributes={() => setAttributesListing(listing)}
-                        onToggle={() => handleToggleActive(listing)}
-                        isPending={isPending}
-                      />
-                    ))}
-                  </div>
+                  {activeListings.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {searching ? "No active listings match this search." : "No active listings"}
+                    </p>
+                  ) : (
+                    <div className="flex flex-col divide-y divide-border">
+                      {activeListings.map((listing) => (
+                        <ListingRow
+                          key={listing.id}
+                          listing={listing}
+                          onEdit={() => openEdit(listing)}
+                          onAttributes={() => setAttributesListing(listing)}
+                          onToggle={() => handleToggleActive(listing)}
+                          isPending={isPending}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
+
+              {inactiveTotal > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Inactive listings</CardTitle>
+                    <CardDescription>
+                      {shownOf(inactiveListings.length, inactiveTotal, "deactivated listing")}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {inactiveListings.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No inactive listings match this search.</p>
+                    ) : (
+                      <div className="flex flex-col divide-y divide-border">
+                        {inactiveListings.map((listing) => (
+                          <ListingRow
+                            key={listing.id}
+                            listing={listing}
+                            onEdit={() => openEdit(listing)}
+                            onAttributes={() => setAttributesListing(listing)}
+                            onToggle={() => handleToggleActive(listing)}
+                            isPending={isPending}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+              </>
             )}
           </div>
         )}
@@ -888,10 +933,6 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   );
 }
 
-function displayNameOf(listing: Listing) {
-  return listing.customName ?? listing.masterProductName ?? "Unnamed";
-}
-
 function ListingRow({
   listing,
   onEdit,
@@ -911,7 +952,7 @@ function ListingRow({
     <div className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-foreground truncate">
+          <span className="line-clamp-2 min-w-0 break-words text-base font-medium text-foreground">
             {displayName}
           </span>
           {listingNeedsWeight(listing) ? (
@@ -957,23 +998,24 @@ function ListingRow({
         <Button
           variant="ghost"
           size="icon"
-          className="size-8"
+          className="size-11"
           onClick={onEdit}
           aria-label={`Edit ${displayName}`}
         >
-          <Pencil className="size-3.5" />
+          <Pencil className="size-4" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className="size-8"
+          className="size-11"
           onClick={onAttributes}
           aria-label={`Ingredients and allergens for ${displayName}`}
         >
-          <ListChecks className="size-3.5" />
+          <ListChecks className="size-4" />
         </Button>
         <Switch
           checked={listing.active}
+          className="mx-2 after:-inset-y-3.5"
           onCheckedChange={onToggle}
           disabled={isPending}
           aria-label={listing.active ? `Deactivate ${displayName}` : `Reactivate ${displayName}`}

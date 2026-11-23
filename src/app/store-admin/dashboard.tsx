@@ -13,7 +13,7 @@ import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
 import { GoLiveCard } from "./go-live-card";
-import { AlertCircle, Camera, ChartColumn, ClipboardList, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck } from "lucide-react";
+import { AlertCircle, Camera, ChartColumn, ClipboardList, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck, type LucideIcon } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -132,229 +132,86 @@ export function StoreAdminDashboard({
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">
+          {/* Daily work first (#725): orders, then messages, then products. */}
+          <NavCard href={`/store-admin/orders?store=${storeParam}`} icon={ShoppingBag} title="Orders">
+            View and manage incoming orders
+          </NavCard>
+
+          <NavCard href={`/store-admin/messages?store=${storeParam}`} icon={MessagesSquare} title="Messages">
+            Customer questions about orders
+            {unreadMessages > 0 && <Badge>{unreadMessages} unread</Badge>}
+          </NavCard>
+
+          <NavCard href={`/store-admin/listings?store=${storeParam}`} icon={Package} title="Products">
+            Manage your listings and stock
+          </NavCard>
+
           {role === "owner" && (
-            <Link href={`/store-admin/plan?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Gem className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Plan</CardTitle>
-                      <CardDescription className="flex items-center gap-2">
-                        {plan.name} plan
-                        {plan.status === "trialing" && <Badge variant="secondary">Free trial</Badge>}
-                        {plan.status === "none" && <Badge variant="outline">Choose a plan</Badge>}
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/plan?store=${storeParam}`} icon={Gem} title="Plan">
+              {plan.name} plan
+              {plan.status === "trialing" && <Badge variant="secondary">Free trial</Badge>}
+              {plan.status === "none" && <Badge variant="outline">Choose a plan</Badge>}
+            </NavCard>
           )}
 
           {role === "owner" && (
-            <Link href={`/store-admin/team?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Users className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Team</CardTitle>
-                      <CardDescription>
-                        Manage staff and invitations
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/team?store=${storeParam}`} icon={Users} title="Team">
+              Manage staff and invitations
+            </NavCard>
           )}
 
           {role === "owner" && (
-            <Link href={`/store-admin/promotions?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <TicketPercent className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Promotions</CardTitle>
-                      <CardDescription>
-                        Coupon codes for your shoppers
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/promotions?store=${storeParam}`} icon={TicketPercent} title="Promotions">
+              Coupon codes for your shoppers
+            </NavCard>
           )}
 
           {role === "owner" && (
-            <Link href={`/store-admin/payouts?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <CreditCard className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Payouts</CardTitle>
-                      <CardDescription className="flex items-center gap-2">
-                        Connect payments
-                        <Badge variant={STATUS_LABELS[stripeOnboardingStatus]?.variant ?? "outline"}>
-                          {STATUS_LABELS[stripeOnboardingStatus]?.label ?? stripeOnboardingStatus}
-                        </Badge>
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/payouts?store=${storeParam}`} icon={CreditCard} title="Payouts">
+              Connect payments
+              <Badge variant={STATUS_LABELS[stripeOnboardingStatus]?.variant ?? "outline"}>
+                {STATUS_LABELS[stripeOnboardingStatus]?.label ?? stripeOnboardingStatus}
+              </Badge>
+            </NavCard>
           )}
 
           {role === "owner" && (
-            <Link href={`/store-admin/whatsapp?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <MessageCircle className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">WhatsApp</CardTitle>
-                      <CardDescription>
-                        Link your number for the Store copilot
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/whatsapp?store=${storeParam}`} icon={MessageCircle} title="WhatsApp">
+              Link your number for the Store copilot
+            </NavCard>
           )}
 
           {role === "owner" && (
-            <Link href={`/store-admin/directory?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <MapPin className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Directory listing</CardTitle>
-                      <CardDescription>
-                        Show your store to shoppers nearby and to AI assistants
-                      </CardDescription>
-                      <p className="mt-1 text-sm font-medium text-foreground">
-                        {directoryOrders === 1 ? "1 order" : `${directoryOrders.toLocaleString("en-US")} orders`} from the directory
-                      </p>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard
+              href={`/store-admin/directory?store=${storeParam}`}
+              icon={MapPin}
+              title="Directory listing"
+              extra={
+                <p className="mt-1 text-sm font-medium text-foreground">
+                  {directoryOrders === 1 ? "1 order" : `${directoryOrders.toLocaleString("en-US")} orders`} from the directory
+                </p>
+              }
+            >
+              Show your store to shoppers nearby and to AI assistants
+            </NavCard>
           )}
 
           {role === "owner" && (
-            <Link href={`/store-admin/shipping?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Truck className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Shipping</CardTitle>
-                      <CardDescription>
-                        Ship dry goods to shoppers by parcel
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-          )}
-
-          <Link href={`/store-admin/orders?store=${storeParam}`}>
-            <Card className="transition-shadow hover:shadow-md">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                    <ShoppingBag className="size-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">Orders</CardTitle>
-                    <CardDescription>
-                      View and manage incoming orders
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-            </Card>
-          </Link>
-
-          <Link href={`/store-admin/messages?store=${storeParam}`}>
-            <Card className="transition-shadow hover:shadow-md">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                    <MessagesSquare className="size-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">Messages</CardTitle>
-                    <CardDescription className="flex items-center gap-2">
-                      Customer questions about orders
-                      {unreadMessages > 0 && <Badge>{unreadMessages} unread</Badge>}
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-            </Card>
-          </Link>
-
-          {role === "owner" && (
-            <Link href={`/store-admin/copilot?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <MessageSquare className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Copilot</CardTitle>
-                      <CardDescription>
-                        Report stock in a sentence
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/shipping?store=${storeParam}`} icon={Truck} title="Shipping">
+              Ship dry goods to shoppers by parcel
+            </NavCard>
           )}
 
           {role === "owner" && (
-            <Link href={`/store-admin/purchase-orders?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <ClipboardList className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Purchase orders</CardTitle>
-                      <CardDescription>
-                        Order from your wholesalers
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/copilot?store=${storeParam}`} icon={MessageSquare} title="Copilot">
+              Report stock in a sentence
+            </NavCard>
+          )}
+
+          {role === "owner" && (
+            <NavCard href={`/store-admin/purchase-orders?store=${storeParam}`} icon={ClipboardList} title="Purchase orders">
+              Order from your wholesalers
+            </NavCard>
           )}
 
           {role !== "owner" && !plan.readOnly && plan.reportsAllowed && (
@@ -373,58 +230,16 @@ export function StoreAdminDashboard({
             </div>
           )}
 
-          <Link href={`/store-admin/listings?store=${storeParam}`}>
-            <Card className="transition-shadow hover:shadow-md">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                    <Package className="size-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">Products</CardTitle>
-                    <CardDescription>
-                      Manage your listings and stock
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-            </Card>
-          </Link>
-
           {role !== "owner" && !plan.readOnly && (
-            <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Camera className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Shelf photos</CardTitle>
-                      <CardDescription>Photograph shelves to draft new listings</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/listings/from-photos?store=${storeParam}`} icon={Camera} title="Shelf photos">
+              Photograph shelves to draft new listings
+            </NavCard>
           )}
 
           {role === "owner" && plan.analyticsAllowed && (
-            <Link href={`/store-admin/analytics?store=${storeParam}`}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                      <ChartColumn className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Analytics</CardTitle>
-                      <CardDescription>Sales, best sellers and repeat shoppers</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <NavCard href={`/store-admin/analytics?store=${storeParam}`} icon={ChartColumn} title="Analytics">
+              Sales, best sellers and repeat shoppers
+            </NavCard>
           )}
           {role === "owner" && !plan.analyticsAllowed && (
             <PlanLocked
@@ -457,5 +272,42 @@ export function StoreAdminDashboard({
         </div>
       </main>
     </div>
+  );
+}
+
+/** One dashboard link. Flat: hover and focus change the border and tone, never a shadow. */
+function NavCard({
+  href,
+  icon: Icon,
+  title,
+  children,
+  extra,
+}: {
+  href: string;
+  icon: LucideIcon;
+  title: string;
+  children: React.ReactNode;
+  extra?: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group/nav block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      <Card className="h-full transition-colors group-hover/nav:bg-muted/40 group-hover/nav:ring-foreground/25">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+              <Icon className="size-5 text-primary" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="text-base">{title}</CardTitle>
+              <CardDescription className="flex flex-wrap items-center gap-2">{children}</CardDescription>
+              {extra}
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+    </Link>
   );
 }

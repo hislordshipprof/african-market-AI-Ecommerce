@@ -25,6 +25,9 @@ import {
 import type { PickBatchView } from "@/lib/order/batch";
 import type { BatchPickLine, BatchSplit } from "@/lib/order/batch-pick-list";
 import { STAFF_GENERIC_ERROR } from "@/lib/order/staff-copy";
+import { formatClockInZone } from "@/lib/format";
+import { UpdatesPaused } from "../../updates-paused";
+import { ActionError } from "../../action-error";
 
 const STATUS_LABELS: Record<string, string> = {
   ACCEPTED: "Not started",
@@ -40,8 +43,6 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const PACKING = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
-
-const time = (value: Date | string) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function ToteLetter({ letter, size = "sm" }: { letter: string; size?: "sm" | "lg" }) {
   return (
@@ -89,6 +90,7 @@ function PickRow(props: {
   line: BatchPickLine;
   canPick: boolean;
   disabled: boolean;
+  error: string | null;
   onPickAll: () => void;
   onShort: () => void;
 }) {
@@ -133,6 +135,7 @@ function PickRow(props: {
           </Button>
         </div>
       )}
+      <ActionError message={props.error} className="mt-2" />
       {!line.open && (
         <p className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
           <CheckCircle2 className="size-4" aria-hidden /> Done
@@ -142,18 +145,27 @@ function PickRow(props: {
   );
 }
 
-export function PackingScreen({ initial, storeParam }: { initial: PickBatchView; storeParam: string }) {
+export function PackingScreen({ initial, storeParam, timeZone }: { initial: PickBatchView; storeParam: string; timeZone: string }) {
   const [batch, setBatch] = useState<PickBatchView | null>(initial);
   const [isPending, startTransition] = useTransition();
+  const [isRetrying, startRetry] = useTransition();
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(() => new Date());
   const [shortLine, setShortLine] = useState<BatchPickLine | null>(null);
   const [unitsFound, setUnitsFound] = useState("0");
+  /** The last failed action, keyed by the line, bag or button it was for. */
+  const [actionError, setActionError] = useState<{ key: string; message: string } | null>(null);
+  const errorFor = (key: string) => (actionError?.key === key ? actionError.message : null);
   const ordersHref = `/store-admin/orders?store=${encodeURIComponent(storeParam)}`;
 
   const refresh = useCallback(async () => {
     try {
       setBatch(await readBatchAction(initial.batchId));
+      setRefreshFailed(false);
+      setLastRefreshed(new Date());
     } catch {
-      // A failed poll keeps the last list; the next one tries again.
+      // A failed poll keeps the last list and says so; the next one tries again.
+      setRefreshFailed(true);
     }
   }, [initial.batchId]);
 
@@ -162,7 +174,9 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
     return () => clearInterval(interval);
   }, [refresh]);
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, done: string, after?: () => void) {
+  /** A failure stays beside what it was for (`key`); success is a transient toast (#725). */
+  function run(key: string, action: () => Promise<{ ok: boolean; error?: string }>, done: string, after?: () => void) {
+    setActionError(null);
     startTransition(async () => {
       let result: { ok: boolean; error?: string };
       try {
@@ -171,7 +185,7 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
         result = { ok: false, error: STAFF_GENERIC_ERROR };
       }
       if (!result.ok) {
-        toast.error(result.error ?? STAFF_GENERIC_ERROR);
+        setActionError({ key, message: result.error ?? STAFF_GENERIC_ERROR });
         return;
       }
       toast.success(done);
@@ -202,11 +216,12 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
     if (!shortLine) return;
     const found = Number(unitsFound);
     if (!Number.isInteger(found) || found < 0 || found >= shortTotal) {
-      toast.error(`Enter a whole number from 0 to ${shortTotal - 1}`);
+      setActionError({ key: "short", message: `Enter a whole number from 0 to ${shortTotal - 1}` });
       return;
     }
     const line = shortLine;
     run(
+      "short",
       () => pickBatchLineAction(batch!.batchId, line.listingVariantId, found),
       "Customers asked to choose a swap or refund",
       () => setShortLine(null),
@@ -234,6 +249,13 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
       </header>
 
       <main className="mx-auto max-w-2xl px-4 py-5">
+        <UpdatesPaused
+          paused={refreshFailed}
+          lastUpdated={lastRefreshed}
+          timeZone={timeZone}
+          retrying={isRetrying}
+          onRetry={() => startRetry(refresh)}
+        />
         <section aria-label="Bags" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {batch.totes.map((tote) => (
             <div key={tote.orderId} className="flex items-center gap-2.5 rounded-xl border border-border bg-card p-2.5" data-testid="tote">
@@ -244,7 +266,7 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
                 {tote.fulfillment === "courier" && (
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Truck className="size-3" aria-hidden />
-                    {tote.readyEstimateAt && PACKING.includes(tote.status) ? `Ready by ${time(tote.readyEstimateAt)}` : "Courier"}
+                    {tote.readyEstimateAt && PACKING.includes(tote.status) ? `Ready by ${formatClockInZone(tote.readyEstimateAt, timeZone)}` : "Courier"}
                   </p>
                 )}
                 {tote.fulfillment === "ship" && (
@@ -273,11 +295,13 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
                   line={line}
                   canPick={batch.packingStarted}
                   disabled={isPending}
+                  error={errorFor(line.listingVariantId)}
                   onPickAll={() => {
                     const total = line.splits.filter((s) => s.status === "pending").reduce((n, s) => n + s.qty, 0);
-                    run(() => pickBatchLineAction(batch.batchId, line.listingVariantId, total), `${line.name} picked`);
+                    run(line.listingVariantId, () => pickBatchLineAction(batch.batchId, line.listingVariantId, total), `${line.name} picked`);
                   }}
                   onShort={() => {
+                    setActionError(null);
                     setUnitsFound("0");
                     setShortLine(line);
                   }}
@@ -290,14 +314,16 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
         {batch.totes.some((tote) => tote.canMarkReady) && (
           <section className="mt-6 space-y-2" aria-label="Orders ready to close">
             {batch.totes.filter((tote) => tote.canMarkReady).map((tote) => (
-              <Button
-                key={tote.orderId}
-                className="min-h-12 w-full rounded-full"
-                onClick={() => run(() => markReadyAction(tote.orderId), `Order #${tote.number} marked ready`)}
-                disabled={isPending}
-              >
-                <CheckCircle2 className="mr-2 size-4" aria-hidden /> Mark #{tote.number} ready (bag {tote.letter})
-              </Button>
+              <div key={tote.orderId} className="space-y-2">
+                <Button
+                  className="min-h-12 w-full rounded-full"
+                  onClick={() => run(tote.orderId, () => markReadyAction(tote.orderId), `Order #${tote.number} marked ready`)}
+                  disabled={isPending}
+                >
+                  <CheckCircle2 className="mr-2 size-4" aria-hidden /> Mark #{tote.number} ready (bag {tote.letter})
+                </Button>
+                <ActionError message={errorFor(tote.orderId)} />
+              </div>
             ))}
           </section>
         )}
@@ -305,11 +331,12 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
         <Button
           variant="outline"
           className="mt-6 min-h-12 w-full rounded-full"
-          onClick={() => run(() => leaveBatchAction(batch.batchId), pickable.length > 0 ? "Left the batch" : "Batch finished")}
+          onClick={() => run("leave", () => leaveBatchAction(batch.batchId), pickable.length > 0 ? "Left the batch" : "Batch finished")}
           disabled={isPending}
         >
           {pickable.length > 0 ? "Leave batch" : "Finish batch"}
         </Button>
+        <ActionError message={errorFor("leave")} className="mt-2" />
         {pickable.length > 0 && (
           <p className="mt-2 text-center text-xs text-muted-foreground">Leaving keeps what is picked; each order goes back to the order list.</p>
         )}
@@ -318,9 +345,10 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
       {!batch.packingStarted && (
         <div className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-card/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
           <div className="mx-auto max-w-2xl">
+            <ActionError message={errorFor("start")} className="mb-2" />
             <Button
               className="min-h-12 w-full rounded-full text-base"
-              onClick={() => run(() => startBatchPackingAction(batch.batchId), "Packing started")}
+              onClick={() => run("start", () => startBatchPackingAction(batch.batchId), "Packing started")}
               disabled={isPending}
             >
               Start packing
@@ -352,6 +380,7 @@ export function PackingScreen({ initial, storeParam }: { initial: PickBatchView;
               onChange={(event) => setUnitsFound(event.target.value)}
               className="mt-1.5 h-12 text-lg"
             />
+            <ActionError message={errorFor("short")} className="mt-2" />
           </div>
           <DialogFooter>
             <Button variant="outline" className="min-h-11 rounded-full" onClick={() => setShortLine(null)}>

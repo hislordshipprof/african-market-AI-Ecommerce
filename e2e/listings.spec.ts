@@ -101,6 +101,45 @@ test.describe("Listing management (authenticated)", () => {
     await expect(page.getByRole("option").first()).toBeVisible({ timeout: 10000 });
   });
 
+  test("search filters active and inactive listings by name and clears from an empty result", async ({ page }) => {
+    await page.goto(LISTINGS_URL);
+    const search = page.getByRole("searchbox", { name: "Search products" });
+    expect((await search.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+
+    await search.fill("garri");
+    const active = section(page, "Active listings");
+    const inactive = section(page, "Inactive listings");
+    await expect(active.getByText("Yellow Garri (Ijebu)")).toBeVisible();
+    await expect(active.getByText("Palm Oil", { exact: true })).toHaveCount(0);
+    await expect(active.getByText(/^\d+ of \d+ listings$/)).toBeVisible();
+    await expect(inactive.getByText(/^Garri \(Seasonal/)).toBeVisible();
+    await expect(inactive.getByText(/^1 of \d+ deactivated listings?$/)).toBeVisible();
+
+    await search.fill("zzzz no such product");
+    await expect(page.getByText("No products match “zzzz no such product”.")).toBeVisible();
+    await page.getByRole("button", { name: "Clear search" }).click();
+    await expect(search).toHaveValue("");
+    await expect(active.getByText("Palm Oil", { exact: true })).toBeVisible();
+    await expect(active.getByText(/^\d+ listings$/)).toBeVisible();
+  });
+
+  test("row actions are 44px touch targets and the page fits 390px", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(LISTINGS_URL);
+    await expect(page.getByRole("button", { name: "Edit Palm Oil", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    for (const name of ["Edit Palm Oil", "Ingredients and allergens for Palm Oil"]) {
+      const box = await page.getByRole("button", { name, exact: true }).boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+    const toggleHit = await page.getByRole("switch", { name: "Deactivate Palm Oil" }).evaluate((el) => {
+      const after = getComputedStyle(el, "::after");
+      return el.getBoundingClientRect().height - parseFloat(after.top) - parseFloat(after.bottom);
+    });
+    expect(toggleHit).toBeGreaterThanOrEqual(44);
+  });
+
   test("create a listing with a variant", async ({ page }) => {
     await createListingViaUI(page, {
       name: `E2E Garri ${Date.now()}`,

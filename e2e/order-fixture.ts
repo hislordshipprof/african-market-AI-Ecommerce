@@ -144,6 +144,12 @@ export async function setInboxOrderStatus(number: number, status: string): Promi
   });
 }
 
+export async function setOrderReadyEstimate(number: number, readyEstimateAt: Date): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.updateMany({ where: { storeId, number }, data: { readyEstimateAt } });
+  });
+}
+
 export async function seedCaptureLabel(number: number): Promise<string> {
   return withMama(async (tx, storeId) => {
     const order = await tx.order.findFirstOrThrow({

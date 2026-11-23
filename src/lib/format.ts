@@ -30,3 +30,8 @@ export function formatInZone(date: Date | string, timeZone: string, options: Int
     return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "America/New_York" }).format(at);
   }
 }
+
+/** An operational clock time in the store's zone, labelled with the zone: "3:05 PM CST". */
+export function formatClockInZone(date: Date | string, timeZone: string): string {
+  return formatInZone(date, timeZone, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+}

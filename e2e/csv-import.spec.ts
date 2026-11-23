@@ -470,12 +470,26 @@ test.describe("CSV import (authenticated)", () => {
     }
   });
 
-  test("every invalid row stays a toast and does not open the Errors section", async ({ page }) => {
+  test("the CSV chooser has a name and a visible focus ring", async ({ page }) => {
+    await page.goto(IMPORT_URL);
+    const chooser = page.getByLabel("Choose a CSV file");
+    await expect(chooser).toHaveAttribute("type", "file");
+    await page.keyboard.press("Tab");
+    for (let i = 0; i < 20 && !(await chooser.evaluate((el) => el === document.activeElement)); i++) {
+      await page.keyboard.press("Tab");
+    }
+    const ring = await chooser.evaluate((el) => getComputedStyle(el.parentElement!).boxShadow);
+    expect(ring).not.toBe("none");
+  });
+
+  test("every invalid row stays an inline upload error and does not open the Errors section", async ({ page }) => {
     const csvPath = writeTempCsv("name,price\n,3.00\nBad Price,abc\n");
     await page.goto(IMPORT_URL);
     await page.locator("input[type='file']").setInputFiles(csvPath);
     await page.click("text=Upload & Preview");
-    await expect(page.getByText("Missing required field: name")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("alert").filter({ hasText: "Missing required field: name" })).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(5_000);
+    await expect(page.getByRole("alert").filter({ hasText: "Missing required field: name" })).toBeVisible();
     await expect(
       page.locator("[data-slot='card-title']").filter({ hasText: /^Errors$/ }),
     ).toHaveCount(0);
@@ -652,7 +666,7 @@ test.describe("CSV import (authenticated)", () => {
       await dropped;
       await page.unroute("**/*");
       await page.waitForTimeout(1_000);
-      const lostText = (await page.locator("[data-sonner-toast]").allInnerTexts()).join("\n");
+      const lostText = (await page.getByRole("alert").allInnerTexts()).join("\n");
       expect(lostText).toContain("We couldn't confirm the import. Press Import again. Nothing will be imported twice.");
       const ui = await page.evaluate(() => {
         const text = document.body.innerText;
@@ -870,7 +884,7 @@ test.describe("CSV import (authenticated)", () => {
       await page.locator("input[type='file']").setInputFiles(csvPath);
       await page.click("text=Upload & Preview");
       await expect.poll(() => status, { timeout: 20_000 }).toBe(500);
-      await expect(page.locator("[data-sonner-toast]")).toContainText(
+      await expect(page.getByRole("alert").filter({ hasText: "Upload failed." })).toContainText(
         "Upload failed. The file may be too large or the server is unavailable.",
         { timeout: 20_000 },
       );
