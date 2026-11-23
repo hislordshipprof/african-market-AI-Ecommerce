@@ -92,8 +92,10 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567), a
     await expect(pay).toBeEnabled({ timeout: 15_000 });
     await pay.click();
     await expect(page).toHaveURL(/\/order\/.+placed=1/, { timeout: 20_000 });
-    await expect(page.getByText("Fulfillment: Shipping")).toBeVisible();
-    await expect(page.getByText(`Carrier: USPS Ground Advantage · ${fee}`)).toBeVisible();
+    const status = page.getByRole("region", { name: "Order placed" });
+    await expect(status).toContainText(/Fulfillment:?\s*Shipping/);
+    await expect(status).toContainText(/Carrier:?\s*USPS Ground Advantage/);
+    await expect(page.getByText(`Shipping: ${fee}`)).toBeVisible();
 
     const order = await scoped((tx) => tx.order.findFirst({ where: { storeId: store.id } }));
     expect(order).toMatchObject({ fulfillment: "ship", shippingCarrier: "USPS", deliveryState: "MD" });
@@ -116,7 +118,7 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567), a
     });
     expect(await signed.json()).toEqual({ received: true, recorded: true });
     await page.reload();
-    await expect(page.getByText("Status: Shipped")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Shipped", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "9400111899223197428490" })).toHaveAttribute("href", trackingUrl);
     const proof = process.env.PROOF_DIR;
     if (proof) {

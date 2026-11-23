@@ -87,8 +87,8 @@ test("order tracking names each line's product and size, and the fulfillment in 
   });
   try {
     await page.goto(`${BASE}/order/${seeded.orderId}`, { waitUntil: "networkidle" });
-    const details = page.locator("section, div", { has: page.getByRole("heading", { name: "Order details" }) }).last();
-    await expect(details).toContainText("Fulfillment: Pickup");
+    await expect(page.getByRole("region", { name: "Completed" })).toContainText(/Fulfillment:?\s*Pickup/);
+    const details = page.locator("section", { has: page.getByRole("heading", { name: "Receipt" }) });
     const lineName = seeded.lineName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     await expect(details.getByRole("listitem").first()).toHaveText(new RegExp(`^1 × ${lineName}\\s*\\$12\\.50$`));
   } finally {
