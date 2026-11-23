@@ -368,7 +368,7 @@ export function AccountFlow(props: Props) {
                     <span>
                       <strong>{o.number}</strong>
                       <small>
-                        {formatListDate(o.createdAt, Intl.DateTimeFormat().resolvedOptions().timeZone)} ·{" "}
+                        {formatListDate(o.createdAt, Intl.DateTimeFormat().resolvedOptions().timeZone)} ...{" "}
                         {o.lines.length}{" "}
                         {o.lines.length === 1 ? "item" : "items"}
                       </small>
