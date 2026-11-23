@@ -95,7 +95,7 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await page.getByLabel("Email").fill(`approve-${run}@example.com`);
     await page.getByLabel("Phone").fill(`713555${digits.slice(-4)}`);
     await page.getByRole("button", { name: "Send application" }).click();
-    await expect(page.getByRole("alert")).toContainText("Check the highlighted fields.");
+    await expect(page.getByRole("alert").filter({ hasText: "Check the highlighted fields." })).toBeVisible();
     await expect(page.getByLabel("ZIP")).toBeFocused();
     await expect(page.getByLabel("ZIP")).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByLabel("ZIP")).toHaveAccessibleDescription(/5-digit ZIP code/);
