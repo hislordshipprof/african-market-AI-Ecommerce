@@ -167,7 +167,7 @@ export default async function CategoryPage({
               </div>
             )}
             <p className="sf-result-count">
-              {visible.length} {visible.length === 1 ? "listing" : "listings"}
+              {visible.length} {visible.length === 1 ? "product" : "products"}
               {(stock || frozen || pack) && (
                 <>
                   {" "}
@@ -189,7 +189,7 @@ export default async function CategoryPage({
               </ProductListMotion>
             ) : (
               <EmptyState
-                title="No listings found"
+                title="No products found"
                 description="Try clearing your filters or exploring another aisle."
               >
                 <Link
