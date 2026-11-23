@@ -159,6 +159,75 @@ export function AccountFlow(props: Props) {
         <FlowLoading />
       ) : (
         <>
+          <FlowCard title="Your orders">
+            <p className="sf-account-orders-intro">
+              {customer
+                ? `Orders placed at ${props.settings.name} with ${profile?.email || "your email"} appear here, including any from before you had an account.`
+                : "Order history is limited to this market and browser. Your demo profile is shared across markets."}
+            </p>
+            {customer && accountOrders.length ? (
+              <div className="sf-account-list">
+                {accountOrders.map((o) => (
+                  <Link className="sf-account-order sf-account-order--real" href={o.href} key={o.id}>
+                    <span className="sf-account-order-main">
+                      <strong>Order #{o.number}</strong>
+                      <small>
+                        {o.dateLabel} · {o.itemsLabel}
+                      </small>
+                    </span>
+                    <span className="sf-account-order-end">
+                      <strong>{o.amountLabel}</strong>
+                      <small>{o.statusLabel}</small>
+                    </span>
+                    <ChevronRight aria-hidden="true" className="sf-account-order-chevron" />
+                  </Link>
+                ))}
+                {accountOrders.length >= ACCOUNT_ORDER_LIMIT && (
+                  <p className="sf-account-order-cap">
+                    Showing your {ACCOUNT_ORDER_LIMIT} most recent orders.
+                  </p>
+                )}
+              </div>
+            ) : orders.length ? (
+              <div className="sf-account-list">
+                {orders.map((o) => (
+                  <Link
+                    className="sf-account-order"
+                    href={`/account/orders/${encodeURIComponent(o.id)}`}
+                    key={o.id}
+                  >
+                    <span>
+                      <strong>{o.number}</strong>
+                      <small>
+                        {formatListDate(o.createdAt, Intl.DateTimeFormat().resolvedOptions().timeZone)} ·{" "}
+                        {o.lines.length}{" "}
+                        {o.lines.length === 1 ? "item" : "items"}
+                      </small>
+                    </span>
+                    <span>
+                      {statusLabel(o.status)}
+                      <small>
+                        {money(o.finalCents ?? o.quote.totalCents)}
+                      </small>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="No orders yet"
+                description={
+                  customer
+                    ? "Orders placed with your email will appear here."
+                    : "Your demo orders from this market will appear here."
+                }
+              >
+                <Link href="/" className="sf-button">
+                  Start shopping
+                </Link>
+              </EmptyState>
+            )}
+          </FlowCard>
           {!profile ? (
             <FlowCard title="Make yourself at home">
               <p>
@@ -328,75 +397,6 @@ export function AccountFlow(props: Props) {
               )}
             </div>
           )}
-          <FlowCard title={`Orders from ${props.settings.name}`}>
-            <p className="sf-account-orders-intro">
-              {customer
-                ? `Orders placed at this market with ${profile?.email || "your email"} appear here, including any from before you had an account.`
-                : "Order history is limited to this market and browser. Your demo profile is shared across markets."}
-            </p>
-            {customer && accountOrders.length ? (
-              <div className="sf-account-list">
-                {accountOrders.map((o) => (
-                  <Link className="sf-account-order sf-account-order--real" href={o.href} key={o.id}>
-                    <span className="sf-account-order-main">
-                      <strong>Order #{o.number}</strong>
-                      <small>
-                        {o.dateLabel} · {o.itemsLabel}
-                      </small>
-                    </span>
-                    <span className="sf-account-order-end">
-                      <strong>{o.amountLabel}</strong>
-                      <small>{o.statusLabel}</small>
-                    </span>
-                    <ChevronRight aria-hidden="true" className="sf-account-order-chevron" />
-                  </Link>
-                ))}
-                {accountOrders.length >= ACCOUNT_ORDER_LIMIT && (
-                  <p className="sf-account-order-cap">
-                    Showing your {ACCOUNT_ORDER_LIMIT} most recent orders.
-                  </p>
-                )}
-              </div>
-            ) : orders.length ? (
-              <div className="sf-account-list">
-                {orders.map((o) => (
-                  <Link
-                    className="sf-account-order"
-                    href={`/account/orders/${encodeURIComponent(o.id)}`}
-                    key={o.id}
-                  >
-                    <span>
-                      <strong>{o.number}</strong>
-                      <small>
-                        {formatListDate(o.createdAt, Intl.DateTimeFormat().resolvedOptions().timeZone)} ...{" "}
-                        {o.lines.length}{" "}
-                        {o.lines.length === 1 ? "item" : "items"}
-                      </small>
-                    </span>
-                    <span>
-                      {statusLabel(o.status)}
-                      <small>
-                        {money(o.finalCents ?? o.quote.totalCents)}
-                      </small>
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                title="Your first market haul awaits"
-                description={
-                  customer
-                    ? "Orders placed with your email will appear here."
-                    : "Your demo orders from this market will appear here."
-                }
-              >
-                <Link href="/" className="sf-button">
-                  Explore the market
-                </Link>
-              </EmptyState>
-            )}
-          </FlowCard>
         </>
       )}
     </div>

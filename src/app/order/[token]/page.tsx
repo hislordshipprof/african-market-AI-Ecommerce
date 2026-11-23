@@ -4,7 +4,7 @@ import { OrderFlow } from "@/components/storefront/flow/order-flow";
 import { FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
-import { customerStatusLabel } from "@/lib/customer-account/order-history-view";
+import { customerStatusLabel, orderOutcomeMessage } from "@/lib/customer-account/order-history-view";
 import { notFound } from "next/navigation";
 import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications/lookup";
 import { OrderMessages } from "@/components/storefront/flow/order-messages";
@@ -17,6 +17,7 @@ import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
 import { formatClockInZone, money } from "@/lib/format";
+import styles from "./tracking.module.css";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
 
@@ -48,60 +49,116 @@ export default async function OrderPage({
     const messages = realOrder.trackingToken === token
       ? await readCustomerMessages(context.store.id, token).catch(() => null)
       : null;
+    const owner = realOrder.trackingToken === token;
+    const statusLabel = customerStatusLabel(realOrder.status);
+    const refundedCents = realOrder.refundRequests
+      .filter((request) => request.providerStatus === "succeeded")
+      .reduce((sum, request) => sum + request.amountCents, 0);
+    const outcome = orderOutcomeMessage(realOrder, refundedCents);
+    const fulfillment = FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment;
+    const issue = realOrder.issueReports[0];
+    const shipped = realOrder.fulfillment === "ship";
     return (
       <StorefrontShell store={context.store}>
-        <div style={{ maxWidth: 600, margin: "0 auto", padding: "2rem 1rem", display: "grid", gap: 16 }}>
+        <div className={styles.page}>
           <FlowHeading
             title={query.placed === "1" ? "You're all set." : `Order #${realOrder.number}`}
             description={`Order #${realOrder.number} · ${context.store.name}`}
             backHref="/"
             backLabel="Keep shopping"
           />
-          {query.placed === "1" && (
-            <FlowCard>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem", padding: "1rem 0" }}>
-                <SuccessMark />
-                <h2>Order placed</h2>
-              </div>
+          <section className={`flow-card ${styles.status}`} aria-labelledby="order-status">
+            {query.placed === "1" && <SuccessMark />}
+            <p className={styles.eyebrow}>Status</p>
+            <h2 id="order-status">{statusLabel}</h2>
+            {outcome && <p>{outcome}</p>}
+            {query.placed === "1" && (
               <p>
                 Your card has been authorized for {money(realOrder.totalAuthorizedCents)}.
                 You&rsquo;ll be charged the final amount after picking; unused buffer is
                 released.
               </p>
-            </FlowCard>
-          )}
-          {realOrder.trackingToken === token && (
-            <OrderUpdates token={token} publicKey={vapidPublicKey()} storeName={context.store.name} />
-          )}
-          {realOrder.status === "SUBSTITUTION_PENDING" && realOrder.trackingToken === token && (
-            <FlowCard title="An item is short">
-              <p>The store couldn&rsquo;t find everything you ordered. Choose a swap or a refund.</p>
-              <Link className="sf-button" href={`/order/${encodeURIComponent(token)}/substitutions`}>Choose now</Link>
-            </FlowCard>
-          )}
-          <FlowCard title="Order details">
-            <p><strong>Status:</strong> {customerStatusLabel(realOrder.status)}</p>
-            <p><strong>Fulfillment:</strong> {FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment}</p>
-            {scheduled && (
-              <p><strong>Scheduled for:</strong> {scheduled}</p>
             )}
-            {realOrder.fulfillment === "ship" && realOrder.shippingCarrier && (
-              <p><strong>Carrier:</strong> {[realOrder.shippingCarrier, realOrder.shippingService].filter(Boolean).join(" ")} · {money(realOrder.deliveryFeeCents)}</p>
+            <dl className={styles.facts}>
+              <div>
+                <dt>Fulfillment</dt>
+                <dd>{fulfillment}</dd>
+              </div>
+              {scheduled && !outcome && (
+                <div>
+                  <dt>{realOrder.fulfillment === "pickup" ? "Pickup time" : "Delivery time"}</dt>
+                  <dd>{scheduled}</dd>
+                </div>
+              )}
+              {shipped && realOrder.shippingCarrier && (
+                <div>
+                  <dt>Carrier</dt>
+                  <dd>{[realOrder.shippingCarrier, realOrder.shippingService].filter(Boolean).join(" ")}</dd>
+                </div>
+              )}
+              {shipped && realOrder.shippingTrackingNumber && owner && (
+                <div>
+                  <dt>Tracking</dt>
+                  <dd>
+                    {realOrder.shippingTrackingUrl?.startsWith("https://") ? (
+                      <a href={realOrder.shippingTrackingUrl} target="_blank" rel="noopener noreferrer">{realOrder.shippingTrackingNumber}</a>
+                    ) : realOrder.shippingTrackingNumber}
+                  </dd>
+                </div>
+              )}
+            </dl>
+            {realOrder.status === "SUBSTITUTION_PENDING" && owner && (
+              <div className={styles.block}>
+                <h3>An item is short</h3>
+                <p>The store couldn&rsquo;t find everything you ordered. Choose a swap or a refund.</p>
+                <Link className="sf-button" href={`/order/${encodeURIComponent(token)}/substitutions`}>Choose now</Link>
+              </div>
             )}
-            {realOrder.fulfillment === "ship" && realOrder.shippingTrackingNumber && realOrder.trackingToken === token && (
-              <p>
-                <strong>Tracking:</strong>{" "}
-                {realOrder.shippingTrackingUrl?.startsWith("https://") ? (
-                  <a href={realOrder.shippingTrackingUrl} target="_blank" rel="noopener noreferrer">{realOrder.shippingTrackingNumber}</a>
-                ) : realOrder.shippingTrackingNumber}
-              </p>
+            {issue ? (
+              <div className={styles.block}>
+                <h3>Your problem report</h3>
+                <p>{issueStateMessage(issue)}</p>
+              </div>
+            ) : owner && issueWindowOpen(realOrder) ? (
+              <div className={styles.block}>
+                <h3>Something wrong with your order?</h3>
+                <p>Tell us within 48 hours of your order and we&rsquo;ll make it right.</p>
+                <Link className="sf-button" href={`/order/${encodeURIComponent(token)}/report`}>Report a problem</Link>
+              </div>
+            ) : null}
+            {courier && (
+              <div className={styles.block}>
+                <h3>Your courier</h3>
+                <p><strong>{courierBrand(courier.provider as DeliveryProviderName)}</strong></p>
+                {courier.status === "returned" ? (
+                  <p>The courier couldn&rsquo;t complete the drop-off and is taking your order back to the store. The store will contact you.</p>
+                ) : courierInfo?.name ? (
+                  <p>
+                    {courierInfo.name}
+                    {courierInfo.vehicle && ` · ${courierInfo.vehicle}`}
+                    {eta && courier.status !== "delivered" && (
+                      <> · arriving about <span style={{ whiteSpace: "nowrap" }}>{eta}</span></>
+                    )}
+                  </p>
+                ) : (
+                  <p>We&rsquo;re matching your order with a courier.</p>
+                )}
+                {courier.pin && owner && courier.status !== "delivered" && courier.status !== "returned" && (
+                  <p>Give your courier this PIN at the door: <strong className={styles.pin}>{courier.pin}</strong></p>
+                )}
+                {courier.trackingUrl && courier.status !== "delivered" && (
+                  <a className="sf-text-link" href={courier.trackingUrl} target="_blank" rel="noopener noreferrer">Track your courier</a>
+                )}
+              </div>
             )}
+          </section>
+          <FlowCard title="Receipt">
             {realOrder.customer && (
               <p><strong>Customer:</strong> {realOrder.customer.name}</p>
             )}
-            <ul style={{ listStyle: "none", padding: 0, margin: "1rem 0" }}>
+            <ul className={styles.lines}>
               {realOrder.lines.map((line) => (
-                <li key={line.id} style={{ display: "flex", justifyContent: "space-between", padding: "0.25rem 0" }}>
+                <li key={line.id}>
                   <span>{line.qtyOrdered} × {[line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant?.label].filter(Boolean).join(" · ") || "Item"}</span>
                   <span>{money(line.unitPriceCents * line.qtyOrdered)}</span>
                 </li>
@@ -111,35 +168,14 @@ export default async function OrderPage({
             {realOrder.discountCents > 0 && (
               <p><strong>{realOrder.coupon ? `Promo ${realOrder.coupon.code}` : "Promo discount"}:</strong> −{money(realOrder.discountCents)}</p>
             )}
+            {shipped && realOrder.shippingCarrier && (
+              <p><strong>Shipping:</strong> {money(realOrder.deliveryFeeCents)}</p>
+            )}
             {realOrder.serviceFeeCents > 0 && (
               <p><strong>Service fee:</strong> {money(realOrder.serviceFeeCents)}</p>
             )}
             <p><strong>Authorization hold:</strong> {money(realOrder.totalAuthorizedCents)}</p>
           </FlowCard>
-          {courier && (
-            <FlowCard title="Your courier">
-              <p><strong>{courierBrand(courier.provider as DeliveryProviderName)}</strong></p>
-              {courier.status === "returned" ? (
-                <p>The courier couldn&rsquo;t complete the drop-off and is taking your order back to the store. The store will contact you.</p>
-              ) : courierInfo?.name ? (
-                <p>
-                  {courierInfo.name}
-                  {courierInfo.vehicle && ` · ${courierInfo.vehicle}`}
-                  {eta && courier.status !== "delivered" && (
-                    <> · arriving about <span style={{ whiteSpace: "nowrap" }}>{eta}</span></>
-                  )}
-                </p>
-              ) : (
-                <p>We&rsquo;re matching your order with a courier.</p>
-              )}
-              {courier.pin && realOrder.trackingToken === token && courier.status !== "delivered" && courier.status !== "returned" && (
-                <p>Give your courier this PIN at the door: <strong style={{ letterSpacing: "0.2em" }}>{courier.pin}</strong></p>
-              )}
-              {courier.trackingUrl && courier.status !== "delivered" && (
-                <a className="sf-text-link" href={courier.trackingUrl} target="_blank" rel="noopener noreferrer">Track your courier</a>
-              )}
-            </FlowCard>
-          )}
           {proofToken && (
             <FlowCard title="Delivery photo">
               {/* Private route, not the image optimizer: the photo must never be cached publicly. */}
@@ -147,24 +183,17 @@ export default async function OrderPage({
               <img
                 src={`/api/delivery-proof/${encodeURIComponent(proofToken)}`}
                 alt={`Photo of order #${realOrder.number} where it was delivered`}
-                style={{ width: "100%", height: "auto", borderRadius: 8 }}
+                className={styles.photo}
               />
             </FlowCard>
+          )}
+          {owner && (
+            <OrderUpdates token={token} publicKey={vapidPublicKey()} storeName={context.store.name} />
           )}
           {messages && (
             <OrderMessages token={token} storeName={context.store.name} timeZone={context.store.timezone} initialMessages={messages} />
           )}
-          {realOrder.issueReports[0] ? (
-            <FlowCard title="Your problem report">
-              <p>{issueStateMessage(realOrder.issueReports[0])}</p>
-            </FlowCard>
-          ) : realOrder.trackingToken === token && issueWindowOpen(realOrder) ? (
-            <FlowCard title="Something wrong with your order?">
-              <p>Tell us within 48 hours of your order and we&rsquo;ll make it right.</p>
-              <Link className="sf-button" href={`/order/${encodeURIComponent(token)}/report`}>Report a problem</Link>
-            </FlowCard>
-          ) : null}
-          <div style={{ marginTop: "1rem", textAlign: "center" }}>
+          <div className={styles.end}>
             <Link className="sf-button" href="/">Continue shopping</Link>
           </div>
         </div>

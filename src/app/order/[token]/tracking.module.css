@@ -1,0 +1,86 @@
+.page {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 32px 16px;
+  display: grid;
+  gap: 24px;
+  font-size: 16px;
+}
+.page :global(.flow-heading) {
+  margin-bottom: 0;
+}
+.status > h2 {
+  margin-bottom: 8px;
+}
+.status > p {
+  margin-top: 8px;
+}
+.eyebrow {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-muted);
+  margin-bottom: 4px;
+}
+.facts {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+.facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.facts dt {
+  font-weight: 600;
+}
+.facts dt::after {
+  content: ":";
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.block {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--color-line);
+}
+.block h3 {
+  font-size: 16px;
+}
+.block :global(.sf-button) {
+  margin-top: 8px;
+}
+.pin {
+  letter-spacing: 0.2em;
+}
+.lines {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+}
+.photo {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+.end {
+  text-align: center;
+}
+@media (max-width: 700px) {
+  .page {
+    gap: 16px;
+    padding: 24px 16px;
+  }
+}

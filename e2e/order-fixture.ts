@@ -357,3 +357,51 @@ export async function insertRecoveryOrder(input: { number: number; token: string
     }
   });
 }
+
+/** A tracking-page order (#736): its status, slot, courier and settled refund are set directly. */
+export async function insertTrackingOrder(input: {
+  number: number;
+  token: string;
+  status: string;
+  fulfillment?: "pickup" | "courier";
+  pickupSlot?: string;
+  courier?: { name: string; trackingUrl: string };
+  capturedAmountCents?: number | null;
+  refundCents?: number;
+}): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number: input.number } });
+    const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
+    const listing = await tx.listing.findFirstOrThrow({
+      where: { storeId, active: true, variants: { some: {} } },
+      include: { variants: { take: 1 } },
+      orderBy: { id: "asc" },
+    });
+    const paymentIntentId = `pi_e2e_tracking_${input.number}_${Date.now()}`;
+    const order = await tx.order.create({
+      data: {
+        storeId, number: input.number, customerId: customer.id, status: input.status, fulfillment: input.fulfillment ?? "pickup",
+        pickupSlot: input.pickupSlot ?? null, subtotalCents: 1250, bufferCents: 125, totalAuthorizedCents: 1375, totalCents: 1250,
+        capturedAmountCents: input.capturedAmountCents ?? null, refundId: input.refundCents ? `re_e2e_${input.number}` : null,
+        paymentIntentId, trackingToken: input.token,
+        lines: { create: { listingVariantId: listing.variants[0].id, qtyOrdered: 1, unitPriceCents: 1250 } },
+      },
+    });
+    if (input.courier) {
+      await tx.delivery.create({
+        data: {
+          storeId, orderId: order.id, provider: "doordash", externalId: `e2e-tracking-${input.number}-${Date.now()}`, status: "courier_assigned",
+          quoteFeeCents: 699, trackingUrl: input.courier.trackingUrl, courierJson: { name: input.courier.name, vehicle: "Blue Honda Civic" },
+        },
+      });
+    }
+    if (input.refundCents) {
+      await tx.refundRequest.create({
+        data: {
+          storeId, orderId: order.id, paymentIntentId, key: `e2e-tracking-refund-${input.number}-${Date.now()}`, amountCents: input.refundCents,
+          refundApplicationFee: false, state: "CREATED", providerRefundId: `re_e2e_${input.number}`, providerStatus: "succeeded",
+        },
+      });
+    }
+  });
+}
