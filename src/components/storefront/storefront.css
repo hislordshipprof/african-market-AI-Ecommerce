@@ -1752,6 +1752,10 @@
   html:has(.sf-add-bar) {
     scroll-padding-bottom: calc(180px + env(safe-area-inset-bottom));
   }
+  /* Stripe's test-mode button sits above the bottom nav, not over Account; its inline bottom is not !important (#740). */
+  body:has(.sf-storefront) > iframe[title="Stripe developer tools frame"] {
+    bottom: calc(96px + env(safe-area-inset-bottom)) !important;
+  }
   .sf-collection-hero {
     height: 260px;
   }

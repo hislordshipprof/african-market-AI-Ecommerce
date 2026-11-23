@@ -94,8 +94,7 @@ function useBasketQuote(
   lines: readonly CartLine[],
   subtotal: number,
   syncing: boolean,
-  realCheckout: boolean,
-  demo: ReturnType<typeof createDemoServices>,
+  demo: ReturnType<typeof createDemoServices> | null,
   couponRev = 0,
 ) {
   const [response, setResponse] = useState<BasketQuoteResponse | null>(null);
@@ -120,8 +119,8 @@ function useBasketQuote(
       };
     }
     const timer = setTimeout(() => {
-      // Same quote source as checkout: the server quote when checkout takes payment, else the demo one.
-      const request: Promise<CheckoutQuote | null> = realCheckout
+      // Same quote source as checkout: the server quote when checkout takes payment (no demo services), else the demo one.
+      const request: Promise<CheckoutQuote | null> = !demo
         ? quoteCheckoutAction(NO_CONTACT, "pickup").then((result) => (result.ok ? result.quote : null))
         : demo.checkout.quote({
             lines,
@@ -146,7 +145,7 @@ function useBasketQuote(
     };
     // basketKey covers the lines this quote is for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basketKey, syncing, realCheckout, demo]);
+  }, [basketKey, syncing, demo]);
   return basketQuoteView(response, basketKey, subtotal);
 }
 
@@ -158,12 +157,13 @@ export function CartPage({
 }: ShoppingFlowProps & { realCheckout: boolean }) {
   const { lines, subtotal, count, store, refreshCart, syncing, loading, loadFailed, pendingKeys } = useCart();
   const ready = useCartReady();
+  // A live store has no demo services: they refuse to start when demo flows are off (#740).
   const demo = useMemo(
-    () => createDemoServices(settings, catalog, enabled),
-    [settings, catalog, enabled],
+    () => (realCheckout ? null : createDemoServices(settings, catalog, enabled)),
+    [settings, catalog, enabled, realCheckout],
   );
   const [couponRev, setCouponRev] = useState(0);
-  const summary = useBasketQuote(lines, subtotal, syncing, realCheckout, demo, couponRev);
+  const summary = useBasketQuote(lines, subtotal, syncing, demo, couponRev);
   const quote = summary.kind === "quote" ? summary.quote : null;
   const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
@@ -220,7 +220,7 @@ export function CartPage({
         backHref="/"
         backLabel="Keep shopping"
       />
-      {!lines.length && <DemoNotice />}
+      {!lines.length && !realCheckout && <DemoNotice />}
       {!lines.length ? (
         loadFailed ? (
           // Failed-to-load is distinct from a confirmed-empty basket (#708 AC3).
@@ -326,7 +326,7 @@ export function CartPage({
             </FlowCard>
             {/* After the lines, so a phone shows the first line without scrolling (#708 P1). */}
             <AssistantSlot label="Shop with AI" />
-            <DemoNotice />
+            {!realCheckout && <DemoNotice />}
             {!!related.length && (
               <FlowCard>
                 <RailScroller
