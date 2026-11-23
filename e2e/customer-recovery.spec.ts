@@ -45,6 +45,11 @@ test.describe("customer recovery (#724)", () => {
       await expect(field).toHaveCSS("font-size", "16px");
     }
     expect((await note.boundingBox())?.height).toBeGreaterThanOrEqual(120);
+    const card = (await page.locator(".flow-card", { hasText: "What went wrong?" }).boundingBox())!;
+    for (const field of [select, note]) {
+      const box = (await field.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(card.x + card.width - 16);
+    }
     await expect(note).toHaveCSS("font-size", "16px");
 
     await select.focus();

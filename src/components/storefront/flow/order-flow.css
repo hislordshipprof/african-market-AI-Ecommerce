@@ -115,6 +115,7 @@
 }
 .of-form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   font-size: 16px;
 }
@@ -123,6 +124,7 @@
   font-weight: 600;
 }
 .of-form fieldset {
+  min-width: 0;
   border: 1px solid var(--color-line);
   border-radius: 12px;
   padding: 16px;
