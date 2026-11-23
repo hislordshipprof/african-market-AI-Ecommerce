@@ -110,7 +110,7 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
                 <span className="sf-hero-subject-label">{itemSubject.altName || itemSubject.displayName}</span>
               </div>}
               <div className="sf-glass-pill sf-glass-one"><Store size={18} aria-hidden />{pickupEnabled ? `Pickup in ${pickupMinutes} min` : "Your neighborhood favorites"}</div>
-              <div className="sf-glass-pill sf-glass-two"><ShieldCheck size={18} aria-hidden />No swaps without your say</div>
+              <div className="sf-glass-pill sf-glass-two"><ShieldCheck size={18} aria-hidden />We ask before any swap</div>
               <svg className="sf-round-badge" style={{ animationPlayState: running ? "running" : "paused" }} viewBox="0 0 120 120" aria-hidden>
                 <defs><path id={`${badgeId}-${i}`} d="M60,60m-44,0a44,44 0 1,1 88,0a44,44 0 1,1 -88,0" /></defs>
                 <text><textPath href={`#${badgeId}-${i}`} textLength="276">FROM OUR SHELVES · TO YOUR KITCHEN · </textPath></text>
@@ -145,7 +145,7 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
           </div>
         </div>}
       </div>
-      <div className="sf-reassurance sf-container"><span><Store size={16} />Your neighborhood store, online</span><span><ShieldCheck size={16} />No swaps without your say</span><span><Truck size={16} />Local delivery & easy pickup</span></div>
+      <div className="sf-reassurance sf-container"><span><Store size={16} />Your neighborhood store, online</span><span><ShieldCheck size={16} />We ask before any swap</span><span><Truck size={16} />Local delivery & easy pickup</span></div>
       <Link href="/categories/spices-and-seasonings" className="sf-hero-offer"><strong>Make room for a little spice.</strong><span>Explore the pantry <ArrowRight size={16} /></span></Link>
     </section>
   );
