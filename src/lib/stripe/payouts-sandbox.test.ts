@@ -3,7 +3,9 @@ import Stripe from "stripe";
 import { stripeProvider } from "./provider";
 import { sandboxConnectedAccountId } from "./test-sandbox-account";
 
-const hasKey = !!process.env.STRIPE_SECRET_KEY;
+// Opt-in (decision 2026-11-23-03): the sandbox account's payouts grow with every e2e charge (5,000+ transactions
+// per payout by 2026-11-23), so reading them outgrew any CI timeout. Run with STRIPE_LIVE_TESTS=1.
+const hasKey = !!process.env.STRIPE_SECRET_KEY && process.env.STRIPE_LIVE_TESTS === "1";
 
 // Reads the sandbox account's real payouts; creates nothing (#548).
 describe.skipIf(!hasKey)("Stripe payouts sandbox (#548)", () => {
