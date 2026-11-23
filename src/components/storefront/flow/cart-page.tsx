@@ -94,7 +94,6 @@ function useBasketQuote(
   lines: readonly CartLine[],
   subtotal: number,
   syncing: boolean,
-  realCheckout: boolean,
   demo: ReturnType<typeof createDemoServices> | null,
   couponRev = 0,
 ) {
@@ -120,7 +119,7 @@ function useBasketQuote(
       };
     }
     const timer = setTimeout(() => {
-      // Same quote source as checkout: the server quote when checkout takes payment, else the demo one.
+      // Same quote source as checkout: the server quote when checkout takes payment (no demo services), else the demo one.
       const request: Promise<CheckoutQuote | null> = !demo
         ? quoteCheckoutAction(NO_CONTACT, "pickup").then((result) => (result.ok ? result.quote : null))
         : demo.checkout.quote({
@@ -146,7 +145,7 @@ function useBasketQuote(
     };
     // basketKey covers the lines this quote is for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basketKey, syncing, realCheckout, demo]);
+  }, [basketKey, syncing, demo]);
   return basketQuoteView(response, basketKey, subtotal);
 }
 
@@ -164,7 +163,7 @@ export function CartPage({
     [settings, catalog, enabled, realCheckout],
   );
   const [couponRev, setCouponRev] = useState(0);
-  const summary = useBasketQuote(lines, subtotal, syncing, realCheckout, demo, couponRev);
+  const summary = useBasketQuote(lines, subtotal, syncing, demo, couponRev);
   const quote = summary.kind === "quote" ? summary.quote : null;
   const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
