@@ -21,7 +21,7 @@ function rangeQuery(range: AnalyticsRange): string {
   return range.preset === "custom" ? `range=custom&from=${range.from}&to=${range.to}` : `range=${range.preset}`;
 }
 
-function Header({ slug, name, subtitle }: { slug: string; name: string; subtitle: string }) {
+function Header({ slug, name, range }: { slug: string; name: string; range?: string }) {
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
@@ -33,8 +33,8 @@ function Header({ slug, name, subtitle }: { slug: string; name: string; subtitle
           <span className="text-sm font-semibold">Dashboard</span>
         </Link>
         <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold text-foreground">{name}</h1>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
+          <h1 className="truncate text-base font-semibold text-foreground">Analytics</h1>
+          <p className="text-xs text-muted-foreground">{range ? `${name} · ${range}` : name}</p>
         </div>
       </div>
     </header>
@@ -195,7 +195,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   if (!planAllows(plan, "analytics-dashboard")) {
     return (
       <div className="min-h-dvh bg-background">
-        <Header slug={store.slug} name={store.name} subtitle="Analytics" />
+        <Header slug={store.slug} name={store.name} />
         <main className="mx-auto max-w-5xl px-4 py-6">
           <PlanLocked
             title="Analytics dashboard"
@@ -221,7 +221,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
   return (
     <div className="min-h-dvh bg-background">
-      <Header slug={store.slug} name={store.name} subtitle={`Analytics · ${fmtDay(range.from)} to ${fmtDay(range.to)}, store time`} />
+      <Header slug={store.slug} name={store.name} range={`${fmtDay(range.from)} to ${fmtDay(range.to)}, store time`} />
 
       <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <nav aria-label="Analytics sections" className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 py-2 text-sm">
