@@ -107,6 +107,22 @@ const STORE_CANCEL_REASON_LABELS: Record<StoreCancelReason, string> = {
 
 const STORE_CANCELLABLE: readonly string[] = CANCELLABLE_BEFORE_CAPTURE;
 
+/** Before accepting the owner sees what was ordered; after, the same lines are the pick list. */
+const LINES_SHOWN: readonly string[] = ["AUTHORIZED", "ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
+
+/** How the order leaves the store, so the owner can decide before accepting (#742). */
+function fulfillmentLine(order: StoreOrderRow): string {
+  const street = [order.deliveryLine1, order.deliveryLine2].filter(Boolean).join(", ");
+  const area = order.deliveryCity ? `${order.deliveryCity}, ${order.deliveryState} ${order.deliveryZip}` : "";
+  if (order.fulfillment === "pickup") return "Pickup at the store";
+  if (order.fulfillment === "store-delivery") {
+    return `Store delivery to ${[street, area].filter(Boolean).join(", ")}${order.leaveAtDoor ? " · Leave at door" : ""}`;
+  }
+  if (order.fulfillment === "courier") return area ? `Courier delivery to ${area}` : "Courier delivery";
+  const carrier = [order.shippingCarrier, order.shippingService].filter(Boolean).join(" ");
+  return `Shipping${carrier ? ` · ${carrier}` : ""}${street ? ` to ${[street, area].filter(Boolean).join(", ")}` : ""}`;
+}
+
 function orderCustomerLabel(name: string, phone: string | null): string {
   const trimmed = phone?.trim() ?? "";
   if (!trimmed) return name;
@@ -564,32 +580,13 @@ export function OrderInbox({
                     {selectedOrder.notes}
                   </p>
                 )}
-                {selectedOrder.fulfillment === "store-delivery" && selectedOrder.deliveryLine1 && (
-                  <p className="mt-2 text-sm text-foreground">
-                    {selectedOrder.deliveryLine1}
-                    {selectedOrder.deliveryLine2 ? `, ${selectedOrder.deliveryLine2}` : ""}
-                    {", "}
-                    {selectedOrder.deliveryCity}, {selectedOrder.deliveryState} {selectedOrder.deliveryZip}
-                    {selectedOrder.leaveAtDoor ? " · Leave at door" : ""}
-                  </p>
-                )}
-                {selectedOrder.fulfillment === "ship" && (
-                  <p className="mt-2 flex items-start gap-1.5 text-sm text-foreground">
-                    <Package className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span>
-                      Shipping{selectedOrder.shippingCarrier ? ` · ${[selectedOrder.shippingCarrier, selectedOrder.shippingService].filter(Boolean).join(" ")}` : ""}
-                      {selectedOrder.deliveryLine1 && (
-                        <>
-                          {" to "}
-                          {selectedOrder.deliveryLine1}
-                          {selectedOrder.deliveryLine2 ? `, ${selectedOrder.deliveryLine2}` : ""}
-                          {", "}
-                          {selectedOrder.deliveryCity}, {selectedOrder.deliveryState} {selectedOrder.deliveryZip}
-                        </>
-                      )}
-                    </span>
-                  </p>
-                )}
+                <p className="mt-2 flex items-start gap-1.5 text-sm text-foreground" data-testid="order-fulfillment">
+                  {(() => {
+                    const Icon = selectedOrder.fulfillment === "pickup" ? ShoppingBag : selectedOrder.fulfillment === "ship" ? Package : Truck;
+                    return <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />;
+                  })()}
+                  <span>{fulfillmentLine(selectedOrder)}</span>
+                </p>
                 {selectedOrder.status === "REFUND_FAILED" && (
                   <p className="mt-2 text-sm text-destructive">
                     {REFUND_FAILED_STAFF_COPY}
@@ -619,22 +616,10 @@ export function OrderInbox({
                     timeZone={timeZone}
                   />
                 )}
-                {selectedOrder.status === "AUTHORIZED" && (
-                  <Button
-                    className="mb-4 min-h-12 w-full rounded-full"
-                    onClick={() => handleAcceptClick(selectedOrder.id)}
-                    disabled={isPending}
-                  >
-                    <Check className="mr-2 size-4" /> Accept order
-                  </Button>
-                )}
-
-                {(selectedOrder.status === "ACCEPTED" ||
-                  selectedOrder.status === "PICKING" ||
-                  selectedOrder.status === "SUBSTITUTION_PENDING") && (
-                  <div className="mb-4">
-                    <h3 className="mb-2 text-sm font-semibold text-foreground">
-                      Pick list
+                {LINES_SHOWN.includes(selectedOrder.status) && (
+                  <section className="mb-4" aria-labelledby="order-lines-heading">
+                    <h3 id="order-lines-heading" className="mb-2 text-sm font-semibold text-foreground">
+                      {selectedOrder.status === "AUTHORIZED" ? "Items" : "Pick list"}
                     </h3>
                     {selectedOrder.pickBatchId && (
                       <p className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm text-foreground">
@@ -684,7 +669,7 @@ export function OrderInbox({
                               </div>
                             )}
                           </div>
-                          {line.status === "pending" && selectedOrder.pickBatchId ? null : line.status === "pending" ? (
+                          {line.status === "pending" && (selectedOrder.pickBatchId || selectedOrder.status === "AUTHORIZED") ? null : line.status === "pending" ? (
                             <div className="ml-auto flex shrink-0 gap-2">
                               <Button
                                 variant="ghost"
@@ -716,7 +701,17 @@ export function OrderInbox({
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </section>
+                )}
+
+                {selectedOrder.status === "AUTHORIZED" && (
+                  <Button
+                    className="mb-4 min-h-12 w-full rounded-full"
+                    onClick={() => handleAcceptClick(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <Check className="mr-2 size-4" /> Accept order
+                  </Button>
                 )}
 
                 <ActionError message={errorFor(selectedOrder.id)} className="mb-4" />

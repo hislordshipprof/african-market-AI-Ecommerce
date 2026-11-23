@@ -29,6 +29,8 @@ export async function insertInboxOrder(input: {
   platformResolved?: boolean;
   /** Goods discount from a store coupon (#557); subtotal stays the goods before it. */
   discountCents?: number;
+  /** A store-delivery order to this address, with its fee in the total (#742). */
+  delivery?: { line1: string; city: string; state: string; zip: string; feeCents: number };
 }): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
@@ -54,11 +56,16 @@ export async function insertInboxOrder(input: {
         number: input.number,
         customerId: customer.id,
         status: input.status,
-        fulfillment: "pickup",
+        fulfillment: input.delivery ? "store-delivery" : "pickup",
         subtotalCents: amount,
         bufferCents: 100,
-        totalAuthorizedCents: amount + 100,
-        totalCents: amount,
+        totalAuthorizedCents: amount + (input.delivery?.feeCents ?? 0) + 100,
+        totalCents: amount + (input.delivery?.feeCents ?? 0),
+        deliveryFeeCents: input.delivery?.feeCents ?? 0,
+        deliveryLine1: input.delivery?.line1 ?? null,
+        deliveryCity: input.delivery?.city ?? null,
+        deliveryState: input.delivery?.state ?? null,
+        deliveryZip: input.delivery?.zip ?? null,
         capturedAmountCents: input.capturedAmountCents,
         discountCents,
         couponId: coupon?.id ?? null,
