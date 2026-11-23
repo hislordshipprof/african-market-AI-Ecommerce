@@ -829,7 +829,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Product name"
                   autoComplete="off"
-                  className="h-12 pl-10 text-base md:text-base"
+                  className="h-12 pl-10 text-base md:text-base [&::-webkit-search-cancel-button]:appearance-none"
                 />
               </div>
             </div>
@@ -1015,6 +1015,7 @@ function ListingRow({
         </Button>
         <Switch
           checked={listing.active}
+          className="mx-2 after:-inset-y-3.5"
           onCheckedChange={onToggle}
           disabled={isPending}
           aria-label={listing.active ? `Deactivate ${displayName}` : `Reactivate ${displayName}`}

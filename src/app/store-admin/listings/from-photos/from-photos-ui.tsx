@@ -231,7 +231,11 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, 
               >
                 <Camera className="h-7 w-7 text-[var(--color-muted)]" aria-hidden />
                 <span className="text-sm font-medium">
-                  {queue.length > 0 ? `${queue.length} ${queue.length === 1 ? "photo" : "photos"} ready` : "Take or choose shelf photos"}
+                  {failedCount > 0
+                    ? `${failedCount} ${failedCount === 1 ? "photo" : "photos"} to retry`
+                    : queue.length > 0
+                      ? `${queue.length} ${queue.length === 1 ? "photo" : "photos"} ready`
+                      : "Take or choose shelf photos"}
                 </span>
                 <input
                   id="shelf-photos"

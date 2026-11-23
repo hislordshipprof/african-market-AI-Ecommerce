@@ -133,6 +133,11 @@ test.describe("Listing management (authenticated)", () => {
       expect(box?.width).toBeGreaterThanOrEqual(44);
       expect(box?.height).toBeGreaterThanOrEqual(44);
     }
+    const toggleHit = await page.getByRole("switch", { name: "Deactivate Palm Oil" }).evaluate((el) => {
+      const after = getComputedStyle(el, "::after");
+      return el.getBoundingClientRect().height - parseFloat(after.top) - parseFloat(after.bottom);
+    });
+    expect(toggleHit).toBeGreaterThanOrEqual(44);
   });
 
   test("create a listing with a variant", async ({ page }) => {
