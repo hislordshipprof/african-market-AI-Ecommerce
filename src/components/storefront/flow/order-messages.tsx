@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { sendOrderMessageAction } from "@/lib/support/customer-actions";
-import { formatInZone } from "@/lib/format";
+import { formatListTime } from "@/lib/format";
 import type { SupportTopic, ThreadMessage } from "@/lib/support/thread";
 import { Button } from "../primitives";
 import { FlowCard } from "./common";
@@ -17,7 +17,6 @@ const TOPICS: { value: SupportTopic; label: string }[] = [
 ];
 
 // The store's zone on server and client alike, so hydration renders the same text.
-const time = (iso: string, timeZone: string) => formatInZone(iso, timeZone, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" });
 
 /** The order's support thread on the tracking page. Polls the cached route every 10 s (ADR-0016). */
 export function OrderMessages({
@@ -94,7 +93,7 @@ export function OrderMessages({
               }}
             >
               <small style={{ display: "block", color: "var(--color-muted)" }}>
-                {message.sender === "customer" ? "You" : message.sender === "platform" ? "Platform team" : storeName} · {time(message.createdAt, timeZone)}
+                {message.sender === "customer" ? "You" : message.sender === "platform" ? "Platform team" : storeName} · {formatListTime(message.createdAt, timeZone)}
               </small>
               <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{message.body}</span>
             </li>

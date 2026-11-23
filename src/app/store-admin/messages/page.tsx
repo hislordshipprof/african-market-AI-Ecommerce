@@ -1,13 +1,10 @@
 import Link from "next/link";
 import { Store } from "lucide-react";
 import { requireStoreMember } from "@/lib/store-admin/session";
-import { formatInZone } from "@/lib/format";
+import { formatListTime } from "@/lib/format";
 import { getStoreThread, listStoreThreads } from "@/lib/support/thread";
 import { Badge } from "@/components/ui/badge";
 import { ThreadReply } from "./thread-reply";
-
-const when = (date: Date | string, timeZone: string) =>
-  formatInZone(date, timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export default async function MessagesPage({
   searchParams,
@@ -55,7 +52,7 @@ export default async function MessagesPage({
                     <span>
                       <span className="block text-sm font-medium text-foreground">Order #{t.orderNumber}</span>
                       {t.lastCustomerAt && (
-                        <span className="block text-xs text-muted-foreground">{when(t.lastCustomerAt, session.store.timezone)}</span>
+                        <span className="block text-xs text-muted-foreground">{formatListTime(t.lastCustomerAt, session.store.timezone)}</span>
                       )}
                     </span>
                     <span className="flex items-center gap-2">
@@ -86,7 +83,7 @@ export default async function MessagesPage({
                     className={`max-w-[85%] rounded-lg border border-border px-3 py-2 ${m.sender === "customer" ? "justify-self-start" : "justify-self-end bg-muted"}`}
                   >
                     <span className="block text-xs text-muted-foreground">
-                      {m.sender === "customer" ? "Customer" : m.sender === "platform" ? "Platform team" : m.senderName ?? "Store"} · {when(m.createdAt, session.store.timezone)}
+                      {m.sender === "customer" ? "Customer" : m.sender === "platform" ? "Platform team" : m.senderName ?? "Store"} · {formatListTime(m.createdAt, session.store.timezone)}
                     </span>
                     <span className="whitespace-pre-wrap break-words text-sm text-foreground">{m.body}</span>
                   </li>

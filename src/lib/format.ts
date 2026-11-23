@@ -38,3 +38,8 @@ export function formatInZone(date: Date | string, timeZone: string, options: Int
 export function formatClockInZone(date: Date | string, timeZone: string): string {
   return formatInZone(date, timeZone, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 }
+
+/** A time in a list (#737): "Today, 3:05 PM CST". */
+export function formatListTime(date: Date | string, timeZone: string, now: Date = new Date()): string {
+  return `${formatListDate(date, timeZone, now)}, ${formatClockInZone(date, timeZone)}`;
+}

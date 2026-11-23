@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatInZone, formatListDate, money } from "./format";
+import { formatInZone, formatListDate, formatListTime, money } from "./format";
 
 const AT = new Date("2026-11-03T19:05:00.000Z");
 const OPTIONS: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
@@ -53,5 +53,14 @@ describe("formatListDate", () => {
   it("reads the day in the store's zone, not UTC", () => {
     // Nov 3, 9:00 PM in Chicago; its UTC date is Nov 4.
     expect(formatListDate("2026-11-04T03:00:00.000Z", CHICAGO, NOW)).toBe("Today");
+  });
+});
+
+describe("formatListTime", () => {
+  const NOW = new Date("2026-11-04T03:30:00.000Z");
+
+  it("joins the list day to the store's labelled clock time", () => {
+    expect(formatListTime(new Date("2026-11-03T19:05:00.000Z"), "America/Chicago", NOW)).toBe("Today, 1:05 PM CST");
+    expect(formatListTime(new Date("2026-11-01T19:05:00.000Z"), "America/Chicago", NOW)).toBe("Nov 1, 2026, 1:05 PM CST");
   });
 });
