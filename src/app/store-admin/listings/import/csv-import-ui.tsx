@@ -225,7 +225,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   return (
     <MotionConfig reducedMotion="user">
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-ink)]">
-      <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
         {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <Link
@@ -319,7 +319,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </main>
     </div>
     </MotionConfig>
   );

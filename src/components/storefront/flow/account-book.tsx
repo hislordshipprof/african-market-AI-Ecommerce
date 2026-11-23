@@ -15,17 +15,20 @@ import type { AccountCard } from "@/lib/customer-account/saved-cards";
 import { Button } from "../primitives";
 import { FlowCard } from "./common";
 
-const EMPTY = {
-  label: "",
-  line1: "",
-  line2: "",
-  city: "",
-  state: "MD",
-  zip: "",
-  notes: "",
+type FormState = {
+  label: string;
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  zip: string;
+  notes: string;
 };
 
-type FormState = typeof EMPTY;
+/** A new address starts in the store's own state, where most customers live (#743). */
+function emptyForm(state: string): FormState {
+  return { label: "", line1: "", line2: "", city: "", state, zip: "", notes: "" };
+}
 
 function fromAddress(address: AccountAddressView): FormState {
   return {
@@ -39,13 +42,13 @@ function fromAddress(address: AccountAddressView): FormState {
   };
 }
 
-export function RealAccountBook({ initial }: { initial: AccountBookSnapshot }) {
+export function RealAccountBook({ initial, defaultState }: { initial: AccountBookSnapshot; defaultState: string }) {
   // Each save refreshes the router, or Back restores a cached page from before it.
   const router = useRouter();
   const [addresses, setAddresses] = useState(initial.addresses);
   const [cards, setCards] = useState(initial.cards);
   const [cardsUnavailable, setCardsUnavailable] = useState(initial.cardsUnavailable);
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [form, setForm] = useState<FormState>(() => emptyForm(defaultState));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -76,7 +79,7 @@ export function RealAccountBook({ initial }: { initial: AccountBookSnapshot }) {
       return;
     }
     setAddresses(result.addresses);
-    setForm(EMPTY);
+    setForm(emptyForm(defaultState));
     setEditingId(null);
     router.refresh();
   }
@@ -240,7 +243,7 @@ export function RealAccountBook({ initial }: { initial: AccountBookSnapshot }) {
             className="sf-text-link"
             onClick={() => {
               setEditingId(null);
-              setForm(EMPTY);
+              setForm(emptyForm(defaultState));
               setError("");
             }}
           >

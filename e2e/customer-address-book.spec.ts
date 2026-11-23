@@ -1,6 +1,7 @@
 import { storeUrl, E2E_PORT } from "./urls";
 import { test, expect } from "@playwright/test";
 import { insertShopperAccount } from "./account-fixture";
+import { deleteGuestOrder, insertGuestOrder } from "./order-fixture";
 
 const base = storeUrl("mama-ngozi");
 const apiBase = `http://localhost:${E2E_PORT}`;
@@ -86,5 +87,32 @@ test.describe("Customer address book", () => {
     await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("9 Market St")).toHaveCount(0);
     await expect(page.getByText("No saved addresses yet.")).toBeVisible();
+  });
+  test("#743 AC3: a new address starts in the store's state, and name and phone come from the last order", async ({ page, request }) => {
+    const email = `e2e-prefill-${Date.now()}@test.example`;
+    await insertShopperAccount({ email, password: "E2eTestPass-123!", name: "" });
+    const seeded = await insertGuestOrder({ email, name: "Gale Guest", phone: "+15550007431" });
+    try {
+      await page.goto(`${base}/account/sign-in`);
+      await page.getByLabel("Email address").fill(email);
+      await page.getByRole("button", { name: "Send sign-in link" }).click();
+      await expect(page.locator("[data-slot='card-title']")).toContainText("Check your email", { timeout: 10000 });
+      const tokenRes = await request.get(`${apiBase}/api/e2e/magic-link-token?email=${encodeURIComponent(email)}`);
+      const { token } = await tokenRes.json();
+      await page.goto(`${base}/api/auth/magic-link/verify?token=${token}&callbackURL=/account`);
+      await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible({ timeout: 15000 });
+
+      // Mama Ngozi is in Houston, TX.
+      await expect(page.getByTestId("account-address-form").getByLabel("State")).toHaveValue("TX");
+      const details = page.locator(".flow-card", { has: page.getByRole("heading", { name: "Personal details" }) });
+      await expect(details.getByLabel("Name")).toHaveValue("Gale Guest");
+      await expect(details.getByLabel("Phone")).toHaveValue("+15550007431");
+
+      // A prefilled name is not yet saved, so Save writes it to the account.
+      await details.getByRole("button", { name: "Save details" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Details saved." })).toBeVisible();
+    } finally {
+      await deleteGuestOrder(seeded);
+    }
   });
 });

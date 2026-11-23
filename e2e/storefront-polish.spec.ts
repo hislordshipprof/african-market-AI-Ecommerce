@@ -95,3 +95,61 @@ test("order tracking names each line's product and size, and the fulfillment in 
     await deleteGuestOrder(seeded);
   }
 });
+
+/** WCAG relative luminance of a computed `rgb()` or `color(srgb …)` value. */
+function luminance(css: string): number {
+  const srgb = css.match(/color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/);
+  const channels = srgb
+    ? srgb.slice(1, 4).map(Number)
+    : (css.match(/[\d.]+/g) ?? []).slice(0, 3).map((n) => Number(n) / 255);
+  const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+test.describe("Stepper focus ring on the green pill (#743 AC2)", () => {
+  for (const slug of ["mama-ngozi", "tante-marie"]) {
+    for (const scheme of ["light", "dark"] as const) {
+      test(`${slug}, ${scheme}: the focused button's ring is painted inside the pill at 3:1 or more`, async ({ page }) => {
+        await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
+        await page.goto(`${storeUrl(slug)}/`, { waitUntil: "networkidle" });
+        await page.getByTestId("listing-card").getByTestId("quick-add-btn").first().click();
+        // The one item in the basket, so the only stepper on the page.
+        const minus = page.getByTestId("stepper-minus").first();
+        await expect(minus).toBeVisible();
+        // Reached by keyboard, so :focus-visible applies.
+        await minus.focus();
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Shift+Tab");
+        await expect(minus).toBeFocused();
+        const ring = await minus.evaluate((el) => {
+          const pill = el.parentElement!;
+          const s = getComputedStyle(el);
+          const b = el.getBoundingClientRect();
+          const p = pill.getBoundingClientRect();
+          return {
+            focusVisible: el.matches(":focus-visible"),
+            style: s.outlineStyle,
+            color: s.outlineColor,
+            width: parseFloat(s.outlineWidth),
+            offset: parseFloat(s.outlineOffset),
+            pill: getComputedStyle(pill).backgroundColor,
+            clips: getComputedStyle(pill).overflow === "hidden",
+            insidePill: b.left >= p.left - 0.5 && b.right <= p.right + 0.5 && b.top >= p.top - 0.5 && b.bottom <= p.bottom + 0.5,
+          };
+        });
+        expect(ring.focusVisible).toBe(true);
+        expect(ring.style).not.toBe("none");
+        expect(ring.width).toBeGreaterThanOrEqual(2);
+        // The pill clips its buttons, so a ring drawn outside the button is cut off: it must sit inside it.
+        expect(ring.clips && ring.insidePill).toBe(true);
+        expect(ring.offset + ring.width).toBeLessThanOrEqual(0);
+        expect(contrast(ring.color, ring.pill)).toBeGreaterThanOrEqual(3);
+      });
+    }
+  }
+});

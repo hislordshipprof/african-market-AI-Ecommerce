@@ -129,7 +129,7 @@ function OwnerStories({ quotes }: { quotes: OwnerQuote[] }) {
 }
 
 const PITCH = [
-  { title: "Your own branded site", body: "Your name, logo and colours on your own shop, not a listing in someone else's." },
+  { title: "Your own branded site", body: "Your name, logo and colors on your own shop, not a listing in someone else's." },
   { title: "Your own customers", body: "Shoppers order from your shop, and the relationship stays yours." },
   { title: "No commission on your sales", body: "Set your own prices and keep your sales." },
 ];

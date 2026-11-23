@@ -9,7 +9,7 @@ import { clientIp } from "../assistant/client-ip";
 import { scheduleAfterResponse } from "../schedule-after-response";
 import { sendIssueToReviewPush } from "../push/issue-to-review";
 import { DELIVERY_PROOF_MAX_BYTES } from "./delivery-proof";
-import { ISSUE_LINES_INVALID, ISSUE_PHOTO_INVALID, ISSUE_TYPES, issueStateMessage, submitIssueReport, type IssueState } from "./issue-report";
+import { ISSUE_LINES_INVALID, ISSUE_PHOTO_INVALID, ISSUE_TYPES, issuePhotoRequired, issueStateMessage, submitIssueReport, type IssueState } from "./issue-report";
 
 const reportSchema = z.strictObject({
   token: z.string().min(1).max(200),
@@ -41,7 +41,7 @@ export async function reportIssueAction(_previous: ReportIssueResult, form: Form
   if (!parsed.ok) return { ok: false, error: ISSUE_LINES_INVALID };
   const photo = form.get("photo");
   const file = photo instanceof File && photo.size > 0 ? photo : null;
-  if (!file || file.size > DELIVERY_PROOF_MAX_BYTES) return { ok: false, error: ISSUE_PHOTO_INVALID };
+  if (file ? file.size > DELIVERY_PROOF_MAX_BYTES : issuePhotoRequired(parsed.data.type)) return { ok: false, error: ISSUE_PHOTO_INVALID };
 
   const ip = clientIp(await headers());
   const [byToken, byIp] = await Promise.all([
@@ -55,7 +55,7 @@ export async function reportIssueAction(_previous: ReportIssueResult, form: Form
     type: parsed.data.type,
     lines: parsed.data.lines,
     note: parsed.data.note,
-    photo: new Uint8Array(await file.arrayBuffer()),
+    photo: file ? new Uint8Array(await file.arrayBuffer()) : null,
   });
   if (!result.ok) return result;
   if (result.state === "in_review") {

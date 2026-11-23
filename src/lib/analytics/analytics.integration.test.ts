@@ -85,7 +85,7 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
 
       const o3At = at("2026-11-05T20:00:00Z");
       // Placed from an AI agent's checkout link (#573), on a cart the shopping assistant also added to: counted once, as agent.
-      const o3 = await order({ customerId: c1guest.id, acquisitionSource: "agent", sourceCartId: cartO3.id, fulfillment: "store_delivery", status: "DELIVERED", tipCents: 200, deliveryFeeCents: 500, capturedAmountCents: 3700, platformFeeCents: 137, createdAt: o3At, readyAt: minutes(o3At, 90) });
+      const o3 = await order({ customerId: c1guest.id, acquisitionSource: "agent", sourceCartId: cartO3.id, fulfillment: "store-delivery", status: "DELIVERED", tipCents: 200, deliveryFeeCents: 500, capturedAmountCents: 3700, platformFeeCents: 137, createdAt: o3At, readyAt: minutes(o3At, 90) });
       await tx.orderLine.create({ data: { storeId: storeA, orderId: o3.id, listingVariantId: vPalm.id, qtyOrdered: 2, qtyPicked: 2, unitPriceCents: 1500, status: "picked" } });
       const l4 = await tx.orderLine.create({ data: { storeId: storeA, orderId: o3.id, listingVariantId: vEgusi.id, qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 1000, status: "refunded" } });
       await tx.substitutionRequest.create({ data: { storeId: storeA, orderId: o3.id, orderLineId: l4.id, qty: 1, status: "timed_out", expiresAt: minutes(o3At, 15), createdAt: minutes(o3At, 5) } });
@@ -232,7 +232,7 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     const split = Object.fromEntries(data.sales.byFulfillment.map((f) => [f.fulfillment, f]));
     expect(split.pickup).toMatchObject({ orders: 1, goodsCents: 2000, netCents: 2203 });
     expect(split.courier).toMatchObject({ orders: 1, goodsCents: 3700, refundsCents: 1100, netCents: 2437 });
-    expect(split.store_delivery).toMatchObject({ orders: 1, goodsCents: 3000, refundsCents: 1000, netCents: 2600 });
+    expect(split["store-delivery"]).toMatchObject({ orders: 1, goodsCents: 3000, refundsCents: 1000, netCents: 2600 });
   });
 
   it("products, customers, operations and assistant match the fixture", () => {
@@ -275,7 +275,7 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
   it("each CSV matches the on-screen numbers", () => {
     const sales = analyticsCsv("sales", data, USAGE).split("\r\n");
     expect(sales).toContain("2026-11-03,2,57.00,28.50,0.00,0.00,2.60,8.99,57.40");
-    expect(sales).toContain("Courier,1,37.00,37.00,0.00,11.00,1.63,8.99,24.37");
+    expect(sales).toContain("Courier delivery,1,37.00,37.00,0.00,11.00,1.63,8.99,24.37");
     expect(sales).toContain("Total 2026-11-01 to 2026-11-07,3,87.00,29.00,0.00,21.00,3.97,8.99,72.40");
     expect(analyticsCsv("products", data, USAGE)).toContain("Top seller,Egusi,4,42.00,,,\r\n");
     expect(analyticsCsv("customers", data, USAGE)).toContain("Repeat rate %,100\r\n");

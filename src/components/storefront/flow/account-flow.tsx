@@ -38,6 +38,10 @@ type Props = {
   customer?: StoreCustomer | null;
   accountBook?: AccountBookSnapshot | null;
   accountOrders?: AccountOrderRow[] | null;
+  /** Contact on the newest order, used where the account has none yet (#743). */
+  lastContact?: { name: string; phone: string | null } | null;
+  /** A new address starts in this state. */
+  storeState?: string;
 };
 const message = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong. Please try again.";
@@ -50,13 +54,14 @@ function useServices({ settings, catalog, enabled }: Props) {
 export function AccountFlow(props: Props) {
   const router = useRouter();
   const services = useServices(props);
-  const { customer, accountBook } = props;
+  const { customer, accountBook, lastContact } = props;
   const accountOrders = props.accountOrders ?? [];
+  const savedName = accountBook?.name || customer?.name || "";
   const realProfile: CustomerProfile | null = customer
     ? {
         id: customer.id,
-        name: accountBook?.name || customer.name,
-        phone: accountBook?.phone ?? "",
+        name: savedName || lastContact?.name || "",
+        phone: accountBook?.phone || lastContact?.phone || "",
         email: accountBook?.email || customer.email || "",
         addresses: [],
       }
@@ -115,7 +120,8 @@ export function AccountFlow(props: Props) {
         }
         return;
       }
-      const renamed = next.name.trim() !== (realProfile?.name ?? "").trim();
+      // Against the saved name: a name prefilled from an order is not saved until now.
+      const renamed = next.name.trim() !== savedName.trim();
       const named = renamed ? await saveNameAction(next.name) : null;
       const result = named && !named.ok ? named : await savePhoneAction(next.phone);
       if (!result.ok) {
@@ -310,7 +316,7 @@ export function AccountFlow(props: Props) {
                 </form>
               </FlowCard>
               {customer && accountBook ? (
-                <RealAccountBook initial={accountBook} />
+                <RealAccountBook initial={accountBook} defaultState={props.storeState ?? "MD"} />
               ) : (
               <FlowCard title="Saved addresses">
                 <div className="sf-account-list">

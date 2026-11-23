@@ -172,6 +172,15 @@
 .of-check span {
   flex: 1;
 }
+.of-field-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -8px;
+}
+.of-field-error svg {
+  flex: none;
+}
 .of-wrap textarea,
 .of-wrap select {
   width: 100%;
