@@ -58,7 +58,7 @@ import {
 import type { StoreOrderRow } from "@/lib/order/service";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
-import { formatClockInZone, money } from "@/lib/format";
+import { formatClockInZone, formatUsPhone, money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
@@ -108,7 +108,7 @@ const STORE_CANCELLABLE: readonly string[] = CANCELLABLE_BEFORE_CAPTURE;
 function orderCustomerLabel(name: string, phone: string | null): string {
   const trimmed = phone?.trim() ?? "";
   if (!trimmed) return name;
-  return `${name} · ${trimmed}`;
+  return `${name} · ${formatUsPhone(trimmed)}`;
 }
 
 /** Not a status, so it does not look like one. */
