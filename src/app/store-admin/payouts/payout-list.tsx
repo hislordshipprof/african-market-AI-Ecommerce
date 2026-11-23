@@ -20,7 +20,7 @@ export async function PayoutList({
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="payouts-title" className="text-lg font-semibold text-foreground">Recent payouts</h2>
-          <p className="text-sm text-muted-foreground">Your last 12 payouts. Open one to see the orders in it.</p>
+          <p className="text-sm text-muted-foreground">Your recent payouts. Open one to see the orders in it.</p>
         </div>
         <StripeDashboardButton slug={store.slug} />
       </div>
