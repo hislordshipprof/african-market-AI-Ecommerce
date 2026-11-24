@@ -1,16 +1,38 @@
 "use client";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { MapPin, ChevronDown } from "lucide-react";
+import { openStatus } from "@/lib/directory/open-status";
+
+const MINUTE_MS = 60_000;
+
+function subscribe(onChange: () => void) {
+  const id = setInterval(onChange, MINUTE_MS / 2);
+  return () => clearInterval(id);
+}
+
+const currentMinute = () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
+
+/** A pickup time only while the store is open; otherwise when it opens (#763). */
+export function pickupChipLabel(minutes: number, hours: unknown, timezone: string, now: Date, viewerZone?: string): string {
+  const status = openStatus(hours, timezone, now, viewerZone);
+  return `Pickup · ${status.open ? `${minutes} min` : status.detail ?? status.label}`;
+}
 
 export function FulfillmentChip({
   minutes,
   pickup,
   radius,
+  hours,
+  timezone,
 }: {
   minutes: number;
   pickup: boolean;
   radius: number;
+  hours: unknown;
+  timezone: string;
 }) {
+  // Worked out in the browser each minute, like the directory's Open now: blank until then.
+  const minute = useSyncExternalStore(subscribe, currentMinute, () => null);
   const [open, setOpen] = useState(false);
   const [zip, setZip] = useState("");
   const [draft, setDraft] = useState("");
@@ -24,7 +46,11 @@ export function FulfillmentChip({
       >
         <MapPin size={16} aria-hidden />
         <span>
-          {pickup ? `Pickup · ${minutes} min` : "Local delivery"}
+          {!pickup
+            ? "Local delivery"
+            : minute === null
+              ? "Pickup"
+              : pickupChipLabel(minutes, hours, timezone, new Date(minute), Intl.DateTimeFormat().resolvedOptions().timeZone)}
           <small>{zip || "Set ZIP code"}</small>
         </span>
         <ChevronDown size={14} aria-hidden />
