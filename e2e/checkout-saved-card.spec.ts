@@ -64,6 +64,10 @@ test("signed-in checkout: save tick starts unticked, a saved card is reused, a r
 
     // 1. The rendered tick starts unticked; ticking and unticking at once saves nothing.
     await openCheckout(page, name);
+    // #750: the note names only what the account filled; this account has a name and email, no phone.
+    await expect(page.getByText("We filled your name and email from your account. Edits apply to this order only.")).toBeVisible();
+    await expect(page.getByLabel("Full name")).toHaveValue("Ada Saver");
+    await expect(page.getByLabel("Phone number (required)")).toHaveValue("");
     await expect(saveTick).toBeVisible();
     await expect(saveTick).not.toBeChecked();
     await saveTick.check();

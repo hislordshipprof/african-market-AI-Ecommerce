@@ -66,6 +66,8 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567), a
     }).toPass({ timeout: 20_000 });
     await ship.click();
     await expect(page.getByText("Enter your shipping address to see the shipping rate.")).toBeVisible({ timeout: 15_000 });
+    // Before any address: the states it ships to, in words (#750).
+    await expect(page.getByText(/^Ships to .*Maryland/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "A thank-you for your driver" })).toHaveCount(0);
     await expect(page.getByLabel("Leave at door")).toHaveCount(0);
 

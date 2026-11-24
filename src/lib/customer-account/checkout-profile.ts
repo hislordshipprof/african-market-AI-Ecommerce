@@ -1,4 +1,5 @@
-import { authPrisma, customerScoped } from "../db";
+import { authPrisma, customerScoped, storeScoped } from "../db";
+import { lastOrderContact } from "./order-history";
 import { validPhone } from "./phone";
 import { listAddresses, readAccountPhone } from "./address-book";
 import { checkoutCardView } from "./checkout-card-view";
@@ -65,10 +66,17 @@ export async function loadAccountBook(userId: string, now = new Date()): Promise
   };
 }
 
-export async function loadCheckoutPrefill(userId: string, now = new Date()): Promise<CheckoutPrefill> {
+/** Full name falls back to the name on this store's last order when the account has none (#750). */
+async function lastOrderName(storeId: string, userId: string): Promise<string> {
+  const account = await storeScoped(storeId).customer.findFirst({ where: { storeId, userId }, select: { id: true } });
+  return account ? (await lastOrderContact(storeId, account.id))?.name.trim() ?? "" : "";
+}
+
+export async function loadCheckoutPrefill(userId: string, storeId?: string, now = new Date()): Promise<CheckoutPrefill> {
   const book = await loadAccountBook(userId, now);
+  const name = book.name.trim() || (storeId ? await lastOrderName(storeId, userId) : "");
   return {
-    contact: { name: book.name, email: book.email, phone: book.phone },
+    contact: { name, email: book.email, phone: book.phone },
     cards: book.cards,
     cardsUnavailable: book.cardsUnavailable,
     defaultAddress: book.addresses.find((address) => address.isDefault) ?? null,
@@ -76,7 +84,7 @@ export async function loadCheckoutPrefill(userId: string, now = new Date()): Pro
 }
 
 export async function getCheckoutProfile(userId: string, now = new Date()): Promise<CheckoutProfile> {
-  const prefill = await loadCheckoutPrefill(userId, now);
+  const prefill = await loadCheckoutPrefill(userId, undefined, now);
   const view = checkoutCardView({
     signedIn: true,
     cards: prefill.cards.map((card) => ({
