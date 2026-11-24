@@ -10,9 +10,11 @@ import { captureSplit, courierFeeCents, platformTaxCents, refundFeeReturns } fro
  *   repayment leaves it as it was. A capture whose cancel refund failed stays a capture row, marked refund failed.
  * - Application fee = the stored platform fee (service fee + the store's card fee) + the courier fee or the postage of
  *   a shipped order (#568), capped at the capture, as sent to Stripe. Card fee share = the platform's part of the card-fee split.
- *   Net = application fee − courier fee − the store's card fee − the platform's card fee share − postage absorbed.
+ *   Net = application fee − courier fee − the store's card fee − the platform's card fee share − postage absorbed
+ *   + postage saving.
  * - Postage absorbed: when Shippo refused a shipped order's rate after capture, the label was bought on a fresh rate
  *   (#771); the platform pays its difference from the captured postage, so it is a platform cost on the capture row.
+ *   A cheaper fresh rate is a postage saving the platform keeps, as it bought the label (decision 2026-11-23-14).
  * - A refund row is dated when the refund succeeded and shown only when it returns fee, as refundFeeReturns
  *   (src/lib/order/platform-fee.ts) works it out; the sales CSV and the order detail use the same rule (#757).
  *   Stripe keeps its card fee on a refund. The courier part of a returned fee goes back to the customer, so
@@ -86,6 +88,7 @@ export type LedgerAmounts = {
   courierFeeCents: number;
   platformCardFeeCents: number;
   postageAbsorbedCents: number;
+  postageSavedCents: number;
   applicationFeeCents: number;
   feeRefundedCents: number;
   platformNetCents: number;
@@ -113,15 +116,18 @@ function orderMoney(order: OrderFacts, capturedCents: number) {
   const platformFee = order.platformFeeCents ?? split.platformFeeCents;
   const applicationFee = Math.min(platformFee + courier + platformTax, capturedCents);
   const storeCardFee = Math.max(0, platformFee - order.serviceFeeCents);
-  const postageAbsorbed = order.fulfillment === "ship" && order.shippingLabelPostageCents != null ? order.shippingLabelPostageCents - courier : 0;
+  const postageDifference = order.fulfillment === "ship" && order.shippingLabelPostageCents != null ? order.shippingLabelPostageCents - courier : 0;
+  const postageAbsorbed = Math.max(0, postageDifference);
+  const postageSaved = Math.max(0, -postageDifference);
   return {
     capturedCents,
     courierFeeCents: courier,
     applicationFeeCents: applicationFee,
     platformCardFeeCents: split.platformCardFeeCents,
     postageAbsorbedCents: postageAbsorbed,
+    postageSavedCents: postageSaved,
     // Courier fees, postage and the tax the platform collects pass through; only their card fees are its cost.
-    platformNetCents: applicationFee - courier - platformTax - storeCardFee - split.platformCardFeeCents - postageAbsorbed,
+    platformNetCents: applicationFee - courier - platformTax - storeCardFee - split.platformCardFeeCents - postageAbsorbed + postageSaved,
   };
 }
 
@@ -130,7 +136,7 @@ const negative = (cents: number) => (cents === 0 ? 0 : -cents);
 
 function emptyTotals(): LedgerTotals {
   return {
-    orders: 0, capturedCents: 0, serviceFeeCents: 0, courierFeeCents: 0, platformCardFeeCents: 0, postageAbsorbedCents: 0,
+    orders: 0, capturedCents: 0, serviceFeeCents: 0, courierFeeCents: 0, platformCardFeeCents: 0, postageAbsorbedCents: 0, postageSavedCents: 0,
     applicationFeeCents: 0, feeRefundedCents: 0, platformNetCents: 0,
   };
 }
@@ -142,6 +148,7 @@ function addRow(totals: LedgerTotals, row: LedgerRow) {
   totals.courierFeeCents += row.courierFeeCents;
   totals.platformCardFeeCents += row.platformCardFeeCents;
   totals.postageAbsorbedCents += row.postageAbsorbedCents;
+  totals.postageSavedCents += row.postageSavedCents;
   totals.applicationFeeCents += row.applicationFeeCents;
   totals.feeRefundedCents += row.feeRefundedCents;
   totals.platformNetCents += row.platformNetCents;
@@ -183,6 +190,7 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
         courierFeeCents: negative(courierBack),
         platformCardFeeCents: 0,
         postageAbsorbedCents: 0,
+        postageSavedCents: 0,
         applicationFeeCents: 0,
         feeRefundedCents: negative(fee),
         platformNetCents: negative(fee - courierBack - taxBack),
@@ -234,6 +242,7 @@ export function buildFeeLedger(
       courierFeeCents: 0,
       platformCardFeeCents: 0,
       postageAbsorbedCents: 0,
+      postageSavedCents: 0,
       applicationFeeCents: 0,
       feeRefundedCents: 0,
       platformNetCents: 0,
@@ -291,6 +300,7 @@ export const AMOUNT_COLUMNS: Array<[keyof LedgerAmounts, string]> = [
   ["courierFeeCents", "Courier fee or postage passed through"],
   ["platformCardFeeCents", "Card fee share (platform)"],
   ["postageAbsorbedCents", "Postage absorbed"],
+  ["postageSavedCents", "Postage saving"],
   ["applicationFeeCents", "Application fee"],
   ["feeRefundedCents", "Fee refunded"],
   ["platformNetCents", "Platform net"],

@@ -48,11 +48,11 @@ describe("fee ledger CSV", () => {
   it("has one line per screen row, then each store's total and the month's, in dollars", () => {
     const csv = feeLedgerCsv(buildFeeLedger(ledgerMonth("2026-11"), [capture], [cancel], []));
     expect(csv.split("\r\n")).toEqual([
-      "Month (UTC),Date (UTC),Store,Order,Row,Captured,Service fee,Courier fee or postage passed through,Card fee share (platform),Postage absorbed,Application fee,Fee refunded,Platform net",
-      `2026-11,2026-11-03,"'=Mama Africa, Inc",#7,Order,70.79,1.80,8.99,0.31,0.00,12.83,0.00,1.49`,
-      `2026-11,2026-11-04,"'=Mama Africa, Inc",#7,Refund,-70.79,0.00,-8.99,0.00,0.00,0.00,-12.83,-3.84`,
-      `2026-11,,"'=Mama Africa, Inc",,Store total (1 order),0.00,1.80,0.00,0.31,0.00,12.83,-12.83,-2.35`,
-      "2026-11,,All stores,,Month total (1 order),0.00,1.80,0.00,0.31,0.00,12.83,-12.83,-2.35",
+      "Month (UTC),Date (UTC),Store,Order,Row,Captured,Service fee,Courier fee or postage passed through,Card fee share (platform),Postage absorbed,Postage saving,Application fee,Fee refunded,Platform net",
+      `2026-11,2026-11-03,"'=Mama Africa, Inc",#7,Order,70.79,1.80,8.99,0.31,0.00,0.00,12.83,0.00,1.49`,
+      `2026-11,2026-11-04,"'=Mama Africa, Inc",#7,Refund,-70.79,0.00,-8.99,0.00,0.00,0.00,0.00,-12.83,-3.84`,
+      `2026-11,,"'=Mama Africa, Inc",,Store total (1 order),0.00,1.80,0.00,0.31,0.00,0.00,12.83,-12.83,-2.35`,
+      "2026-11,,All stores,,Month total (1 order),0.00,1.80,0.00,0.31,0.00,0.00,12.83,-12.83,-2.35",
       "",
     ]);
   });

@@ -367,6 +367,23 @@ describe.skipIf(!hasDb)("shipping labels, tracking and the Shipped state (#568, 
     expect(row?.platformNetCents).toBe(99 - Math.round(99 * 0.029) - Math.round(POSTAGE * 0.029) - Math.round(156 * 0.029) - 500);
   });
 
+  it("#775 AC2: a cheaper re-quote after capture is a postage saving the platform keeps, not a negative absorbed amount", async () => {
+    const { store, orderId, paymentIntentId, deps, scoped } = await pickedShipOrder();
+    const label = { ...deps, provider: requoting(-300) };
+    const ready = await markReady(store.id, orderId, { label });
+    expect(ready).toMatchObject({ ok: true, labelConfirmPostageCents: POSTAGE - 300 });
+    expect(ready.ok && ready.labelError).toBe(`${LABEL_RATE_EXPIRED_PREFIX}The new rate is $10.05, $3.00 less than the shopper paid. Confirm to buy the label`);
+    const captured = { amount: capturedPayments.get(paymentIntentId), fee: capturedFees.get(paymentIntentId) };
+    expect(await buyShippingLabel(store.id, orderId, label, POSTAGE - 300)).toEqual({ ok: true });
+    expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ shippingLabelStatus: "bought", shippingPostageCents: POSTAGE, shippingLabelPostageCents: POSTAGE - 300 });
+    // Nothing is given back through Stripe: the platform bought the label, so it keeps the $3.
+    expect({ amount: capturedPayments.get(paymentIntentId), fee: capturedFees.get(paymentIntentId) }).toEqual(captured);
+
+    const row = (await platformFeeLedger(new Date().toISOString().slice(0, 7))).rows.find((r) => r.storeId === store.id && r.kind === "capture");
+    expect(row).toMatchObject({ courierFeeCents: POSTAGE, postageAbsorbedCents: 0, postageSavedCents: 300 });
+    expect(row?.platformNetCents).toBe(99 - Math.round(99 * 0.029) - Math.round(POSTAGE * 0.029) - Math.round(156 * 0.029) + 300);
+  });
+
   it("#771 AC2: a retry after the fresh-rate purchase fails still records the absorbed postage, without asking again", async () => {
     const { store, orderId, deps, scoped } = await pickedShipOrder();
     const fresh = requoting(500);
