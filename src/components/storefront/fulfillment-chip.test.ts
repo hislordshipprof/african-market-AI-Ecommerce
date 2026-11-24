@@ -20,10 +20,10 @@ describe("header pickup chip (#763 AC3)", () => {
 
   it("says when a closed store opens instead of a pickup time", () => {
     // Monday 21:00 CST.
-    expect(pickupChipLabel(30, WEEKDAYS_9_TO_8, "America/Chicago", new Date("2026-11-17T03:00:00Z"))).toBe("Pickup · Opens tomorrow 9 AM");
+    expect(pickupChipLabel(30, WEEKDAYS_9_TO_8, "America/Chicago", new Date("2026-11-17T03:00:00Z"))).toBe("Opens tomorrow 9 AM");
   });
 
   it("says closed when the store never opens in the week ahead", () => {
-    expect(pickupChipLabel(30, ALWAYS_CLOSED, "America/Chicago", new Date("2026-11-16T16:00:00Z"))).toBe("Pickup · Closed");
+    expect(pickupChipLabel(30, ALWAYS_CLOSED, "America/Chicago", new Date("2026-11-16T16:00:00Z"))).toBe("Closed");
   });
 });

@@ -15,7 +15,8 @@ const currentMinute = () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
 /** A pickup time only while the store is open; otherwise when it opens (#763). */
 export function pickupChipLabel(minutes: number, hours: unknown, timezone: string, now: Date, viewerZone?: string): string {
   const status = openStatus(hours, timezone, now, viewerZone);
-  return `Pickup · ${status.open ? `${minutes} min` : status.detail ?? status.label}`;
+  // Closed: only when it opens, which fits the chip on a phone.
+  return status.open ? `Pickup · ${minutes} min` : status.detail ?? status.label;
 }
 
 export function FulfillmentChip({
