@@ -30,6 +30,9 @@ export function resolveAuthBaseUrl(
   env: Record<string, string | undefined> = process.env,
 ): string {
   if (env.BETTER_AUTH_URL) return env.BETTER_AUTH_URL;
+  // A deployment's own URL changes on every deploy; links in messages must outlive it (#796).
+  const alias = fallbackRootHost(env);
+  if (alias) return `https://${alias}`;
   if (env.VERCEL_URL) return `https://${env.VERCEL_URL}`;
   return "http://localhost:3000";
 }
