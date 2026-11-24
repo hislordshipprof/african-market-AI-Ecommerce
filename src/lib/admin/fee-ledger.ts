@@ -11,10 +11,8 @@ import { captureSplit, courierFeeCents, platformTaxCents, refundFeeReturns } fro
  * - Application fee = the stored platform fee (service fee + the store's card fee) + the courier fee or the postage of
  *   a shipped order (#568), capped at the capture, as sent to Stripe. Card fee share = the platform's part of the card-fee split.
  *   Net = application fee − courier fee − the store's card fee − the platform's card fee share.
- * - A refund row is dated when the refund succeeded and shown only when it returns fee: a refund with
- *   refund_application_fee returns the fee in proportion, never more than the fee across the order's refunds
- *   (Stripe's rule); a courier refund after delivery returns its service fee share, and its share of the tax the
- *   platform collected (#65), once that fee refund is made.
+ * - A refund row is dated when the refund succeeded and shown only when it returns fee, as refundFeeReturns
+ *   (src/lib/order/platform-fee.ts) works it out; the sales CSV and the order detail use the same rule (#757).
  *   Stripe keeps its card fee on a refund. The courier part of a returned fee goes back to the customer, so
  *   it reverses the courier pass-through and is not a platform loss; so does the tax part of a returned fee.
  * - A manual repayment is its own row in the month it was recorded: the amount repaid comes off the capture.
