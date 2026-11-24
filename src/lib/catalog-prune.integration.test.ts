@@ -112,6 +112,7 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
   afterAll(async () => {
     if (!prisma) return;
     await asAdmin(prisma, async (tx) => {
+      if (storeIds.length) await tx.listing.deleteMany({ where: { storeId: { in: storeIds } } });
       if (bannerIds.length) await tx.storeBanner.deleteMany({ where: { id: { in: bannerIds } } });
       if (collectionIds.length) await tx.storeCollection.deleteMany({ where: { id: { in: collectionIds } } });
       if (masterIds.length) {
@@ -280,6 +281,7 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
       logo: `catalog/${RUN}-col-logo.jpg`,
       owner: `catalog/${RUN}-col-owner.jpg`,
       user: `catalog/${RUN}-col-user.jpg`,
+      listing: `catalog/listing-${RUN}-col.webp`,
     };
     const storeId = `${RUN}-store`;
     const categoryId = `${RUN}-category`;
@@ -301,6 +303,8 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
       await tx.storeBanner.create({ data: { id: bannerId, storeId, title: "Inactive", imageUrl: keys.banner, active: false } });
       await tx.storeCollection.create({ data: { id: collectionId, storeId, title: "Inactive", slug: collectionId, imageUrl: keys.collection, active: false } });
       await tx.storeCollection.create({ data: { id: nullCollectionId, storeId, title: "Null", slug: nullCollectionId, imageUrl: null, active: false } });
+      // #787: a store's own product photo, on an inactive listing.
+      await tx.listing.create({ data: { storeId, customName: "Own photo", imageUrl: `/api/catalog-image/${keys.listing}`, price: 100, stockMode: "status", active: false } });
     });
     await prisma.user.create({ data: { id: userId, name: userId, email: `${userId}@example.com`, image: keys.user } });
     await prisma.user.create({ data: { id: `${userId}-null`, name: "null", email: `${userId}-null@example.com`, image: null } });

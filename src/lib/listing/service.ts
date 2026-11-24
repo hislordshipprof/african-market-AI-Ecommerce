@@ -509,6 +509,29 @@ export async function reactivateListing(storeId: string, listingId: string, acto
   return setListingActive(storeId, listingId, true, actor);
 }
 
+/** Points this store's listing at its own photo (#787); the master product's photo is never touched. Null when the listing is not this store's. */
+export async function setListingPhoto(storeId: string, listingId: string, imageUrl: string, actor: Actor) {
+  return storeScopedTransaction(storeId, async (tx) => {
+    await lockListingRow(tx, listingId);
+    const existing = await tx.listing.findUnique({ where: { id: listingId }, select: { imageUrl: true } });
+    if (!existing) return null;
+    await tx.listing.update({ where: { id: listingId }, data: { imageUrl } });
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: actor.id,
+        actorEmail: actor.email,
+        action: "listing.photo",
+        entityType: "listing",
+        entityId: listingId,
+        before: { imageUrl: existing.imageUrl },
+        after: { imageUrl },
+      },
+    });
+    return { imageUrl };
+  }, LISTING_WRITE_TRANSACTION);
+}
+
 export async function listListings(storeId: string, includeInactive = false) {
   const scoped = storeScoped(storeId);
   return scoped.listing.findMany({
