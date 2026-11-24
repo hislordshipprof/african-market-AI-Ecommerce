@@ -1,4 +1,4 @@
-import { FULFILLMENT_LABELS } from "../analytics/csv";
+import { FULFILLMENT_LABELS } from "./status-labels";
 import { lineChargeCents, type ChargeLine } from "./substitution-pricing";
 
 export type ReceiptOrder = {

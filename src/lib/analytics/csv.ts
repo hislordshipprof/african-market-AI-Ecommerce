@@ -1,17 +1,10 @@
 import { CANCEL_REASON_LABELS, type StoreAnalytics } from "./queries";
+import { FULFILLMENT_LABELS } from "../order/status-labels";
 
 export const ANALYTICS_VIEWS = ["sales", "products", "customers", "operations", "assistant"] as const;
 export type AnalyticsView = (typeof ANALYTICS_VIEWS)[number];
 
 /** Keyed by the stored `orders.fulfillment` value; `delivery` is the value older orders carry. */
-export const FULFILLMENT_LABELS: Record<string, string> = {
-  pickup: "Pickup",
-  "store-delivery": "Store delivery",
-  delivery: "Store delivery",
-  courier: "Courier delivery",
-  ship: "Shipping",
-};
-
 /** Cents as dollars with two decimals, so a spreadsheet sums them exactly. */
 export function csvDollars(cents: number): string {
   const sign = cents < 0 ? "-" : "";
