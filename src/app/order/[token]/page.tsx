@@ -18,6 +18,7 @@ import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
 import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
+import { deliveryDestination } from "@/lib/order/delivery-address";
 import { formatClockInZone, money } from "@/lib/format";
 import styles from "./tracking.module.css";
 
@@ -60,6 +61,8 @@ export default async function OrderPage({
     const fulfillment = FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment;
     const issue = realOrder.issueReports[0];
     const shipped = realOrder.fulfillment === "ship";
+    // An address is the customer's own: shown only with the tracking token, like the PIN and the photo.
+    const destination = owner ? deliveryDestination(realOrder) : null;
     const receipt = orderReceipt({ ...realOrder, couponCode: realOrder.coupon?.code ?? null, refundedCents });
     return (
       <StorefrontShell store={context.store}>
@@ -87,6 +90,12 @@ export default async function OrderPage({
                 <dt>Fulfillment</dt>
                 <dd>{fulfillment}</dd>
               </div>
+              {destination && (
+                <div>
+                  <dt>{destination.label}</dt>
+                  <dd>{destination.address}</dd>
+                </div>
+              )}
               {scheduled && !outcome && (
                 <div>
                   <dt>{realOrder.fulfillment === "pickup" ? "Pickup time" : "Delivery time"}</dt>
