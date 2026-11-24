@@ -1209,7 +1209,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
   return (
     <div className={styles.page}>
       <FlowHeading
-        title="A little closer to home"
+        title="Checkout"
         description="Review your order and choose how it reaches you."
         backHref="/cart"
         backLabel="Back to basket"
@@ -1519,7 +1519,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               )}
             </FlowCard>
           </div>
-          {fulfillment !== "pickup" && !shipping && (
+          {/* Tips are not paid out end to end yet, so the real checkout offers none (decision 2026-11-23-09). */}
+          {!isRealPayment && fulfillment !== "pickup" && !shipping && (
             <FlowCard title="A thank-you for your driver">
               <p className={styles.muted}>
                 100% of your tip goes to the courier. No tip is added unless

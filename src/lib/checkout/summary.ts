@@ -34,7 +34,7 @@ export function orderSummary(quote: CheckoutQuote, fulfillment: Fulfillment): Or
     lines.push({ key: "shipping", label: `Shipping · ${quote.shipping.carrier}`, cents: quote.shipping.feeCents });
   }
   lines.push({ key: "tax", label: "Estimated tax", cents: quote.taxCents });
-  if ((fulfillment !== "pickup" && fulfillment !== "ship") || quote.tipCents > 0) {
+  if (quote.tipCents > 0) {
     lines.push({ key: "tip", label: "Tip", cents: quote.tipCents });
   }
   return {

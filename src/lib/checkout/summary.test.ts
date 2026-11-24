@@ -37,7 +37,7 @@ describe("orderSummary", () => {
     expect(view.bufferCents).toBe(419);
   });
 
-  it("shows the store delivery fee and tip choice on a store-delivery order", () => {
+  it("shows the store delivery fee on a store-delivery order, and no Tip line when there is no tip (#750)", () => {
     const view = orderSummary(
       quote({ deliveryFeeCents: 499, totalCents: 4693, holdCents: 5112 }),
       "store-delivery",
@@ -47,7 +47,6 @@ describe("orderSummary", () => {
       ["Service fee", 126],
       ["Store delivery", 499],
       ["Estimated tax", 0],
-      ["Tip", 0],
     ]);
     expect(labels(view)).not.toContain("Courier");
     expect(view.totalCents).toBe(4693);
