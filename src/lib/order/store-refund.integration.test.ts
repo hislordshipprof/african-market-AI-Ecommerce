@@ -178,6 +178,17 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
     });
   });
 
+  it("after a platform refund, a whole-order refund reverses no more tax than the sale has left", async () => {
+    const { order } = await capturedOrder("DELIVERED", "ship", { deliveryFeeCents: 599, tipCents: 300, yamTaxCents: 160, oilTaxCents: 40 });
+    const { refundOrderAsPlatform } = await import("./platform-refund");
+    expect(await refundOrderAsPlatform(order.id, { amountCents: 1000, reason: "Late", submissionId: crypto.randomUUID() }, OWNER)).toMatchObject({ ok: true });
+    expect(await refund(order.id, "whole_order")).toMatchObject({ ok: true });
+    const [first, second] = (await state(order.id)).requests.map((row) => row.taxReversal as { mode: string; totalCents: number });
+    // A flat reversal records no lines, so a lines plan would ask Stripe Tax for more than each line has left.
+    expect(second).toMatchObject({ mode: "flat" });
+    expect(first.totalCents + second.totalCents).toBeLessThanOrEqual(2700);
+  });
+
   it("refunding the whole of a ready ship order cancels the shipment and keeps the owner's reason", async () => {
     const { order } = await capturedOrder("READY", "ship");
     expect(await refund(order.id, "whole_order")).toEqual({ ok: true, cancelled: true });

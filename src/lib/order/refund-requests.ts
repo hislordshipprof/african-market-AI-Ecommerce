@@ -149,7 +149,8 @@ function taxReversalPlan(
       .map((line, index) => ({ reference: line.reference, amountCents: goods[index], taxCents: tax[index] }))
       .filter((line) => line.amountCents > 0 || line.taxCents > 0);
     const totalCents = reversed.reduce((sum, line) => sum + line.amountCents + line.taxCents, 0);
-    return totalCents > 0 ? { mode: "lines", totalCents, lines: reversed } : null;
+    // An earlier flat reversal records no lines, so a lines plan past what the sale has left would be refused: go flat.
+    if (totalCents <= left) return totalCents > 0 ? { mode: "lines", totalCents, lines: reversed } : null;
   }
   const totalCents = Math.min(left, shares.goodsCents + shares.taxCents);
   return totalCents > 0 ? { mode: "flat", totalCents } : null;
