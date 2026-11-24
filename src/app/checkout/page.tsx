@@ -31,7 +31,7 @@ export default async function CheckoutRoute() {
         : null;
   const harness = checkoutHarnessOn(cookieStore);
   const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
-  const prefill = !unavailable && session?.user?.id ? await loadCheckoutPrefill(session.user.id) : null;
+  const prefill = !unavailable && session?.user?.id ? await loadCheckoutPrefill(session.user.id, store.id) : null;
   const takesPayment = !unavailable && checkoutTakesPayment(store, publishableKey, harness);
   const [slotStore, whatsappUpdates] = takesPayment
     ? await Promise.all([platform.store.findUnique({ where: { id: store.id } }), storeHasWhatsAppNumber(store.id)])

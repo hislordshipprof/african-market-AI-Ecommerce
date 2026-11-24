@@ -8,9 +8,8 @@ export type DeliveryAddress = {
 
 /** "12 Main St, Apt 4, Houston, TX 77001", from the address stored on the order. */
 export function formatDeliveryAddress(order: DeliveryAddress): string {
-  const street = [order.deliveryLine1, order.deliveryLine2].filter(Boolean).join(", ");
-  const area = order.deliveryCity ? `${order.deliveryCity}, ${order.deliveryState} ${order.deliveryZip}` : "";
-  return [street, area].filter(Boolean).join(", ");
+  const region = [order.deliveryState, order.deliveryZip].filter(Boolean).join(" ");
+  return [order.deliveryLine1, order.deliveryLine2, order.deliveryCity, region].filter(Boolean).join(", ");
 }
 
 /** Where a delivered or shipped order is going (#753); null for pickup or when no address was stored. */

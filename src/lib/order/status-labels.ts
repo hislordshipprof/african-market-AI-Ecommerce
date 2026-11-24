@@ -1,5 +1,14 @@
 import type { OrderStatus } from "./service";
 
+/** One name per way an order leaves the store, on the inbox, the receipt, the order page and the analytics export. */
+export const FULFILLMENT_LABELS: Record<string, string> = {
+  pickup: "Pickup",
+  "store-delivery": "Store delivery",
+  delivery: "Store delivery",
+  courier: "Courier delivery",
+  ship: "Shipping",
+};
+
 /** One name per order state, on the store inbox, the packing screen and the customer's order page (#742). */
 const ORDER_STATUS_LABELS: Record<Exclude<OrderStatus, "READY">, string> = {
   AUTHORIZED: "Order placed",

@@ -35,8 +35,8 @@ export interface FlowStore {
   insulatedPackaging: boolean;
   /** A Pro store registered with a courier, with a pickup point (#527). Each order's eligibility comes with its quote. */
   courierOffered: boolean;
-  /** The store ships parcels: it set handling days (#567). Each basket's eligibility comes with its quote. */
-  shippingOffered?: boolean;
+  /** The states the store ships parcels to (#567, #750); empty when it set no handling days or the platform ships nowhere. Each basket's eligibility comes with its quote. */
+  shipsTo: string[];
   /** Closed now, and an order placed now is queued for the next opening. */
   closed: boolean;
   /** "Wed 9:00 AM CT" while closed, else empty. */

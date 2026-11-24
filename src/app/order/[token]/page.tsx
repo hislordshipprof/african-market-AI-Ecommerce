@@ -14,7 +14,7 @@ import { readCustomerMessages } from "@/lib/support/thread";
 import { issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
 import { courierBrand } from "@/lib/delivery/dispatch";
 import type { DeliveryProviderName } from "@/lib/delivery/provider";
-import { FULFILLMENT_LABELS } from "@/lib/analytics/csv";
+import { FULFILLMENT_LABELS } from "@/lib/order/status-labels";
 import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";

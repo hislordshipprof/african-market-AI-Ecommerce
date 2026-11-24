@@ -45,7 +45,7 @@ const settings = {
   autoRefundLimitCents: 0,
   insulatedPackaging: false,
   courierOffered: false,
-  shippingOffered: false,
+  shipsTo: [],
   closed: false,
   opensAt: "",
   readyAt: "",

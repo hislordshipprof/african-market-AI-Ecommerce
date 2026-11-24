@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { formatInZone, formatListDate, formatListTime, formatUsPhone, money } from "./format";
+import { formatInZone, formatListDate, formatListTime, formatUsPhone, mapsUrl, money, telHref } from "./format";
 
 const AT = new Date("2026-11-03T19:05:00.000Z");
 const OPTIONS: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
@@ -98,5 +98,25 @@ describe("formatUsPhone", () => {
   it("leaves a number that is not a US number as typed", () => {
     expect(formatUsPhone("+234 803 123 4567")).toBe("+234 803 123 4567");
     expect(formatUsPhone("555-0100")).toBe("555-0100");
+  });
+});
+
+describe("telHref", () => {
+  it("dials a US number with its country code however it was typed (#751)", () => {
+    expect(telHref("(202) 555-0100")).toBe("tel:+12025550100");
+    expect(telHref("+1 202 555 0100")).toBe("tel:+12025550100");
+    expect(telHref("12025550100")).toBe("tel:+12025550100");
+  });
+
+  it("dials any other number as typed, without spaces", () => {
+    expect(telHref("+44 20 7946 0958")).toBe("tel:+442079460958");
+  });
+});
+
+describe("mapsUrl", () => {
+  it("opens directions to the address (#751)", () => {
+    expect(mapsUrl("7500 Bellfort St, Houston, TX 77061")).toBe(
+      "https://www.google.com/maps/dir/?api=1&destination=7500%20Bellfort%20St%2C%20Houston%2C%20TX%2077061",
+    );
   });
 });

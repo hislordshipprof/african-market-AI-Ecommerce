@@ -7,7 +7,8 @@ import { PlanLocked } from "@/components/store-admin/plan-locked";
 import { money } from "@/lib/format";
 import { RANGE_PRESETS, resolveRange, storeToday, type AnalyticsRange } from "@/lib/analytics/range";
 import { CANCEL_REASON_LABELS, storeAnalytics, type SalesDay } from "@/lib/analytics/queries";
-import { FULFILLMENT_LABELS, type AnalyticsView } from "@/lib/analytics/csv";
+import { type AnalyticsView } from "@/lib/analytics/csv";
+import { FULFILLMENT_LABELS } from "@/lib/order/status-labels";
 import { dayChartScale } from "./day-chart-scale";
 
 type Search = { store?: string; range?: string; from?: string; to?: string };

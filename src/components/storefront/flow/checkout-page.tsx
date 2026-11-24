@@ -58,9 +58,10 @@ import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
 import { checkoutQuoteKey, placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
-import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
+import { contactPrefillNote, SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import type { SlotOptions } from "@/lib/checkout/slots";
+import { shipsToLabel } from "@/lib/shipping/eligibility";
 import { CouponField } from "./coupon-field";
 import styles from "./cart-checkout.module.css";
 
@@ -356,6 +357,8 @@ function RealCheckoutForm({
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [confirmed, setConfirmed] = useState<ConfirmedDelivery | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // An address check failed: Place order stays off until an address is confirmed (#750).
+  const [addressRefused, setAddressRefused] = useState(false);
   const suggestAbort = useRef<AbortController | null>(null);
   const [schedule, setSchedule] = useState(false);
   const [slot, setSlot] = useState("asap");
@@ -515,6 +518,7 @@ function RealCheckoutForm({
     setErrorHref(null);
     // In page order: the address card comes before contact. Fields show their own errors; values stay.
     if (fulfillment !== "pickup" && !delivery) {
+      setAddressRefused(true);
       fail("address", fulfillment === "ship" ? "Confirm your shipping address." : "Confirm your delivery address.");
       return;
     }
@@ -762,6 +766,7 @@ function RealCheckoutForm({
               setConfirming(false);
               if (!settled.ok) {
                 setConfirmed(null);
+                setAddressRefused(true);
                 fail(
                   "address",
                   fulfillment === "ship"
@@ -773,11 +778,13 @@ function RealCheckoutForm({
               const result = settled.value;
               if (!result.ok) {
                 setConfirmed(null);
+                setAddressRefused(true);
                 fail("address", result.error);
                 return;
               }
               setIssue(null);
               setSuggestions([]);
+              setAddressRefused(false);
               setConfirmed({
                 formatted: result.formatted,
                 line1: result.line1,
@@ -856,8 +863,9 @@ function RealCheckoutForm({
       cateringLead={slotOptions?.leadMinutes ? slotOptions.leadMinutes / 60 : undefined}
       weightG={weightG}
       courierEligible={settings.courierOffered}
+      addressHold={addressRefused && fulfillment !== "pickup" && !delivery}
       onSubmit={pay}
-      signedIn={Boolean(stripeConfig.signedIn)}
+      contactNote={contactPrefillNote(stripeConfig.signedIn ? prefill?.contact ?? { name: "", phone: "", email: "" } : null)}
       paymentSection={
         <>
           {prefill?.cardsUnavailable ? <p>Saved cards are unavailable right now</p> : null}
@@ -1093,7 +1101,8 @@ interface CheckoutLayoutProps {
   errorHref?: string | null;
   submitted: boolean;
   payState: "idle" | "pending" | "success";
-  signedIn?: boolean;
+  /** Above the contact fields: what the account filled, or the guest line (#750). */
+  contactNote?: string;
   identityLocked?: boolean;
   frozen: boolean;
   /** A hot prepared item is in the basket: no Leave at door (#570). */
@@ -1102,6 +1111,8 @@ interface CheckoutLayoutProps {
   prepMinutes?: number;
   weightG: number;
   courierEligible: boolean;
+  /** A failed address check holds Place order until an address is confirmed (#750). */
+  addressHold?: boolean;
   onSubmit: (e: FormEvent) => void;
   paymentSection: React.ReactNode;
   payLabel: string;
@@ -1145,9 +1156,9 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, quoteFailed = false, quoteFailMessage, onRetryQuote,
     issue, onClearIssue, onUseAnotherCard, onRefresh, submitAttempt, errorHref, submitted, payState,
-    frozen, hot = false, prepMinutes, weightG, courierEligible,
+    frozen, hot = false, prepMinutes, weightG, courierEligible, addressHold = false,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
-    signedIn = false, identityLocked = false, whatsapp,
+    contactNote = contactPrefillNote(null), identityLocked = false, whatsapp,
   } = props;
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
 
@@ -1209,7 +1220,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
   return (
     <div className={styles.page}>
       <FlowHeading
-        title="A little closer to home"
+        title="Checkout"
         description="Review your order and choose how it reaches you."
         backHref="/cart"
         backLabel="Back to basket"
@@ -1264,7 +1275,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                       : "Courier"}
                   </Chip>
                 )}
-                {isRealPayment && settings.shippingOffered && (
+                {isRealPayment && settings.shipsTo.length > 0 && (
                   <Chip
                     type="button"
                     selected={shipping}
@@ -1277,7 +1288,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               </div>
               <p className={styles.muted}>
                 {shipping
-                  ? `Order weight: ${(weightG / 453.592).toFixed(1)} lb. Shipped orders can weigh up to 50 lb.`
+                  ? `${shipsToLabel(settings.shipsTo)}. Order weight: ${(weightG / 453.592).toFixed(1)} lb. Shipped orders can weigh up to 50 lb.`
                   : `Order weight: ${(weightG / 453.592).toFixed(1)} lb. Delivery radius: ${settings.deliveryRadiusMi} miles.`}
               </p>
               {!isRealPayment && !courierEligible && (
@@ -1449,11 +1460,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           </FlowCard>
           <div id="contact" className={styles.anchor}>
             <FlowCard title="Contact details">
-              <p className={styles.muted}>
-                {signedIn
-                  ? "We filled your name and email from your account. Edits apply to this order only."
-                  : "Guest checkout. A phone number helps your shopper reach you about substitutions."}
-              </p>
+              <p className={styles.muted}>{contactNote}</p>
               <label className={styles.field}>
                 Full name
                 <input
@@ -1519,7 +1526,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               )}
             </FlowCard>
           </div>
-          {fulfillment !== "pickup" && !shipping && (
+          {/* Tips are not paid out end to end yet, so the real checkout offers none (decision 2026-11-23-09). */}
+          {!isRealPayment && fulfillment !== "pickup" && !shipping && (
             <FlowCard title="A thank-you for your driver">
               <p className={styles.muted}>
                 100% of your tip goes to the courier. No tip is added unless
@@ -1684,10 +1692,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               type="submit"
               state={payState}
               realPayment={isRealPayment}
-              disabled={payState !== "idle" || quotePending || Boolean(blocking)}
-              aria-describedby={blocking ? issueId("basket") : undefined}
+              disabled={payState !== "idle" || quotePending || Boolean(blocking) || addressHold}
+              aria-describedby={blocking ? issueId("basket") : addressHold ? "checkout-address-hold" : undefined}
               label={payLabel}
             />
+            {addressHold && (
+              <p className={styles.muted} id="checkout-address-hold">Confirm your address to place the order.</p>
+            )}
             <p className={styles.muted}>
               By placing this order, you approve the authorization hold and
               your fulfillment choices.

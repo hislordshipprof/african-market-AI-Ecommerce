@@ -1,4 +1,4 @@
-import type { CheckoutQuote, Fulfillment } from "../customer-flow/contracts";
+import type { CheckoutQuote, FlowStore, Fulfillment } from "../customer-flow/contracts";
 import { money } from "../format";
 
 export interface SummaryLine {
@@ -34,7 +34,7 @@ export function orderSummary(quote: CheckoutQuote, fulfillment: Fulfillment): Or
     lines.push({ key: "shipping", label: `Shipping · ${quote.shipping.carrier}`, cents: quote.shipping.feeCents });
   }
   lines.push({ key: "tax", label: "Estimated tax", cents: quote.taxCents });
-  if ((fulfillment !== "pickup" && fulfillment !== "ship") || quote.tipCents > 0) {
+  if (quote.tipCents > 0) {
     lines.push({ key: "tip", label: "Tip", cents: quote.tipCents });
   }
   return {
@@ -43,6 +43,23 @@ export function orderSummary(quote: CheckoutQuote, fulfillment: Fulfillment): Or
     bufferCents: quote.bufferCents,
     holdCents: quote.holdCents,
   };
+}
+
+/** The basket's line under its estimate: only the ways this store hands over an order, at their real starting fees (#750). */
+export function basketFulfilmentNote(
+  store: Pick<FlowStore, "pickupEnabled" | "storeDeliveryEnabled" | "storeDeliveryFeeCents" | "courierOffered" | "shipsTo">,
+): string {
+  const options = [
+    store.storeDeliveryEnabled
+      ? store.storeDeliveryFeeCents === 0 ? "free store delivery" : `store delivery from ${money(store.storeDeliveryFeeCents)}`
+      : null,
+    store.courierOffered ? "courier quoted at checkout" : null,
+    store.shipsTo.length > 0 ? "shipping quoted at checkout" : null,
+  ].filter((option) => option !== null);
+  const estimate = store.pickupEnabled ? "Estimated for pickup." : "Estimated before delivery.";
+  if (!options.length) return estimate;
+  const list = options.join("; ");
+  return `${estimate} ${list[0].toUpperCase()}${list.slice(1)}. Final fees depend on your choice.`;
 }
 
 export function placeOrderLabel(quote: CheckoutQuote | null): string {
