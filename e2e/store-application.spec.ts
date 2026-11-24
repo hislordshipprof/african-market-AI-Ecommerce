@@ -78,6 +78,8 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await page.getByRole("banner").getByRole("link", { name: "Sell on African Markets" }).click();
     await expect(page).toHaveURL(`${root}/sell`);
     await expect(page.getByRole("heading", { level: 1, name: "Sell on African Markets" })).toBeVisible();
+    // #780: the monthly fee shows before applying, beside "No commission".
+    await expect(page.getByText(/No commission on your sales\. Plans are Starter at \$\d+ a month or Pro at \$\d+ a month\./)).toBeVisible();
     await shoot(page, "sell-form");
 
     await page.getByRole("button", { name: "Send application" }).click();
@@ -115,6 +117,12 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await page.getByLabel("Verification code").fill(generateTOTP(TOTP_SECRET));
     await page.click("button[type='submit']");
     await page.waitForURL("**/admin", { timeout: 15_000 });
+    // #780: the admin home counts the applications waiting, at least the two just sent.
+    const applicationsCount = page.getByTestId("count-applications");
+    await expect(applicationsCount).toHaveAttribute("href", "/admin/applications");
+    await expect(applicationsCount).toContainText("Applications to review");
+    await expect(applicationsCount).not.toContainText("Nothing waiting");
+    await shoot(page, "admin-home");
 
     await page.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "Applications" }).first().click();
     await expect(page).toHaveURL(`${root}/admin/applications`);
