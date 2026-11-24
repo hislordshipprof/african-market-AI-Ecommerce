@@ -60,7 +60,7 @@ export default async function OrderPage({
     const fulfillment = FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment;
     const issue = realOrder.issueReports[0];
     const shipped = realOrder.fulfillment === "ship";
-    const receipt = orderReceipt({ ...realOrder, couponCode: realOrder.coupon?.code ?? null });
+    const receipt = orderReceipt({ ...realOrder, couponCode: realOrder.coupon?.code ?? null, refundedCents });
     return (
       <StorefrontShell store={context.store}>
         <div className={styles.page}>
@@ -174,6 +174,12 @@ export default async function OrderPage({
               <FeeLine key={line.key} label={line.label} cents={line.cents} />
             ))}
             <FeeLine label={receipt.total.label} cents={receipt.total.cents} strong />
+            {receipt.refund && receipt.net && (
+              <>
+                <FeeLine label={receipt.refund.label} cents={receipt.refund.cents} />
+                <FeeLine label={receipt.net.label} cents={receipt.net.cents} strong />
+              </>
+            )}
             {receipt.holdCents != null && (
               <FeeLine
                 label="Authorization hold"
