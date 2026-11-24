@@ -459,3 +459,110 @@ describe("directory attribution cookie (#454)", () => {
     expect(res.cookies.get("came_from")).toBeUndefined();
   });
 });
+
+describe("proxy on the production alias before the platform domain is chosen (#766)", () => {
+  const ALIAS = "african-market-ai-ecommerce.vercel.app";
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", ALIAS);
+  });
+
+  for (const path of ["/", "/stores/texas", "/sell", "/admin"]) {
+    it(`serves ${path} as the platform root, marked noindex`, () => {
+      const res = proxy(makeRequest(`https://${ALIAS}${path}`));
+      expect(res.headers.get("x-middleware-request-x-platform-root")).toBe("1");
+      expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+      expect(res.headers.get("x-robots-tag")).toBe("noindex");
+    });
+  }
+
+  it("leaves a preview or deployment vercel.app host with no store and no root", () => {
+    for (const host of ["african-market-ai-ecommerce-git-main-team.vercel.app", "african-market-ai-ecommerce-abc123-team.vercel.app"]) {
+      const res = proxy(makeRequest(`https://${host}/stores/texas?store=mama-ngozi`));
+      expect(res.headers.get("x-middleware-request-x-platform-root")).toBeNull();
+      expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+      expect(res.cookies.get("store_override")).toBeUndefined();
+      expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/_directory-not-here");
+      expect(res.headers.get("x-robots-tag")).toBeNull();
+    }
+  });
+
+  it("a spoofed Host that only contains the alias gets nothing", () => {
+    const req = new NextRequest(`https://${ALIAS}.evil.example/sell`, {
+      headers: { host: `${ALIAS}.evil.example`, "x-platform-root": "1", "x-forwarded-host": ALIAS },
+    });
+    const res = proxy(req);
+    expect(res.headers.get("x-middleware-request-x-platform-root")).toBeNull();
+    expect(res.headers.get("x-robots-tag")).toBeNull();
+  });
+
+  it("once PLATFORM_ROOT_DOMAIN is set the alias is a plain vercel.app host again, and ?store= is ignored", () => {
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "example.com");
+    const res = proxy(makeRequest(`https://${ALIAS}/?store=mama-ngozi`));
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("store_override")).toBeUndefined();
+    expect(res.headers.get("x-middleware-request-x-platform-root")).toBeNull();
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+    expect(res.headers.get("x-robots-tag")).toBeNull();
+    expect(proxy(makeRequest("https://example.com/")).headers.get("x-robots-tag")).toBeNull();
+  });
+});
+
+describe("stores on the production alias, by ?store= (#766)", () => {
+  const ALIAS = "african-market-ai-ecommerce.vercel.app";
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", ALIAS);
+  });
+
+  it("a directory link remembers the store and drops the param, keeping the ref", () => {
+    const res = proxy(makeRequest(`https://${ALIAS}/?store=mama-ngozi&ref=directory`));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).search).toBe("?ref=directory");
+    const cookie = res.cookies.get("store_override");
+    expect(cookie?.value).toBe("mama-ngozi");
+    expect(cookie?.secure).toBe(true);
+    expect(cookie?.httpOnly).toBe(true);
+    expect(res.headers.get("x-robots-tag")).toBe("noindex");
+  });
+
+  it("the remembered store serves its storefront pages there", () => {
+    for (const path of ["/", "/categories/grains", "/account/sign-in/confirm"]) {
+      const res = proxy(makeRequest(`https://${ALIAS}${path}`, { store_override: "mama-ngozi" }));
+      expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
+      expect(res.headers.get("x-middleware-request-x-platform-root")).toBeNull();
+      expect(res.headers.get("x-robots-tag")).toBe("noindex");
+    }
+  });
+
+  it("marketplace pages stay the marketplace while a store is remembered", () => {
+    for (const path of ["/stores/texas", "/stores/texas/houston", "/sell", "/admin/applications", "/sitemap.xml", "/robots.txt"]) {
+      const res = proxy(makeRequest(`https://${ALIAS}${path}`, { store_override: "mama-ngozi" }));
+      expect(res.headers.get("x-middleware-request-x-platform-root")).toBe("1");
+      expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+    }
+  });
+
+  it("a marketplace page forgets the store, so its links to / lead back to the directory home", () => {
+    const res = proxy(makeRequest(`https://${ALIAS}/stores/texas`, { store_override: "mama-ngozi" }));
+    expect(res.cookies.get("store_override")?.value).toBe("");
+    expect(res.cookies.get("store_override")?.maxAge).toBe(0);
+    const home = proxy(makeRequest(`https://${ALIAS}/`));
+    expect(home.headers.get("x-middleware-request-x-platform-root")).toBe("1");
+  });
+
+  it("a storefront page keeps the store", () => {
+    const res = proxy(makeRequest(`https://${ALIAS}/cart`, { store_override: "mama-ngozi" }));
+    expect(res.cookies.get("store_override")).toBeUndefined();
+  });
+});
