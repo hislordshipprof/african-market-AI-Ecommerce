@@ -376,6 +376,7 @@ interface RawSearchRow {
   id: string;
   custom_name: string | null;
   master_product_name: string | null;
+  image_url: string | null;
   master_product_image: string | null;
   category_slug: string | null;
   price: number;
@@ -406,7 +407,7 @@ async function readSearchListings(
   const results = await storeScopedRawQuery<RawSearchRow>(
     storeId,
     Prisma.sql`
-    SELECT l.id, l.custom_name, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
+    SELECT l.id, l.custom_name, l.image_url, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
       l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable, l.max_per_order,
       pack.price AS min_variant_price, pack.id AS variant_id,
       pack.label AS pack_label, pack.weight_g, pack.weight_placeholder,
@@ -483,7 +484,7 @@ async function readSearchListings(
       id: row.id,
       name: names.displayName,
       altName: names.altName ?? localNameFor(names.displayName),
-      imageUrl: listingImage({ customName: row.custom_name, masterProduct: row.master_product_name ? { name: row.master_product_name, imageUrl: row.master_product_image } : null }),
+      imageUrl: listingImage({ imageUrl: row.image_url, customName: row.custom_name, masterProduct: row.master_product_name ? { name: row.master_product_name, imageUrl: row.master_product_image } : null }),
       categorySlug: row.category_slug ?? undefined,
       variantId: row.variant_id ?? undefined,
       packLabel: row.weight_placeholder ? "Each" : row.pack_label ?? "Each",

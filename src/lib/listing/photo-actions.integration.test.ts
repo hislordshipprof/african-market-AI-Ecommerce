@@ -40,7 +40,7 @@ vi.mock("../r2", async (importOriginal) => {
 });
 
 import { uploadListingPhotoAction } from "./actions";
-import { getListingDetail } from "../storefront/service";
+import { getListingDetail, searchListings } from "../storefront/service";
 import { platformAdmin } from "../db";
 import { PHOTO_UPLOAD_MAX_BYTES } from "./csv-file-cap";
 
@@ -146,6 +146,8 @@ describe.skipIf(!hasDb)("uploadListingPhotoAction (DB integration, #787)", () =>
     expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBe(960);
 
     expect((await getListingDetail(storeA.id, listingA))?.imageUrl).toBe(`/api/catalog-image/${key}`);
+    const hit = (await searchListings(storeA.id, `P787 Egusi ${RUN}`)).find((row) => row.id === listingA);
+    expect(hit?.imageUrl).toBe(`/api/catalog-image/${key}`);
     // AC2: the other store and the master product keep the catalogue photo.
     expect((await getListingDetail(storeB.id, listingB))?.imageUrl).toBe(MASTER_PHOTO);
     expect((await platformAdmin.masterProduct.findUnique({ where: { id: masterId } }))?.imageUrl).toBe(MASTER_PHOTO);
