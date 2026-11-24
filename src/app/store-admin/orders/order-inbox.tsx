@@ -62,7 +62,7 @@ import { orderStatusLabel } from "@/lib/order/status-labels";
 import { formatClockInZone, formatUsPhone, mapsUrl, money, telHref } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
-import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines } from "@/lib/order/staff-copy";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines, swapChoiceLine } from "@/lib/order/staff-copy";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { ActionError } from "./action-error";
 import { CourierTiming } from "./courier-timing";
@@ -684,6 +684,11 @@ export function OrderInbox({
                               {line.listingVariant.label} &middot; Qty:{" "}
                               {line.qtyOrdered}
                             </div>
+                            {line.status === "pending" && (
+                              <div className="mt-1 text-xs text-muted-foreground" data-testid="pick-line-swap-choice">
+                                {swapChoiceLine(line.swapRule, line.substituteVariant ? variantName(line.substituteVariant) : null)}
+                              </div>
+                            )}
                             {substitutionNote(line) && (
                               <div className="mt-1 text-xs font-medium text-foreground" role="status">
                                 {substitutionNote(line)}

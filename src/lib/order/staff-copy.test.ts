@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines } from "./staff-copy";
+import { fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines, swapChoiceLine } from "./staff-copy";
 
 describe("captured line", () => {
   it("shows Captured only after the money is captured", () => {
@@ -212,5 +212,17 @@ describe("storePayoutLines", () => {
 
   it("reads exactly as before when the order has no refunds", () => {
     expect(storePayoutLines({ ...order1007, refundRequests: [] })).toEqual(storePayoutLines(order1007));
+  });
+});
+
+describe("swapChoiceLine", () => {
+  it("tells staff, before they tap Short, what the customer chose if the item is short (#762)", () => {
+    expect(swapChoiceLine("exact_only", null)).toBe("If short: exact item only, refund it");
+    expect(swapChoiceLine("store_suggests", null)).toBe("If short: the customer lets you suggest a swap");
+    expect(swapChoiceLine("named_substitute", "Cameroon Pepper")).toBe("If short: swap for Cameroon Pepper");
+  });
+
+  it("falls back to a refund when a named substitute is gone", () => {
+    expect(swapChoiceLine("named_substitute", null)).toBe("If short: exact item only, refund it");
   });
 });

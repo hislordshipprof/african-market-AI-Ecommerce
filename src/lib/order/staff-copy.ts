@@ -73,6 +73,13 @@ export function storeOrderBreakdown(order: OrderMoneyInput & {
   return { lines, total: { label: money.expected ? "Expected total" : "Total", cents } };
 }
 
+/** The customer's swap choice for a line, shown on the pick list before staff tap Short (#762). */
+export function swapChoiceLine(swapRule: string, substituteName: string | null): string {
+  if (swapRule === "store_suggests") return "If short: the customer lets you suggest a swap";
+  if (swapRule === "named_substitute" && substituteName) return `If short: swap for ${substituteName}`;
+  return "If short: exact item only, refund it";
+}
+
 type ScheduledOrder = { fulfillment: string; pickupSlot: string | null };
 
 type FulfillmentOrder = ScheduledOrder & {

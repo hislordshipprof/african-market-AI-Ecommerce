@@ -69,6 +69,8 @@ export default async function OrderPage({
     const shipped = realOrder.fulfillment === "ship";
     // An address is the customer's own: shown only with the tracking token, like the PIN and the photo.
     const destination = owner ? deliveryDestination(realOrder) : null;
+    const deadline = realOrder.substitutionRequests[0]?.expiresAt;
+    const answerBy = deadline ? formatClockInZone(deadline, context.store.timezone) : null;
     const receipt = orderReceipt({
       ...realOrder,
       couponCode: realOrder.coupon?.code ?? null,
@@ -133,7 +135,10 @@ export default async function OrderPage({
             {realOrder.status === "SUBSTITUTION_PENDING" && owner && (
               <div className={styles.block}>
                 <h3>An item is short</h3>
-                <p>The store couldn&rsquo;t find everything you ordered. Choose a swap or a refund.</p>
+                <p>
+                  The store couldn&rsquo;t find everything you ordered. Choose a swap or a refund
+                  {answerBy ? <> by <strong>{answerBy}</strong></> : null}.
+                </p>
                 <Link className="sf-button" href={`/order/${encodeURIComponent(token)}/substitutions`}>Choose now</Link>
               </div>
             )}
