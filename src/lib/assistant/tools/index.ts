@@ -131,7 +131,7 @@ export function assistantTools(
       execute: (input, options) => getRecipe({ ...ctx, toolCallId: options.toolCallId }, input, recipeDeps),
     }),
     get_fulfillment_options: tool({
-      description: "Today's pickup times at this store, in store time. Delivery is chosen on the checkout page.",
+      description: "The pickup times checkout offers at this store, in store time: asap (or, while the store is closed, a queued order for when it opens) and any scheduled times. Delivery is chosen on the checkout page.",
       inputSchema: getFulfillmentOptionsInput,
       execute: (input, options) => getFulfillmentOptions({ ...ctx, toolCallId: options.toolCallId }, input),
     }),

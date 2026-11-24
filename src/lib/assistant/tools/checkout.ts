@@ -1,9 +1,8 @@
 import { storeScoped } from "../../db";
 import { computeQuote } from "../../checkout/quote";
 import { readServiceFeeSettings } from "../../order/service-fee-settings";
-import { pickupSlotsFor } from "../../order/slot-schedule";
 import { shownPack } from "../../storefront/pack-order";
-import { readConversationDraft, readPickupStore, writeCheckoutDraft } from "../checkout-draft";
+import { offeredPickupSlots, readConversationDraft, readPickupStore, writeCheckoutDraft } from "../checkout-draft";
 import { mayBeUnavailable } from "./availability";
 import { listingName, recordRead, type AssistantContext, type ToolResult } from "./execute";
 import { getFulfillmentOptionsInput, parseToolInput, prepareCheckoutInput, setFulfillmentInput } from "./schemas";
@@ -26,7 +25,7 @@ export async function getFulfillmentOptions(ctx: AssistantContext, input: unknow
   const parsed = parseToolInput(getFulfillmentOptionsInput, input);
   const store = await readPickupStore(ctx.storeId);
   if (!store) return recordRead(ctx, "get_fulfillment_options", parsed, fail("store_not_found"));
-  const slots = pickupSlotsFor(store, new Date(), new Map());
+  const slots = await offeredPickupSlots(ctx.storeId, store, ctx.cartId, new Date());
   return recordRead(ctx, "get_fulfillment_options", parsed, {
     ok: true,
     pickup: {
@@ -44,7 +43,7 @@ export async function setFulfillment(ctx: AssistantContext, input: unknown): Pro
   const store = await readPickupStore(ctx.storeId);
   if (!store) return recordRead(ctx, "set_fulfillment", parsed, fail("store_not_found"));
   if (!store.pickupEnabled) return recordRead(ctx, "set_fulfillment", parsed, fail("pickup_unavailable"));
-  const slot = pickupSlotsFor(store, new Date(), new Map()).find((offered) => offered.id === parsed.slot_id);
+  const slot = (await offeredPickupSlots(ctx.storeId, store, ctx.cartId, new Date())).find((offered) => offered.id === parsed.slot_id);
   if (!slot) return recordRead(ctx, "set_fulfillment", parsed, fail("slot_not_offered"));
   await writeCheckoutDraft(ctx.storeId, ctx.conversationId, { fulfillment: "pickup", slot: slot.id });
   return recordRead(ctx, "set_fulfillment", parsed, {
@@ -90,7 +89,7 @@ export async function prepareCheckout(ctx: AssistantContext, input: unknown): Pr
     "pickup",
     serviceFee,
   );
-  const slot = draft ? pickupSlotsFor(store, new Date(), new Map()).find((offered) => offered.id === draft.slot) : undefined;
+  const slot = draft ? (await offeredPickupSlots(ctx.storeId, store, ctx.cartId, new Date())).find((offered) => offered.id === draft.slot) : undefined;
   // Contact is entered on the checkout page, so its problem is not the card's.
   const problems = [...new Set(quote.problems.filter((problem) => problem.code !== "invalid-contact").map((problem) => problem.message))];
   for (const line of cartLines) {
