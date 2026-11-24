@@ -510,6 +510,8 @@ export function OrderInbox({
     );
   }
 
+  const breakdown = selectedOrder ? storeOrderBreakdown(selectedOrder) : null;
+
   const sortedPickLines = selectedOrder
     ? sortPickListLines(
         selectedOrder.lines.map((l) => ({
@@ -873,7 +875,7 @@ export function OrderInbox({
                 )}
 
                 <div className="mt-6 space-y-1.5 border-t pt-4">
-                  {storeOrderBreakdown(selectedOrder).map((line) => (
+                  {breakdown!.lines.map((line) => (
                     <div key={line.key} className="flex justify-between gap-3 text-sm">
                       <span className="text-muted-foreground">{line.label}</span>
                       <span className="tabular-nums" data-testid={`order-${line.key}`}>
@@ -882,9 +884,9 @@ export function OrderInbox({
                     </div>
                   ))}
                   <div className="flex justify-between pt-1.5 text-base font-semibold">
-                    <span>Total</span>
+                    <span>{breakdown!.total.label}</span>
                     <span className="tabular-nums" data-testid="order-total">
-                      {money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}
+                      {money(breakdown!.total.cents)}
                     </span>
                   </div>
                   {selectedOrder.capturedAmountCents != null &&

@@ -23,6 +23,11 @@ import { formatClockInZone, money } from "@/lib/format";
 import { shownPack } from "@/lib/storefront/pack-order";
 import styles from "./tracking.module.css";
 
+/** A product's name and pack, as the receipt lists it. */
+function variantLabel(variant: { label: string; weightPlaceholder?: boolean; weightG: number; listing: { customName: string | null; masterProduct: { name: string } | null } | null }): string {
+  return [variant.listing?.customName ?? variant.listing?.masterProduct?.name, shownPack(variant).label].filter(Boolean).join(" · ") || "Item";
+}
+
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
 
 export default async function OrderPage({
@@ -64,7 +69,12 @@ export default async function OrderPage({
     const shipped = realOrder.fulfillment === "ship";
     // An address is the customer's own: shown only with the tracking token, like the PIN and the photo.
     const destination = owner ? deliveryDestination(realOrder) : null;
-    const receipt = orderReceipt({ ...realOrder, couponCode: realOrder.coupon?.code ?? null, refundedCents });
+    const receipt = orderReceipt({
+      ...realOrder,
+      couponCode: realOrder.coupon?.code ?? null,
+      refundedCents,
+      lines: realOrder.lines.map((line) => ({ ...line, substitutedName: line.substitutedVariant ? variantLabel(line.substitutedVariant) : null })),
+    });
     return (
       <StorefrontShell store={context.store}>
         <div className={styles.page}>
@@ -173,7 +183,7 @@ export default async function OrderPage({
               {realOrder.lines.map((line, index) => (
                 <li key={line.id}>
                   <span>
-                    {line.qtyOrdered} × {[line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant && shownPack(line.listingVariant).label].filter(Boolean).join(" · ") || "Item"}
+                    {line.qtyOrdered} × {line.listingVariant ? variantLabel(line.listingVariant) : "Item"}
                     {receipt.items[index].note && <small className={styles.note}>{receipt.items[index].note}</small>}
                   </span>
                   <span>{money(receipt.items[index].cents)}</span>
