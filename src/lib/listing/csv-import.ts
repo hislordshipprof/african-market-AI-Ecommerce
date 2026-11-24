@@ -31,6 +31,8 @@ const PRICE_DOLLAR_RE = /^\$?\s*/;
 export interface CsvPreviewMatch {
   row: number;
   csvName: string;
+  /** Parsed price in cents, shown so a wrong price is caught before import (#752). */
+  price: number;
   masterProductId: string;
   masterProductName: string;
   matchType: "exact" | "synonym";
@@ -41,6 +43,7 @@ export interface CsvPreviewMatch {
 export interface CsvPreviewAmbiguous {
   row: number;
   csvName: string;
+  price: number;
   candidates: Array<{
     masterProductId: string;
     masterProductName: string;
@@ -51,6 +54,7 @@ export interface CsvPreviewAmbiguous {
 export interface CsvPreviewNew {
   row: number;
   csvName: string;
+  price: number;
   reason: string;
 }
 
@@ -774,7 +778,7 @@ function classifyPreviewRows(
           existingListingId: existingCustomId,
         });
       } else {
-        newItems.push({ row: row.row, csvName: row.name, reason: "no master product match" });
+        newItems.push({ row: row.row, csvName: row.name, price: row.price, reason: "no master product match" });
       }
     } else if (productMatches.length === 1) {
       const m = productMatches[0];
@@ -797,6 +801,7 @@ function classifyPreviewRows(
         matches.push({
           row: row.row,
           csvName: row.name,
+          price: row.price,
           masterProductId: m.product.id,
           masterProductName: m.product.name,
           matchType: m.matchType,
@@ -808,6 +813,7 @@ function classifyPreviewRows(
       ambiguous.push({
         row: row.row,
         csvName: row.name,
+        price: row.price,
         candidates: productMatches.map((m) => ({
           masterProductId: m.product.id,
           masterProductName: m.product.name,

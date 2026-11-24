@@ -125,8 +125,9 @@ test.describe("CSV import (authenticated)", () => {
     await expect(page.getByText("New listings", { exact: true })).toBeVisible({
       timeout: 15000,
     });
-    await expect(page.getByText(nameA)).toBeVisible();
-    await expect(page.getByText(nameB)).toBeVisible();
+    // #752 AC3: each row shows its parsed price beside its name, so a wrong price is caught here.
+    await expect(page.getByText(nameA).locator("..")).toContainText("$5.00");
+    await expect(page.getByText(nameB).locator("..")).toContainText("$7.50");
 
     await page.getByRole("button", { name: "Import 2 listings" }).click();
 
