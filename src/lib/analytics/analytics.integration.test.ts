@@ -32,10 +32,12 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
   let storeC = "";
   let storeD = "";
   let storeE = "";
+  let storeF = "";
   let data: StoreAnalytics;
   let edges: StoreAnalytics;
   let promo: StoreAnalytics;
   let serviceFee: StoreAnalytics;
+  let payout: StoreAnalytics;
 
   async function asStore<T>(storeId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return raw.$transaction(async (tx) => {
@@ -196,6 +198,27 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     });
   }
 
+  /**
+   * Payout reconciliation (store F, #753), hand-computed from what each order stored:
+   * F1 pickup 11-02  goods 3895 + service fee 117 = captured 4012; card fee 143; platform fee 260.
+   *    Partial refund $11.32 with fee back: round(260 × 1132 / 4012) = 73 returned → store bears 1059; net 4012 − 260 − 1059 = 2693.
+   * F2 pickup 11-03  goods 2000 + tax 100 the platform collects = captured 2100; card fee 88; platform fee 88.
+   *    The application fee also takes the tax (captureSplit, capturedPayout): net 2100 − 88 − 100 = 1912.
+   * F3 courier 11-04 goods 2000 + service fee 99 + courier fee 500 = captured 2599; card fee 88; platform fee 187; net 1912.
+   *    Refund $10.00 after delivery, no fee back on the refund, then its service fee share 38 returned (fee_refund_id): store bears 962; net 950.
+   */
+  async function seedStoreF() {
+    await asStore(storeF, async (tx) => {
+      const customer = await tx.customer.create({ data: { storeId: storeF, name: "Gbenga" } });
+      const base = { storeId: storeF, customerId: customer.id, status: "COMPLETED" as const, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0 };
+      const f1 = await tx.order.create({ data: { ...base, number: 1, fulfillment: "pickup", serviceFeeCents: 117, capturedAmountCents: 4012, platformFeeCents: 260, createdAt: at("2026-11-02T15:00:00Z") } });
+      await tx.refundRequest.create({ data: { storeId: storeF, orderId: f1.id, paymentIntentId: `pi_${run}_f1`, key: `${run}-f1`, amountCents: 1132, refundApplicationFee: true, state: "CREATED", providerStatus: "succeeded", createdAt: at("2026-11-02T18:00:00Z") } });
+      await tx.order.create({ data: { ...base, number: 2, fulfillment: "pickup", taxCents: 100, taxLiableParty: "platform", capturedAmountCents: 2100, platformFeeCents: 88, createdAt: at("2026-11-03T15:00:00Z") } });
+      const f3 = await tx.order.create({ data: { ...base, number: 3, fulfillment: "courier", deliveryFeeCents: 500, serviceFeeCents: 99, capturedAmountCents: 2599, platformFeeCents: 187, createdAt: at("2026-11-04T15:00:00Z") } });
+      await tx.refundRequest.create({ data: { storeId: storeF, orderId: f3.id, paymentIntentId: `pi_${run}_f3`, key: `${run}-f3`, amountCents: 1000, refundApplicationFee: false, serviceFeeShareCents: 38, feeRefundId: `fr_${run}_f3`, state: "CREATED", providerStatus: "succeeded", createdAt: at("2026-11-04T18:00:00Z") } });
+    });
+  }
+
   beforeAll(async () => {
     raw = testPrismaClient();
     await raw.$connect();
@@ -213,6 +236,9 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     edges = await storeAnalytics(storeC, TZ, RANGE);
     promo = await storeAnalytics(storeD, TZ, RANGE);
     serviceFee = await storeAnalytics(storeE, TZ, RANGE);
+    storeF = (await raw.store.create({ data: { slug: `an-f-${run}`, name: "Analytics F", timezone: TZ } })).id;
+    await seedStoreF();
+    payout = await storeAnalytics(storeF, TZ, RANGE);
   });
 
   afterAll(async () => {
@@ -221,7 +247,8 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
 
   it("sales match the hand-computed fixture to the cent, by day and by fulfilment", () => {
     expect(data.sales.totals).toEqual({
-      orders: 3, goodsCents: 8700, averageOrderCents: 2900, discountsCents: 0, refundsCents: 2100, cardFeeCents: 397, courierFeeCents: 899, netCents: 7240,
+      orders: 3, goodsCents: 8700, averageOrderCents: 2900, discountsCents: 0, deliveryFeeCents: 1399, tipCents: 500, serviceFeeCents: 0,
+      platformTaxCents: 0, chargedCents: 10_599, refundsCents: 2100, feeReturnedCents: 37, cardFeeCents: 397, courierFeeCents: 899, netCents: 7240,
     });
     const byDay = Object.fromEntries(data.sales.days.map((d) => [d.day, d]));
     expect(data.sales.days).toHaveLength(7);
@@ -274,9 +301,9 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
 
   it("each CSV matches the on-screen numbers", () => {
     const sales = analyticsCsv("sales", data, USAGE).split("\r\n");
-    expect(sales).toContain("2026-11-03,2,57.00,28.50,0.00,0.00,2.60,8.99,57.40");
-    expect(sales).toContain("Courier delivery,1,37.00,37.00,0.00,11.00,1.63,8.99,24.37");
-    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,3,87.00,29.00,0.00,21.00,3.97,8.99,72.40");
+    expect(sales).toContain("2026-11-03,2,57.00,28.50,0.00,8.99,3.00,0.00,0.00,68.99,0.00,0.00,2.60,8.99,57.40");
+    expect(sales).toContain("Courier delivery,1,37.00,37.00,0.00,8.99,0.00,0.00,0.00,45.99,11.00,0.00,1.63,8.99,24.37");
+    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,3,87.00,29.00,0.00,13.99,5.00,0.00,0.00,105.99,21.00,0.37,3.97,8.99,72.40");
     expect(analyticsCsv("products", data, USAGE)).toContain("Top seller,Egusi,4,42.00,,,\r\n");
     expect(analyticsCsv("customers", data, USAGE)).toContain("Repeat rate %,100\r\n");
     expect(analyticsCsv("operations", data, USAGE)).toContain("Cancelled: Out of stock,1\r\n");
@@ -295,13 +322,13 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     const byDay = Object.fromEntries(serviceFee.sales.days.map((d) => [d.day, d]));
     expect(byDay["2026-11-02"]).toMatchObject({ goodsCents: 1500, cardFeeCents: 74, courierFeeCents: 0, netCents: 1426 });
     expect(byDay["2026-11-03"]).toMatchObject({ goodsCents: 2000, cardFeeCents: 88, courierFeeCents: 500, netCents: 1912 });
-    expect(analyticsCsv("sales", serviceFee, USAGE).split("\r\n")).toContain("2026-11-02,1,15.00,15.00,0.00,0.00,0.74,0.00,14.26");
+    expect(analyticsCsv("sales", serviceFee, USAGE).split("\r\n")).toContain("2026-11-02,1,15.00,15.00,0.00,0.00,0.00,0.99,0.00,15.99,0.00,0.00,0.74,0.00,14.26");
   });
 
   it("exports a negative amount as a plain number a spreadsheet can sum", () => {
     const sales = analyticsCsv("sales", edges, USAGE).split("\r\n");
-    expect(sales).toContain("2026-11-02,0,0.00,0.00,0.00,5.00,0.00,0.00,-4.71");
-    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,1,0.01,0.01,0.00,5.00,0.59,9.41,-4.71");
+    expect(sales).toContain("2026-11-02,0,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,5.00,0.29,0.00,0.00,-4.71");
+    expect(sales).toContain("Total 2026-11-01 to 2026-11-07,1,0.01,0.01,0.00,9.99,0.00,0.00,0.00,10.00,5.00,0.29,0.59,9.41,-4.71");
     // Shopper search text that would run as a formula stays guarded.
     expect(analyticsCsv("products", edges, USAGE)).toContain("\"Searched, not carried\",'-1+cmd,,,,,1\r\n");
   });
@@ -318,6 +345,34 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     expect(promo.sales.byFulfillment.find((f) => f.fulfillment === "pickup")?.discountsCents).toBe(350);
     const b = await storeAnalytics(storeB, TZ, RANGE);
     expect(b.sales.totals.discountsCents).toBe(5000);
-    expect(analyticsCsv("sales", promo, USAGE).split("\r\n")).toContain("Total 2026-11-01 to 2026-11-07,2,26.50,13.25,3.50,0.00,1.37,0.00,25.13");
+    expect(analyticsCsv("sales", promo, USAGE).split("\r\n")).toContain("Total 2026-11-01 to 2026-11-07,2,26.50,13.25,3.50,0.00,0.00,0.00,0.00,26.50,0.00,0.00,1.37,0.00,25.13");
+  });
+
+  it("nets each order to what the store is paid: fee returned on a refund, platform tax, a returned service fee share", () => {
+    const byDay = Object.fromEntries(payout.sales.days.map((d) => [d.day, d]));
+    expect(byDay["2026-11-02"]).toMatchObject({ chargedCents: 4012, serviceFeeCents: 117, refundsCents: 1132, feeReturnedCents: 73, cardFeeCents: 143, netCents: 2693 });
+    expect(byDay["2026-11-03"]).toMatchObject({ chargedCents: 2100, platformTaxCents: 100, cardFeeCents: 88, netCents: 1912 });
+    expect(byDay["2026-11-04"]).toMatchObject({ chargedCents: 2599, deliveryFeeCents: 500, courierFeeCents: 500, refundsCents: 1000, feeReturnedCents: 38, netCents: 950 });
+    expect(payout.sales.totals.netCents).toBe(2693 + 1912 + 950);
+  });
+
+  it("every sales CSV row reconciles: charged − refunds + fees returned − card fee − service fee − courier fee − platform tax = net", () => {
+    for (const analytics of [data, edges, promo, serviceFee, payout]) {
+      const [header, ...rows] = analyticsCsv("sales", analytics, USAGE).trim().split("\r\n").map((line) => line.split(","));
+      const col = (name: string) => {
+        const index = header.indexOf(name);
+        expect(index, name).toBeGreaterThan(0);
+        return index;
+      };
+      const cents = (cells: string[], name: string) => Math.round(Number(cells[col(name)]) * 100);
+      for (const cells of rows) {
+        const net = cents(cells, "Charged") - cents(cells, "Refunds") + cents(cells, "Fees returned on refunds")
+          - cents(cells, "Card fee") - cents(cells, "Platform service fee") - cents(cells, "Courier fee") - cents(cells, "Sales tax the platform remits");
+        expect(net, cells[0]).toBe(cents(cells, "Net to store"));
+        expect(cents(cells, "Charged"), cells[0]).toBe(cents(cells, "Goods revenue") + cents(cells, "Delivery or shipping fee") + cents(cells, "Tips") + cents(cells, "Platform service fee"));
+      }
+    }
+    // The walkthrough's pickup order (#753): 40.12 − 11.32 + 0.73 − 1.43 − 1.17 = 26.93.
+    expect(analyticsCsv("sales", payout, USAGE)).toContain("2026-11-02,1,38.95,38.95,0.00,0.00,0.00,1.17,0.00,40.12,11.32,0.73,1.43,0.00,26.93\r\n");
   });
 });

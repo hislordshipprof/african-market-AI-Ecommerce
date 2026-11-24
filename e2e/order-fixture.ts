@@ -382,8 +382,10 @@ export async function insertTrackingOrder(input: {
   number: number;
   token: string;
   status: string;
-  fulfillment?: "pickup" | "courier" | "store-delivery";
+  fulfillment?: "pickup" | "courier" | "store-delivery" | "ship";
   pickupSlot?: string;
+  /** #753: the stored delivery address. */
+  address?: { deliveryLine1: string; deliveryCity: string; deliveryState: string; deliveryZip: string };
   courier?: { name: string; trackingUrl: string };
   capturedAmountCents?: number | null;
   refundCents?: number;
@@ -406,6 +408,7 @@ export async function insertTrackingOrder(input: {
         pickupSlot: input.pickupSlot ?? null, subtotalCents: 1250, bufferCents: 125, totalAuthorizedCents: 1375, totalCents: 1250,
         capturedAmountCents: input.capturedAmountCents ?? null, refundId: input.refundCents ? `re_e2e_${input.number}` : null,
         paymentIntentId, trackingToken: input.token,
+        ...input.address,
         ...(input.money && {
           subtotalCents: input.money.subtotalCents, deliveryFeeCents: input.money.deliveryFeeCents, serviceFeeCents: input.money.serviceFeeCents,
           totalAuthorizedCents: input.money.totalAuthorizedCents,
