@@ -865,7 +865,7 @@ function AmbiguousRow({
               onChange={() => onResolve(c.masterProductId)}
               className="h-3.5 w-3.5 accent-[var(--color-primary)]"
             />
-            <ProductThumb src={c.masterImageUrl} className="size-10" />
+            <ProductThumb src={c.masterImageUrl} size="sm" />
             <span className="text-sm">{c.masterProductName}</span>
             <Badge variant="secondary" className="text-[10px]">
               {c.matchType === "exact" ? "Exact" : "Synonym"}

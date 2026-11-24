@@ -403,7 +403,7 @@ function DraftRow({
             disabled={disabled}
           />
         )}
-        <ProductThumb src={draft.masterImageUrl} className="size-14" />
+        <ProductThumb src={draft.masterImageUrl} />
         <div className="min-w-0 flex-1">
           <p className="font-medium">
             {draft.extractedName}
@@ -427,7 +427,7 @@ function DraftRow({
                         checked={row.pick === candidate.id}
                         onChange={() => onChange({ pick: candidate.id })}
                       />
-                      {candidate.id !== "new" && <ProductThumb src={candidate.imageUrl} className="size-10" />}
+                      {candidate.id !== "new" && <ProductThumb src={candidate.imageUrl} size="sm" />}
                       <span>{candidate.name}</span>
                     </label>
                   ))}
@@ -439,7 +439,7 @@ function DraftRow({
                 <ul className="mt-1 flex flex-col gap-1">
                   {draft.candidates.map((candidate) => (
                     <li key={candidate.id} className="flex items-center gap-3">
-                      <ProductThumb src={candidate.imageUrl} className="size-10" />
+                      <ProductThumb src={candidate.imageUrl} size="sm" />
                       <span>{candidate.name}</span>
                     </li>
                   ))}

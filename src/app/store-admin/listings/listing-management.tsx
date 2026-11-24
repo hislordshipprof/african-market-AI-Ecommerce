@@ -547,7 +547,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
             <ComboboxList>
               {(item: MasterProductOption) => (
                 <ComboboxItem key={item.id} value={item}>
-                  <ProductThumb src={item.imageUrl} className="size-10" />
+                  <ProductThumb src={item.imageUrl} size="sm" />
                   {item.name}
                 </ComboboxItem>
               )}
@@ -591,7 +591,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
         <div className="flex flex-wrap items-start gap-4">
           {selectedMaster && (
             <figure className="flex w-24 flex-col gap-1">
-              <ProductThumb src={selectedMaster.imageUrl} alt={`Catalogue photo of ${selectedMaster.name}`} className="size-24" />
+              <ProductThumb src={selectedMaster.imageUrl} alt={`Catalogue photo of ${selectedMaster.name}`} size="lg" />
               <figcaption className="text-xs text-muted-foreground">Catalogue photo</figcaption>
             </figure>
           )}
@@ -600,7 +600,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
               <ProductThumb
                 src={pendingPhoto?.preview ?? editListing?.ownPhotoUrl}
                 alt={`Your photo of ${name || "this product"}`}
-                className="size-24"
+                size="lg"
               />
               <figcaption className="text-xs text-muted-foreground">Your photo</figcaption>
             </figure>
@@ -1112,46 +1112,48 @@ function ListingRow({
 
   return (
     <div className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
-      <ProductThumb src={listing.photoUrl} />
-      <div className="flex-1 min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="line-clamp-2 min-w-0 break-words text-base font-medium text-foreground">
-            {displayName}
-          </span>
-          {listingNeedsWeight(listing) ? (
-            <Badge variant="outline" className="shrink-0" data-needs-weight="">
-              Needs weight
-            </Badge>
-          ) : null}
-          {listing.frozen && (
-            <Snowflake className="size-3.5 shrink-0 text-blue-500" aria-label="Frozen" />
-          )}
-          {listing.perishable && (
-            <Leaf className="size-3.5 shrink-0 text-green-600" aria-label="Perishable" />
-          )}
-          {listing.shippable && (
-            <Truck className="size-3.5 shrink-0 text-muted-foreground" aria-label="Ships nationwide" />
-          )}
-          {listing.prepared && (
-            <Badge variant="outline" className="shrink-0">
-              {listing.prepared === "hot" ? "Hot food" : "Cold food"} · {listing.prepMinutes} min
-            </Badge>
-          )}
-          {listing.cateringLeadHours != null && (
-            <Badge variant="outline" className="shrink-0">
-              Catering · {listing.cateringLeadHours} h ahead · min {listing.cateringMinQty}
-            </Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-xs text-muted-foreground">
-            {money(listing.price)}
-          </span>
-          {listing.variants.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              · {listing.variants.length} variant{listing.variants.length !== 1 ? "s" : ""}
+      <div className="flex min-w-0 flex-1 basis-56 items-center gap-3">
+        <ProductThumb src={listing.photoUrl} />
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="line-clamp-2 min-w-0 break-words text-base font-medium text-foreground">
+              {displayName}
             </span>
-          )}
+            {listingNeedsWeight(listing) ? (
+              <Badge variant="outline" className="shrink-0" data-needs-weight="">
+                Needs weight
+              </Badge>
+            ) : null}
+            {listing.frozen && (
+              <Snowflake className="size-3.5 shrink-0 text-blue-500" aria-label="Frozen" />
+            )}
+            {listing.perishable && (
+              <Leaf className="size-3.5 shrink-0 text-green-600" aria-label="Perishable" />
+            )}
+            {listing.shippable && (
+              <Truck className="size-3.5 shrink-0 text-muted-foreground" aria-label="Ships nationwide" />
+            )}
+            {listing.prepared && (
+              <Badge variant="outline" className="shrink-0">
+                {listing.prepared === "hot" ? "Hot food" : "Cold food"} · {listing.prepMinutes} min
+              </Badge>
+            )}
+            {listing.cateringLeadHours != null && (
+              <Badge variant="outline" className="shrink-0">
+                Catering · {listing.cateringLeadHours} h ahead · min {listing.cateringMinQty}
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="text-xs text-muted-foreground">
+              {money(listing.price)}
+            </span>
+            {listing.variants.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                · {listing.variants.length} variant{listing.variants.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
         </div>
       </div>
       <Badge variant={stockBadgeVariant(listing)} className="shrink-0">
