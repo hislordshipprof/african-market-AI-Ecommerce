@@ -5,6 +5,7 @@ import {
   clearTestSentEmails,
   ResendSender,
   createSender,
+  emailSignInAvailable,
 } from "./send";
 
 describe("sendEmail (test double)", () => {
@@ -103,6 +104,21 @@ describe("createSender", () => {
       RESEND_API_KEY: "re_test_key",
     });
     expect(sender).toBeInstanceOf(ResendSender);
+  });
+});
+
+describe("emailSignInAvailable (#765)", () => {
+  const live = { NODE_ENV: "production", RESEND_API_KEY: "re_live" };
+
+  it("is false in production without a sender address, or with Resend's sandbox one that reaches only the account owner", () => {
+    expect(emailSignInAvailable(live)).toBe(false);
+    expect(emailSignInAvailable({ ...live, EMAIL_FROM: "onboarding@resend.dev" })).toBe(false);
+  });
+
+  it("is true with a real sender, and wherever mail goes to the in-memory sink (CI, tests, development)", () => {
+    expect(emailSignInAvailable({ ...live, EMAIL_FROM: "Market <orders@markets.example>" })).toBe(true);
+    expect(emailSignInAvailable({ ...live, CI: "true" })).toBe(true);
+    expect(emailSignInAvailable({ NODE_ENV: "development" })).toBe(true);
   });
 });
 

@@ -129,6 +129,17 @@ export function providerSinkMode(env: Record<string, string | undefined> = proce
   return env.NEXT_PHASE === "phase-production-build" || env.NODE_ENV === "test" || env.CI === "true";
 }
 
+/** Shown wherever a sign-in or reset link would be sent while none can reach anyone (#765). */
+export const EMAIL_SIGN_IN_UNAVAILABLE = "Email sign-in is not available yet.";
+
+/**
+ * Sign-in links can reach shoppers and staff (#765): a real sender address in production. Build, tests and CI send
+ * to the in-memory sink, and development logs, so links work there without one.
+ */
+export function emailSignInAvailable(env: Record<string, string | undefined> = process.env): boolean {
+  return providerSinkMode(env) || env.NODE_ENV !== "production" || emailFromSet(env);
+}
+
 export function createSender(
   env: Record<string, string | undefined> = process.env,
 ): EmailSender {

@@ -248,6 +248,32 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     }
   });
 
+  it("#765 AC4: without a sender address in production the sign-in form says email sign-in is not available yet and sends nothing", async () => {
+    const email = `c1-nofrom-${suffix}@test.example`;
+    const form = new FormData();
+    form.set("email", email);
+    try {
+      clearTestSentEmails();
+      for (const key of [...headerState.keys()]) headerState.delete(key);
+      headerState.set("host", `${storeSlug}.localhost:3000`);
+      headerState.set("x-forwarded-for", "10.181.0.10");
+      headerState.set("x-store-slug", storeSlug);
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CI", "");
+      vi.stubEnv("EMAIL_FROM", "");
+      expect(await sendSignInLinkAction({ status: "idle", email: "" }, form)).toEqual({
+        status: "error",
+        email,
+        message: expect.stringContaining("Email sign-in is not available yet"),
+      });
+      expect(getTestSentEmails()).toHaveLength(0);
+    } finally {
+      vi.unstubAllEnvs();
+      for (const key of [...headerState.keys()]) headerState.delete(key);
+      await removeAuthFixtures([email], []);
+    }
+  });
+
   it("a forgotten password resets by email, ends old sessions, and still needs the second step", async () => {
     const email = `c1-reset-${suffix}@test.example`;
     try {

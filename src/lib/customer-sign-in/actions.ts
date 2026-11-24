@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../auth";
+import { EMAIL_SIGN_IN_UNAVAILABLE, emailSignInAvailable } from "../email/send";
 import { parseInput, readFormField } from "../security/parse-input";
 
 export type SignInLinkState =
@@ -25,6 +26,7 @@ export async function sendSignInLinkAction(
   const email = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   const parsed = parseInput(z.email().max(254), email);
   if (!parsed.ok) return { status: "error", email, message: "Enter a valid email address." };
+  if (!emailSignInAvailable()) return { status: "error", email, message: EMAIL_SIGN_IN_UNAVAILABLE };
   const incoming = await headers();
   const host = incoming.get("host");
   if (!incoming.get("x-store-slug") || !host) {
