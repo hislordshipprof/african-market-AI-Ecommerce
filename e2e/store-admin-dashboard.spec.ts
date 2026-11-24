@@ -96,6 +96,8 @@ test.describe.serial("Store admin dashboard (#784)", () => {
     const totpURI = ((await (await enabled).json()) as { totpURI: string }).totpURI;
     await page.getByLabel("Verification code").fill(generateTOTP(new URL(totpURI).searchParams.get("secret")!));
     await page.getByRole("button", { name: "Verify & join store" }).click();
+    await expect(page.getByRole("heading", { name: "Save your backup codes" })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("button", { name: /saved them/ }).click();
     await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
 
     await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
