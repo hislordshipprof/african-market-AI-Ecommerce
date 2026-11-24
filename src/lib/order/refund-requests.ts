@@ -137,11 +137,13 @@ function taxReversalPlan(
 ): TaxReversalPlan | null {
   if (!order.taxCalculationId) return null;
   const saleCents = (order.capturedAmountCents ?? 0) - order.serviceFeeCents - order.tipCents - order.deliveryFeeCents;
-  const before = counted(earlier).reduce((sum, row) => sum + ((row.taxReversal as TaxReversalPlan | null)?.totalCents ?? 0), 0);
+  const plans = counted(earlier).map((row) => row.taxReversal as TaxReversalPlan | null);
+  const before = plans.reduce((sum, plan) => sum + (plan?.totalCents ?? 0), 0);
   const left = saleCents - before;
   if (left <= 0) return null;
   if (cancel) return before === 0 ? { mode: "full", totalCents: saleCents } : { mode: "flat", totalCents: left };
-  if (lines?.lineTax) {
+  // Stripe Tax spreads a flat reversal over every line and records none, so no line's remainder is known after one: go flat.
+  if (lines?.lineTax && !plans.some((plan) => plan?.mode === "flat")) {
     // A whole-order refund's goods share carries the delivery fee and tip; Stripe Tax refuses a line reversed past what it has.
     const goods = allocateLineDiscounts(lines.lines.map((line) => line.amountCents), Math.min(shares.goodsCents, lines.lineTax.goodsCents));
     const tax = allocateLineDiscounts(lines.lines.map((line) => line.taxCents), Math.min(shares.taxCents, lines.lineTax.taxCents));
@@ -149,7 +151,6 @@ function taxReversalPlan(
       .map((line, index) => ({ reference: line.reference, amountCents: goods[index], taxCents: tax[index] }))
       .filter((line) => line.amountCents > 0 || line.taxCents > 0);
     const totalCents = reversed.reduce((sum, line) => sum + line.amountCents + line.taxCents, 0);
-    // An earlier flat reversal records no lines, so a lines plan past what the sale has left would be refused: go flat.
     if (totalCents <= left) return totalCents > 0 ? { mode: "lines", totalCents, lines: reversed } : null;
   }
   const totalCents = Math.min(left, shares.goodsCents + shares.taxCents);

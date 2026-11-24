@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 
@@ -19,6 +19,7 @@ const { setStripeProvider } = await import("../stripe");
 const { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount } = await import("../stripe/fake");
 const { completePickup } = await import("./service");
 const { countedListing } = await import("./stock-ledger-test-helpers");
+const { fakeTaxCalculator, setTaxCalculatorForTests } = await import("../tax/calculator");
 
 const hasDb = !!process.env.DATABASE_URL;
 const OWNER = { id: crypto.randomUUID(), email: `owner-${Date.now()}@store.test` };
@@ -187,6 +188,28 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
     // A flat reversal records no lines, so a lines plan would ask Stripe Tax for more than each line has left.
     expect(second).toMatchObject({ mode: "flat" });
     expect(first.totalCents + second.totalCents).toBeLessThanOrEqual(2700);
+  });
+
+  it("after a platform refund, a refund of some lines reverses its tax within what the lines have left", async () => {
+    const { order, yam, oil } = await capturedOrder("DELIVERED", "ship", { deliveryFeeCents: 599, tipCents: 300, yamTaxCents: 160, oilTaxCents: 40 });
+    const tax = fakeTaxCalculator({ TX: { rate: 0.08 } });
+    setTaxCalculatorForTests(tax);
+    onTestFinished(() => setTaxCalculatorForTests(null));
+    const calculation = await tax.calculate({
+      address: { line1: "600 Congress Ave", city: "Austin", state: "TX", postalCode: "78701" },
+      lines: [{ reference: yam.id, amountCents: 2000, taxCode: null }, { reference: oil.id, amountCents: 500, taxCode: null }],
+      liableParty: "platform", stripeAccount: null, idempotencyKey: `sale-${order.id}`,
+    });
+    const transaction = await tax.recordTransaction({ calculationId: calculation.id!, reference: `order_${order.id}`, liableParty: "platform", stripeAccount: null });
+    await storeScoped(storeId).order.update({ where: { id: order.id }, data: { taxCalculationId: calculation.id, taxTransactionId: transaction.id } });
+    const { refundOrderAsPlatform } = await import("./platform-refund");
+    expect(await refundOrderAsPlatform(order.id, { amountCents: 1500, reason: "Late", submissionId: crypto.randomUUID() }, OWNER)).toMatchObject({ ok: true });
+    expect(await refund(order.id, [{ lineId: yam.id, qty: 1 }])).toMatchObject({ ok: true });
+    const [first, second] = (await state(order.id)).requests;
+    // A flat reversal took part of every line, so a lines plan could ask for more than the yam has left.
+    expect(second.taxReversal).toMatchObject({ mode: "flat" });
+    expect(first.taxReversalId).not.toBeNull();
+    expect(second.taxReversalId).not.toBeNull();
   });
 
   it("refunding the whole of a ready ship order cancels the shipment and keeps the owner's reason", async () => {
