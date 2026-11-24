@@ -52,7 +52,7 @@ test.describe.serial("Store admin dashboard (#784)", () => {
     const floor = await asPlatformAdmin(async (tx) => (await tx.platformSettings.findFirst())?.goLiveListingFloor ?? 20);
     storeId = await asPlatformAdmin(async (tx) => {
       const store = await tx.store.create({
-        data: { slug, name: "E2E Lagos Corner", status: "setup", stripeOnboardingStatus: "complete", stripeAccountId: `acct_${slug}`, hours: HOURS, timezone: "America/Chicago", pickupEnabled: true },
+        data: { slug, name: "E2E Lagos Corner", status: "setup", stripeOnboardingStatus: "complete", stripeAccountId: `acct_${slug}`, hours: HOURS, timezone: "America/Chicago", timezoneSetAt: new Date(), pickupEnabled: true },
       });
       await tx.storeSubscription.create({ data: { storeId: store.id, plan: "starter", status: "active", stripeSubscriptionId: `sub_${slug}` } });
       const owner = await tx.user.findUniqueOrThrow({ where: { email: "owner@mama-ngozi.test" } });

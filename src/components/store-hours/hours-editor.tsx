@@ -65,7 +65,7 @@ export function HoursEditor({
                     value={hours.open}
                     onChange={(event) => setDay(day, { open: event.target.value })}
                     aria-label={`${LABEL(day)} opens`}
-                    className="h-11 w-32"
+                    className="h-11 w-36"
                     required
                   />
                   <span className="text-sm text-muted-foreground">to</span>
@@ -74,7 +74,7 @@ export function HoursEditor({
                     value={hours.close}
                     onChange={(event) => setDay(day, { close: event.target.value })}
                     aria-label={`${LABEL(day)} closes`}
-                    className="h-11 w-32"
+                    className="h-11 w-36"
                     required
                   />
                   {overnight(hours) && <span className="text-sm text-muted-foreground">next day</span>}
