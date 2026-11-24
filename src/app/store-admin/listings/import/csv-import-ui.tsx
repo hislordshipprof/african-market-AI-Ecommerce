@@ -367,7 +367,7 @@ function UploadStep({
             <Col>category</Col> or <Col>aisle</Col>, <Col>stock_mode</Col>, <Col>qty</Col>, <Col>status</Col>.
           </p>
           <p>
-            A row without a weight blocks go-live until you add one. A category names one of the store&rsquo;s aisles, such as Oils &amp; Butters.
+            A row without a weight blocks go-live until you add one. The category or aisle column takes an aisle name, such as Oils &amp; Butters.
           </p>
           <a
             href={`data:text/csv;charset=utf-8,${encodeURIComponent(LISTINGS_CSV_TEMPLATE)}`}

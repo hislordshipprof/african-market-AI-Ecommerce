@@ -149,6 +149,33 @@ test.describe("Listing management (authenticated)", () => {
     });
   });
 
+  // #782 AC1: a custom listing gets an aisle in the add dialog, and the edit dialog shows it.
+  test("an owner puts a custom listing in an aisle", async ({ page }) => {
+    const uniqueName = `E2E Aisle ${Date.now()}`;
+    createdNames.push(uniqueName);
+    await page.goto(LISTINGS_URL);
+    await page.click("text=Add listing");
+    await page.getByLabel("Product name").fill(uniqueName);
+    await page.getByRole("combobox", { name: "Aisle" }).click();
+    await page.getByRole("option", { name: "Oils & Butters" }).click();
+    await page.locator("input[placeholder='Label (e.g. 1kg)']").first().fill("1L");
+    await page.locator("input[placeholder='Price']").first().fill("9.00");
+    await page.locator("input[placeholder='Weight (g)']").first().fill("1000");
+    await page.click("text=Create listing");
+    await expect(page.locator("text=Listing created")).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(async () => {
+        const logs = await findListingAuditLogs("mama-ngozi", uniqueName);
+        return logs.find((l) => l.action === "listing.create")?.after ?? null;
+      }, { timeout: 10000 })
+      .toMatchObject({ categoryId: "cat_oils" });
+
+    await page.goto(LISTINGS_URL);
+    await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
+    await expect(page.getByRole("combobox", { name: "Aisle" })).toContainText("Oils & Butters");
+  });
+
   test("edit price and verify audit trail exists", async ({ page }) => {
     const uniqueName = `E2E Audit ${Date.now()}`;
     await createListingViaUI(page, {
