@@ -14,7 +14,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
-import { displayAddress, GoLiveCard, LiveNotice } from "./go-live-card";
+import { displayAddress } from "@/lib/directory/links";
+import { GoLiveCard, LiveNotice } from "./go-live-card";
 import { SignOutButton } from "./sign-out-button";
 import { AlertCircle, Camera, ExternalLink, ChartColumn, ClipboardList, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck, type LucideIcon } from "lucide-react";
 

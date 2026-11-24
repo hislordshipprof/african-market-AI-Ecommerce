@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slugFromHost, resolveHost, RESERVED_SLUGS, isSlugRoutable, isFallbackRoot } from "./slug";
+import { slugFromHost, resolveHost, RESERVED_SLUGS, isSlugRoutable, isFallbackRoot, SLUG_INPUT_PATTERN } from "./slug";
 
 describe("slugFromHost", () => {
   it("extracts slug from subdomain with root domain", () => {
@@ -236,5 +236,15 @@ describe("isFallbackRoot (#766): the production alias stands in for the platform
   it("is never a custom domain, which Vercel picks as the production URL once one is attached (a store's)", () => {
     const env = { VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "shop.mamasmarket.com" };
     expect(isFallbackRoot("shop.mamasmarket.com", env)).toBe(false);
+  });
+});
+
+describe("SLUG_INPUT_PATTERN (#786)", () => {
+  it("compiles the way browsers compile a pattern attribute, and agrees with the slug rule", () => {
+    const browser = () => new RegExp(`^(?:${SLUG_INPUT_PATTERN})$`, "v");
+    expect(browser).not.toThrow();
+    for (const slug of ["mama-ngozi", "a", "lagos-corner-2", "-bad", "bad-", "Bad", "two--dashes"]) {
+      expect(browser().test(slug), slug).toBe(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug));
+    }
   });
 });

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { GoLiveItems, type GoLiveItemView } from "@/components/go-live/go-live-items";
 import { goLiveAction } from "@/lib/store-admin/go-live-actions";
+import { displayAddress } from "@/lib/directory/links";
 import { directoryNote, testOrderHint } from "./go-live-hint";
 
 /** A store in setup: the go-live checklist, and the owner's Go live once every item is done (#555). Going live asks first (#784). */
@@ -145,9 +146,4 @@ export function LiveNotice({
       </div>
     </section>
   );
-}
-
-/** The address as a shopper would type it: no scheme, no trailing slash. */
-export function displayAddress(url: string): string {
-  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }

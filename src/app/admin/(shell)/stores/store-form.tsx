@@ -1,13 +1,16 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 import { createStore, updateStore } from "@/lib/admin/actions";
 import type { StoreFormState } from "@/lib/admin/actions";
 import type { Store } from "@prisma/client";
 import { VALID_US_TIMEZONES } from "@/lib/admin/timezone";
 import { SLOT_FORMS, WEEKDAYS, slotFormValues, type SlotFormPrefix } from "@/lib/admin/slot-form";
+import { SLUG_INPUT_PATTERN } from "@/lib/slug";
+import { displayAddress } from "@/lib/directory/links";
+import { HoursEditor } from "@/components/store-hours/hours-editor";
+import { DEFAULT_WEEK, readWeeklyHours, writeWeeklyHours, type WeekHours } from "@/lib/store-settings/weekly-hours";
 
 const PRESETS = [
   { value: "palm-and-shea", label: "Palm & Shea" },
@@ -18,9 +21,12 @@ const PRESETS = [
 export function StoreForm({
   mode,
   store,
+  webAddress,
 }: {
   mode: "create" | "edit";
   store?: Store;
+  /** The store's address (edit) or an example one (create), from the request host; null when it cannot be routed. */
+  webAddress: string | null;
 }) {
   const router = useRouter();
   const action = mode === "create" ? createStore : updateStore;
@@ -78,16 +84,19 @@ export function StoreForm({
           type="text"
           required
           defaultValue={sv?.slug ?? store?.slug ?? ""}
-          pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+          pattern={SLUG_INPUT_PATTERN}
           className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           placeholder="mama-ngozi"
         />
         {state.fieldErrors?.slug && (
           <p className="mt-1 text-xs text-destructive">{state.fieldErrors.slug}</p>
         )}
-        <p className="mt-1 text-xs text-muted-foreground">
-          Becomes the subdomain: slug.yourplatform.com
-        </p>
+        {webAddress && (
+          <p className="mt-1 text-xs text-muted-foreground" data-testid="slug-address">
+            {mode === "create" ? "Becomes the store's web address, like " : "The store's web address: "}
+            {displayAddress(webAddress)}
+          </p>
+        )}
       </div>
 
       <div>
@@ -182,26 +191,7 @@ export function StoreForm({
           Settings
         </legend>
         <div className="space-y-4">
-          <div>
-            <label htmlFor="hours" className="mb-1 block text-sm font-medium text-foreground">
-              Hours (JSON)
-            </label>
-            <textarea
-              id="hours"
-              name="hours"
-              rows={3}
-              defaultValue={
-                sv?.hours ?? (store?.hours ? JSON.stringify(store.hours, null, 2) : "")
-              }
-              className="w-full rounded-md border border-input px-3 py-2 placeholder:text-muted-foreground font-mono text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              placeholder='{"mon": "9:00-21:00", "tue": "9:00-21:00"}'
-            />
-            {state.fieldErrors?.hours && (
-              <p className="mt-1 text-xs text-destructive">
-                {state.fieldErrors.hours}
-              </p>
-            )}
-          </div>
+          <HoursField saved={sv?.hours ?? store?.hours ?? null} error={state.fieldErrors?.hours} />
 
           <div>
             <label htmlFor="timezone" className="mb-1 block text-sm font-medium text-foreground">
@@ -611,5 +601,40 @@ function SlotFields({
         {error("Closed")}
       </div>
     </section>
+  );
+}
+
+/** The weekly hours editor (#786), posted as the same JSON the store action has always read. */
+function HoursField({ saved, error }: { saved: unknown; error?: string }) {
+  const [initial] = useState(() => {
+    if (typeof saved !== "string") return readWeeklyHours(saved);
+    try {
+      return readWeeklyHours(JSON.parse(saved));
+    } catch {
+      return null;
+    }
+  });
+  const [week, setWeek] = useState<WeekHours | null>(initial?.week ?? null);
+
+  return (
+    <fieldset>
+      <legend className="mb-1 block text-sm font-medium text-foreground">Hours</legend>
+      <input type="hidden" name="hours" value={week ? JSON.stringify(writeWeeklyHours(week)) : ""} />
+      {week ? (
+        <HoursEditor week={week} onChange={setWeek} unreadable={initial?.unreadable} />
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-muted-foreground">No hours set: checkout treats the store as always open.</p>
+          <button
+            type="button"
+            onClick={() => setWeek(DEFAULT_WEEK)}
+            className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4"
+          >
+            Set weekly hours
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+    </fieldset>
   );
 }
