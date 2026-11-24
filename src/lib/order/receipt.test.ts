@@ -15,7 +15,7 @@ function order(overrides: Partial<ReceiptOrder> = {}): ReceiptOrder {
     taxCents: 0,
     totalAuthorizedCents: 5238,
     captureCents: null,
-    refundedCents: 0,
+    refunds: [],
     coupon: null,
     serviceFeeBps: 300,
     serviceFeeMinCents: 99,
@@ -120,26 +120,50 @@ describe("orderReceipt", () => {
       deliveryFeeCents: 0,
       serviceFeeCents: 117,
       captureCents: 4012,
-      refundedCents: 1132,
+      refunds: [{ amountCents: 1132, lines: [] }],
       lines: [{ id: "l1", status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 3895, substitutedUnitPriceCents: null, substitutedName: null }],
     }));
     expect(sum(view)).toBe(view.total.cents);
     expect(view.total).toEqual({ label: "Charged", cents: 4012 });
-    expect(view.refund).toEqual({ key: "refund", label: "Refunded", cents: -1132 });
+    expect(view.refunds).toEqual([{ key: "refund", label: "Refunded", cents: -1132 }]);
     expect(view.net).toEqual({ label: "Net charged", cents: 2880 });
-    expect(view.total.cents + view.refund!.cents).toBe(view.net!.cents);
+    expect(view.total.cents + view.refunds[0].cents).toBe(view.net!.cents);
+  });
+
+  it("names each refunded item with its quantity and amount, and a refund without lines on its own row (#798)", () => {
+    const line = (id: string, name: string, qty: number, unitPriceCents: number) =>
+      ({ id, name, status: "picked", qtyOrdered: qty, qtyPicked: qty, unitPriceCents, substitutedUnitPriceCents: null, substitutedName: null });
+    const view = orderReceipt(order({
+      status: "PARTIALLY_REFUNDED",
+      fulfillment: "pickup",
+      subtotalCents: 2500,
+      deliveryFeeCents: 0,
+      serviceFeeCents: 150,
+      captureCents: 2650,
+      lines: [line("yam", "Yam", 2, 1000), line("oil", "Palm oil", 1, 500)],
+      refunds: [
+        { amountCents: 1060, lines: [{ lineId: "yam", qty: 1, amountCents: 1060 }] },
+        { amountCents: 1590, lines: [{ lineId: "oil", qty: 1, amountCents: 530 }, { lineId: "yam", qty: 1, amountCents: 1060 }] },
+        { amountCents: 0, lines: [] },
+      ],
+    }));
+    expect(view.refunds).toEqual([
+      { key: "refund-yam", label: "Refunded 2 × Yam", cents: -2120 },
+      { key: "refund-oil", label: "Refunded 1 × Palm oil", cents: -530 },
+    ]);
+    expect(view.net).toEqual({ label: "Net charged", cents: 0 });
   });
 
   it("nets a full refund to nothing charged", () => {
-    const view = orderReceipt(order({ status: "REFUNDED", captureCents: 4819, refundedCents: 4819 }));
-    expect(view.refund?.cents).toBe(-4819);
+    const view = orderReceipt(order({ status: "REFUNDED", captureCents: 4819, refunds: [{ amountCents: 4819, lines: [] }] }));
+    expect(view.refunds.map((row) => row.cents)).toEqual([-4819]);
     expect(view.net).toEqual({ label: "Net charged", cents: 0 });
   });
 
   it("shows no refund line without a succeeded refund, or before capture", () => {
-    expect(orderReceipt(order({ status: "READY", captureCents: 4819 })).refund).toBeNull();
-    const uncaptured = orderReceipt(order({ refundedCents: 500 }));
-    expect(uncaptured.refund).toBeNull();
+    expect(orderReceipt(order({ status: "READY", captureCents: 4819 })).refunds).toEqual([]);
+    const uncaptured = orderReceipt(order({ refunds: [{ amountCents: 500, lines: [] }] }));
+    expect(uncaptured.refunds).toEqual([]);
     expect(uncaptured.net).toBeNull();
   });
 

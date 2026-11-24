@@ -3,6 +3,7 @@ import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { OrderFlow } from "@/components/storefront/flow/order-flow";
 import { FeeLine, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { orderReceipt } from "@/lib/order/receipt";
+import { requestLines } from "@/lib/order/refund-requests";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { orderOutcomeMessage } from "@/lib/customer-account/order-history-view";
@@ -60,9 +61,10 @@ export default async function OrderPage({
       : null;
     const owner = realOrder.trackingToken === token;
     const statusLabel = orderStatusLabel(realOrder.status, realOrder.fulfillment);
-    const refundedCents = realOrder.refundRequests
+    const refunds = realOrder.refundRequests
       .filter((request) => request.providerStatus === "succeeded")
-      .reduce((sum, request) => sum + request.amountCents, 0);
+      .map((request) => ({ amountCents: request.amountCents, lines: requestLines(request.lines) }));
+    const refundedCents = refunds.reduce((sum, refund) => sum + refund.amountCents, 0);
     const outcome = orderOutcomeMessage(realOrder, refundedCents);
     const fulfillment = FULFILLMENT_LABELS[realOrder.fulfillment] ?? realOrder.fulfillment;
     const issue = realOrder.issueReports[0];
@@ -76,8 +78,12 @@ export default async function OrderPage({
     const receipt = orderReceipt({
       ...realOrder,
       couponCode: realOrder.coupon?.code ?? null,
-      refundedCents,
-      lines: realOrder.lines.map((line) => ({ ...line, substitutedName: line.substitutedVariant ? variantLabel(line.substitutedVariant) : null })),
+      refunds,
+      lines: realOrder.lines.map((line) => ({
+        ...line,
+        name: line.listingVariant ? variantLabel(line.listingVariant) : "Item",
+        substitutedName: line.substitutedVariant ? variantLabel(line.substitutedVariant) : null,
+      })),
     });
     return (
       <StorefrontShell store={context.store}>
@@ -225,9 +231,11 @@ export default async function OrderPage({
               <FeeLine key={line.key} label={line.label} cents={line.cents} />
             ))}
             <FeeLine label={receipt.total.label} cents={receipt.total.cents} strong />
-            {receipt.refund && receipt.net && (
+            {receipt.net && (
               <>
-                <FeeLine label={receipt.refund.label} cents={receipt.refund.cents} />
+                {receipt.refunds.map((line) => (
+                  <FeeLine key={line.key} label={line.label} cents={line.cents} />
+                ))}
                 <FeeLine label={receipt.net.label} cents={receipt.net.cents} strong />
               </>
             )}
