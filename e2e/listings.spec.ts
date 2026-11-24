@@ -150,7 +150,8 @@ test.describe("Listing management (authenticated)", () => {
 
     await page.getByRole("button", { name: "Edit Yam", exact: true }).click();
     await expect(page.getByRole("dialog").getByRole("img", { name: "Catalogue photo of Yam" })).toBeVisible();
-    await page.keyboard.press("Escape");
+    await page.getByRole("dialog").locator("[data-slot='dialog-close']").last().click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
     await page.click("text=Add listing");
     const picker = page.getByLabel("Master product (optional)");
