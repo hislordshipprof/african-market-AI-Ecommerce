@@ -142,8 +142,9 @@ function taxReversalPlan(
   if (left <= 0) return null;
   if (cancel) return before === 0 ? { mode: "full", totalCents: saleCents } : { mode: "flat", totalCents: left };
   if (lines?.lineTax) {
-    const goods = allocateLineDiscounts(lines.lines.map((line) => line.amountCents), shares.goodsCents);
-    const tax = allocateLineDiscounts(lines.lines.map((line) => line.taxCents), shares.taxCents);
+    // A whole-order refund's goods share carries the delivery fee and tip; Stripe Tax refuses a line reversed past what it has.
+    const goods = allocateLineDiscounts(lines.lines.map((line) => line.amountCents), Math.min(shares.goodsCents, lines.lineTax.goodsCents));
+    const tax = allocateLineDiscounts(lines.lines.map((line) => line.taxCents), Math.min(shares.taxCents, lines.lineTax.taxCents));
     const reversed = lines.lines
       .map((line, index) => ({ reference: line.reference, amountCents: goods[index], taxCents: tax[index] }))
       .filter((line) => line.amountCents > 0 || line.taxCents > 0);

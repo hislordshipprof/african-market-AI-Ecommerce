@@ -66,11 +66,16 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
   });
 
   /** A captured pickup order: two lines, $10 × 2 and $5 × 1, plus a $1.50 service fee. */
-  async function capturedOrder(status: "AWAITING_PICKUP" | "COMPLETED" | "READY" = "COMPLETED", fulfillment: "pickup" | "ship" = "pickup") {
+  async function capturedOrder(
+    status: "AWAITING_PICKUP" | "COMPLETED" | "READY" | "DELIVERED" = "COMPLETED",
+    fulfillment: "pickup" | "ship" = "pickup",
+    extra: { deliveryFeeCents: number; tipCents: number; yamTaxCents: number; oilTaxCents: number } | null = null,
+  ) {
     number += 1;
     const scoped = storeScoped(storeId);
     const customer = await scoped.customer.create({ data: { storeId, name: `Refund ${number}`, email: `c${number}@${run}.test` } });
-    const captured = 2500 + 150;
+    const taxCents = extra ? extra.yamTaxCents + extra.oilTaxCents : 0;
+    const captured = 2500 + 150 + (extra ? extra.deliveryFeeCents + extra.tipCents + taxCents : 0);
     const pi = `pi_sr798_${number}_${run}`;
     setAuthorizedAmount(pi, captured);
     await fakeStripeProvider.capturePaymentIntent(pi, captured, `cap-sr798-${number}`);
@@ -80,13 +85,14 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
         totalAuthorizedCents: captured, totalCents: captured, capturedAmountCents: captured, captureCents: captured,
         serviceFeeCents: 150, paymentIntentId: pi, trackingToken: `t-${run}-${number}`,
         completedAt: status === "COMPLETED" ? new Date() : null,
+        ...(extra ? { deliveryFeeCents: extra.deliveryFeeCents, tipCents: extra.tipCents, taxCents, taxCalculationId: `taxcalc_${run}_${number}` } : {}),
       },
     });
     const yam = await scoped.orderLine.create({
-      data: { storeId, orderId: order.id, listingVariantId: variantId, qtyOrdered: 2, qtyPicked: 2, unitPriceCents: 1000, status: "picked" },
+      data: { storeId, orderId: order.id, listingVariantId: variantId, qtyOrdered: 2, qtyPicked: 2, unitPriceCents: 1000, status: "picked", taxCents: extra?.yamTaxCents ?? 0 },
     });
     const oil = await scoped.orderLine.create({
-      data: { storeId, orderId: order.id, listingVariantId: variantId, qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 500, status: "picked" },
+      data: { storeId, orderId: order.id, listingVariantId: variantId, qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 500, status: "picked", taxCents: extra?.oilTaxCents ?? 0 },
     });
     return { order, yam, oil };
   }
@@ -158,6 +164,18 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
     const lines = after.requests[1].lines as Array<{ lineId: string; qty: number; amountCents: number }>;
     expect(lines.map(({ lineId, qty }) => ({ lineId, qty }))).toEqual([{ lineId: yam.id, qty: 1 }, { lineId: oil.id, qty: 1 }]);
     expect(lines.reduce((sum, line) => sum + line.amountCents, 0)).toBe(2650 - 1060);
+  });
+
+  it("refunding the whole of a delivered order with a delivery fee and tip reverses no more tax than each line has", async () => {
+    const { order, yam, oil } = await capturedOrder("DELIVERED", "ship", { deliveryFeeCents: 599, tipCents: 300, yamTaxCents: 160, oilTaxCents: 40 });
+    expect(await refund(order.id, "whole_order")).toMatchObject({ ok: true, amountCents: 2500 + 150 + 599 + 300 + 200 });
+    const after = await state(order.id);
+    // The delivery fee and tip are not sales of the lines: the reversal is the lines' goods and tax, the sale left.
+    expect(after.requests[0].taxReversal).toEqual({
+      mode: "lines",
+      totalCents: 2700,
+      lines: [{ reference: yam.id, amountCents: 2000, taxCents: 160 }, { reference: oil.id, amountCents: 500, taxCents: 40 }],
+    });
   });
 
   it("refunding the whole of a ready ship order cancels the shipment and keeps the owner's reason", async () => {
