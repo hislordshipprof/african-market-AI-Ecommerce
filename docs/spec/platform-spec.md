@@ -65,7 +65,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ## 4. Multi-tenancy
 
 - **Tenant = one market** (may have multiple locations later; v1 = one location per tenant).
-- **Routing:** `{slug}.platform.com` by default; optional custom domain (e.g. `shop.marketa.com`) via CNAME + automatic TLS.
+- **Routing:** `{slug}.platform.com` by default; optional custom domain (e.g. `shop.marketa.com`) via CNAME + automatic TLS. Until `PLATFORM_ROOT_DOMAIN` is set, the production vercel.app alias serves the platform root and stores by `?store=<slug>`, noindex ([ADR-0007](../adr/0007-store-directory-instead-of-marketplace.md), #766).
 - **Branding per tenant:** name, logo, colors, hero banner, about/hours/contact, policies, WhatsApp number.
 - **Isolation:** every tenant-owned row carries `tenant_id`; enforced with Postgres Row-Level Security plus a tenant-scoped data access layer. No query may run without a resolved tenant (except platform-admin and shared-catalog tables).
 - **Shared vs tenant data:**
