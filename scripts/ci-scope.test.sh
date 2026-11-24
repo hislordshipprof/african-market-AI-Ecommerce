@@ -19,7 +19,7 @@ check tests src/lib/cart/service.test.ts
 check tests e2e/cart.spec.ts src/lib/cart/service.test.ts docs/note.md
 check full src/lib/cart/service.ts
 check full src/lib/cart/service.ts src/lib/cart/service.test.ts
-check full scripts/seed-preview.mjs
+check full scripts/seed-deploy.mjs
 check full scripts/ci-local.sh src/lib/cart/service.test.ts
 check full prisma/schema.prisma
 check full package.json

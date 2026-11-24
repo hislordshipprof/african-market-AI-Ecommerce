@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "dotenv -e .env.local -- node scripts/build.mjs",
-    "postbuild": "node scripts/seed-preview.mjs",
+    "postbuild": "node scripts/seed-deploy.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
