@@ -61,6 +61,7 @@ import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import type { SlotOptions } from "@/lib/checkout/slots";
+import { shipsToLabel } from "@/lib/shipping/eligibility";
 import { CouponField } from "./coupon-field";
 import styles from "./cart-checkout.module.css";
 
@@ -1264,7 +1265,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                       : "Courier"}
                   </Chip>
                 )}
-                {isRealPayment && settings.shippingOffered && (
+                {isRealPayment && settings.shipsTo.length > 0 && (
                   <Chip
                     type="button"
                     selected={shipping}
@@ -1277,7 +1278,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               </div>
               <p className={styles.muted}>
                 {shipping
-                  ? `Order weight: ${(weightG / 453.592).toFixed(1)} lb. Shipped orders can weigh up to 50 lb.`
+                  ? `${shipsToLabel(settings.shipsTo)}. Order weight: ${(weightG / 453.592).toFixed(1)} lb. Shipped orders can weigh up to 50 lb.`
                   : `Order weight: ${(weightG / 453.592).toFixed(1)} lb. Delivery radius: ${settings.deliveryRadiusMi} miles.`}
               </p>
               {!isRealPayment && !courierEligible && (

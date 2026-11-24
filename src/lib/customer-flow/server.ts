@@ -7,6 +7,8 @@ import { demoFlowsEnabled } from "./demo-gate";
 import { storeMayUse } from "@/lib/billing/plan";
 import { courierOffered } from "@/lib/delivery/courier-offered";
 import { anyCourierEnabled, readStoreCourierSettings } from "@/lib/delivery/courier-settings";
+import { storeShipsTo } from "@/lib/shipping/eligibility";
+import { readShippingStates } from "@/lib/shipping/settings";
 import type { FlowStore } from "./contracts";
 
 export const getFlowContext = cache(async () => {
@@ -41,7 +43,7 @@ export const getFlowContext = cache(async () => {
     courierOffered: courierOffered(store)
       && (await storeMayUse(store.id, "courier-delivery"))
       && anyCourierEnabled(await readStoreCourierSettings(store.id), store.id),
-    shippingOffered: store.shippingHandlingDays != null,
+    shipsTo: storeShipsTo(store.shippingHandlingDays, await readShippingStates()),
     closed: availability.kind === "queued",
     opensAt: queue?.opensAt ?? "",
     readyAt: queue?.readyAt ?? "",
