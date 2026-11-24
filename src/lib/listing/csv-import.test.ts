@@ -3211,3 +3211,18 @@ describe.skipIf(!hasDb)("D5: service-level cross-store actor check", () => {
     expect(await storeScoped(storeBId).listingImport.findUnique({ where: { id: preview.importToken } })).toBeNull();
   });
 });
+
+// #782 AC3: the template the import page offers is a file the importer accepts as it stands.
+describe("listings CSV template", () => {
+  it("parses with no error or unknown column, and every row has a weight and an aisle", async () => {
+    const { LISTINGS_CSV_TEMPLATE } = await import("./csv-template");
+    const parsed = parseCsvText(LISTINGS_CSV_TEMPLATE);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.unknownColumns).toEqual([]);
+    expect(parsed.rows.length).toBeGreaterThan(0);
+    for (const row of parsed.rows) {
+      expect(row.weightG).toBeGreaterThan(0);
+      expect(row.aisleCell).toBeTruthy();
+    }
+  });
+});

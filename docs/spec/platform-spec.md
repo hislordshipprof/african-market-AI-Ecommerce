@@ -78,7 +78,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ## 5. Customer experience
 
 ### 5.1 Browse & search
-- Category browsing (Tubers, Grains & Flours, Spices, Oils, Vegetables, Fish & Meat, Frozen, Snacks, Drinks, Beauty). Custom-name-only listings (not linked to a master product) do not appear in category browse; they are reachable via search and the all-products view.
+- Category browsing (Tubers, Grains & Flours, Spices, Oils, Vegetables, Fish & Meat, Frozen, Snacks, Drinks, Beauty). A listing's aisle is its master product's category; a custom listing (no master product) has the aisle the owner picks in the listing dialog or the CSV `category`/`aisle` column, and one without an aisle is reached through search and the all-products view (#782). The aisle menu lists only aisles in which the store has an active listing.
 - Search resolves synonyms and local names: *ugu → fluted pumpkin leaves*, *ata rodo → scotch bonnet*, *gari / garri*, *teff / injera flour*, *ogiri*, *dawadawa / iru*, *kpakpo shito*.
 - Product page: sizes/variants, price, **stock confidence badge** (In stock / Limited / Ask store), freshness notes for produce/meat/fish, weight, frozen flag, recipes that use it.
 

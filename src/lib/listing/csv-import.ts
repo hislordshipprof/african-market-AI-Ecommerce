@@ -56,6 +56,8 @@ export interface CsvPreviewNew {
   csvName: string;
   price: number;
   reason: string;
+  /** The platform aisle the row's category or aisle cell named (#782). */
+  aisle?: string;
 }
 
 export interface CsvPreviewAlreadyListed {
@@ -98,6 +100,9 @@ interface ParsedRow {
   status?: StockStatus;
   /** Whole grams from a valid weight cell. Absent when the cell was empty. */
   weightG?: number;
+  /** The category or aisle cell as typed; resolved to a platform aisle when matching. */
+  aisleCell?: string;
+  aisle?: { id: string; name: string };
 }
 
 function normalizeHeader(h: string): string {
@@ -213,7 +218,7 @@ export function textLooksNonCsv(text: string): boolean {
   return false;
 }
 
-type KnownColumn = "name" | "price" | "stock_mode" | "qty" | "status" | "weight";
+type KnownColumn = "name" | "price" | "stock_mode" | "qty" | "status" | "weight" | "aisle";
 
 function knownColumnKey(normalized: string): KnownColumn | null {
   if (normalized === "name") return "name";
@@ -221,6 +226,7 @@ function knownColumnKey(normalized: string): KnownColumn | null {
   if (normalized === "stock_mode" || normalized === "stockmode") return "stock_mode";
   if (normalized === "qty" || normalized === "quantity") return "qty";
   if (normalized === "status") return "status";
+  if (normalized === "category" || normalized === "aisle") return "aisle";
   if (headerWeightUnit(normalized) !== undefined) return "weight";
   return null;
 }
@@ -314,6 +320,7 @@ export function parseCsvText(raw: string): {
   const qtyIdx = columnIndex.get("qty");
   const statusIdx = columnIndex.get("status");
   const weightIdx = columnIndex.get("weight");
+  const aisleIdx = columnIndex.get("aisle");
   const hasQtyColumn = qtyIdx !== undefined;
 
   if (columnIndex.has("weight") && rawHeaders.filter((header) => knownColumnKey(normalizeHeader(header)) === "weight").length > 1) {
@@ -489,6 +496,7 @@ export function parseCsvText(raw: string): {
       qty = parsed;
     }
 
+    const aisleCell = cell(record, aisleIdx).trim();
     rows.push({
       row: rowNum,
       name: rawName,
@@ -497,6 +505,7 @@ export function parseCsvText(raw: string): {
       qty,
       status,
       ...(weightG !== undefined ? { weightG } : {}),
+      ...(aisleCell ? { aisleCell } : {}),
     });
   }
 
@@ -642,6 +651,7 @@ function resolveImportWeight(
 interface ListingToCreate {
   masterProductId: string | null;
   customName: string | null;
+  categoryId: string | null;
   price: number;
   stockMode: StockMode;
   qty: number | null;
@@ -671,6 +681,7 @@ function buildListingData(
     return {
       masterProductId: null,
       customName: row.name,
+      categoryId: row.aisle?.id ?? null,
       price: row.price,
       ...stock,
       frozen: false,
@@ -683,6 +694,8 @@ function buildListingData(
   return {
     masterProductId: product.id,
     customName: null,
+    // The master product's category is the aisle.
+    categoryId: null,
     price: row.price,
     ...stock,
     frozen: product.frozen,
@@ -712,8 +725,43 @@ type ExistingListingReader = {
   };
 };
 
+function aisleKey(text: string): string {
+  return text.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Puts each row's category or aisle cell in a platform aisle, by name or slug, ignoring case and
+ * "&" versus "and". A cell naming no aisle is a row error.
+ */
+async function resolveAisles(parsed: ReturnType<typeof parseCsvText>): Promise<ReturnType<typeof parseCsvText>> {
+  if (!parsed.rows.some((row) => row.aisleCell)) return parsed;
+  const categories = await platform.category.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true, name: true, slug: true } });
+  const byKey = new Map<string, { id: string; name: string }>();
+  for (const category of categories) {
+    byKey.set(aisleKey(category.slug), { id: category.id, name: category.name });
+    byKey.set(aisleKey(category.name), { id: category.id, name: category.name });
+  }
+  const rows: ParsedRow[] = [];
+  const errors = [...parsed.errors];
+  for (const row of parsed.rows) {
+    if (!row.aisleCell) {
+      rows.push(row);
+      continue;
+    }
+    const aisle = byKey.get(aisleKey(row.aisleCell));
+    if (aisle) rows.push({ ...row, aisle });
+    else errors.push({
+      row: row.row,
+      csvName: row.name,
+      reason: `Unknown aisle: "${row.aisleCell}". Use one of: ${categories.map((category) => category.name).join(", ")}.`,
+    });
+  }
+  errors.sort((a, b) => a.row - b.row);
+  return { ...parsed, rows, errors };
+}
+
 export async function buildMatchContext(csvText: string) {
-  const parsed = parseCsvText(csvText);
+  const parsed = await resolveAisles(parseCsvText(csvText));
   const matchMap =
     parsed.rows.length === 0
       ? new Map<string, ProductMatchList>()
@@ -778,7 +826,13 @@ function classifyPreviewRows(
           existingListingId: existingCustomId,
         });
       } else {
-        newItems.push({ row: row.row, csvName: row.name, price: row.price, reason: "no master product match" });
+        newItems.push({
+          row: row.row,
+          csvName: row.name,
+          price: row.price,
+          reason: "no master product match",
+          ...(row.aisle ? { aisle: row.aisle.name } : {}),
+        });
       }
     } else if (productMatches.length === 1) {
       const m = productMatches[0];
@@ -1134,6 +1188,7 @@ export async function commitImport(
         storeId,
         masterProductId: item.masterProductId,
         customName: item.customName,
+        categoryId: item.categoryId,
         price: item.price,
         stockMode: item.stockMode,
         qty: item.qty,

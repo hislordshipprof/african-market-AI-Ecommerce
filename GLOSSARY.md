@@ -111,7 +111,7 @@ Another name a shopper searches for a master product: a local name ("egusi" in Y
 _Avoid_: Alias, keyword
 
 **Category**:
-A platform-wide aisle (e.g. "Grains & Flours") that master products belong to, with a local name, a photo and a place in the order. A category may sit under one top-level category as a subcategory; there is no deeper level. Its slug never changes after creation. A re-seed keeps what an admin changed, and does not recreate a category an admin deleted (#675).
+A platform-wide aisle (e.g. "Grains & Flours") that master products belong to; a custom listing takes the aisle its owner picks (#782). A store shows only the aisles it stocks. Each category has a local name, a photo and a place in the order. A category may sit under one top-level category as a subcategory; there is no deeper level. Its slug never changes after creation. A re-seed keeps what an admin changed, and does not recreate a category an admin deleted (#675).
 _Avoid_: Department, collection (a store's own curated list)
 
 **Listing**:
