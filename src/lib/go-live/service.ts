@@ -14,17 +14,20 @@ export const FORCE_REASON_MAX = 500;
 
 /**
  * Moves a store from `setup` to `active` with one audit row. The update is conditional on `setup`, so a second click,
- * a second tab or a suspension that lands first changes nothing.
+ * a second tab or a suspension that lands first changes nothing. `list` also lists it in the directory (#784).
  */
 async function markLive(
   storeId: string,
   actor: Actor,
   action: "store.go_live" | "store.go_live_forced",
   after: Record<string, unknown>,
+  list: boolean,
 ): Promise<void> {
   const store = await platformAdminTransaction(async (tx) => {
-    const moved = await tx.store.updateMany({ where: { id: storeId, status: "setup" }, data: { status: "active" } });
-    if (moved.count === 0) return null;
+    const prior = await tx.store.findUnique({ where: { id: storeId }, select: { listed: true } });
+    const data = list ? { status: "active", listed: true } : { status: "active" };
+    const moved = await tx.store.updateMany({ where: { id: storeId, status: "setup" }, data });
+    if (moved.count === 0 || !prior) return null;
     await tx.auditLog.create({
       data: {
         storeId,
@@ -33,8 +36,8 @@ async function markLive(
         action,
         entityType: "store",
         entityId: storeId,
-        before: { status: "setup" },
-        after: { status: "active", ...after },
+        before: { status: "setup", listed: prior.listed },
+        after: { ...data, ...after },
       },
     });
     return tx.store.findUniqueOrThrow({ where: { id: storeId }, select: { id: true, slug: true, customDomain: true, listed: true } });
@@ -49,7 +52,7 @@ function openKeys(checklist: GoLiveChecklist): string[] {
   return checklist.items.filter((i) => !i.done).map((i) => i.key);
 }
 
-/** The owner's Go live: refused unless every checklist item is done. Suspended wins over everything. */
+/** The owner's Go live: refused unless every checklist item is done, and lists the store. Suspended wins over everything. */
 export async function goLive(storeId: string, actor: Actor, now: Date): Promise<GoLiveResult> {
   const checklist = await readGoLiveChecklist(storeId, now);
   if (!checklist) return { ok: false, error: "Store not found." };
@@ -60,7 +63,7 @@ export async function goLive(storeId: string, actor: Actor, now: Date): Promise<
     const open = checklist.items.filter((i) => !i.done).map((i) => goLiveItemLabel(i.key, checklist.floor));
     return { ok: false, error: `Finish the checklist first: ${open.join(", ")}.` };
   }
-  await markLive(storeId, actor, "store.go_live", {});
+  await markLive(storeId, actor, "store.go_live", {}, true);
   return { ok: true };
 }
 
@@ -73,6 +76,6 @@ export async function forceGoLive(storeId: string, rawReason: string, actor: Act
   if (!checklist) return { ok: false, error: "Store not found." };
   if (checklist.status === "suspended") return { ok: false, error: "This store is suspended. Lift the suspension first." };
   if (checklist.status === "active") return { ok: true };
-  await markLive(storeId, actor, "store.go_live_forced", { reason, openItems: openKeys(checklist) });
+  await markLive(storeId, actor, "store.go_live_forced", { reason, openItems: openKeys(checklist) }, false);
   return { ok: true };
 }
