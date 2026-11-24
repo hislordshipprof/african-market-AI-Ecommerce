@@ -4,8 +4,9 @@
  * parcel fields, an unknown unit or a non-positive weight (400), and returns no rates unless async is false.
  * GET /transactions/{id} returns a bought label again.
  * GET /transactions?rate=<id> lists the labels sold from a rate.
- * A label is bought only from a rate it quoted less than 7 days ago [ASSUMPTION: Shippo does not document the error
- * for an older rate; the fake answers ERROR]; a rate POSTed again sells a second label [ASSUMPTION: not documented by
+ * A label is bought only from a rate it quoted less than 7 days ago; an older one is a transaction with status ERROR
+ * (Shippo documents ERROR and `messages[].code`, but no code for an expired rate), and a rate it never quoted is a 400;
+ * a rate POSTed again sells a second label [ASSUMPTION: not documented by
  * Shippo; the worst case, so a test sees a double purchase]. A refund after `scan()` is an ERROR, as Shippo rejects a
  * scanned label.
  */
@@ -82,6 +83,8 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
   const rates = new Map<string, { quotedAt: Date; feeCents: number }>();
   const labels = new Map<string, { rateId: string; scanned: boolean; refunded: boolean }>();
   let shipments = 0;
+  // Shippo object ids are unique across accounts, so a rate one fake quoted is unknown to another.
+  const account = crypto.randomUUID().slice(0, 8);
   const handler = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const headers = new Headers(init?.headers);
@@ -125,7 +128,7 @@ export function fakeShippo(opts: FakeShippoOptions): FakeShippo {
     const parcel = (body.parcels as Json[])[0];
     const lb = Number(parcel.weight) * LB_PER_UNIT[parcel.mass_unit as string];
     const quoted = services.map((service, i) => ({
-      object_id: `rate_fake_${shipments}_${i}`,
+      object_id: `rate_fake_${shipments}_${i}_${account}`,
       shipment: shipmentId,
       amount: ((service.baseCents + Math.ceil(lb) * service.perLbCents) / 100).toFixed(2),
       currency: "USD",

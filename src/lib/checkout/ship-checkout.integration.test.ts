@@ -135,7 +135,7 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
       fulfillment: "ship", status: "AUTHORIZED",
       deliveryFeeCents: 1305, totalCents: quote.totalCents, totalAuthorizedCents: quote.holdCents, taxCents: 156,
       deliveryState: "AR", deliveryZip: "72201", deliveryDistanceMi: null,
-      shippingCarrier: "USPS", shippingService: "Ground Advantage", shippingDays: 5, shippingRateId: "rate_fake_1_0",
+      shippingCarrier: "USPS", shippingService: "Ground Advantage", shippingDays: 5, shippingRateId: expect.stringMatching(/^rate_fake_1_0_/),
     });
     // Placement charged the locked rate; Shippo was not asked again.
     expect(fetch.calls).toHaveLength(1);

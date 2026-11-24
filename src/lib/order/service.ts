@@ -1090,7 +1090,7 @@ export async function markReady(
   orderId: string,
   options: { confirmPostageCents?: number; label?: LabelDeps } = {},
 ): Promise<
-  | { ok: true; capturedAmountCents: number; voided?: boolean; labelError?: string }
+  | { ok: true; capturedAmountCents: number; voided?: boolean; labelError?: string; labelConfirmPostageCents?: number; labelOfferCancel?: boolean }
   | { ok: false; error: string; confirmPostageCents?: number }
 > {
   // Phase 0: a shipped order's postage, re-quoted when its rate expired (#568); then final tax on the picked lines; never capture untaxed (#65).
@@ -1362,7 +1362,15 @@ export async function markReady(
   // The capture stands; a label or PDF that fails is retried from the order (Buy label).
   const label = shipReady ? await buyShippingLabel(storeId, orderId, options.label) : null;
 
-  return { ok: true, capturedAmountCents: finalize.capturedAmountCents, ...(label && !label.ok && { labelError: label.error }) };
+  return {
+    ok: true,
+    capturedAmountCents: finalize.capturedAmountCents,
+    ...(label && !label.ok && {
+      labelError: label.error,
+      ...(label.confirmPostageCents !== undefined && { labelConfirmPostageCents: label.confirmPostageCents }),
+      ...(label.offerCancel && { labelOfferCancel: true }),
+    }),
+  };
 }
 
 export async function completePickup(

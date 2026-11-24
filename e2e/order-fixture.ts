@@ -515,3 +515,40 @@ export async function insertShortSwapOrder(input: { number: number; token: strin
     return { swapName: name(5), pendingName: name(3), substituteName: name(5) };
   });
 }
+
+/**
+ * A shipped order at Ready whose stored rate the fake Shippo never quoted, so buying its label is refused (#771).
+ * Its 4 lb parcel re-quotes at $9.25 (USPS Ground Advantage, $5.45 + 4 × $0.95). Remove with deleteShipRequoteOrder.
+ */
+export async function insertShipRequoteOrder(number: number, capturedPostageCents: number): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number } });
+    const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
+    const listing = await tx.listing.create({ data: { storeId, customName: `E2E garri ${number}`, price: 1200, stockMode: "unlimited", shippable: true } });
+    const variant = await tx.listingVariant.create({ data: { listingId: listing.id, label: "4 lb", price: 1200, weightG: 1814 } });
+    const total = 1200 + capturedPostageCents;
+    await tx.order.create({
+      data: {
+        storeId, number, customerId: customer.id, status: "READY", fulfillment: "ship",
+        subtotalCents: 1200, bufferCents: 0, deliveryFeeCents: capturedPostageCents, totalAuthorizedCents: total, totalCents: total, capturedAmountCents: total,
+        paymentIntentId: `pi_e2e_${number}_${Date.now()}`, readyAt: new Date(),
+        deliveryLine1: "8505 Fenton St", deliveryCity: "Silver Spring", deliveryState: "MD", deliveryZip: "20910",
+        shippingRateId: `rate_e2e_dead_${number}`, shippingRateExpiresAt: new Date(Date.now() + 86_400_000), shippingPostageCents: capturedPostageCents,
+        shippingCarrier: "USPS", shippingService: "Ground Advantage", shippingDays: 5,
+        lines: { create: { listingVariantId: variant.id, qtyOrdered: 1, qtyPicked: 1, status: "picked", unitPriceCents: 1200 } },
+      },
+    });
+  });
+}
+
+export async function shipRequoteOrder(number: number) {
+  return withMama((tx, storeId) => tx.order.findFirstOrThrow({ where: { storeId, number } }));
+}
+
+export async function deleteShipRequoteOrder(number: number): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number } });
+    await tx.listingVariant.deleteMany({ where: { listing: { storeId, customName: `E2E garri ${number}` } } });
+    await tx.listing.deleteMany({ where: { storeId, customName: `E2E garri ${number}` } });
+  });
+}

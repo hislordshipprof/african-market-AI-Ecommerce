@@ -8,10 +8,11 @@ import { setStripeProvider } from "../stripe";
 import { capturedFees, capturedPayments, fakeStripeProvider, refundedPayments, setAuthorizedAmount } from "../stripe/fake";
 import { fakeTaxCalculator, setTaxCalculatorForTests } from "../tax/calculator";
 import { cancelShipment, markReady } from "../order/service";
-import { buyShippingLabel, LABEL_PDF_NOT_SAVED, SHIPMENT_SCANNED } from "./label";
+import { buyShippingLabel, LABEL_NOT_BOUGHT, LABEL_PDF_NOT_SAVED, LABEL_RATE_EXPIRED_PREFIX, SHIPMENT_SCANNED } from "./label";
 import { platformFeeLedger } from "../admin/fee-ledger-query";
 import { createPaymentIntent, placeOrder, quoteCheckout, saveDeliverySnapshot, type DeliveryRequest } from "../checkout/service";
 import { ShippoProvider, signShippoWebhook } from "./shippo";
+import { ShippingProviderError } from "./provider";
 import { fakeShippo } from "./shippo-fake";
 import type { LabelDeps } from "./label";
 
@@ -337,5 +338,85 @@ describe.skipIf(!hasDb)("shipping labels, tracking and the Shipped state (#568, 
     expect(await buyShippingLabel(store.id, orderId, deps)).toEqual({ ok: true });
     expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ shippingLabelStatus: "bought", shippingLabelId: sold.labelId });
     expect(fake.labels.size).toBe(1);
+  });
+
+  it("#771 AC1, AC2: a label refused after capture re-quotes; staff confirm a rise up to $5, which the platform absorbs and records", async () => {
+    // Checkout's rate is still in date, so Ready captures on it; Shippo then refuses it (400) and the parcel is quoted again.
+    const { store, orderId, paymentIntentId, quote, deps, scoped } = await pickedShipOrder();
+    const fresh = requoting(500);
+    const label = { ...deps, provider: fresh };
+    const ready = await markReady(store.id, orderId, { label });
+    expect(ready).toMatchObject({ ok: true, capturedAmountCents: quote.totalCents, labelConfirmPostageCents: POSTAGE + 500 });
+    expect(ready.ok && ready.labelError).toBe(`${LABEL_RATE_EXPIRED_PREFIX}The new rate is $18.05, $5.00 more than the shopper paid. The platform pays the difference. Confirm to buy the label`);
+    const captured = { amount: capturedPayments.get(paymentIntentId), fee: capturedFees.get(paymentIntentId) };
+    expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ status: "READY", shippingLabelStatus: null, shippingLabelPostageCents: null });
+
+    // Confirming an amount other than the fresh quote asks again; the quoted amount buys the label on the new rate.
+    expect(await buyShippingLabel(store.id, orderId, label, POSTAGE + 499)).toMatchObject({ ok: false, confirmPostageCents: POSTAGE + 500 });
+    expect(await buyShippingLabel(store.id, orderId, label, POSTAGE + 500)).toEqual({ ok: true });
+    const order = await scoped.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(order).toMatchObject({ status: "READY", shippingLabelStatus: "bought", deliveryFeeCents: POSTAGE, shippingPostageCents: POSTAGE, shippingLabelPostageCents: POSTAGE + 500 });
+    expect(order.shippingRateId).toMatch(/^rate_fake_/);
+    // Stripe is untouched: the absorbed $5 is recorded, not charged.
+    expect({ amount: capturedPayments.get(paymentIntentId), fee: capturedFees.get(paymentIntentId) }).toEqual(captured);
+
+    const ledger = await platformFeeLedger(new Date().toISOString().slice(0, 7));
+    const row = ledger.rows.find((r) => r.storeId === store.id && r.kind === "capture");
+    const storeCardFee = Math.round(2400 * 0.029) + 30;
+    expect(row).toMatchObject({ courierFeeCents: POSTAGE, postageAbsorbedCents: 500, applicationFeeCents: 99 + storeCardFee + POSTAGE + 156 });
+    expect(row?.platformNetCents).toBe(99 - Math.round(99 * 0.029) - Math.round(POSTAGE * 0.029) - Math.round(156 * 0.029) - 500);
+  });
+
+  it("#771 AC2: a retry after the fresh-rate purchase fails still records the absorbed postage, without asking again", async () => {
+    const { store, orderId, deps, scoped } = await pickedShipOrder();
+    const fresh = requoting(500);
+    const label = { ...deps, provider: fresh };
+    expect(await markReady(store.id, orderId, { label })).toMatchObject({ ok: true, labelConfirmPostageCents: POSTAGE + 500 });
+    // The old rate is refused and re-quoted; the purchase on the fresh rate is then lost and the lookup finds nothing.
+    let buys = 0;
+    const flaky = Object.assign(Object.create(fresh) as typeof fresh, {
+      buyLabel: async (rateId: string, id: string) => {
+        if (++buys === 1) return fresh.buyLabel(rateId, id);
+        throw new ShippingProviderError(503, "Shippo POST /transactions/ failed with 503");
+      },
+      findLabel: async () => null,
+    });
+    expect(await buyShippingLabel(store.id, orderId, { ...deps, provider: flaky }, POSTAGE + 500)).toEqual({ ok: false, error: LABEL_NOT_BOUGHT });
+    const month = new Date().toISOString().slice(0, 7);
+    // No label yet, so the ledger counts nothing absorbed.
+    expect((await platformFeeLedger(month)).rows.find((r) => r.storeId === store.id && r.kind === "capture")).toMatchObject({ postageAbsorbedCents: 0 });
+
+    // Staff already confirmed this rate, so the next click buys it and the absorbed $5 is kept.
+    expect(await buyShippingLabel(store.id, orderId, label)).toEqual({ ok: true });
+    expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ shippingLabelStatus: "bought", shippingLabelPostageCents: POSTAGE + 500 });
+    expect((await platformFeeLedger(month)).rows.find((r) => r.storeId === store.id && r.kind === "capture")).toMatchObject({ postageAbsorbedCents: 500 });
+  });
+
+  it("#771 AC3: above $5 more, staff are offered cancel and refund, never a purchase", async () => {
+    const { store, orderId, paymentIntentId, quote, deps, scoped } = await pickedShipOrder();
+    const fresh = fakeShippo({ token: TOKEN, services: [{ provider: "USPS", name: "Ground Advantage", baseCents: 545 + 501, perLbCents: 95, days: 5 }] });
+    const label = { ...deps, provider: new ShippoProvider({ apiKey: TOKEN, fetch: fresh }) };
+    const ready = await markReady(store.id, orderId, { label });
+    expect(ready).toMatchObject({ ok: true, labelOfferCancel: true });
+    expect(ready.ok && ready.labelError).toBe(`${LABEL_RATE_EXPIRED_PREFIX}The new rate is $18.06, $5.01 more than the shopper paid. That is over the $5.00 the platform covers, so cancel the shipment and refund the customer`);
+    // Even a confirm of the exact amount buys nothing.
+    expect(await buyShippingLabel(store.id, orderId, label, POSTAGE + 501)).toMatchObject({ ok: false, offerCancel: true });
+    expect(fresh.labels.size).toBe(0);
+    expect(await cancelShipment(store.id, orderId, staff, { provider: label.provider })).toEqual({ ok: true });
+    expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ status: "CANCELLED", shippingLabelPostageCents: null });
+    expect(refundedPayments.get(paymentIntentId)).toBe(quote.totalCents);
+  });
+
+  it("#771 AC1: a 5xx or lost answer never re-quotes, so the lookup keeps the old rate id", async () => {
+    const { store, orderId, fake, provider, deps, scoped } = await pickedShipOrder();
+    const unknown = Object.assign(Object.create(provider) as typeof provider, {
+      buyLabel: async () => { throw new ShippingProviderError(503, "Shippo POST /transactions/ failed with 503"); },
+    });
+    const shipments = () => fake.calls.filter((call) => "parcels" in call).length;
+    const before = shipments();
+    const ready = await markReady(store.id, orderId, { label: { ...deps, provider: unknown } });
+    expect(ready).toEqual({ ok: true, capturedAmountCents: expect.any(Number), labelError: LABEL_NOT_BOUGHT });
+    expect(shipments()).toBe(before);
+    expect((await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).shippingLabelStatus).toBeNull();
   });
 });
