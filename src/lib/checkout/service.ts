@@ -399,7 +399,8 @@ async function shippingQuoteFor(
   if (!confirmed?.ok) return unavailable("We couldn't find that address");
   const stateRefusal = shipRefusal({ lines, handlingDays: store.shippingHandlingDays, state: confirmed.match.state, allowedStates });
   if (stateRefusal) return unavailable(stateRefusal);
-  if (!contact.name.trim()) return unavailable("Add your name to see the shipping rate.");
+  // The rate needs no name (#763), but a label is bought from the rate's shipment, so only a named one is kept for it.
+  const name = contact.name.trim();
 
   const handlingDays = store.shippingHandlingDays as number;
   const weightG = orderWeightG(lines);
@@ -407,10 +408,10 @@ async function shippingQuoteFor(
   const scoped = storeScoped(store.id);
   const saved = await scoped.cart.findUnique({
     where: { id: cart.id },
-    select: { shippingFeeCents: true, shippingCarrier: true, shippingService: true, shippingDays: true, shippingQuoteKey: true, shippingQuoteExpiresAt: true },
+    select: { shippingFeeCents: true, shippingRateId: true, shippingCarrier: true, shippingService: true, shippingDays: true, shippingQuoteKey: true, shippingQuoteExpiresAt: true },
   });
   const shown = saved?.shippingQuoteKey === key && saved.shippingFeeCents != null ? saved.shippingFeeCents : null;
-  if (shown != null && saved?.shippingQuoteExpiresAt && saved.shippingQuoteExpiresAt > new Date()) {
+  if (shown != null && saved?.shippingQuoteExpiresAt && saved.shippingQuoteExpiresAt > new Date() && (saved.shippingRateId != null || !name)) {
     return { ok: true, feeCents: shown, carrier: saved.shippingCarrier ?? "", service: saved.shippingService ?? "", days: saved.shippingDays, handlingDays };
   }
 
@@ -420,7 +421,7 @@ async function shippingQuoteFor(
   try {
     rate = cheapestRate(await provider.rates({
       from: { name: store.name, line1: store.addressLine1, line2: store.addressLine2, city: store.city, state: store.state, zip: store.zip, phone: store.phone },
-      to: { name: contact.name.trim(), line1: confirmed.match.line1, line2: request.line2 ?? null, city: confirmed.match.city, state: confirmed.match.state, zip: confirmed.match.zip, phone: contact.phone.trim() || null },
+      to: { name: name || "Shopper", line1: confirmed.match.line1, line2: request.line2 ?? null, city: confirmed.match.city, state: confirmed.match.state, zip: confirmed.match.zip, phone: contact.phone.trim() || null },
       weightG,
     }));
   } catch (error) {
@@ -431,7 +432,7 @@ async function shippingQuoteFor(
     where: { id: cart.id },
     data: {
       shippingFeeCents: rate?.feeCents ?? null,
-      shippingRateId: rate?.rateId ?? null,
+      shippingRateId: name ? rate?.rateId ?? null : null,
       shippingCarrier: rate?.carrier ?? null,
       shippingService: rate?.service ?? null,
       shippingDays: rate?.days ?? null,

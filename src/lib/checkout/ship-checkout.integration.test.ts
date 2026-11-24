@@ -158,6 +158,33 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     expect(accepted.problems).toEqual([]);
   });
 
+  it("#763 AC4: the rate shows once the address is confirmed, before a name; the label is then rated under the shopper's real name", async () => {
+    setTaxCalculatorForTests(fakeTaxCalculator(RATES));
+    const { store, cartId } = await seed();
+    const { fetch, provider } = shippo();
+
+    const unnamed = await quoteCheckout(store.id, 0, cartId, { ...CONTACT, name: "" }, "ship", AR, { shipping: provider });
+    expect(unnamed.shipping?.feeCents).toBe(1305);
+    expect(unnamed.problems.filter((problem) => problem.code === "ineligible")).toEqual([]);
+
+    const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", AR, { shipping: provider });
+    expect(quote.shipping?.feeCents).toBe(1305);
+    const paymentIntentId = await payAndSave(store.id, cartId, quote.holdCents);
+    const placed = await placeOrder(store.id, 0, cartId, CONTACT, "ship", null, null, paymentIntentId);
+    const scoped = storeScoped(store.id);
+    await scoped.order.update({ where: { id: placed.token }, data: { status: "PICKING", acceptedAt: new Date() } });
+    await scoped.orderLine.updateMany({ where: { orderId: placed.token }, data: { status: "picked", qtyPicked: 2 } });
+    setStripeProvider(fakeStripeProvider);
+    setAuthorizedAmount(paymentIntentId, quote.holdCents);
+    await markReady(store.id, placed.token, { label: { provider, hasStorage: () => true, upload: async () => {} } });
+
+    // The label is bought from the order's rate, so that rate's shipment carries the shopper's name, never a stand-in.
+    const order = await scoped.order.findUniqueOrThrow({ where: { id: placed.token } });
+    const shipment = Number(/^rate_fake_(\d+)_/.exec(order.shippingRateId ?? "")?.[1]);
+    const shipments = fetch.calls.filter((call) => "address_to" in call);
+    expect(shipments[shipment - 1]).toMatchObject({ address_to: { name: "Ada Buyer" } });
+  });
+
   it("AC2–AC4: no rate unless every line ships, the store ships, the state is allowed and the order is at most 50 lb", async () => {
     const cases = [
       { opts: { shippable: false }, address: AR, message: /can't ship/ },
