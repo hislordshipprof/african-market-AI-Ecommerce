@@ -53,6 +53,28 @@ export function resolveHost(
   return { kind: "slug", slug: firstLabel };
 }
 
+type Env = Record<string, string | undefined>;
+
+// One label under vercel.app: Vercel names the production URL after the shortest custom domain once
+// one is attached, and store domains are attached to this project (#711), so only an alias qualifies.
+const VERCEL_ALIAS_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.vercel\.app$/;
+
+/**
+ * The production vercel.app alias, served as the platform root until PLATFORM_ROOT_DOMAIN is set (#766).
+ * Stores are not subdomains there: they are reached by `?store=<slug>` (ADR-0007).
+ */
+export function fallbackRootHost(env: Env): string | null {
+  if (env.PLATFORM_ROOT_DOMAIN?.trim()) return null;
+  if (env.VERCEL_ENV !== "production") return null;
+  const alias = env.VERCEL_PROJECT_PRODUCTION_URL?.trim().toLowerCase() ?? "";
+  return VERCEL_ALIAS_RE.test(alias) ? alias : null;
+}
+
+export function isFallbackRoot(host: string, env: Env): boolean {
+  const alias = fallbackRootHost(env);
+  return alias !== null && host.split(":")[0].toLowerCase() === alias;
+}
+
 export function slugFromHost(
   host: string,
   rootDomain?: string,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
-import { resolveHost, isSlugRoutable } from "@/lib/slug";
+import { resolveHost, isSlugRoutable, isFallbackRoot } from "@/lib/slug";
 import { ATTRIBUTION_COOKIE, ATTRIBUTION_MAX_AGE, DIRECTORY_REF } from "@/lib/directory/attribution";
 import { needsNoScriptCsp, newCspNonce, NO_SCRIPT_CSP, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
@@ -17,41 +17,53 @@ export function allowStoreOverride(
 }
 
 export function proxy(request: NextRequest) {
+  const host = request.headers.get("host");
+  const fallbackRoot = host !== null && isFallbackRoot(host, process.env);
+  const response = route(request, host, fallbackRoot);
+  // The stand-in address must never compete with the real domain in search (#766).
+  if (fallbackRoot) response.headers.set("X-Robots-Tag", "noindex");
+  return response;
+}
+
+function route(request: NextRequest, host: string | null, fallbackRoot: boolean): NextResponse {
   const headers = new Headers(request.headers);
   headers.delete("x-store-slug");
   headers.delete("x-custom-domain");
   headers.delete("x-platform-root");
 
-  const host = request.headers.get("host");
-  const overrideAllowed = allowStoreOverride(process.env);
+  // The alias has no store subdomains, so stores are reached there the way previews reach them (#766).
+  const overrideAllowed = fallbackRoot || allowStoreOverride(process.env);
   let slug: string | null = null;
 
   if (overrideAllowed) {
     const rawParam = request.nextUrl.searchParams.get("store");
     const paramSlug = rawParam?.toLowerCase() ?? null;
-    if (paramSlug && isSlugRoutable(paramSlug)) {
+    // On the alias an empty ?store= is the way back to the directory home, which shares "/" with stores.
+    if ((paramSlug && isSlugRoutable(paramSlug)) || (fallbackRoot && paramSlug === "")) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.searchParams.delete("store");
       const response = NextResponse.redirect(redirectUrl, 307);
       stampSecurity(headers, response);
       rememberBrowser(request, response, browserIdentity(request));
-      response.cookies.set(COOKIE_NAME, paramSlug, {
+      response.cookies.set(COOKIE_NAME, paramSlug ?? "", {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        maxAge: COOKIE_MAX_AGE,
+        maxAge: paramSlug ? COOKIE_MAX_AGE : 0,
         secure: request.nextUrl.protocol === "https:",
       });
       return response;
     }
 
     const cookieSlug = request.cookies.get(COOKIE_NAME)?.value;
-    if (cookieSlug && isSlugRoutable(cookieSlug)) {
+    if (cookieSlug && isSlugRoutable(cookieSlug) && !(fallbackRoot && isMarketplacePath(request.nextUrl.pathname))) {
       slug = cookieSlug;
     }
   }
 
-  if (!slug && host) {
+  if (!slug && fallbackRoot) {
+    headers.set("x-platform-root", "1");
+  } else if (!slug && host) {
     const resolution = resolveHost(host, process.env.PLATFORM_ROOT_DOMAIN);
     if (resolution.kind === "slug") {
       slug = resolution.slug;
@@ -100,6 +112,11 @@ export function proxy(request: NextRequest) {
 
 function isDirectoryOnlyPath(pathname: string): boolean {
   return pathname === "/sitemap.xml" || pathname === "/robots.txt" || pathname.startsWith("/stores/");
+}
+
+/** Pages of the platform itself, which a store remembered on the alias must not take over. */
+function isMarketplacePath(pathname: string): boolean {
+  return isDirectoryOnlyPath(pathname) || pathname === "/sell" || pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
 function stampSecurity(requestHeaders: Headers, response: NextResponse) {
