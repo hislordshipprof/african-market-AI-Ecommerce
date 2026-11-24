@@ -5,6 +5,7 @@ import { anyCourierEnabled, enabledProviders, preferredProvider, type CourierSel
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
 import { orderReadyEstimate, READY_PUSH_MINUTES } from "./ready-estimate";
+import { storeDeliveryOffered } from "./store-delivery-offered";
 import { DeliveryProviderError, type CreatedDelivery, type DeliveryAddress, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
 
 /** Spec §11.3: above this goods value (the subtotal, before fees, tip and tax), or with any frozen item, the courier checks a PIN at drop-off. */
@@ -197,10 +198,10 @@ async function recordDelivery(input: DispatchInput, provider: DeliveryProvider, 
 async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDeps["emit"]): Promise<void> {
   const order = await storeScoped(storeId).order.findUniqueOrThrow({
     where: { id: orderId },
-    select: { number: true, store: { select: { storeDeliveryEnabled: true, pickupEnabled: true } } },
+    select: { number: true, store: { select: { storeDeliveryEnabled: true, deliveryRadiusMi: true, lat: true, lng: true, pickupEnabled: true } } },
   });
   const options: Array<"store-delivery" | "pickup" | "cancel"> = [];
-  if (order.store.storeDeliveryEnabled) options.push("store-delivery");
+  if (storeDeliveryOffered(order.store)) options.push("store-delivery");
   if (order.store.pickupEnabled) options.push("pickup");
   options.push("cancel");
   await recordCourierEvent(storeId, orderId, null, "both_failed", { options });

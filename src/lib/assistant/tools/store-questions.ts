@@ -3,7 +3,7 @@ import { revalidateTag } from "next/cache";
 import { confirmDeliveryAddress } from "../../address/confirm";
 import { platform, storeScoped } from "../../db";
 import { isStoreOpen, isValidTimezone } from "../../order/store-hours";
-import { deliveryProofBucket } from "../../r2";
+import { storeDeliveryOffered } from "../../delivery/store-delivery-offered";
 import { takeRateLimit } from "../../rate-limit/app-limiter";
 import {
   announceCustomerMessage,
@@ -190,8 +190,7 @@ export async function checkDeliveryArea(ctx: AssistantContext, input: unknown): 
   if (!decision.ok) {
     return recordRead(ctx, "check_delivery_area", parsed, fail(decision.code, decision.message));
   }
-  // As checkout: not offered while the delivered photo has nowhere to be kept (#765).
-  const storeDelivery = store.storeDeliveryEnabled && deliveryProofBucket() !== null && radiusMi > 0 && decision.withinRadius;
+  const storeDelivery = storeDeliveryOffered(store) && decision.withinRadius;
   return recordRead(ctx, "check_delivery_area", parsed, {
     ok: true,
     address: decision.match.formattedAddress,
@@ -225,6 +224,8 @@ export async function getStoreInfo(ctx: AssistantContext, input: unknown): Promi
       storeDeliveryEnabled: true,
       storeDeliveryFeeCents: true,
       deliveryRadiusMi: true,
+      lat: true,
+      lng: true,
       ownerName: true,
       ownerStory: true,
       neighborhood: true,
@@ -243,7 +244,7 @@ export async function getStoreInfo(ctx: AssistantContext, input: unknown): Promi
     pickup: store.pickupEnabled,
     deliveryInfo: store.deliveryInfo,
     storeDelivery: {
-      enabled: store.storeDeliveryEnabled && deliveryProofBucket() !== null,
+      enabled: storeDeliveryOffered(store),
       feeCents: store.storeDeliveryFeeCents,
       radiusMi: Number(store.deliveryRadiusMi),
     },

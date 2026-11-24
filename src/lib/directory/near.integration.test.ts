@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { isUsPoint, locate, nearestStores } from "./near";
@@ -79,7 +79,12 @@ describe.skipIf(!hasDb)("near me", () => {
     }
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("says the store delivers to you only within its own delivery radius, the boundary included", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "proofs");
     // Northern Nevada, over 100 miles from ORIGIN's stores. The store's radius is 8 miles.
     const home = { lat: 41.0, lng: -117.5 };
     const from = (miles: number) => ({ lat: home.lat + miles / MI_PER_DEG_LAT, lng: home.lng });
@@ -98,6 +103,14 @@ describe.skipIf(!hasDb)("near me", () => {
     // The answer carries the verdict, never the radius or the store's point.
     expect(mine.get(slug("r-in"))).not.toHaveProperty("deliveryRadiusMi");
     expect(mine.get(slug("r-in"))).not.toHaveProperty("lat");
+  });
+
+  it("never says the store delivers to you while the proof bucket is unset (#775)", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    const home = { lat: 42.0, lng: -117.5 };
+    await raw.store.create({ data: { slug: slug("nobucket"), name: "No Bucket", lat: home.lat + 1 / MI_PER_DEG_LAT, lng: home.lng, listed: true, storeDeliveryEnabled: true, deliveryRadiusMi: 8 } });
+    const mine = new Map((await nearestStores(home)).stores.map((s) => [s.slug, s]));
+    expect(mine.get(slug("nobucket"))).toMatchObject({ deliversToYou: false, storeDeliveryEnabled: false });
   });
 
   it("tells a US point from one abroad", async () => {

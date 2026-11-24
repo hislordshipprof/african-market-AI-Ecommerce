@@ -1,6 +1,7 @@
 import { listedStoresByDistance, platform, pointWithinZipReach } from "@/lib/db";
 import type { NearQuery } from "./near-query";
 import { assessRadius } from "@/lib/address/geo";
+import { storeDeliveryOffered } from "@/lib/delivery/store-delivery-offered";
 import { DIRECTORY_QUERY_FIELDS, toDirectoryStores, type DirectoryRow, type DirectoryStore } from "./stores";
 import type { StateCode } from "./us-states";
 import { NEARBY_MILES } from "./distance";
@@ -41,7 +42,7 @@ export type NearStore = DirectoryStore & { distanceMi: number; deliversToYou: bo
 
 /** The store's own delivery reaches the point: its radius only, as at checkout (equal is inside). */
 function deliversTo(point: Point, row: DirectoryRow): boolean {
-  if (!row.storeDeliveryEnabled || row.lat == null || row.lng == null) return false;
+  if (!storeDeliveryOffered(row)) return false;
   return assessRadius(point, { lat: row.lat, lng: row.lng, radiusMi: Number(row.deliveryRadiusMi) }).withinRadius;
 }
 
