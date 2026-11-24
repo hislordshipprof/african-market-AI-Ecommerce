@@ -210,13 +210,14 @@ describe.skipIf(!hasDb)("platform fee ledger (lane DB)", () => {
       serviceFeeCents: 180 + 99 + 99 + 150 + 150 + 99,
       courierFeeCents: 899 + 750 - 750 + 899 + 899,
       platformCardFeeCents: 31 + 3 + 25 + 30 + 30 + 3,
+      postageAbsorbedCents: 0,
       applicationFeeCents: 1283 + 196 + 966 + 1224 + 1224 + 184,
       feeRefundedCents: -966 - 30 - 184,
       platformNetCents: 149 + 96 + 74 - 216 + 120 - 30 + 120 + 96 - 184,
     });
     expect(b).toEqual({
       storeId: storeB, storeName: nameB, orders: 1, capturedCents: 4120, serviceFeeCents: 120, courierFeeCents: 0,
-      platformCardFeeCents: 3, applicationFeeCents: 266, feeRefundedCents: 0, platformNetCents: 117,
+      platformCardFeeCents: 3, postageAbsorbedCents: 0, applicationFeeCents: 266, feeRefundedCents: 0, platformNetCents: 117,
     });
     expect(ledger.total).toMatchObject({ orders: 7, platformNetCents: 225 + 117, feeRefundedCents: -1180 });
   });

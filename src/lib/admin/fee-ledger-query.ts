@@ -6,7 +6,7 @@ import {
 const ORDER_FACTS = Prisma.sql`
   o.id AS "orderId", o.store_id AS "storeId", s.name AS "storeName", o.number AS "orderNumber", o.fulfillment,
   o.confirmed_capture_cents AS "capturedAmountCents", o.platform_fee_cents AS "platformFeeCents",
-  o.service_fee_cents AS "serviceFeeCents", o.delivery_fee_cents AS "deliveryFeeCents", o.shipping_postage_cents AS "shippingPostageCents",
+  o.service_fee_cents AS "serviceFeeCents", o.delivery_fee_cents AS "deliveryFeeCents", o.shipping_postage_cents AS "shippingPostageCents", o.shipping_label_postage_cents AS "shippingLabelPostageCents",
   o.tax_cents AS "taxCents", o.tax_liable_party AS "taxLiableParty"`;
 
 /** UTC month bounds as timestamps, matching the UTC values Prisma stores in timestamp(3) columns. */

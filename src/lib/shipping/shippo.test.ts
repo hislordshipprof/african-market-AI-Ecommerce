@@ -65,6 +65,16 @@ describe("Shippo labels and tracking (#568)", () => {
     await expect(provider.buyLabel(old.rateId, "order3")).rejects.toBeInstanceOf(ShippingProviderError);
   });
 
+  it("#771: an ERROR is a definitive refusal (4xx) unless its message code says the carrier timed out", async () => {
+    const answering = (messages: unknown[]) => new ShippoProvider({
+      apiKey: TOKEN,
+      fetch: (async () => new Response(JSON.stringify({ object_id: "txn_err", status: "ERROR", messages }), { status: 201 })) as unknown as typeof fetch,
+    });
+    const status = (provider: ShippoProvider) => provider.buyLabel("rate_1", "order1").catch((e: ShippingProviderError) => e.status);
+    expect(await status(answering([{ source: "USPS", code: "", text: "Rate has expired. Please create a new shipment." }]))).toBe(422);
+    expect(await status(answering([{ source: "UPS", code: "carrier_timeout", text: "UPS API did not respond." }]))).toBe(503);
+  });
+
   it("accepts only a fresh HMAC signature over the exact body, and reads the transaction and status id from track_updated", () => {
     const body = JSON.stringify({ event: "track_updated", test: false, data: { transaction: "txn_1", tracking_status: { object_id: "ts_1", status: "TRANSIT" } } });
     const header = signShippoWebhook(body, "secret", NOW);

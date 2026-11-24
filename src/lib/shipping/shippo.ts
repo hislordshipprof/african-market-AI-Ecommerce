@@ -98,13 +98,15 @@ export class ShippoProvider implements ShippingProvider {
 
   /**
    * POST /transactions buys the rate as a 4×6 PDF label (https://docs.goshippo.com/api-reference/transactions/create-a-shipping-label).
-   * Shippo's ERROR is a settled refusal (422); any other answer leaves the sale unknown (status 0).
+   * Shippo's ERROR is a settled refusal (422), except a message coded `carrier_timeout` (the documented example of a
+   * transient one, 503); any other answer leaves the sale unknown (status 0). No code for an expired rate is documented.
    */
   async buyLabel(rateId: string, orderId: string): Promise<BoughtLabel> {
     const json = await this.post("/transactions/", { rate: rateId, label_file_type: "PDF_4x6", async: false, metadata: orderId });
     const label = boughtLabel(json);
     if (label) return label;
-    throw new ShippingProviderError(json.status === "ERROR" ? 422 : 0, `Shippo label not bought (${String(json.status)}): ${JSON.stringify(json.messages ?? []).slice(0, 300)}`);
+    const timedOut = Array.isArray(json.messages) && json.messages.some((m: unknown) => (m as Json | null)?.code === "carrier_timeout");
+    throw new ShippingProviderError(json.status !== "ERROR" ? 0 : timedOut ? 503 : 422, `Shippo label not bought (${String(json.status)}): ${JSON.stringify(json.messages ?? []).slice(0, 300)}`);
   }
 
   /**
