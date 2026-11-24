@@ -30,6 +30,8 @@ function route(request: NextRequest, host: string | null, fallbackRoot: boolean)
   headers.delete("x-store-slug");
   headers.delete("x-custom-domain");
   headers.delete("x-platform-root");
+  // Lets store admin send a signed-out member back to the page they asked for (#797).
+  headers.set("x-request-path", request.nextUrl.pathname + request.nextUrl.search);
 
   // The alias has no store subdomains, so stores are reached there the way previews reach them (#766).
   const overrideAllowed = fallbackRoot || allowStoreOverride(process.env);
@@ -109,7 +111,8 @@ function route(request: NextRequest, host: string | null, fallbackRoot: boolean)
       secure: request.nextUrl.protocol === "https:",
     });
   }
-  if (forgetsStore && request.cookies.has(COOKIE_NAME)) {
+  // A prefetch is not a visit: a store page's link to a marketplace page must not forget the store (#797).
+  if (forgetsStore && request.cookies.has(COOKIE_NAME) && !isPrefetch(request)) {
     response.cookies.set(COOKIE_NAME, "", {
       httpOnly: true,
       sameSite: "lax",
@@ -125,9 +128,18 @@ function isDirectoryOnlyPath(pathname: string): boolean {
   return pathname === "/sitemap.xml" || pathname === "/robots.txt" || pathname.startsWith("/stores/");
 }
 
-/** Pages of the platform itself, which a store remembered on the alias must not take over. */
+/**
+ * Pages of the platform itself, which a store remembered on the alias must not take over.
+ * Password reset is shared with store admin, so it keeps the store (#797).
+ */
 function isMarketplacePath(pathname: string): boolean {
+  if (pathname === "/admin/reset-password") return false;
   return isDirectoryOnlyPath(pathname) || pathname === "/sell" || pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
+function isPrefetch(request: NextRequest): boolean {
+  const purpose = request.headers.get("sec-purpose") ?? request.headers.get("purpose") ?? "";
+  return request.headers.get("next-router-prefetch") === "1" || purpose.includes("prefetch");
 }
 
 function stampSecurity(requestHeaders: Headers, response: NextResponse) {
