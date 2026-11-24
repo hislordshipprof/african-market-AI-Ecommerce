@@ -4,6 +4,7 @@ import { SubstitutionFlow } from "@/components/storefront/flow/substitution-flow
 import { SubstitutionPrompts } from "@/components/storefront/flow/substitution-prompts";
 import { FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { getFlowContext } from "@/lib/customer-flow/server";
+import { redirectToOrderStore } from "@/lib/notifications/lookup";
 import { substitutionPromptsForToken } from "@/lib/order/substitution";
 import "@/components/storefront/flow/order-flow.css";
 
@@ -12,7 +13,9 @@ export default async function SubstitutionsPage({
 }: {
   params: Promise<{ token: string }>;
 }) {
-  const [{ token }, context] = await Promise.all([params, getFlowContext()]);
+  const { token } = await params;
+  await redirectToOrderStore(token, "/substitutions");
+  const context = await getFlowContext();
   // The tracking token only: an order id never opens the prompt.
   // No catch: a database error goes to error.tsx, so a customer never reads it as a 404.
   const real = await substitutionPromptsForToken(context.store.id, token);

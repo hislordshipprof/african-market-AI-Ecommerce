@@ -1,4 +1,8 @@
-import { storeScoped } from "../db";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { allowStoreOverride } from "../../proxy";
+import { Prisma, platformAdminRawQuery, storeScoped } from "../db";
+import { isFallbackRoot, isSlugRoutable } from "../slug";
 
 const orderInclude = {
   customer: true,
@@ -65,4 +69,21 @@ export function deliveryProofTokenFor(
   // deliveredAt, not status: an issue refund moves a delivered order on to Refunded (#462).
   if (!order.deliveredAt || !order.deliveryProofKey || !order.trackingToken) return null;
   return order.trackingToken === urlToken ? order.trackingToken : null;
+}
+
+/**
+ * Where `?store=` picks the store (the alias, previews, local), an order link opens its own store:
+ * a bookmark, or a browser that last saw another store, is sent there instead of a 404 (#796).
+ * The tracking token is unique across stores.
+ */
+export async function redirectToOrderStore(token: string, subpath: "" | "/substitutions" | "/report"): Promise<void> {
+  const headerList = await headers();
+  const host = headerList.get("host");
+  if (!host || !(isFallbackRoot(host, process.env) || allowStoreOverride(process.env))) return;
+  const rows = await platformAdminRawQuery<{ slug: string }>(
+    Prisma.sql`SELECT s.slug FROM orders o JOIN stores s ON s.id = o.store_id WHERE o.tracking_token = ${token}`,
+  );
+  const slug = rows[0]?.slug;
+  if (!slug || !isSlugRoutable(slug) || slug === headerList.get("x-store-slug")) return;
+  redirect(`/order/${encodeURIComponent(token)}${subpath}?store=${encodeURIComponent(slug)}`);
 }
