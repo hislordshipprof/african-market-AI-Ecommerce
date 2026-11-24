@@ -1,6 +1,6 @@
 import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
-import { orderPacks } from "./pack-order";
+import { orderPacks, shownPack } from "./pack-order";
 import { listingAvailable, stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
@@ -58,7 +58,7 @@ async function readGetFlowCatalog(
           ...base,
           variantId: variant.id,
           price: variant.price,
-          packLabel: variant.label,
+          packLabel: shownPack(variant).label,
           weightG: variant.weightG,
         }))
       : [{ ...base, price: listing.price, packLabel: "Each", weightG: 500 }];
@@ -171,7 +171,7 @@ export function projectStorefrontListing(listing: {
   maxPerOrder?: number | null;
   imageUrl?: string | null;
   masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
-  variants: { id?: string; label?: string; price: number; weightG?: number }[];
+  variants: { id?: string; label?: string; price: number; weightG?: number; weightPlaceholder?: boolean }[];
 }): StorefrontListing {
   const names = deriveNames(
     listing.customName,
@@ -180,7 +180,11 @@ export function projectStorefrontListing(listing: {
   const ordered = orderPacks(
     listing.variants.flatMap((variant) =>
       variant.id
-        ? [{ id: variant.id, label: variant.label, price: variant.price, weightG: variant.weightG }]
+        ? [{
+            id: variant.id,
+            price: variant.price,
+            ...shownPack({ label: variant.label, weightG: variant.weightG, weightPlaceholder: variant.weightPlaceholder }),
+          }]
         : [],
     ),
   );
@@ -265,7 +269,7 @@ export interface StorefrontListingDetail {
     id: string;
     label: string;
     price: number;
-    weightG: number;
+    weightG?: number;
   }[];
 }
 
@@ -309,9 +313,8 @@ async function readGetListingDetail(
     perishable: listing.perishable,
     variants: orderPacks(listing.variants).map((v) => ({
       id: v.id,
-      label: v.label,
       price: v.price,
-      weightG: v.weightG,
+      ...shownPack(v),
     })),
   };
 }
@@ -354,6 +357,7 @@ interface RawSearchRow {
   variant_id: string | null;
   pack_label: string | null;
   weight_g: number | null;
+  weight_placeholder: boolean | null;
   frozen: boolean;
   perishable: boolean;
   max_per_order: number | null;
@@ -375,7 +379,7 @@ async function readSearchListings(
     SELECT l.id, l.custom_name, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
       l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable, l.max_per_order,
       pack.price AS min_variant_price, pack.id AS variant_id,
-      pack.label AS pack_label, pack.weight_g,
+      pack.label AS pack_label, pack.weight_g, pack.weight_placeholder,
       CASE
         WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 'name'
         WHEN synonym_hit.term IS NOT NULL THEN 'synonym'
@@ -390,7 +394,7 @@ async function readSearchListings(
     LEFT JOIN categories c ON mp.category_id = c.id
     ${need ? effectiveAttributesSql : Prisma.empty}
     LEFT JOIN LATERAL (
-      SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
+      SELECT lv.id, lv.label, lv.price, lv.weight_g, lv.weight_placeholder FROM listing_variants lv
       WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id COLLATE "C" LIMIT 1
     ) pack ON true
     LEFT JOIN LATERAL (
@@ -452,8 +456,8 @@ async function readSearchListings(
       imageUrl: listingImage({ customName: row.custom_name, masterProduct: row.master_product_name ? { name: row.master_product_name, imageUrl: row.master_product_image } : null }),
       categorySlug: row.category_slug ?? undefined,
       variantId: row.variant_id ?? undefined,
-      packLabel: row.pack_label ?? "Each",
-      weightG: row.weight_g ?? undefined,
+      packLabel: row.weight_placeholder ? "Each" : row.pack_label ?? "Each",
+      weightG: row.weight_placeholder ? undefined : row.weight_g ?? undefined,
       price: row.min_variant_price ?? row.price,
       frozen: row.frozen,
       perishable: row.perishable,

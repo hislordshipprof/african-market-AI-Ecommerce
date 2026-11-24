@@ -10,7 +10,7 @@ import { Client } from "pg";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { runtimeDatabaseUrl } from "../env";
 import { addLine, getCartWithLines, getOrCreateCart } from "../cart/service";
-import { getActiveListings, getFlowCatalog, getListingDetail } from "../storefront/service";
+import { getActiveListings, getFlowCatalog, getListingDetail, searchListings } from "../storefront/service";
 import { seedDemoCatalog } from "../../../prisma/seed-demo-catalog";
 import { commitImport, generatePreview } from "./csv-import";
 import { createListing, updateListing, updateVariants, type Actor } from "./service";
@@ -479,7 +479,7 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
     expect(auditStill.after).toMatchObject({ needsWeightCount: 1 });
   });
 
-  it("storefront and cart payloads for a placeholder listing carry no weightPlaceholder", async () => {
+  it("storefront and cart payloads for a placeholder listing carry no weightPlaceholder, no made-up size and no \"Default\" label (#752)", async () => {
     const name = `Payload Yam ${RUN}`;
     const preview = await generatePreview(storeAId, `name,price\n${name},8.00\n`, userId);
     const result = await commitImport(
@@ -492,23 +492,30 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
     const variant = await storeScoped(storeAId).listingVariant.findFirstOrThrow({ where: { listingId } });
     expect(variant.weightPlaceholder).toBe(true);
 
-    const [listings, detail, catalog] = await Promise.all([
+    const [listings, detail, catalog, found] = await Promise.all([
       getActiveListings(storeAId),
       getListingDetail(storeAId, listingId),
       getFlowCatalog(storeAId),
+      searchListings(storeAId, name),
     ]);
     const cartId = await getOrCreateCart(storeAId, null, null);
     await addLine(storeAId, cartId, variant.id, 1);
     const cart = await getCartWithLines(storeAId, cartId);
     const shown = listings.find((row) => row.id === listingId);
     const item = catalog.find((row) => row.listingId === listingId);
-    expect(shown?.weightG).toBe(100);
+    const hit = found.find((row) => row.id === listingId);
+    expect(shown).toMatchObject({ packLabel: "Each", weightG: undefined, packLabels: ["Each"] });
+    expect(shown?.packOptions).toEqual([{ id: variant.id, label: "Each", price: 800, weightG: undefined }]);
+    expect(hit).toMatchObject({ packLabel: "Each", weightG: undefined });
     expect(detail?.variants).toEqual([
-      { id: variant.id, label: "Default", price: 800, weightG: 100 },
+      { id: variant.id, label: "Each", price: 800, weightG: undefined },
     ]);
-    expect(item).toMatchObject({ variantId: variant.id, price: 800, weightG: 100 });
-    expect(cart?.lines[0]?.variant.weightG).toBe(100);
-    expect(JSON.stringify({ listings, detail, catalog, cart })).not.toContain("weightPlaceholder");
+    // The basket keeps the stored weight for the courier limit; the shopper never sees "Default".
+    expect(item).toMatchObject({ variantId: variant.id, price: 800, packLabel: "Each", weightG: 100 });
+    expect(cart?.lines[0]?.variant).toMatchObject({ label: "Each", weightG: 100 });
+    const own = [shown, detail, item, hit, cart];
+    expect(JSON.stringify({ listings, detail, catalog, found, cart })).not.toContain("weightPlaceholder");
+    expect(JSON.stringify(own)).not.toContain("Default");
   });
 
   it("a placeholder flag does not depend on the clock", async () => {
