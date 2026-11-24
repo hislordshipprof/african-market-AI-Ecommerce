@@ -177,7 +177,6 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
   };
 
   let label: BoughtLabel | null = null;
-  let labelPostageCents: number | null = null;
   // A claim retaken after a crash or failed write may have sold a label already: look for it before buying again.
   if (before?.shippingLabelStatus === "buying") {
     try {
@@ -195,17 +194,17 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
       if (!rate) return { ok: false, error: SHIPPING_UNAVAILABLE };
       if (rate.feeCents - captured > PLATFORM_POSTAGE_ABSORB_CENTS) return { ok: false, error: rateExpiredMessage(captured, rate.feeCents), offerCancel: true };
       if (confirmPostageCents !== rate.feeCents) return { ok: false, error: rateExpiredMessage(captured, rate.feeCents), confirmPostageCents: rate.feeCents };
-      // The claim again, now on the fresh rate, so a lost answer is looked up on the rate actually bought.
+      // The claim again, now on the fresh rate with its absorbed postage, so a lost answer or a retry stays on the rate staff confirmed.
       const reclaimed = await scoped.order.updateMany({
         where: { id: orderId, status: "READY", shippingLabelStatus: null },
         data: {
           shippingLabelStatus: "buying", shippingLabelClaimedAt: now,
           shippingRateId: rate.rateId, shippingRateExpiresAt: rate.expiresAt, shippingCarrier: rate.carrier, shippingService: rate.service, shippingDays: rate.days,
+          shippingLabelPostageCents: rate.feeCents,
         },
       });
       if (reclaimed.count === 0) return { ok: false, error: LABEL_BEING_BOUGHT };
       console.info(JSON.stringify({ event: "shipping_label_requoted", storeId, orderId, capturedCents: captured, labelCents: rate.feeCents }));
-      labelPostageCents = rate.feeCents;
       bought = await buy(rate.rateId);
       if (bought === "refused") return { ok: false, error: LABEL_NOT_BOUGHT };
     }
@@ -218,7 +217,6 @@ export async function buyShippingLabel(storeId: string, orderId: string, deps: L
     where: { id: orderId, shippingLabelStatus: "buying" },
     data: {
       shippingLabelStatus: "bought", shippingLabelId: label.labelId, shippingTrackingNumber: label.trackingNumber, shippingTrackingUrl: label.trackingUrl,
-      ...(labelPostageCents !== null && { shippingLabelPostageCents: labelPostageCents }),
     },
   });
   const bought = label;

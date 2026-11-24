@@ -59,7 +59,7 @@ type OrderFacts = {
   deliveryFeeCents: number;
   /** Postage a shipped order passed through (#568); absent on rows built before it. */
   shippingPostageCents?: number | null;
-  /** What the label cost when it was re-quoted after capture (#771); absent or null when bought at the captured postage. */
+  /** What the label cost when it was re-quoted after capture (#771); absent or null when bought at the captured postage or not bought yet. */
   shippingLabelPostageCents?: number | null;
   taxCents: number;
   taxLiableParty: string;

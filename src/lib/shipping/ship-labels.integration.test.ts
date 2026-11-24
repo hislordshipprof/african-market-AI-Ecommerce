@@ -367,6 +367,31 @@ describe.skipIf(!hasDb)("shipping labels, tracking and the Shipped state (#568, 
     expect(row?.platformNetCents).toBe(99 - Math.round(99 * 0.029) - Math.round(POSTAGE * 0.029) - Math.round(156 * 0.029) - 500);
   });
 
+  it("#771 AC2: a retry after the fresh-rate purchase fails still records the absorbed postage, without asking again", async () => {
+    const { store, orderId, deps, scoped } = await pickedShipOrder();
+    const fresh = requoting(500);
+    const label = { ...deps, provider: fresh };
+    expect(await markReady(store.id, orderId, { label })).toMatchObject({ ok: true, labelConfirmPostageCents: POSTAGE + 500 });
+    // The old rate is refused and re-quoted; the purchase on the fresh rate is then lost and the lookup finds nothing.
+    let buys = 0;
+    const flaky = Object.assign(Object.create(fresh) as typeof fresh, {
+      buyLabel: async (rateId: string, id: string) => {
+        if (++buys === 1) return fresh.buyLabel(rateId, id);
+        throw new ShippingProviderError(503, "Shippo POST /transactions/ failed with 503");
+      },
+      findLabel: async () => null,
+    });
+    expect(await buyShippingLabel(store.id, orderId, { ...deps, provider: flaky }, POSTAGE + 500)).toEqual({ ok: false, error: LABEL_NOT_BOUGHT });
+    const month = new Date().toISOString().slice(0, 7);
+    // No label yet, so the ledger counts nothing absorbed.
+    expect((await platformFeeLedger(month)).rows.find((r) => r.storeId === store.id && r.kind === "capture")).toMatchObject({ postageAbsorbedCents: 0 });
+
+    // Staff already confirmed this rate, so the next click buys it and the absorbed $5 is kept.
+    expect(await buyShippingLabel(store.id, orderId, label)).toEqual({ ok: true });
+    expect(await scoped.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ shippingLabelStatus: "bought", shippingLabelPostageCents: POSTAGE + 500 });
+    expect((await platformFeeLedger(month)).rows.find((r) => r.storeId === store.id && r.kind === "capture")).toMatchObject({ postageAbsorbedCents: 500 });
+  });
+
   it("#771 AC3: above $5 more, staff are offered cancel and refund, never a purchase", async () => {
     const { store, orderId, paymentIntentId, quote, deps, scoped } = await pickedShipOrder();
     const fresh = fakeShippo({ token: TOKEN, services: [{ provider: "USPS", name: "Ground Advantage", baseCents: 545 + 501, perLbCents: 95, days: 5 }] });
