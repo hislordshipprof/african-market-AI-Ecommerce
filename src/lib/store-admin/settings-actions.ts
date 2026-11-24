@@ -3,7 +3,8 @@
 import { z } from "zod";
 import { requireStoreOwner } from "./session";
 import { parseInput } from "../security/parse-input";
-import { saveStoreSettings, STORE_ABOUT_MAX, type SettingsResult } from "../store-settings/settings";
+import { saveStoreSettings, type SettingsResult } from "../store-settings/settings";
+import { STORE_ABOUT_MAX } from "../store-settings/fields";
 import { WEEK_DAYS } from "../store-settings/weekly-hours";
 
 const day = z.strictObject({ closed: z.boolean(), open: z.string().max(10), close: z.string().max(10) });

@@ -1,13 +1,10 @@
 import { platformAdminTransaction } from "../db";
 import { revalidateStore } from "../get-store";
 import { VALID_US_TIMEZONES } from "../admin/timezone";
+import { MINIMUM_ORDER_MAX_CENTS, STORE_ABOUT_MAX } from "./fields";
 import { storePhone } from "./store-phone";
 import { weeklyHoursError, writeWeeklyHours, type WeekHours } from "./weekly-hours";
 
-/** "About the store" is the owner's story the storefront shows under "Our story". */
-export const STORE_ABOUT_MAX = 600;
-/** $1,000: a guard against a typo, not a business rule. */
-export const MINIMUM_ORDER_MAX_CENTS = 100_000;
 
 export interface StoreSettingsInput {
   hours: WeekHours;

@@ -15,18 +15,21 @@ import {
 } from "@/components/ui/dialog";
 import { GoLiveItems, type GoLiveItemView } from "@/components/go-live/go-live-items";
 import { goLiveAction } from "@/lib/store-admin/go-live-actions";
-import { testOrderHint } from "./go-live-hint";
+import { directoryNote, testOrderHint } from "./go-live-hint";
 
 /** A store in setup: the go-live checklist, and the owner's Go live once every item is done (#555). Going live asks first (#784). */
 export function GoLiveCard({
   items,
   isOwner,
   minimumOrderCents,
+  located,
   onLive,
 }: {
   items: GoLiveItemView[];
   isOwner: boolean;
   minimumOrderCents: number;
+  /** The store has a map point; without one the directory hides it (#786). */
+  located: boolean;
   onLive: () => void;
 }) {
   const router = useRouter();
@@ -88,8 +91,8 @@ export function GoLiveCard({
           <DialogHeader>
             <DialogTitle>Go live now?</DialogTitle>
             <DialogDescription>
-              Shoppers can order and pay from now on, and your store is listed in the Store directory. You can unlist it
-              on the Directory listing page.
+              Shoppers can order and pay from now on. {directoryNote(located)} You can unlist it on the Directory
+              listing page.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -111,10 +114,12 @@ export function LiveNotice({
   storeAddress,
   storeParam,
   minimumOrderCents,
+  located,
 }: {
   storeAddress: string | null;
   storeParam: string;
   minimumOrderCents: number;
+  located: boolean;
 }) {
   return (
     <section role="status" aria-labelledby="live-title" className="mb-6 flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/5 p-4 sm:p-6">
@@ -130,7 +135,7 @@ export function LiveNotice({
           </p>
         )}
         <p className="mt-1">
-          Your store is listed in the Store directory. To unlist it, open{" "}
+          {directoryNote(located)} To unlist it, open{" "}
           <Link href={`/store-admin/directory?store=${storeParam}`} className="font-medium text-primary underline underline-offset-4">
             Directory listing
           </Link>

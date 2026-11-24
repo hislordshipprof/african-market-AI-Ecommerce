@@ -10,9 +10,6 @@ import { goLiveItemLabel, readGoLiveChecklist, type GoLiveItemKey } from "@/lib/
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
 import { StoreAdminDashboard } from "./dashboard";
 
-/** Set by the platform admin in the store form: the store has no settings page for these yet. */
-const PLATFORM_SET: readonly GoLiveItemKey[] = ["hours", "fulfillment"];
-
 async function goLiveItems(storeId: string, storeSlug: string, isOwner: boolean): Promise<GoLiveItemView[] | null> {
   const checklist = await readGoLiveChecklist(storeId, new Date());
   if (!checklist || checklist.status !== "setup") return null;
@@ -20,12 +17,19 @@ async function goLiveItems(storeId: string, storeSlug: string, isOwner: boolean)
   const hrefs: Partial<Record<GoLiveItemKey, string>> = {
     listings: `/store-admin/listings${store}`,
     weights: `/store-admin/listings${store}`,
-    ...(isOwner ? { payouts: `/store-admin/payouts${store}`, plan: `/store-admin/plan${store}` } : {}),
+    ...(isOwner
+      ? {
+          payouts: `/store-admin/payouts${store}`,
+          plan: `/store-admin/plan${store}`,
+          hours: `/store-admin/settings${store}`,
+          fulfillment: `/store-admin/settings${store}`,
+        }
+      : {}),
   };
   return checklist.items.map((item) => ({
     key: item.key,
     label: goLiveItemLabel(item.key, checklist.floor),
-    detail: !item.done && PLATFORM_SET.includes(item.key) ? `${item.detail}. The platform team sets this for you.` : item.detail,
+    detail: item.detail,
     done: item.done,
     href: hrefs[item.key],
   }));
@@ -55,6 +59,7 @@ export default async function StoreAdminPage() {
       goLive={goLive}
       storeAddress={host ? storeWebAddress(session.store.slug, host) : null}
       minimumOrderCents={session.store.minimumOrderCents}
+      located={session.store.lat != null && session.store.lng != null}
       plan={{
         name: PLAN_NAMES[billing.plan],
         status: billing.status,
