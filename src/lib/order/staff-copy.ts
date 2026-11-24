@@ -1,3 +1,8 @@
+import { FULFILLMENT_LABELS } from "./status-labels";
+import { formatClockInZone, formatListDate } from "../format";
+import { formatDeliveryAddress } from "./delivery-address";
+import { CARD_FEE_LABEL, capturedPayout, courierFeeCents, platformTaxCents } from "./platform-fee";
+
 export const STAFF_GENERIC_ERROR =
   "Something went wrong. Try again, or contact support if it keeps happening.";
 
@@ -62,6 +67,80 @@ export function storeOrderBreakdown(order: {
     { key: "tip", label: "Tip", cents: order.tipCents },
   ];
   return lines.filter((line) => line.key === "subtotal" || line.cents !== 0);
+}
+
+type ScheduledOrder = { fulfillment: string; pickupSlot: string | null };
+
+type FulfillmentOrder = ScheduledOrder & {
+  deliveryLine1: string | null;
+  deliveryLine2: string | null;
+  deliveryCity: string | null;
+  deliveryState: string | null;
+  deliveryZip: string | null;
+  leaveAtDoor: boolean;
+  shippingCarrier: string | null;
+  shippingService: string | null;
+};
+
+/** A booked slot's start, "Today 7:30 PM CST"; null for ASAP or no slot. */
+function dueLabel(slot: string | null, timeZone: string, now: Date): string | null {
+  if (!slot || Number.isNaN(Date.parse(slot))) return null;
+  return `${formatListDate(slot, timeZone, now)} ${formatClockInZone(slot, timeZone)}`;
+}
+
+/** The card's fulfilment and, when scheduled, its due time (#751): "Pickup Today 7:30 PM CST". */
+export function fulfillmentHeadline(order: ScheduledOrder, timeZone: string, now: Date = new Date()): string {
+  const due = dueLabel(order.pickupSlot, timeZone, now);
+  const kind = FULFILLMENT_LABELS[order.fulfillment] ?? order.fulfillment;
+  return due ? `${kind} ${due}` : kind;
+}
+
+/**
+ * How the order leaves the store, so the owner can decide before accepting (#742): the text before the address,
+ * the address (null when there is none to link) and the text after it.
+ */
+export function fulfillmentLine(
+  order: FulfillmentOrder,
+  timeZone: string,
+  now: Date = new Date(),
+): { before: string; address: string | null; after: string } {
+  const headline = fulfillmentHeadline(order, timeZone, now);
+  if (order.fulfillment === "pickup") {
+    return { before: dueLabel(order.pickupSlot, timeZone, now) ? headline : "Pickup at the store", address: null, after: "" };
+  }
+  if (order.fulfillment === "courier") {
+    const area = formatDeliveryAddress({ ...order, deliveryLine1: null, deliveryLine2: null }) || null;
+    return { before: area ? `${headline} to ` : headline, address: area, after: "" };
+  }
+  const address = formatDeliveryAddress(order) || null;
+  if (order.fulfillment === "store-delivery") {
+    const door = order.leaveAtDoor ? " · Leave at door" : "";
+    return address ? { before: `${headline} to `, address, after: door } : { before: `${headline} · address missing`, address: null, after: door };
+  }
+  const carrier = [order.shippingCarrier, order.shippingService].filter(Boolean).join(" ");
+  const kind = `${headline}${carrier ? ` · ${carrier}` : ""}`;
+  return { before: address ? `${kind} to ` : kind, address, after: "" };
+}
+
+type PayoutOrder = Parameters<typeof capturedPayout>[0];
+
+/**
+ * The store's payout on a captured order as lines that add up (#751): the capture less the card fee, the platform
+ * service fee, a courier fee or postage passed through and tax the platform remits. The last line is the payout.
+ */
+export function storePayoutLines(order: PayoutOrder): { key: string; label: string; cents: number }[] {
+  const split = capturedPayout(order);
+  const lines = [
+    { key: "captured", label: "Captured", cents: order.capturedAmountCents },
+    { key: "card-fee", label: `Card fee on your part (${CARD_FEE_LABEL})`, cents: -split.storeCardFeeCents },
+    { key: "service-fee", label: "Service fee (platform)", cents: -order.serviceFeeCents },
+    { key: "courier-fee", label: order.fulfillment === "ship" ? "Postage (paid for the label)" : "Courier fee (paid to the courier)", cents: -courierFeeCents(order) },
+    { key: "tax", label: "Tax (the platform pays it to the state)", cents: -platformTaxCents(order) },
+  ];
+  return [
+    ...lines.filter((line) => line.key === "captured" || line.cents !== 0),
+    { key: "payout", label: "Your payout", cents: split.storeReceivesCents },
+  ];
 }
 
 export type StaffCourier = { provider: string; status: string; pickupReadyAt: Date | string | null; courierJson: unknown };

@@ -21,6 +21,12 @@ describe("deliveryDestination (#753)", () => {
   });
 
   it("formats the address the store inbox shows", () => {
-    expect(formatDeliveryAddress({ ...address, deliveryCity: null })).toBe("12 Main St");
+    expect(formatDeliveryAddress({ ...address, deliveryCity: null })).toBe("12 Main St, TX 77001");
+  });
+
+  it("joins only the parts that were stored, never printing null (#751)", () => {
+    expect(formatDeliveryAddress({ ...address, deliveryState: null, deliveryZip: null })).toBe("12 Main St, Houston");
+    expect(formatDeliveryAddress({ ...address, deliveryLine1: null })).toBe("Houston, TX 77001");
+    expect(formatDeliveryAddress({ deliveryLine1: null, deliveryLine2: null, deliveryCity: null, deliveryState: null, deliveryZip: null })).toBe("");
   });
 });

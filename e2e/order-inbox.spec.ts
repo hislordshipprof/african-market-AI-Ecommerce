@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { deleteInboxOrder, insertCourierPackingOrder, insertInboxOrder, seedCaptureLabel, setInboxOrderStatus } from "./order-fixture";
 import { storeOwnerSignIn } from "./store-owner-auth";
+import { formatClockInZone, formatListDate } from "../src/lib/format";
 
 const ORDERS_URL = "/store-admin/orders?store=mama-ngozi";
 
@@ -180,6 +181,63 @@ test.describe("Order inbox", () => {
       await expect(page.getByTestId("order-fulfillment")).toContainText("Houston, TX 77002");
       await expect(page.getByTestId("order-delivery")).toHaveText("$4.99");
       await expect(page.getByTestId("order-total")).toHaveText("$14.99");
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("#751: a scheduled pickup shows its slot on the card and the order", async ({ page }, testInfo) => {
+    const number = 18911 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    const slot = new Date(Math.ceil((Date.now() + 2 * 3_600_000) / 1_800_000) * 1_800_000).toISOString();
+    const due = `${formatListDate(slot, "America/Chicago")} ${formatClockInZone(slot, "America/Chicago")}`;
+    await insertInboxOrder({ number, status: "AUTHORIZED", capturedAmountCents: null, pickupSlot: slot });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      const card = page.locator("button", { hasText: `#${number}` });
+      await expect(card.getByTestId("order-card-fulfillment")).toHaveText(`Pickup ${due}`);
+      await card.click();
+      await expect(page.getByTestId("order-fulfillment")).toHaveText(`Pickup ${due}`);
+      const phone = page.getByTestId("order-phone");
+      await expect(phone).toHaveAttribute("href", /^tel:\+1\d{10}$/);
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("#751: a delivery's payout lines add up and a partial address never prints null", async ({ page }, testInfo) => {
+    const number = 18991 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    await insertInboxOrder({
+      number,
+      status: "OUT_FOR_DELIVERY",
+      capturedAmountCents: 5331,
+      fees: { serviceFeeCents: 138, platformFeeCents: 319 },
+      delivery: { line1: "7500 Bellfort St", city: "Houston", state: null, zip: null, feeCents: 0 },
+    });
+    const proofDir = process.env.PROOF_DIR;
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await expect(page.locator("button", { hasText: `#${number}` }).getByTestId("order-card-fulfillment")).toHaveText("Store delivery");
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByTestId("order-fulfillment")).toHaveText("Store delivery to 7500 Bellfort St, Houston");
+      await expect(page.getByTestId("order-address")).toHaveAttribute("href", /^https:\/\/www\.google\.com\/maps\/dir\/\?api=1&destination=7500%20Bellfort%20St%2C%20Houston$/);
+      await expect(page.getByTestId("order-captured")).toHaveText("$53.31");
+      await expect(page.getByTestId("payout-card-fee")).toHaveText("−$1.81");
+      await expect(page.getByTestId("payout-service-fee")).toHaveText("−$1.38");
+      await expect(page.getByTestId("order-payout")).toHaveText("$50.12");
+      if (proofDir) {
+        for (const scheme of ["light", "dark"] as const) {
+          for (const width of [390, 1280]) {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(ORDERS_URL);
+            await page.locator("button", { hasText: `#${number}` }).click();
+            await expect(page.getByTestId("order-payout")).toBeVisible();
+            await page.screenshot({ path: `${proofDir}/order-delivery-${width}-${scheme}.png`, fullPage: true });
+          }
+        }
+      }
     } finally {
       await deleteInboxOrder(number);
     }
