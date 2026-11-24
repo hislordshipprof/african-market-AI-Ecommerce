@@ -17,6 +17,8 @@ export function ProductDetail({
   const [variantId, setVariantId] = useState(listing.variants[0]?.id);
   const variant = listing.variants.find((v) => v.id === variantId);
   const price = variant?.price ?? listing.price;
+  // A pack with no known weight is priced per item (#752).
+  const unit = variant && variant.weightG !== undefined ? variant.label : "item";
   const item = {
     listingId: listing.id,
     variantId: variant?.id,
@@ -50,7 +52,7 @@ export function ProductDetail({
         <PriceDisplay
           cents={price}
           weightG={variant?.weightG}
-          unit={variant?.label ?? "item"}
+          unit={unit}
         />
         {listing.variants.length > 0 && (
           <section className="sf-variants" aria-labelledby="variants-heading">
@@ -66,7 +68,7 @@ export function ProductDetail({
                   >
                     {v.label}
                     <small>
-                      {formatWeight(v.weightG)} / {money(v.price)}
+                      {v.weightG ? `${formatWeight(v.weightG)} / ` : ""}{money(v.price)}
                     </small>
                   </button>
                 </li>
@@ -78,7 +80,7 @@ export function ProductDetail({
         <div className="sf-add-bar">
           <div>
             <span>{variant?.label ?? "Each"}</span>
-            <PriceDisplay cents={price} weightG={variant?.weightG} unit={variant?.label ?? "item"} />
+            <PriceDisplay cents={price} weightG={variant?.weightG} unit={unit} />
           </div>
           {listing.badge === "ask-store" ? (
             <span>Ask the store about availability</span>
@@ -92,7 +94,7 @@ export function ProductDetail({
         <dl className="sf-stats">
           <div>
             <dt>Size</dt>
-            <dd>{variant ? formatWeight(variant.weightG) : "See packaging"}</dd>
+            <dd>{variant?.weightG ? formatWeight(variant.weightG) : "See packaging"}</dd>
           </div>
           <div>
             <dt>Storage</dt>

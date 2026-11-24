@@ -11,6 +11,7 @@ import {
   orderMessagesTag,
   postCustomerMessageForOrder,
 } from "../../support/thread";
+import { shownPack } from "../../storefront/pack-order";
 import { mayBeUnavailable } from "./availability";
 import { listingName, recordRead, type AssistantContext, type ToolResult } from "./execute";
 import {
@@ -108,6 +109,8 @@ async function ownOrders(ctx: AssistantContext, orderNumber: number | undefined)
             select: {
               id: true,
               label: true,
+              weightG: true,
+              weightPlaceholder: true,
               listing: {
                 select: {
                   id: true, customName: true, active: true, confidence: true, stockMode: true, qty: true, status: true,
@@ -131,7 +134,7 @@ function lineSummary(order: OwnOrder) {
     const listing = line.listingVariant.listing;
     return {
       name: listingName(listing),
-      packLabel: line.listingVariant.label,
+      packLabel: shownPack(line.listingVariant).label,
       qty: line.qtyOrdered,
       // The same variant ids reorder the line ("my usual"); only this store's own orders reach here.
       listingId: listing.id,

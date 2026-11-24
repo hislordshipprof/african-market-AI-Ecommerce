@@ -2,6 +2,7 @@ import { storeScoped } from "../../db";
 import { computeQuote } from "../../checkout/quote";
 import { readServiceFeeSettings } from "../../order/service-fee-settings";
 import { pickupSlotsFor } from "../../order/slot-schedule";
+import { shownPack } from "../../storefront/pack-order";
 import { readConversationDraft, readPickupStore, writeCheckoutDraft } from "../checkout-draft";
 import { mayBeUnavailable } from "./availability";
 import { listingName, recordRead, type AssistantContext, type ToolResult } from "./execute";
@@ -100,7 +101,7 @@ export async function prepareCheckout(ctx: AssistantContext, input: unknown): Pr
     lines: cartLines.map((line) => ({
       lineId: line.id,
       name: listingName(line.variant.listing),
-      packLabel: line.variant.label,
+      packLabel: shownPack(line.variant).label,
       qty: line.qty,
       unitPriceCents: line.variant.price,
       lineTotalCents: line.variant.price * line.qty,

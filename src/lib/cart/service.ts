@@ -10,6 +10,7 @@ import {
 } from "../db";
 import { catalogFor } from "../storefront/catalog";
 import { listingAvailable } from "../storefront/stock-badge";
+import { shownPack } from "../storefront/pack-order";
 import type { SwapRuleValue } from "../storefront/cart-store";
 import { PREPARED_EXACT_ONLY } from "../listing/prepared";
 import { cateringMinMessage } from "../listing/catering";
@@ -330,7 +331,7 @@ export async function applyAddLine(
       ? { name: variant.listing.masterProduct.name, imageUrl: variant.listing.masterProduct.imageUrl }
       : null,
   };
-  const variantView = { id: variant.id, label: variant.label, price: variant.price };
+  const variantView = { id: variant.id, label: shownPack(variant).label, price: variant.price };
 
   if (existing) {
     const current = await tx.cartLine.findUnique({ where: { id: existing.id } });
@@ -629,7 +630,7 @@ export async function getCartWithLines(
       categorySlug: line.variant.listing.masterProduct?.category?.slug,
       variant: {
         id: line.variant.id,
-        label: line.variant.label,
+        label: shownPack(line.variant).label,
         price: line.variant.price,
         weightG: line.variant.weightG,
         ships: lineShips(line.variant.listing, line.variant),

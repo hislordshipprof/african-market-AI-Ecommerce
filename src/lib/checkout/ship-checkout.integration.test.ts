@@ -38,7 +38,7 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
   const storeIds: string[] = [];
   let actor = { id: "", email: `${RUN}-owner@t567.test` };
 
-  async function seed(opts: { handlingDays?: number | null; frozen?: boolean; weightG?: number; shippable?: boolean; qty?: number } = {}) {
+  async function seed(opts: { handlingDays?: number | null; frozen?: boolean; weightG?: number; shippable?: boolean; qty?: number; weightPlaceholder?: boolean } = {}) {
     const stamp = crypto.randomUUID().slice(0, 8);
     const store = await platformAdmin.store.create({
       data: {
@@ -53,7 +53,7 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     const listing = await scoped.listing.create({
       data: { storeId: store.id, customName: "Garri", price: 1200, stockMode: "unlimited", frozen: opts.frozen ?? false, shippable: opts.shippable ?? true },
     });
-    const variant = await scoped.listingVariant.create({ data: { listingId: listing.id, label: "4 lb", price: 1200, weightG: opts.weightG ?? 1814 } });
+    const variant = await scoped.listingVariant.create({ data: { listingId: listing.id, label: "4 lb", price: 1200, weightG: opts.weightG ?? 1814, weightPlaceholder: opts.weightPlaceholder ?? false } });
     const cart = await scoped.cart.create({ data: { storeId: store.id } });
     await scoped.cartLine.create({ data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: opts.qty ?? 2, swapRule: "exact_only" } });
     return { store, cartId: cart.id, listingId: listing.id, variantId: variant.id };
@@ -163,6 +163,8 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
       { opts: { shippable: false }, address: AR, message: /can't ship/ },
       // Marked shippable before it was frozen: it still does not ship.
       { opts: { frozen: true }, address: AR, message: /can't ship/ },
+      // A CSV import's made-up 100 g never prices a parcel, even on a listing marked shippable (#752).
+      { opts: { weightG: 100, weightPlaceholder: true }, address: AR, message: /can't ship/ },
       { opts: { handlingDays: null }, address: AR, message: /doesn't ship orders/ },
       { opts: {}, address: NV, message: /can't ship to that state/ },
       // 23 kg × 1 = 50.7 lb.
@@ -179,15 +181,17 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
   });
 
   it("placement refuses a rate that expired, or a line that stopped shipping, after the hold; no order is made", async () => {
-    for (const change of ["expired", "frozen"] as const) {
+    for (const change of ["expired", "frozen", "placeholder"] as const) {
       const { store, cartId, listingId } = await seed();
       const { provider } = shippo();
       const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", AR, { shipping: provider });
       const paymentIntentId = await payAndSave(store.id, cartId, quote.holdCents);
       if (change === "expired") {
         await storeScoped(store.id).cart.update({ where: { id: cartId }, data: { shippingQuoteExpiresAt: new Date(Date.now() - 1000) } });
-      } else {
+      } else if (change === "frozen") {
         await storeScoped(store.id).listing.update({ where: { id: listingId }, data: { frozen: true } });
+      } else {
+        await storeScoped(store.id).listingVariant.updateMany({ where: { listingId }, data: { weightPlaceholder: true } });
       }
       await expect(placeOrder(store.id, 0, cartId, CONTACT, "ship", null, null, paymentIntentId)).rejects.toThrow(BasketChangedError);
       expect(await storeScoped(store.id).order.count()).toBe(0);

@@ -25,3 +25,8 @@ export function comparePacks(a: PackIdentity, b: PackIdentity): number {
 export function orderPacks<T extends PackIdentity>(packs: readonly T[]): T[] {
   return [...packs].sort(comparePacks);
 }
+
+/** A CSV-imported pack with the 100 g fallback has no real size: it is sold "Each", with no weight shown (#752). */
+export function shownPack<L extends string | undefined, W extends number | undefined>(variant: { label: L; weightG: W; weightPlaceholder?: boolean }) {
+  return variant.weightPlaceholder ? { label: "Each", weightG: undefined } : { label: variant.label, weightG: variant.weightG };
+}

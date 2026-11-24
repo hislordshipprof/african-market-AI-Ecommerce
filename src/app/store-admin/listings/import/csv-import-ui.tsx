@@ -21,6 +21,7 @@ import {
   type PreviewActionResult,
 } from "@/lib/listing/csv-import-actions";
 import { needsWeightSentence } from "../needs-weight";
+import { money } from "@/lib/format";
 import { CSV_FILE_CAP_BYTES, CSV_FILE_TOO_LARGE_MESSAGE } from "@/lib/listing/csv-file-cap";
 import type {
   CsvPreviewResult,
@@ -745,6 +746,16 @@ function PreviewSection({
   );
 }
 
+/** The row's name with the price it will go live at, so a wrong price is caught before import (#752). */
+function RowName({ name, price }: { name: string; price: number }) {
+  return (
+    <p className="flex min-w-0 items-baseline gap-2 text-sm font-medium">
+      <span className="truncate">{name}</span>
+      <span className="shrink-0 tabular-nums">{money(price)}</span>
+    </p>
+  );
+}
+
 function MatchRow({
   match,
   selected,
@@ -763,7 +774,7 @@ function MatchRow({
         className="h-4 w-4 rounded border-[var(--color-line)] accent-[var(--color-primary)]"
       />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{match.csvName}</p>
+        <RowName name={match.csvName} price={match.price} />
         <p className="truncate text-xs text-[var(--color-muted)]">
           <CheckCircle2 className="mr-1 inline h-3 w-3 text-[var(--color-success)]" />
           {match.matchType === "exact" ? "Exact" : "Synonym"} match:{" "}
@@ -796,7 +807,7 @@ function NewRow({
         className="h-4 w-4 rounded border-[var(--color-line)] accent-[var(--color-primary)]"
       />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{item.csvName}</p>
+        <RowName name={item.csvName} price={item.price} />
         <p className="truncate text-xs text-[var(--color-muted)]">
           <PlusCircle className="mr-1 inline h-3 w-3 text-[var(--color-primary)]" />
           Will be created as a custom listing
@@ -817,7 +828,7 @@ function AmbiguousRow({
 }) {
   return (
     <div className="px-4 py-2.5">
-      <p className="truncate text-sm font-medium">{item.csvName}</p>
+      <RowName name={item.csvName} price={item.price} />
       <p className="mb-2 text-xs text-[var(--color-muted)]">
         <HelpCircle className="mr-1 inline h-3 w-3" />
         Matches {countPhrase(item.candidates.length, "master product", "master products")} — select one:

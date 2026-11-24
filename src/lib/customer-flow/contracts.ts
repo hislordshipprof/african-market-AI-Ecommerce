@@ -48,7 +48,10 @@ export interface FlowStore {
 }
 export interface FlowCatalogItem extends CartItem {
   categoryId: string;
+  /** Stored weight, for order weight and the courier limit. */
   weightG: number;
+  /** Weight shoppers see a unit price for; absent when the stored weight is a placeholder (#752). */
+  shownWeightG?: number;
   frozen: boolean;
   /** Prepared food (#570): exact item only; hot is handed over, never left at the door. */
   prepared?: "hot" | "cold" | null;

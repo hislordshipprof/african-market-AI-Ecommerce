@@ -10,7 +10,8 @@ import { Client } from "pg";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { runtimeDatabaseUrl } from "../env";
 import { addLine, getCartWithLines, getOrCreateCart } from "../cart/service";
-import { getActiveListings, getFlowCatalog, getListingDetail } from "../storefront/service";
+import { addToCart, getCartSummary, showProducts } from "../assistant/tools/execute";
+import { getActiveListings, getFlowCatalog, getListingDetail, searchListings } from "../storefront/service";
 import { seedDemoCatalog } from "../../../prisma/seed-demo-catalog";
 import { commitImport, generatePreview } from "./csv-import";
 import { createListing, updateListing, updateVariants, type Actor } from "./service";
@@ -83,6 +84,8 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
       raw.$executeRaw`SET LOCAL ROLE app_user`,
       raw.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       raw.cartLine.deleteMany({ where: { storeId: { in: ids } } }),
+      raw.aiAction.deleteMany({ where: { storeId: { in: ids } } }),
+      raw.aiConversation.deleteMany({ where: { storeId: { in: ids } } }),
       raw.cart.deleteMany({ where: { storeId: { in: ids } } }),
       raw.auditLog.deleteMany({ where: { storeId: { in: ids } } }),
       raw.stockEvent.deleteMany({ where: { storeId: { in: ids } } }),
@@ -479,36 +482,58 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
     expect(auditStill.after).toMatchObject({ needsWeightCount: 1 });
   });
 
-  it("storefront and cart payloads for a placeholder listing carry no weightPlaceholder", async () => {
+  it("storefront and cart payloads for a placeholder listing carry no weightPlaceholder, no made-up size and no \"Default\" label (#752)", async () => {
     const name = `Payload Yam ${RUN}`;
-    const preview = await generatePreview(storeAId, `name,price\n${name},8.00\n`, userId);
-    const result = await commitImport(
+    const weighed = `Payload Rice ${RUN}`;
+    const preview = await generatePreview(storeAId, `name,price,weight\n${name},8.00,\n${weighed},3.00,500 g\n`, userId);
+    await commitImport(
       storeAId,
       preview.importToken,
-      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
       actor,
     );
-    const listingId = result.listingIds[0]!;
+    const [listingId, weighedId] = await Promise.all([name, weighed].map(async (customName) =>
+      (await storeScoped(storeAId).listing.findFirstOrThrow({ where: { customName } })).id));
     const variant = await storeScoped(storeAId).listingVariant.findFirstOrThrow({ where: { listingId } });
     expect(variant.weightPlaceholder).toBe(true);
 
-    const [listings, detail, catalog] = await Promise.all([
+    const [listings, detail, catalog, found] = await Promise.all([
       getActiveListings(storeAId),
       getListingDetail(storeAId, listingId),
       getFlowCatalog(storeAId),
+      searchListings(storeAId, name),
     ]);
     const cartId = await getOrCreateCart(storeAId, null, null);
-    await addLine(storeAId, cartId, variant.id, 1);
+    const added = await addLine(storeAId, cartId, variant.id, 1);
     const cart = await getCartWithLines(storeAId, cartId);
+    const talk = await storeScoped(storeAId).aiConversation.create({
+      data: { storeId: storeAId, cartId, model: "claude-haiku-5-5", messages: [] },
+    });
+    const ctx = { storeId: storeAId, cartId, conversationId: talk.id, actorUserId: null };
+    const assistant = [
+      await showProducts(ctx, { listing_ids: [listingId] }),
+      await addToCart(ctx, { items: [{ variant_id: variant.id, qty: 1 }] }),
+      await getCartSummary(ctx, {}),
+    ];
     const shown = listings.find((row) => row.id === listingId);
     const item = catalog.find((row) => row.listingId === listingId);
-    expect(shown?.weightG).toBe(100);
+    const hit = found.find((row) => row.id === listingId);
+    expect(shown).toMatchObject({ packLabel: "Each", weightG: undefined, packLabels: ["Each"] });
+    expect(shown?.packOptions).toEqual([{ id: variant.id, label: "Each", price: 800, weightG: undefined }]);
+    expect(hit).toMatchObject({ packLabel: "Each", weightG: undefined });
     expect(detail?.variants).toEqual([
-      { id: variant.id, label: "Default", price: 800, weightG: 100 },
+      { id: variant.id, label: "Each", price: 800, weightG: undefined },
     ]);
-    expect(item).toMatchObject({ variantId: variant.id, price: 800, weightG: 100 });
-    expect(cart?.lines[0]?.variant.weightG).toBe(100);
-    expect(JSON.stringify({ listings, detail, catalog, cart })).not.toContain("weightPlaceholder");
+    // The basket keeps the stored weight for the courier limit; the shopper never sees "Default".
+    expect(item).toMatchObject({ variantId: variant.id, price: 800, packLabel: "Each", weightG: 100 });
+    expect(item?.shownWeightG).toBeUndefined();
+    expect(catalog.find((row) => row.listingId === weighedId)).toMatchObject({ weightG: 500, shownWeightG: 500 });
+    expect(cart?.lines[0]?.variant).toMatchObject({ label: "Each", weightG: 100 });
+    const own = [shown, detail, item, hit, cart];
+    expect(JSON.stringify({ listings, detail, catalog, found, cart })).not.toContain("weightPlaceholder");
+    expect(JSON.stringify(own)).not.toContain("Default");
+    expect(assistant.every((result) => result.ok)).toBe(true);
+    expect(JSON.stringify({ added, assistant })).not.toContain("Default");
   });
 
   it("a placeholder flag does not depend on the clock", async () => {

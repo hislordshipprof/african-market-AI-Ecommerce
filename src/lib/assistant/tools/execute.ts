@@ -35,6 +35,7 @@ import {
 } from "../constraints";
 import { isAcceptanceLed, namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
 import { listingImage } from "../../storefront/images";
+import { shownPack } from "../../storefront/pack-order";
 import { searchCatalogHits } from "../../storefront/service";
 import { stockBadge } from "../../storefront/stock-badge";
 import { mayBeUnavailable, type StockFacts } from "./availability";
@@ -406,7 +407,7 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
       imageUrl: photo ?? null,
       variants: listing.variants.map((variant) => ({
         variantId: variant.id,
-        label: variant.label,
+        label: shownPack(variant).label,
         priceCents: variant.price,
       })),
       badge: stockBadge(factsOf(listing)),
@@ -498,7 +499,7 @@ async function swapCandidates(ctx: AssistantContext, listingId: string, limit: n
       listingId: candidate.id,
       name: listingName(candidate),
       variantId: variant.id,
-      packLabel: variant.label,
+      packLabel: shownPack(variant).label,
       priceCents: variant.price,
       mayBeUnavailable: false,
       ...verdictFields(verdicts?.get(candidate.id)),
@@ -577,7 +578,7 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
       listingId: listing.id,
       variantId: variant.id,
       name: listingName(listing),
-      packLabel: variant.label,
+      packLabel: shownPack(variant).label,
       priceCents: variant.price,
       imageUrl: photo ?? null,
       mayBeUnavailable: mayBeUnavailable(listing),
@@ -1092,7 +1093,7 @@ export async function getCartSummary(ctx: AssistantContext, input: unknown): Pro
       lineId: line.id,
       variantId: line.variantId,
       name,
-      packLabel: line.variant.label,
+      packLabel: shownPack(line.variant).label,
       qty: line.qty,
       unitPriceCents: line.variant.price,
       lineTotalCents: line.variant.price * line.qty,

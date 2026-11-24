@@ -159,7 +159,7 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
       include: { variants: true },
     });
     const palmB = await storeScoped(storeB).listing.create({
-      data: { storeId: storeB, customName: "Palm oil", price: 700, stockMode: "unlimited", variants: { create: { label: "1 L", price: 700, weightG: 900 } } },
+      data: { storeId: storeB, customName: "Palm oil", price: 700, stockMode: "unlimited", variants: { create: { label: "Default", price: 700, weightG: 100, weightPlaceholder: true } } },
       include: { variants: true },
     });
     const bobOrder = await storeScoped(storeA).order.create({ data: order(1501, bobA.id, storeA) });
@@ -198,7 +198,7 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
     expect(reordered, JSON.stringify(reordered)).toMatchObject({ ok: true, added: 2 });
 
     const inB = await runner(inStoreB)("get_order_status", {});
-    expect(inB).toMatchObject({ ok: true, orders: [{ number: 2501, lines: [{ name: "Palm oil", variantId: palmB.variants[0].id }] }] });
+    expect(inB).toMatchObject({ ok: true, orders: [{ number: 2501, lines: [{ name: "Palm oil", packLabel: "Each", variantId: palmB.variants[0].id }] }] });
     expect(JSON.stringify(inB)).not.toContain(egusi.variants[0].id);
     // Store A's variant cannot reach store B's cart: its handle is not one of that chat's.
     expect(await runner(inStoreB)("add_to_cart", { items: [{ variant_id: egusiHandle, qty: 1 }] }))

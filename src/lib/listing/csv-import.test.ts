@@ -476,6 +476,17 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
     expect(preview.newItems[0].csvName).toBe("Magic Spice Blend");
   });
 
+  it("#752 AC3: matched, new and ambiguous rows carry the parsed price in cents, so a wrong price is seen before import", async () => {
+    for (const productId of mpIds) {
+      await platformAdmin.productSynonym.create({ data: { productId, term: `Shared Pick T63 ${RUN}` } });
+    }
+    const csv = `name,price\nBimba Seeds T63 ${RUN},12.50\nWalk Semolina Bag,"$1,299.00"\nShared Pick T63 ${RUN},0.79\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.matches.map((row) => [row.csvName, row.price])).toEqual([[`Bimba Seeds T63 ${RUN}`, 1250]]);
+    expect(preview.newItems.map((row) => [row.csvName, row.price])).toEqual([["Walk Semolina Bag", 129900]]);
+    expect(preview.ambiguous.map((row) => [row.csvName, row.price])).toEqual([[`Shared Pick T63 ${RUN}`, 79]]);
+  });
+
   it("E7: already listed product shown as 'already listed'", async () => {
     const csv = `name,price\nZola Citrus Oil T63 ${RUN},10.99\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
