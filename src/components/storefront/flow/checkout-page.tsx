@@ -58,7 +58,7 @@ import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
 import { checkoutQuoteKey, placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
-import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
+import { contactPrefillNote, SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import type { SlotOptions } from "@/lib/checkout/slots";
 import { shipsToLabel } from "@/lib/shipping/eligibility";
@@ -865,7 +865,7 @@ function RealCheckoutForm({
       courierEligible={settings.courierOffered}
       addressHold={addressRefused && fulfillment !== "pickup" && !delivery}
       onSubmit={pay}
-      signedIn={Boolean(stripeConfig.signedIn)}
+      contactNote={contactPrefillNote(stripeConfig.signedIn ? prefill?.contact ?? { name: "", phone: "", email: "" } : null)}
       paymentSection={
         <>
           {prefill?.cardsUnavailable ? <p>Saved cards are unavailable right now</p> : null}
@@ -1101,7 +1101,8 @@ interface CheckoutLayoutProps {
   errorHref?: string | null;
   submitted: boolean;
   payState: "idle" | "pending" | "success";
-  signedIn?: boolean;
+  /** Above the contact fields: what the account filled, or the guest line (#750). */
+  contactNote?: string;
   identityLocked?: boolean;
   frozen: boolean;
   /** A hot prepared item is in the basket: no Leave at door (#570). */
@@ -1157,7 +1158,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     issue, onClearIssue, onUseAnotherCard, onRefresh, submitAttempt, errorHref, submitted, payState,
     frozen, hot = false, prepMinutes, weightG, courierEligible, addressHold = false,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
-    signedIn = false, identityLocked = false, whatsapp,
+    contactNote = contactPrefillNote(null), identityLocked = false, whatsapp,
   } = props;
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
 
@@ -1459,11 +1460,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           </FlowCard>
           <div id="contact" className={styles.anchor}>
             <FlowCard title="Contact details">
-              <p className={styles.muted}>
-                {signedIn
-                  ? "We filled your name and email from your account. Edits apply to this order only."
-                  : "Guest checkout. A phone number helps your shopper reach you about substitutions."}
-              </p>
+              <p className={styles.muted}>{contactNote}</p>
               <label className={styles.field}>
                 Full name
                 <input
