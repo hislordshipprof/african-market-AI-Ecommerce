@@ -1,4 +1,6 @@
+import { headers } from "next/headers";
 import { requireStoreMember } from "@/lib/store-admin/session";
+import { storeWebAddress } from "@/lib/directory/links";
 import { storeUnreadCount } from "@/lib/support/thread";
 import { getStoreBilling } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
@@ -39,6 +41,7 @@ export default async function StoreAdminPage() {
   const isOwner = session.membership.role === "owner";
   const usage = isOwner ? await assistantChatUsage(session.store.id, billing.plan) : null;
   const goLive = session.store.status === "setup" ? await goLiveItems(session.store.id, session.store.slug, isOwner) : null;
+  const host = (await headers()).get("host");
 
   return (
     <StoreAdminDashboard
@@ -50,6 +53,8 @@ export default async function StoreAdminPage() {
       unreadMessages={unreadMessages}
       directoryOrders={directoryOrders}
       goLive={goLive}
+      storeAddress={host ? storeWebAddress(session.store.slug, host) : null}
+      minimumOrderCents={session.store.minimumOrderCents}
       plan={{
         name: PLAN_NAMES[billing.plan],
         status: billing.status,
