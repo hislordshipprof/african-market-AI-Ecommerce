@@ -1,11 +1,12 @@
 "use client";
 
+import { ProductThumb } from "@/components/store-admin/product-thumb";
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { toast } from "sonner";
-import { AlertCircle, ArrowLeft, Camera, CheckCircle2, ImageOff, Info, RotateCw } from "lucide-react";
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Info, RotateCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -402,14 +403,7 @@ function DraftRow({
             disabled={disabled}
           />
         )}
-        <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--color-photo-well,var(--color-raised))]">
-          {draft.masterImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={draft.masterImageUrl} alt="" className="size-full object-contain" />
-          ) : (
-            <ImageOff className="h-5 w-5 text-[var(--color-muted)]" aria-hidden />
-          )}
-        </div>
+        <ProductThumb src={draft.masterImageUrl} className="size-14" />
         <div className="min-w-0 flex-1">
           <p className="font-medium">
             {draft.extractedName}
@@ -421,23 +415,36 @@ function DraftRow({
           {draft.match === "none" && <p className="text-sm text-[var(--color-muted)]">Not in the catalog. Lists as a new item.</p>}
           {draft.match === "several" && (
             isOwner ? (
-              <label className="mt-1 block text-sm">
-                <span className="text-[var(--color-muted)]">Which product is it?</span>
-                <select
-                  className="mt-1 block h-11 w-full max-w-xs rounded-lg border border-[var(--color-line-strong,var(--color-line))] bg-[var(--color-surface)] px-3 text-sm"
-                  value={row.pick}
-                  onChange={(event) => onChange({ pick: event.target.value })}
-                  disabled={disabled}
-                >
-                  <option value="">Pick one</option>
-                  {draft.candidates.map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+              <fieldset className="mt-1 text-sm" disabled={disabled}>
+                <legend className="text-[var(--color-muted)]">Which product is it?</legend>
+                <div className="mt-1 flex flex-col">
+                  {[...draft.candidates, { id: "new", name: "None of these: a new item", imageUrl: null }].map((candidate) => (
+                    <label key={candidate.id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-1 py-1 hover:bg-[var(--color-raised)]">
+                      <input
+                        type="radio"
+                        name={`pick-${draft.id}`}
+                        className="size-4 shrink-0 accent-[var(--color-primary)]"
+                        checked={row.pick === candidate.id}
+                        onChange={() => onChange({ pick: candidate.id })}
+                      />
+                      {candidate.id !== "new" && <ProductThumb src={candidate.imageUrl} className="size-10" />}
+                      <span>{candidate.name}</span>
+                    </label>
                   ))}
-                  <option value="new">None of these: a new item</option>
-                </select>
-              </label>
+                </div>
+              </fieldset>
             ) : (
-              <p className="text-sm text-[var(--color-muted)]">{draft.candidates.length} possible catalog matches</p>
+              <div className="mt-1 text-sm text-[var(--color-muted)]">
+                <p>{draft.candidates.length} possible catalog matches</p>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {draft.candidates.map((candidate) => (
+                    <li key={candidate.id} className="flex items-center gap-3">
+                      <ProductThumb src={candidate.imageUrl} className="size-10" />
+                      <span>{candidate.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )
           )}
         </div>

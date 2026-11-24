@@ -1,3 +1,4 @@
+import { listingImage } from "../storefront/images";
 import { randomBytes } from "node:crypto";
 import { ToolChoiceViolationError, generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
@@ -196,7 +197,8 @@ export interface DraftCard {
   masterProductId: string | null;
   masterProductName: string | null;
   masterImageUrl: string | null;
-  candidates: MasterCandidate[];
+  /** Each proposed match with its catalogue photo (#787). */
+  candidates: Array<MasterCandidate & { imageUrl: string | null }>;
   existingListingId: string | null;
   createdAt: string;
 }
@@ -214,8 +216,9 @@ export async function listPendingDrafts(storeId: string): Promise<DraftCard[]> {
   const candidateIds = [...new Set(drafts.flatMap((draft) => draft.candidateIds))];
   const products = candidateIds.length === 0
     ? []
-    : await platform.masterProduct.findMany({ where: { id: { in: candidateIds } }, select: { id: true, name: true } });
-  const names = new Map(products.map((product) => [product.id, product.name]));
+    : await platform.masterProduct.findMany({ where: { id: { in: candidateIds } }, select: { id: true, name: true, imageUrl: true } });
+  const byId = new Map(products.map((product) => [product.id, product]));
+  const photo = (product: { name: string; imageUrl: string | null } | null) => (product ? listingImage({ masterProduct: product }) ?? null : null);
   return drafts.map((draft) => ({
     id: draft.id,
     extractedName: draft.extractedName,
@@ -224,8 +227,11 @@ export async function listPendingDrafts(storeId: string): Promise<DraftCard[]> {
     match: draft.match as DraftMatch["match"],
     masterProductId: draft.masterProductId,
     masterProductName: draft.masterProduct?.name ?? null,
-    masterImageUrl: draft.masterProduct?.imageUrl ?? null,
-    candidates: draft.candidateIds.flatMap((id) => (names.has(id) ? [{ id, name: names.get(id)! }] : [])),
+    masterImageUrl: photo(draft.masterProduct),
+    candidates: draft.candidateIds.flatMap((id) => {
+      const product = byId.get(id);
+      return product ? [{ id, name: product.name, imageUrl: photo(product) }] : [];
+    }),
     existingListingId: draft.existingListingId,
     createdAt: draft.createdAt.toISOString(),
   }));

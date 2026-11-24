@@ -156,7 +156,7 @@ describe.skipIf(!hasDb)("photo-to-listing drafts (real auth, lane database)", ()
         await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${store}, ${user}, ${role}, now())`;
       }
       ids.ogbono = (await tx.masterProduct.create({ data: { name: `Ogbono ${TAG}`, weightG: 500, perishable: true } })).id;
-      ids.flourWhite = (await tx.masterProduct.create({ data: { name: `Yam Flour ${TAG} White` } })).id;
+      ids.flourWhite = (await tx.masterProduct.create({ data: { name: `Yam Flour ${TAG} White`, imageUrl: "/images/products/egusi.webp" } })).id;
       ids.flourBrown = (await tx.masterProduct.create({ data: { name: `Yam Flour ${TAG} Brown` } })).id;
       ids.palm = (await tx.masterProduct.create({ data: { name: `Red Palm Oil ${TAG}` } })).id;
       await tx.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`;
@@ -198,6 +198,10 @@ describe.skipIf(!hasDb)("photo-to-listing drafts (real auth, lane database)", ()
     expect(byName.get(`Ogbono ${TAG}`)).toMatchObject({ match: "one", masterProductId: ids.ogbono, priceReadCents: 499, extractedSize: "500g" });
     expect(byName.get(`Yam Flour ${TAG}`)!.match).toBe("several");
     expect([...byName.get(`Yam Flour ${TAG}`)!.candidateIds].sort()).toEqual([ids.flourBrown, ids.flourWhite].sort());
+    // #787 AC4: each proposed match shows its catalogue photo.
+    const cards = await listPendingDrafts(storeAId);
+    const flourCard = cards.find((card) => card.extractedName === `Yam Flour ${TAG}`)!;
+    expect(flourCard.candidates.find((candidate) => candidate.id === ids.flourWhite)?.imageUrl).toBe("/images/products/egusi.webp");
     expect(byName.get(`Red Palm Oil ${TAG}`)).toMatchObject({ match: "already_listed", existingListingId: ids.palmListing });
     expect(byName.get(`Kilishi ${TAG}`)).toMatchObject({ match: "already_listed", existingListingId: ids.customListing });
     expect(byName.get(`Moin Moin Mix ${TAG}`)).toMatchObject({ match: "none", priceReadCents: 250 });
