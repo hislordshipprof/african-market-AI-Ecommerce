@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped } from "../db";
@@ -177,7 +177,7 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     events.push(event);
   };
 
-  async function courierOrder(flags: { pickupEnabled: boolean; storeDeliveryEnabled: boolean; uberLocationId?: string; metroId?: string }) {
+  async function courierOrder(flags: { pickupEnabled: boolean; storeDeliveryEnabled: boolean; uberLocationId?: string; metroId?: string; lat?: number; lng?: number }) {
     raw ??= testPrismaClient();
     const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const store = await raw.store.create({
@@ -218,6 +218,10 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
 
   beforeEach(() => {
     events = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   afterAll(async () => {
@@ -281,7 +285,8 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
   });
 
   it("AC5: both failing emits courier.both_failed with the store's options and always cancel", async () => {
-    const both = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: true });
+    vi.stubEnv("R2_PROOF_BUCKET", "proofs");
+    const both = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: true, lat: 38.99, lng: -77.03 });
     const failing = () => {
       const a = new StubProvider("uber", 749);
       const b = new StubProvider("doordash", 899);
@@ -303,6 +308,17 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     await selectAndDispatch({ ...neither, request }, { providers: failing(), emit, settings });
     expect(events.at(-1)?.data).toMatchObject({ options: ["cancel"] });
     expect(await storeScoped(neither.storeId).delivery.count({ where: { orderId: neither.orderId } })).toBe(0);
+  });
+
+  it("both failing never offers store delivery while the proof bucket is unset (#775)", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    const ids = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: true, lat: 38.99, lng: -77.03 });
+    const a = new StubProvider("uber", 749);
+    const b = new StubProvider("doordash", 899);
+    a.failCreate = true;
+    b.failQuote = true;
+    await selectAndDispatch({ ...ids, request }, { providers: [a, b], emit, settings });
+    expect(events.at(-1)?.data).toMatchObject({ options: ["pickup", "cancel"] });
   });
 
   async function dispatched(cheaper: StubProvider, other: StubProvider) {

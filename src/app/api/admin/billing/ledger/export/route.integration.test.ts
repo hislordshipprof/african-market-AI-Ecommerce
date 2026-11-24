@@ -28,7 +28,7 @@ describe.skipIf(!hasDb)("fee ledger CSV export route (lane DB)", () => {
     expect(res.headers.get("content-type")).toBe("text/csv; charset=utf-8");
     expect(res.headers.get("content-disposition")).toBe('attachment; filename="platform-fee-ledger-2031-07.csv"');
     expect(res.headers.get("cache-control")).toBe("private, no-store");
-    expect((await res.text()).trim().split("\r\n").at(-1)).toBe("2031-07,,All stores,,Month total (0 orders),0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00");
+    expect((await res.text()).trim().split("\r\n").at(-1)).toBe("2031-07,,All stores,,Month total (0 orders),0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00");
   });
 
   it("refuses a month that is not strictly YYYY-MM", async () => {

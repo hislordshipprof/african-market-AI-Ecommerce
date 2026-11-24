@@ -353,6 +353,8 @@ async function rootServer(port: number, extra: Record<string, string> = {}) {
       VERCEL_ENV: "",
       E2E_STORE_OVERRIDE: "",
       STRIPE_SECRET_KEY: "",
+      // As the main e2e server: the cards show store delivery only where it is offered (#775).
+      R2_PROOF_BUCKET: "e2e-proof-bucket",
       PLATFORM_ROOT_DOMAIN: "localhost",
       BETTER_AUTH_URL: `http://localhost:${port}`,
       BETTER_AUTH_TRUSTED_ORIGINS: `http://localhost:${port}`,

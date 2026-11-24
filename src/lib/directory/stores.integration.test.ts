@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn, revalidateTag: vi.fn() }));
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -57,6 +57,7 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
           ownerName: "Ada",
           phone: "+17135550449",
           uberLocationId: `uber_t449_${stamp}`,
+          storeDeliveryEnabled: true,
         },
         { slug: slug("noaddress"), name: "No Address Market", ...located, listed: true, uberLocationId: `uber_t453_${stamp}`, phone: "+17135550453" },
         { slug: slug("starter"), name: "Starter Plan Market", ...located, listed: true, addressLine1: "1 Main St", zip: "77002", phone: "+17135550454", doordashStoreId: `dd_t453_${stamp}` },
@@ -81,6 +82,18 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
     const mine = (await listDirectoryStores()).filter((s) => s.slug.endsWith(stamp));
     expect(mine.map((s) => s.slug)).toEqual([slug("listed"), slug("noaddress"), slug("starter")]);
     expect(mine[0]).toMatchObject({ name: "Listed Market", city: "Houston", state: "TX", listingBlurb: "Fresh yam every Friday.", ownerName: "Ada" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("shows the store's own delivery only while it is offered: never without the proof bucket (#775)", async () => {
+    const listed = async () => (await listDirectoryStores()).find((s) => s.slug === slug("listed"));
+    vi.stubEnv("R2_PROOF_BUCKET", "proofs");
+    expect((await listed())?.storeDeliveryEnabled).toBe(true);
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    expect((await listed())?.storeDeliveryEnabled).toBe(false);
   });
 
   it("says a courier may deliver only where the storefront offers it: registered, full address and phone, Pro plan", async () => {

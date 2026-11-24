@@ -1,6 +1,6 @@
 vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn, revalidateTag: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers(currentSlug ? { "x-store-slug": currentSlug } : {}) }));
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { fakeAddressBackend, setAddressProvider } from "@/lib/address/provider";
@@ -133,6 +133,10 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
     await addListing(suspended.id, "Mcptest Egusi Seeds", 500);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   afterAll(async () => {
     setAddressProvider(null);
     await cleanup();
@@ -209,8 +213,17 @@ describe.skipIf(!hasDb)("POST /api/mcp (store catalog over MCP)", () => {
   });
 
   it("checks a street address against the store's delivery radius", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "proofs");
     const { data } = await callTool(slugA, "check_delivery_area", { line1: "1600 Pennsylvania Ave NW", city: "Washington", state: "DC", zip: "20500" });
     expect(data).toMatchObject({ within_radius: true, store_delivery: { available: true, fee: { amount: 599, currency: "USD" } }, pickup: true });
+    expect((await callTool(slugA, "get_store_info", {})).data).toMatchObject({ store_delivery: { available: true, fee: { amount: 599, currency: "USD" } } });
+  });
+
+  it("never advertises store delivery while the proof bucket is unset (#775)", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    const { data } = await callTool(slugA, "check_delivery_area", { line1: "1600 Pennsylvania Ave NW", city: "Washington", state: "DC", zip: "20500" });
+    expect(data).toMatchObject({ within_radius: true, store_delivery: { available: false } });
+    expect((await callTool(slugA, "get_store_info", {})).data).toMatchObject({ store_delivery: { available: false } });
   });
 
   it("is not there for an opted-out, unopened or suspended store, or with no store host", async () => {

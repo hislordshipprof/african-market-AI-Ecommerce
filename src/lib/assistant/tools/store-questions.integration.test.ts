@@ -253,6 +253,15 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
     expect(await run("get_store_info", {})).toMatchObject({ ok: true, storeDelivery: { enabled: false } });
   });
 
+  it("a zero delivery radius is no store delivery in the store's answers either (#775)", async () => {
+    await raw.store.update({ where: { id: storeA }, data: { deliveryRadiusMi: 0 } });
+    try {
+      expect(await runner({ actorUserId: null })("get_store_info", {})).toMatchObject({ ok: true, storeDelivery: { enabled: false } });
+    } finally {
+      await raw.store.update({ where: { id: storeA }, data: { deliveryRadiusMi: 8 } });
+    }
+  });
+
   it("forward_to_store opens the order's support thread with the order context and refuses guests and other customers", async () => {
     expect(await runner({ actorUserId: null })("forward_to_store", { issue: "Stale egusi" })).toMatchObject({
       ok: false,

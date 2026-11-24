@@ -9,7 +9,7 @@ import { courierOffered } from "@/lib/delivery/courier-offered";
 import { anyCourierEnabled, readStoreCourierSettings } from "@/lib/delivery/courier-settings";
 import { storeShipsTo } from "@/lib/shipping/eligibility";
 import { readShippingStates, shippingReady } from "@/lib/shipping/settings";
-import { deliveryProofBucket } from "@/lib/r2";
+import { storeDeliveryOffered } from "@/lib/delivery/store-delivery-offered";
 import type { FlowStore } from "./contracts";
 
 export const getFlowContext = cache(async () => {
@@ -33,11 +33,7 @@ export const getFlowContext = cache(async () => {
     minimumOrderCents: store.minimumOrderCents,
     pickupEnabled: store.pickupEnabled,
     // Store delivery and Ship are offered only when their orders can be completed (#765).
-    storeDeliveryEnabled: store.storeDeliveryEnabled
-      && deliveryProofBucket() !== null
-      && store.lat != null
-      && store.lng != null
-      && Number(store.deliveryRadiusMi) > 0,
+    storeDeliveryEnabled: storeDeliveryOffered(store),
     deliveryRadiusMi: Number(store.deliveryRadiusMi),
     prepTimeMinutes: store.prepTimeMinutes,
     storeDeliveryFeeCents: store.storeDeliveryFeeCents,

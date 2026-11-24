@@ -25,7 +25,7 @@ import { pinnedCheckoutTax, quoteCheckoutTax, TaxLocationError, TaxUnavailableEr
 import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type CourierQuoteInput, type QuoteCouponInput, type ShippingQuoteInput, type StoreDeliveryQuote } from "./quote";
 import { cheapestRate, ShippingProviderError, type ShippingProvider } from "../shipping/provider";
 import { lineShips, orderWeightG, shipRefusal, type ShipLine } from "../shipping/eligibility";
-import { deliveryProofBucket } from "../r2";
+import { storeDeliveryOffered } from "../delivery/store-delivery-offered";
 import { readShippingStates, shippingProvider, shippingReady } from "../shipping/settings";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, quoteCourier } from "../delivery/dispatch";
@@ -153,8 +153,7 @@ function deliveryQuoteInput(
     ? { withinRadius: assessRadius(point, { lat: store.lat as number, lng: store.lng as number, radiusMi }).withinRadius }
     : null;
   return {
-    // Not offered while the delivered photo has nowhere to be kept: the order could never be marked delivered (#765).
-    enabled: store.storeDeliveryEnabled && deliveryProofBucket() !== null,
+    enabled: storeDeliveryOffered(store),
     feeCents: store.storeDeliveryFeeCents,
     radiusMi,
     hasCoordinates,

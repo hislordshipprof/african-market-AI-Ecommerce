@@ -1,6 +1,7 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { confirmDeliveryAddress } from "../address/confirm";
+import { storeDeliveryOffered } from "../delivery/store-delivery-offered";
 import { isStoreOpen } from "../order/store-hours";
 import { isListingId } from "../security/listing-id";
 import { SEARCH_QUERY_MAX } from "../storefront/search-query";
@@ -112,7 +113,7 @@ function radiusMi(store: CatalogStore): number {
 function getStoreInfo(req: CatalogRequest) {
   const { store } = req;
   const radius = radiusMi(store);
-  const delivers = store.storeDeliveryEnabled && radius > 0;
+  const delivers = storeDeliveryOffered(store);
   return result({
     name: store.name,
     url: `${req.origin}/`,
@@ -133,7 +134,7 @@ async function checkDeliveryArea(req: CatalogRequest, address: { line1: string; 
   const radius = radiusMi(store);
   const decision = await confirmDeliveryAddress(address, { lat: store.lat, lng: store.lng, radiusMi: radius }, { limit: true, ip: req.ip });
   if (!decision.ok) return refuse(decision.message);
-  const delivers = store.storeDeliveryEnabled && radius > 0 && decision.withinRadius;
+  const delivers = storeDeliveryOffered(store) && decision.withinRadius;
   return result({
     address: decision.match.formattedAddress,
     distance_mi: decision.roundedMi,

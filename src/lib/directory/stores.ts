@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import { platform } from "@/lib/db";
 import { storeMayUse } from "@/lib/billing/plan";
 import { courierOffered } from "@/lib/delivery/courier-offered";
+import { storeDeliveryOffered } from "@/lib/delivery/store-delivery-offered";
 import { storefrontUrl } from "./links";
 
 // The only Store columns the public directory may read. `stores_read` is open to every
@@ -52,7 +53,8 @@ export async function toDirectoryStores(rows: DirectoryRow[]): Promise<Directory
   return Promise.all(rows.map(async (row) => {
     const card = Object.fromEntries(Object.keys(DIRECTORY_STORE_FIELDS).map((key) => [key, row[key as keyof DirectoryRow]]));
     const courierMayDeliver = courierOffered(row) && (await storeMayUse(row.id, "courier-delivery"));
-    return { ...(card as Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }>), courierMayDeliver };
+    // The card says "Delivery" only where checkout offers it (#775).
+    return { ...(card as Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }>), storeDeliveryEnabled: storeDeliveryOffered(row), courierMayDeliver };
   }));
 }
 
