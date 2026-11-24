@@ -142,6 +142,8 @@ test("signed-out production account redirects with demo flows disabled", async (
         BETTER_AUTH_URL: `http://localhost:${port}`,
         BETTER_AUTH_TRUSTED_ORIGINS: `http://localhost:${port}`,
         BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
+        // Without a sender, production says email sign-in is not available yet (#765).
+        EMAIL_FROM: "Market <orders@example.com>",
         ...env,
       },
       healthUrl: `http://127.0.0.1:${port}/api/health`,
