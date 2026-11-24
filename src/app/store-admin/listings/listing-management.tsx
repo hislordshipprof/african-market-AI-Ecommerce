@@ -46,7 +46,11 @@ import {
   deactivateListingAction,
   reactivateListingAction,
   listMasterProductsAction,
+  uploadListingPhotoAction,
 } from "@/lib/listing/actions";
+import { ProductThumb } from "@/components/store-admin/product-thumb";
+import { jpegBlob } from "@/lib/image/client-jpeg";
+import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { AttributesDialog } from "./attributes-dialog";
 import { StockDialog, type StockListing } from "./stock-dialog";
 import { listingNeedsWeight } from "./needs-weight";
@@ -65,6 +69,7 @@ import {
   Camera,
   Truck,
   Search,
+  ImagePlus,
 } from "lucide-react";
 import { shippableRefusal } from "@/lib/shipping/eligibility";
 
@@ -81,6 +86,7 @@ interface Variant {
 interface MasterProductOption {
   id: string;
   name: string;
+  imageUrl: string | null;
 }
 
 interface Aisle {
@@ -97,6 +103,10 @@ interface Listing {
   categoryId: string | null;
   customName: string | null;
   masterProductName: string | null;
+  /** What shoppers see: the store's own photo, else the catalogue photo (#787). */
+  photoUrl: string | null;
+  ownPhotoUrl: string | null;
+  catalogPhotoUrl: string | null;
   price: number;
   stockMode: string;
   qty: number | null;
@@ -126,6 +136,8 @@ interface Props {
   canManage: boolean;
   /** Staff with a seat; read-only staff only look. */
   canEditStock: boolean;
+  /** Photo storage is set up; without it the upload is hidden (#787). */
+  photoUploads: boolean;
 }
 
 function stockLabel(listing: Listing) {
@@ -230,7 +242,7 @@ const PREPARED_LABELS: Record<string, string> = {
 
 const HELD_FOR_ALLERGENS = "Saved, off sale. State its allergens under Ingredients and allergens, then reactivate it.";
 
-export function ListingManagement({ storeName, storeSlug, storeShips, aisles, listings, canManage, canEditStock }: Props) {
+export function ListingManagement({ storeName, storeSlug, storeShips, aisles, listings, canManage, canEditStock, photoUploads }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -264,6 +276,45 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedQty = useRef<{ listings: Listing[]; id: string; qty: number | null } | null>(null);
   const [variants, setVariants] = useState<VariantFormRow[]>([emptyVariantRow()]);
+  const [pendingPhoto, setPendingPhoto] = useState<{ blob: Blob; preview: string } | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+
+  function clearPendingPhoto() {
+    setPendingPhoto((current) => {
+      if (current) URL.revokeObjectURL(current.preview);
+      return null;
+    });
+  }
+
+  async function choosePhoto(file: File | undefined) {
+    if (!file) return;
+    try {
+      // Phone photos run past the 2 MB cap; the server re-encodes and strips metadata either way.
+      const blob = await jpegBlob(file, PHOTO_UPLOAD_MAX_BYTES);
+      if (blob.size > PHOTO_UPLOAD_MAX_BYTES) {
+        toast.error("The photo is over 2 MB. Choose a smaller one.");
+        return;
+      }
+      clearPendingPhoto();
+      setPendingPhoto({ blob, preview: URL.createObjectURL(blob) });
+    } catch {
+      toast.error("Upload a JPEG, PNG or WebP photo.");
+    }
+  }
+
+  /** Sends the chosen photo once the listing exists. Returns false when it was not saved. */
+  async function savePendingPhoto(listingId: string): Promise<boolean> {
+    if (!pendingPhoto) return true;
+    const fd = new FormData();
+    fd.set("listingId", listingId);
+    fd.set("photo", new File([pendingPhoto.blob], "photo.jpg", { type: "image/jpeg" }));
+    const result = await uploadListingPhotoAction(fd).catch(() => ({ error: "The photo could not be saved. Try again." }));
+    if ("error" in result && result.error) {
+      toast.error(`Saved without the photo: ${result.error}`);
+      return false;
+    }
+    return true;
+  }
 
   function resetForm() {
     setName("");
@@ -285,6 +336,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
     setSelectedMasterOption(null);
     selectedMasterNameRef.current = null;
     setVariants([emptyVariantRow()]);
+    clearPendingPhoto();
   }
 
   function searchMasterProducts(query: string) {
@@ -341,10 +393,11 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
     setMasterProductId(listing.masterProductId);
     setCategoryId(listing.categoryId ?? NO_AISLE);
     setVariants(listing.variants.map(loadedVariantRow));
+    clearPendingPhoto();
     searchMasterProducts("");
     const currentMaster =
       listing.masterProductId && listing.masterProductName
-        ? { id: listing.masterProductId, name: listing.masterProductName }
+        ? { id: listing.masterProductId, name: listing.masterProductName, imageUrl: listing.catalogPhotoUrl }
         : null;
     setSelectedMasterOption(currentMaster);
     selectedMasterNameRef.current = currentMaster?.name ?? null;
@@ -398,8 +451,9 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
       if ("error" in result && result.error) {
         toast.error(result.error);
       } else {
+        const photoSaved = "id" in result && result.id ? await savePendingPhoto(result.id) : true;
         if ("heldForAllergens" in result && result.heldForAllergens) toast.warning(HELD_FOR_ALLERGENS);
-        else toast.success("Listing created");
+        else if (photoSaved) toast.success("Listing created");
         setCreateOpen(false);
         resetForm();
         router.refresh();
@@ -417,6 +471,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
       if ("error" in result && result.error) {
         toast.error(result.error);
       } else {
+        const photoSaved = await savePendingPhoto(editListing.id);
         if ("qty" in result) savedQty.current = { listings, id: editListing.id, qty: result.qty ?? null };
         const moved = "stockMoved" in result ? result.stockMoved : undefined;
         if (moved && typedQty === moved.from) {
@@ -425,7 +480,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
           toast.warning(`Stock changed from ${moved.from} to ${moved.to} while you edited. Your count of ${typedQty} was saved.`);
         } else if ("heldForAllergens" in result && result.heldForAllergens) {
           toast.warning(HELD_FOR_ALLERGENS);
-        } else {
+        } else if (photoSaved) {
           toast.success("Listing updated");
         }
         setEditListing(null);
@@ -492,6 +547,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
             <ComboboxList>
               {(item: MasterProductOption) => (
                 <ComboboxItem key={item.id} value={item}>
+                  <ProductThumb src={item.imageUrl} className="size-10" />
                   {item.name}
                 </ComboboxItem>
               )}
@@ -528,6 +584,52 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
           placeholder="e.g. Garri White"
           required
         />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Photo</Label>
+        <div className="flex flex-wrap items-start gap-4">
+          {selectedMaster && (
+            <figure className="flex w-24 flex-col gap-1">
+              <ProductThumb src={selectedMaster.imageUrl} alt={`Catalogue photo of ${selectedMaster.name}`} className="size-24" />
+              <figcaption className="text-xs text-muted-foreground">Catalogue photo</figcaption>
+            </figure>
+          )}
+          {(photoUploads || editListing?.ownPhotoUrl || !selectedMaster) && (
+            <figure className="flex w-24 flex-col gap-1">
+              <ProductThumb
+                src={pendingPhoto?.preview ?? editListing?.ownPhotoUrl}
+                alt={`Your photo of ${name || "this product"}`}
+                className="size-24"
+              />
+              <figcaption className="text-xs text-muted-foreground">Your photo</figcaption>
+            </figure>
+          )}
+          {photoUploads && (
+            <div className="flex min-w-40 flex-1 flex-col gap-2">
+              <input
+                ref={photoInput}
+                id="listing-photo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                tabIndex={-1}
+                onChange={(e) => {
+                  void choosePhoto(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+              <Button type="button" variant="outline" className="min-h-11 self-start" onClick={() => photoInput.current?.click()}>
+                <ImagePlus className="size-4" aria-hidden />
+                {pendingPhoto || editListing?.ownPhotoUrl ? "Replace your photo" : "Add your photo"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                JPEG, PNG or WebP. Shoppers at your store see it instead of the catalogue photo. Saved with the listing.
+              </p>
+            </div>
+          )}
+        </div>
+        {selectedMaster && <p className="text-xs text-muted-foreground">Check the catalogue photo is the item on your shelf.</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -1010,6 +1112,7 @@ function ListingRow({
 
   return (
     <div className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+      <ProductThumb src={listing.photoUrl} />
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="line-clamp-2 min-w-0 break-words text-base font-medium text-foreground">

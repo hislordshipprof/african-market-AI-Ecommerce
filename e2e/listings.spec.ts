@@ -140,6 +140,27 @@ test.describe("Listing management (authenticated)", () => {
     expect(toggleHit).toBeGreaterThanOrEqual(44);
   });
 
+  // #787 AC4: the catalogue photo is a second check that the listing is the right item.
+  test("an owner sees catalogue photos in the list, the picker and the dialogs, and No photo otherwise", async ({ page }) => {
+    const custom = `E2E No Photo ${Date.now()}`;
+    await createListingViaUI(page, { name: custom, price: "3.00" });
+    await expect(listingRow(page, custom).first().getByText("No photo")).toBeVisible();
+    await expect(listingRow(page, "Yam").first().locator("img[src*='/images/products/']")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit Yam", exact: true }).click();
+    await expect(page.getByRole("dialog").getByRole("img", { name: "Catalogue photo of Yam" })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await page.click("text=Add listing");
+    const picker = page.getByLabel("Master product (optional)");
+    await picker.click();
+    await picker.fill("Yam");
+    const option = page.getByRole("option", { name: "Yam", exact: true });
+    await expect(option.locator("img")).toBeVisible({ timeout: 10000 });
+    await option.click();
+    await expect(page.getByRole("dialog").getByRole("img", { name: "Catalogue photo of Yam" })).toBeVisible();
+  });
+
   test("create a listing with a variant", async ({ page }) => {
     await createListingViaUI(page, {
       name: `E2E Garri ${Date.now()}`,

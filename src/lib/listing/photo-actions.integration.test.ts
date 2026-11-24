@@ -117,7 +117,7 @@ describe.skipIf(!hasDb)("uploadListingPhotoAction (DB integration, #787)", () =>
       raw.listing.deleteMany({ where: { storeId: { in: stores } } }),
       raw.storeMembership.deleteMany({ where: { storeId: { in: stores } } }),
     ]);
-    await raw.masterProduct.deleteMany({ where: { id: masterId } });
+    await platformAdmin.masterProduct.deleteMany({ where: { id: masterId } });
     await raw.user.deleteMany({ where: { id: { in: Object.values(ids) } } });
     await raw.store.deleteMany({ where: { id: { in: stores } } });
     await raw.$disconnect();

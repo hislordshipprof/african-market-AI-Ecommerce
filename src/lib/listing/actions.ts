@@ -21,6 +21,7 @@ import {
 import { isPreparedKind, MAX_PREP_MINUTES, type PreparedKind } from "./prepared";
 import { parseInput, readFormFields } from "../security/parse-input";
 import { uploadCatalogPhoto } from "../catalog-image";
+import { listingImage } from "../storefront/images";
 import { PHOTO_UPLOAD_MAX_BYTES } from "./csv-file-cap";
 
 const listingField = z.string().max(500).nullable();
@@ -394,7 +395,7 @@ export async function listMasterProductsAction(query?: string) {
   if (!parsed.ok) return [];
   const safeQuery = parsed.data?.slice(0, 100);
   const products = await listMasterProducts(safeQuery, 50);
-  return products.map((p) => ({ id: p.id, name: p.name }));
+  return products.map((p) => ({ id: p.id, name: p.name, imageUrl: listingImage({ masterProduct: p }) ?? null }));
 }
 
 const PHOTO_ERRORS = {
