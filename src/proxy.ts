@@ -33,30 +33,32 @@ function route(request: NextRequest, host: string | null, fallbackRoot: boolean)
 
   // The alias has no store subdomains, so stores are reached there the way previews reach them (#766).
   const overrideAllowed = fallbackRoot || allowStoreOverride(process.env);
+  // The directory home and a store's home are both "/" there: a marketplace page forgets the store,
+  // so the marketplace's own links to "/" lead home.
+  const forgetsStore = fallbackRoot && isMarketplacePath(request.nextUrl.pathname);
   let slug: string | null = null;
 
   if (overrideAllowed) {
     const rawParam = request.nextUrl.searchParams.get("store");
     const paramSlug = rawParam?.toLowerCase() ?? null;
-    // On the alias an empty ?store= is the way back to the directory home, which shares "/" with stores.
-    if ((paramSlug && isSlugRoutable(paramSlug)) || (fallbackRoot && paramSlug === "")) {
+    if (paramSlug && isSlugRoutable(paramSlug)) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.searchParams.delete("store");
       const response = NextResponse.redirect(redirectUrl, 307);
       stampSecurity(headers, response);
       rememberBrowser(request, response, browserIdentity(request));
-      response.cookies.set(COOKIE_NAME, paramSlug ?? "", {
+      response.cookies.set(COOKIE_NAME, paramSlug, {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        maxAge: paramSlug ? COOKIE_MAX_AGE : 0,
+        maxAge: COOKIE_MAX_AGE,
         secure: request.nextUrl.protocol === "https:",
       });
       return response;
     }
 
     const cookieSlug = request.cookies.get(COOKIE_NAME)?.value;
-    if (cookieSlug && isSlugRoutable(cookieSlug) && !(fallbackRoot && isMarketplacePath(request.nextUrl.pathname))) {
+    if (cookieSlug && isSlugRoutable(cookieSlug) && !forgetsStore) {
       slug = cookieSlug;
     }
   }
@@ -104,6 +106,15 @@ function route(request: NextRequest, host: string | null, fallbackRoot: boolean)
       sameSite: "lax",
       path: "/",
       maxAge: ATTRIBUTION_MAX_AGE,
+      secure: request.nextUrl.protocol === "https:",
+    });
+  }
+  if (forgetsStore && request.cookies.has(COOKIE_NAME)) {
+    response.cookies.set(COOKIE_NAME, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
       secure: request.nextUrl.protocol === "https:",
     });
   }

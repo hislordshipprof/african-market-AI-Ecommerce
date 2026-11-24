@@ -553,11 +553,16 @@ describe("stores on the production alias, by ?store= (#766)", () => {
     }
   });
 
-  it("an empty ?store= forgets the store and lands on the directory", () => {
-    const res = proxy(makeRequest(`https://${ALIAS}/?store=`, { store_override: "mama-ngozi" }));
-    expect(res.status).toBe(307);
-    expect(new URL(res.headers.get("location")!).search).toBe("");
+  it("a marketplace page forgets the store, so its links to / lead back to the directory home", () => {
+    const res = proxy(makeRequest(`https://${ALIAS}/stores/texas`, { store_override: "mama-ngozi" }));
     expect(res.cookies.get("store_override")?.value).toBe("");
     expect(res.cookies.get("store_override")?.maxAge).toBe(0);
+    const home = proxy(makeRequest(`https://${ALIAS}/`));
+    expect(home.headers.get("x-middleware-request-x-platform-root")).toBe("1");
+  });
+
+  it("a storefront page keeps the store", () => {
+    const res = proxy(makeRequest(`https://${ALIAS}/cart`, { store_override: "mama-ngozi" }));
+    expect(res.cookies.get("store_override")).toBeUndefined();
   });
 });
