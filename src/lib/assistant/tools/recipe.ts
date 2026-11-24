@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { storeScoped } from "../../db";
+import { platform, storeScoped } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
 import { hasConstraints, haveAtHomeCovers, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
 import type { ShopperNeed } from "../../catalog/attributes";
@@ -56,18 +56,20 @@ async function listingForMaster(storeId: string, masterProductId: string): Promi
   };
 }
 
-/** Name and synonym fits from the storefront search, name fits first; a near row is not a fit. The need filters in SQL, before the cap. */
-async function searchFits(storeId: string, name: string, need: ShopperNeed | null = null): Promise<StoreItem[]> {
-  const hits = await searchCatalogHits(storeId, name, need);
-  const fits = hits.filter((hit) => hit.match === "name" || hit.match === "synonym")
-    .sort((left, right) => Number(left.match !== "name") - Number(right.match !== "name"));
-  return fits.flatMap((hit) => hit.variantId ? [{
-    listingId: hit.id,
-    name: hit.name,
-    variantId: hit.variantId,
-    packLabel: hit.packLabel ?? "Each",
-    priceCents: hit.price,
-    mayBeUnavailable: hit.badge !== "in-stock",
+/** The storefront search's hits, name fits first, then synonym fits, then near rows. The need filters in SQL, before the cap. */
+async function searchHits(storeId: string, name: string, need: ShopperNeed | null = null): Promise<{ item: StoreItem; fit: boolean }[]> {
+  const rank = (match: string) => (match === "name" ? 0 : match === "synonym" ? 1 : 2);
+  const hits = [...await searchCatalogHits(storeId, name, need)].sort((left, right) => rank(left.match) - rank(right.match));
+  return hits.flatMap((hit) => hit.variantId ? [{
+    item: {
+      listingId: hit.id,
+      name: hit.name,
+      variantId: hit.variantId,
+      packLabel: hit.packLabel ?? "Each",
+      priceCents: hit.price,
+      mayBeUnavailable: hit.badge !== "in-stock",
+    },
+    fit: hit.match === "name" || hit.match === "synonym",
   }] : []);
 }
 
@@ -75,22 +77,40 @@ async function searchFits(storeId: string, name: string, need: ShopperNeed | nul
  * Search fits for one recipe ingredient. Another product fits only when its own name or a synonym is the
  * ingredient, case and punctuation folded: De Rica is "tomato paste", Honey beans are not "honey" (#607), and a
  * pepper and onion mix is not "onion" (#633). For an ingredient with no master product, the other name and
- * synonym hits are similar items, closest first; a seeded ingredient names its product and has none.
+ * synonym hits are similar items, closest first. For a seeded ingredient, a search hit that shares a name or
+ * synonym with the seeded product is a similar item: the same kind under another product, such as the shop's
+ * "Egusi (Melon Seeds)" for ground egusi (#764). A shared term alone is not enough; "ngo" names palm oil and
+ * country onion.
  */
 async function ingredientFits(storeId: string, ingredient: RecipeRow["ingredients"][number], need: ShopperNeed | null = null): Promise<{ fits: StoreItem[]; similar: StoreItem[] }> {
-  const found = await searchFits(storeId, ingredient.name, need);
-  if (found.length === 0) return { fits: [], similar: [] };
+  const hits = await searchHits(storeId, ingredient.name, need);
+  if (hits.length === 0) return { fits: [], similar: [] };
   const wanted = dishKey(ingredient.name);
-  const rows = await storeScoped(storeId).listing.findMany({
-    where: { id: { in: found.map((item) => item.listingId) } },
-    select: { id: true, customName: true, masterProductId: true, masterProduct: { select: { name: true, synonyms: { select: { term: true } } } } },
-  });
-  const same = new Set(rows.filter((row) => (ingredient.masterProductId != null && row.masterProductId === ingredient.masterProductId)
-    || [row.customName, row.masterProduct?.name, ...(row.masterProduct?.synonyms ?? []).map((synonym) => synonym.term)]
-      .some((term) => term != null && dishKey(term) === wanted)).map((row) => row.id));
+  const [rows, seeded] = await Promise.all([
+    storeScoped(storeId).listing.findMany({
+      where: { id: { in: hits.map((hit) => hit.item.listingId) } },
+      select: { id: true, customName: true, masterProductId: true, masterProduct: { select: { name: true, synonyms: { select: { term: true } } } } },
+    }),
+    ingredient.masterProductId
+      ? platform.masterProduct.findUnique({ where: { id: ingredient.masterProductId }, select: { name: true, synonyms: { select: { term: true } } } })
+      : null,
+  ]);
+  const termsOf = (product: { name: string; synonyms: { term: string }[] } | null | undefined) =>
+    product ? [product.name, ...product.synonyms.map((synonym) => synonym.term)] : [];
+  const seededTerms = new Set(termsOf(seeded).map(dishKey).filter(Boolean));
+  const same = new Set<string>();
+  const kind = new Set<string>();
+  for (const row of rows) {
+    const terms = [row.customName, ...termsOf(row.masterProduct)].flatMap((term) => (term == null ? [] : [dishKey(term)]));
+    if ((ingredient.masterProductId != null && row.masterProductId === ingredient.masterProductId) || terms.includes(wanted)) same.add(row.id);
+    else if (terms.some((term) => seededTerms.has(term))) kind.add(row.id);
+  }
+  const fits = hits.flatMap((hit) => (hit.fit ? [hit.item] : []));
   return {
-    fits: found.filter((item) => same.has(item.listingId)),
-    similar: ingredient.masterProductId ? [] : found.filter((item) => !same.has(item.listingId)),
+    fits: fits.filter((item) => same.has(item.listingId)),
+    similar: ingredient.masterProductId
+      ? hits.map((hit) => hit.item).filter((item) => kind.has(item.listingId))
+      : fits.filter((item) => !same.has(item.listingId)),
   };
 }
 

@@ -150,7 +150,8 @@ const PRODUCTS: CatalogProduct[] = [
     id: "mp_palm_oil",
     name: "Palm Oil",
     categoryId: "cat_oils",
-    synonyms: [{ term: "zomi", language: "ghanaian" }, { term: "nkwu", language: "igbo" }],
+    // The recipe base's names for this product (#764).
+    synonyms: [{ term: "zomi", language: "ghanaian" }, { term: "nkwu", language: "igbo" }, { term: "red palm oil" }],
   },
   {
     id: "mp_shea_butter",
@@ -175,7 +176,7 @@ const PRODUCTS: CatalogProduct[] = [
     id: "mp_ugu",
     name: "Fluted Pumpkin Leaves (Ugu)",
     categoryId: "cat_vegetables",
-    synonyms: [{ term: "ugu", language: "igbo" }],
+    synonyms: [{ term: "ugu", language: "igbo" }, { term: "fluted pumpkin leaves" }],
   },
   {
     id: "mp_bitter_leaf",
