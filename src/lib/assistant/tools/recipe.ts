@@ -57,16 +57,18 @@ async function listingForMaster(storeId: string, masterProductId: string): Promi
 }
 
 /** The storefront search's hits, name fits first, then synonym fits, then near rows. The need filters in SQL, before the cap. */
-async function searchHits(storeId: string, name: string, need: ShopperNeed | null = null): Promise<(StoreItem & { fit: boolean })[]> {
+async function searchHits(storeId: string, name: string, need: ShopperNeed | null = null): Promise<{ item: StoreItem; fit: boolean }[]> {
   const rank = (match: string) => (match === "name" ? 0 : match === "synonym" ? 1 : 2);
   const hits = [...await searchCatalogHits(storeId, name, need)].sort((left, right) => rank(left.match) - rank(right.match));
   return hits.flatMap((hit) => hit.variantId ? [{
-    listingId: hit.id,
-    name: hit.name,
-    variantId: hit.variantId,
-    packLabel: hit.packLabel ?? "Each",
-    priceCents: hit.price,
-    mayBeUnavailable: hit.badge !== "in-stock",
+    item: {
+      listingId: hit.id,
+      name: hit.name,
+      variantId: hit.variantId,
+      packLabel: hit.packLabel ?? "Each",
+      priceCents: hit.price,
+      mayBeUnavailable: hit.badge !== "in-stock",
+    },
     fit: hit.match === "name" || hit.match === "synonym",
   }] : []);
 }
@@ -86,7 +88,7 @@ async function ingredientFits(storeId: string, ingredient: RecipeRow["ingredient
   const wanted = dishKey(ingredient.name);
   const [rows, seeded] = await Promise.all([
     storeScoped(storeId).listing.findMany({
-      where: { id: { in: hits.map((item) => item.listingId) } },
+      where: { id: { in: hits.map((hit) => hit.item.listingId) } },
       select: { id: true, customName: true, masterProductId: true, masterProduct: { select: { name: true, synonyms: { select: { term: true } } } } },
     }),
     ingredient.masterProductId
@@ -103,11 +105,12 @@ async function ingredientFits(storeId: string, ingredient: RecipeRow["ingredient
     if ((ingredient.masterProductId != null && row.masterProductId === ingredient.masterProductId) || terms.includes(wanted)) same.add(row.id);
     else if (terms.some((term) => seededTerms.has(term))) kind.add(row.id);
   }
-  const strip = ({ fit: _fit, ...item }: StoreItem & { fit: boolean }): StoreItem => item;
-  const fits = hits.filter((item) => item.fit);
+  const fits = hits.flatMap((hit) => (hit.fit ? [hit.item] : []));
   return {
-    fits: fits.filter((item) => same.has(item.listingId)).map(strip),
-    similar: (ingredient.masterProductId ? hits.filter((item) => kind.has(item.listingId)) : fits.filter((item) => !same.has(item.listingId))).map(strip),
+    fits: fits.filter((item) => same.has(item.listingId)),
+    similar: ingredient.masterProductId
+      ? hits.map((hit) => hit.item).filter((item) => kind.has(item.listingId))
+      : fits.filter((item) => !same.has(item.listingId)),
   };
 }
 
