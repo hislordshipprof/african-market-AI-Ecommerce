@@ -4,7 +4,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
 import { authPrisma, countMagicLinksForEmail, platform } from "./db";
 import { isPrivilegedEmail, isPrivilegedUser, isStaffUser } from "./privileged-user";
-import { sendEmail } from "./email/send";
+import { RESEND_SANDBOX_FROM, sendEmail } from "./email/send";
 import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { isSlugRoutable, slugFromHost } from "./slug";
@@ -127,8 +127,6 @@ export function resolveAuthSecureCookies(
 ): boolean {
   return isDeployment(env) || resolveAuthBaseUrl(env).startsWith("https://");
 }
-
-export const RESEND_SANDBOX_FROM = "onboarding@resend.dev";
 
 /**
  * Resend's sandbox sender only delivers to the account owner, so magic links never arrive.

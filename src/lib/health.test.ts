@@ -5,6 +5,7 @@ import {
   checkEnv,
   checkDatabase,
   checkMigrations,
+  missingSetup,
   runHealthChecks,
   requiredEnvVars,
   toMinimalResult,
@@ -295,6 +296,12 @@ describe("runHealthChecks", () => {
     expect(toMinimalResult(result.status, result.body).status).toBe("degraded");
   });
 
+  it("names the optional setup production lacks (#765), by name only and without failing", async () => {
+    const result = await runHealthChecks({ env: productionEnv, queryRaw: makeQueryRaw() });
+    expect(result.status).toBe(200);
+    expect(result.body.missingSetup).toEqual(["EMAIL_FROM", "R2_PROOF_BUCKET", "SHIPPO_API_KEY"]);
+  });
+
   it("reports missing Inngest keys in preview without failing", async () => {
     const env: Record<string, string | undefined> = { ...productionEnv, VERCEL_ENV: "preview" };
     delete env.INNGEST_EVENT_KEY;
@@ -470,5 +477,17 @@ describe.skipIf(!hasRuntime)("Health check proves app_runtime connection", () =>
     ) => Promise<unknown[]>;
     const result = await checkDatabase(queryRaw);
     expect(result.user).toBe("app_runtime");
+  });
+});
+
+describe("missingSetup (#765)", () => {
+  it("is empty once a real sender, the proof bucket and the Shippo key are set, and never carries their values", () => {
+    const env = { EMAIL_FROM: "Market <orders@markets.example>", R2_PROOF_BUCKET: "proofs-secret-name", SHIPPO_API_KEY: "shippo_live_secret" };
+    expect(missingSetup(env)).toEqual([]);
+  });
+
+  it("counts Resend's sandbox sender and a blank bucket as missing: neither reaches anyone", () => {
+    const env = { EMAIL_FROM: "onboarding@resend.dev", R2_PROOF_BUCKET: "  ", SHIPPO_API_KEY: "shippo_live_secret" };
+    expect(missingSetup(env)).toEqual(["EMAIL_FROM", "R2_PROOF_BUCKET"]);
   });
 });
