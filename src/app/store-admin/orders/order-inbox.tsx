@@ -205,6 +205,8 @@ export function OrderInbox({
   const [lastRefreshed, setLastRefreshed] = useState(() => new Date());
   /** A re-quoted postage more than $2 above what the shopper paid, waiting for staff to confirm (#568). */
   const [postageToConfirm, setPostageToConfirm] = useState<{ orderId: string; cents: number; message: string } | null>(null);
+  // #771: Shippo refused the label's rate after capture; staff confirm the fresh one, or cancel when it is over $5 more.
+  const [labelRequote, setLabelRequote] = useState<{ orderId: string; message: string; cents?: number } | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
   const [acceptingOrderId, setAcceptingOrderId] = useState<string | null>(null);
@@ -408,7 +410,11 @@ export function OrderInbox({
           toast.success("Order cancelled — amount below capture minimum");
         } else if ("labelError" in result && result.labelError) {
           toast.success("Order marked ready");
-          setActionError({ key: orderId, message: result.labelError });
+          if (result.labelConfirmPostageCents !== undefined || result.labelOfferCancel) {
+            setLabelRequote({ orderId, message: result.labelError, cents: result.labelConfirmPostageCents });
+          } else {
+            setActionError({ key: orderId, message: result.labelError });
+          }
         } else {
           toast.success("Order marked ready");
         }
@@ -421,10 +427,27 @@ export function OrderInbox({
     });
   }
 
-  function handleBuyLabel(orderId: string, pdfOnly: boolean) {
-    runAction(orderId, () => buyShippingLabelAction(orderId), () => {
-      toast.success(pdfOnly ? "Label saved" : "Label bought");
-      pollOrders();
+  function handleBuyLabel(orderId: string, pdfOnly: boolean, confirmPostageCents?: number) {
+    setActionError(null);
+    startTransition(async () => {
+      let result: Awaited<ReturnType<typeof buyShippingLabelAction>>;
+      try {
+        result = await buyShippingLabelAction(orderId, confirmPostageCents);
+      } catch {
+        setActionError({ key: orderId, message: STAFF_GENERIC_ERROR });
+        return;
+      }
+      setLabelRequote(null);
+      if (result.ok) {
+        toast.success(pdfOnly ? "Label saved" : "Label bought");
+        pollOrders();
+      } else if ("confirmPostageCents" in result && typeof result.confirmPostageCents === "number") {
+        setLabelRequote({ orderId, message: result.error, cents: result.confirmPostageCents });
+      } else if ("offerCancel" in result && result.offerCancel) {
+        setLabelRequote({ orderId, message: result.error });
+      } else {
+        setActionError({ key: orderId, message: result.error });
+      }
     });
   }
 
@@ -792,6 +815,20 @@ export function OrderInbox({
                         >
                           <Printer className="mr-2 size-4" /> Print label
                         </a>
+                      </div>
+                    ) : selectedOrder.status === "READY" && labelRequote?.orderId === selectedOrder.id ? (
+                      <div role="alert" className="space-y-3 rounded-lg border p-3 text-sm">
+                        <p>{labelRequote.message}</p>
+                        {labelRequote.cents !== undefined && (
+                          <div className="flex gap-2">
+                            <Button className="flex-1 rounded-full" onClick={() => handleBuyLabel(selectedOrder.id, false, labelRequote.cents)} disabled={isPending}>
+                              <Printer className="mr-2 size-4" /> Buy label at {money(labelRequote.cents)}
+                            </Button>
+                            <Button variant="outline" className="rounded-full" onClick={() => setLabelRequote(null)} disabled={isPending}>
+                              Not now
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     ) : selectedOrder.shippingLabelStatus === "bought" || selectedOrder.status === "READY" ? (
                       <Button className="min-h-12 w-full rounded-full" onClick={() => handleBuyLabel(selectedOrder.id, selectedOrder.shippingLabelStatus === "bought")} disabled={isPending}>
