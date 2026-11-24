@@ -101,6 +101,38 @@ describe.skipIf(!hasDb)("assistant checkout handoff tools (#247)", () => {
     expect(await loadCheckoutDraft(storeA, cartA)).toEqual({ fulfillment: "pickup", slot: { id: later.slotId, label: later.label } });
   });
 
+  it("while the store is closed, offers the queued order and later times by the checkout's rules, and saves the choice", async () => {
+    const hours = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((day) => [day, "9:00 AM - 5:00 PM"]));
+    const closed = (await raw.store.create({
+      data: { slug: `co-closed-${suffix}`, name: "Checkout closed", themePreset: "palm-and-shea", hours, timezone: "America/Chicago", prepTimeMinutes: 30, minimumOrderCents: 0, pickupEnabled: true },
+    })).id;
+    const cart = (await storeScoped(closed).cart.create({ data: { storeId: closed, source: "ai" } })).id;
+    const conversationId = (await storeScoped(closed).aiConversation.create({ data: { storeId: closed, cartId: cart, model: "claude-haiku-5-5", messages: [] } })).id;
+    onTestFinished(async () => {
+      vi.useRealTimers();
+      await storeScoped(closed).cart.deleteMany({});
+      await raw.store.delete({ where: { id: closed } });
+    });
+    // Monday 8:00 PM in Chicago: closed until Tuesday 9:00 AM.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-17T02:00:00Z"), shouldAdvanceTime: true });
+    const run = runner({ storeId: closed, cartId: cart, conversationId });
+    const options = await run("get_fulfillment_options", {});
+    const pickup = options.pickup as { slots: Array<{ slotId: string; label: string }>; message?: string };
+    expect(pickup.slots).toEqual([{ slotId: "asap", label: "When the store opens: Tue 9:00 AM CT, ready about 9:30 AM" }]);
+    expect(pickup.message).toBeUndefined();
+    expect(await run("set_fulfillment", { fulfillment: "pickup", slot_id: "asap" })).toMatchObject({ ok: true, slotId: "asap" });
+    expect(await loadCheckoutDraft(closed, cart)).toEqual({ fulfillment: "pickup", slot: { id: "asap", label: "When the store opens: Tue 9:00 AM CT, ready about 9:30 AM" } });
+
+    // With a pickup schedule, the scheduled times of the coming days are offered too, as on the checkout page.
+    const windows = Array.from({ length: 7 }, () => [{ start: 9 * 60, end: 17 * 60 }]);
+    await raw.store.update({ where: { id: closed }, data: { pickupSlotSettings: { slotMinutes: 60, leadMinutes: 120, capacity: 5, daysAhead: 2, closedDates: [], windows } } });
+    const scheduled = (await run("get_fulfillment_options", {})).pickup as { slots: Array<{ slotId: string; label: string }> };
+    expect(scheduled.slots[0].slotId).toBe("asap");
+    expect(scheduled.slots[1]).toEqual({ slotId: "2026-11-17T15:00:00.000Z", label: expect.stringMatching(/^Tue, Nov 17, 9:00/) });
+    expect(await run("set_fulfillment", { fulfillment: "pickup", slot_id: "2026-11-17T15:00:00.000Z" })).toMatchObject({ ok: true });
+    expect(await run("prepare_checkout", {})).toMatchObject({ ok: false, code: "cart_empty" });
+  });
+
   it("a store with pickup off says so plainly and saves nothing", async () => {
     const run = runner({ storeId: storeB, cartId: cartB, conversationId: conversationB });
     const options = await run("get_fulfillment_options", {});

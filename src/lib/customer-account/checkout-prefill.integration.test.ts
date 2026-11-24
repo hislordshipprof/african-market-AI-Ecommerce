@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authPrisma, storeScoped } from "../db";
+import { addAddress, setDefaultAddress } from "./address-book";
 import { loadCheckoutPrefill } from "./checkout-profile";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
@@ -58,5 +59,16 @@ describe.skipIf(!hasDb)("checkout prefill name (#750)", () => {
 
   it("leaves the name empty with no store to look in", async () => {
     expect((await loadCheckoutPrefill(namelessId)).contact.name).toBe("");
+  });
+
+  it("#763 AC1: offers every saved address, the default first, with its delivery notes", async () => {
+    const home = { label: "Home", line1: "1 Market St", line2: null, city: "Silver Spring", state: "MD", zip: "20910", notes: null };
+    await addAddress(namedId, home);
+    const work = await addAddress(namedId, { ...home, label: "Work", line1: "2 Market St", notes: "Ring the side door" });
+    await setDefaultAddress(namedId, work.id);
+
+    const prefill = await loadCheckoutPrefill(namedId, storeId);
+    expect(prefill.defaultAddress).toMatchObject({ label: "Work", notes: "Ring the side door" });
+    expect(prefill.addresses.map((address) => address.label)).toEqual(["Work", "Home"]);
   });
 });

@@ -59,7 +59,7 @@ import { checkoutQuoteKey, placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { contactPrefillNote, SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
-import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
+import type { AccountAddressView, CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import type { SlotOptions } from "@/lib/checkout/slots";
 import { shipsToLabel } from "@/lib/shipping/eligibility";
 import { CouponField } from "./coupon-field";
@@ -201,6 +201,7 @@ function StoreDeliveryFields({
   frozen,
   shipping,
   onEdit,
+  saved,
 }: {
   line1: string;
   setLine1: (value: string) => void;
@@ -223,9 +224,22 @@ function StoreDeliveryFields({
   /** A shipped order: no delivery radius and no leave at door (#567). */
   shipping: boolean;
   onEdit: () => void;
+  /** The signed-in shopper's saved addresses (#763); "" is a different address. */
+  saved?: { addresses: AccountAddressView[]; chosenId: string; onChoose: (id: string) => void };
 }) {
   return (
     <div>
+      {saved && saved.addresses.length > 0 && (
+        <label className={styles.field}>
+          Saved address
+          <select value={saved.chosenId} onChange={(event) => saved.onChoose(event.target.value)}>
+            {saved.addresses.map((address) => (
+              <option key={address.id} value={address.id}>{`${address.label} · ${address.line1}, ${address.city}`}</option>
+            ))}
+            <option value="">A different address</option>
+          </select>
+        </label>
+      )}
       <label className={styles.field}>
         Street address
         <input
@@ -320,7 +334,7 @@ function RealCheckoutForm({
   catalog: ShoppingFlowProps["catalog"];
   stripeConfig: StripeConfig;
 }) {
-  const { lines, subtotal, refreshCart, syncing } = useCart();
+  const { lines, subtotal, refreshCart, syncing, store: cart } = useCart();
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
@@ -348,11 +362,15 @@ function RealCheckoutForm({
   const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [line1, setLine1] = useState("");
-  const [line2, setLine2] = useState("");
-  const [city, setCity] = useState("");
-  const [region, setRegion] = useState("");
-  const [zip, setZip] = useState("");
+  // The default saved address fills delivery, courier and ship; its notes join the order only off pickup (#763).
+  const savedAddresses = prefill?.addresses ?? [];
+  const [savedId, setSavedId] = useState(prefill?.defaultAddress?.id ?? "");
+  const [savedNotes, setSavedNotes] = useState("");
+  const [line1, setLine1] = useState(prefill?.defaultAddress?.line1 ?? "");
+  const [line2, setLine2] = useState(prefill?.defaultAddress?.line2 ?? "");
+  const [city, setCity] = useState(prefill?.defaultAddress?.city ?? "");
+  const [region, setRegion] = useState(prefill?.defaultAddress?.state ?? "");
+  const [zip, setZip] = useState(prefill?.defaultAddress?.zip ?? "");
   const [leaveAtDoor, setLeaveAtDoor] = useState(false);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [confirmed, setConfirmed] = useState<ConfirmedDelivery | null>(null);
@@ -414,8 +432,9 @@ function RealCheckoutForm({
   const currentKey = checkoutQuoteKey({ contact, fulfillment, delivery, couponRev, lines });
   const quotePending = !quote || quoteKey !== currentKey;
 
+  const savedLine1 = savedAddresses.find((address) => address.id === savedId)?.line1;
   useEffect(() => {
-    if (confirmed || line1.trim().length < 3 || fulfillment === "pickup") return;
+    if (confirmed || line1.trim().length < 3 || fulfillment === "pickup" || line1 === savedLine1) return;
     const controller = new AbortController();
     suggestAbort.current = controller;
     const timer = setTimeout(() => {
@@ -432,7 +451,7 @@ function RealCheckoutForm({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [line1, fulfillment, confirmed]);
+  }, [line1, fulfillment, confirmed, savedLine1]);
 
   useEffect(() => {
     let active = true;
@@ -717,6 +736,31 @@ function RealCheckoutForm({
     focusPaymentEntry(card);
   }
 
+  /** Swaps in a saved address's delivery notes, keeping any the shopper typed. */
+  function takeSavedNotes(next: string) {
+    setNotes((current) => (current === "" || current === savedNotes ? next : current));
+    setSavedNotes(next);
+  }
+
+  function chooseSaved(id: string) {
+    const address = savedAddresses.find((row) => row.id === id) ?? null;
+    setSavedId(id);
+    setLine1(address?.line1 ?? "");
+    setLine2(address?.line2 ?? "");
+    setCity(address?.city ?? "");
+    setRegion(address?.state ?? "");
+    setZip(address?.zip ?? "");
+    setConfirmed(null);
+    setSuggestions([]);
+    takeSavedNotes(address?.notes ?? "");
+  }
+
+  function chooseFulfillment(next: Fulfillment) {
+    const notesFor = next === "pickup" ? "" : savedAddresses.find((address) => address.id === savedId)?.notes ?? "";
+    takeSavedNotes(notesFor);
+    setFulfillment(next);
+  }
+
   function refreshCheckout() {
     setIssue(null);
     retryQuote();
@@ -730,7 +774,7 @@ function RealCheckoutForm({
       lines={lines}
       subtotal={subtotal}
       fulfillment={fulfillment}
-      setFulfillment={chosenByShopper(setFulfillment)}
+      setFulfillment={chosenByShopper(chooseFulfillment)}
       deliveryEditor={
         <StoreDeliveryFields
           line1={line1}
@@ -810,7 +854,9 @@ function RealCheckoutForm({
           onEdit={() => {
             setConfirmed(null);
             setSuggestions([]);
+            setSavedId("");
           }}
+          saved={{ addresses: savedAddresses, chosenId: savedId, onChoose: chooseSaved }}
         />
       }
       contact={contact}
@@ -851,6 +897,7 @@ function RealCheckoutForm({
       onRetryQuote={retryQuote}
       issue={issue}
       onClearIssue={() => setIssue(null)}
+      onRemoveLines={(keys) => keys.forEach((key) => cart.remove(key))}
       onUseAnotherCard={switchCard}
       onRefresh={refreshCheckout}
       submitAttempt={submitAttempt}
@@ -1058,6 +1105,8 @@ interface CheckoutLayoutProps {
   searching: boolean;
   notes: string;
   setNotes: (n: string) => void;
+  /** Real checkout: takes lines out of the basket, for items that can't ship (#763). */
+  onRemoveLines?: (keys: string[]) => void;
   leaveAtDoor: boolean;
   setLeaveAtDoor: (v: boolean) => void;
   schedule: boolean;
@@ -1149,7 +1198,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
   const {
     settings, lines, fulfillment, setFulfillment,
     contact, setContact, address, setAddress, query, setQuery,
-    suggestions, setSuggestions, searching, notes, setNotes,
+    suggestions, setSuggestions, searching, notes, setNotes, onRemoveLines,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
     slot, setSlot, slots, slotRequired = false, cateringLead, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage, coupon,
@@ -1194,6 +1243,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     target.focus({ preventScroll: true });
   }, [submitAttempt, payState, contact, issue]);
 
+  // Items that can't ship are named from the live estimate, before Pay, and after a refused Pay (#763).
+  const shipIssue = fulfillment !== "ship"
+    ? null
+    : issue?.section === "shipping"
+      ? issue
+      : quote && !quotePending
+        ? issueFromProblems(quote.problems.filter((problem) => problem.code === "cannot-ship"))
+        : null;
   const actions: IssueActions = {
     useAnotherCard: onUseAnotherCard,
     refresh: onRefresh,
@@ -1205,6 +1262,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     choosePickup: settings.pickupEnabled && fulfillment !== "pickup" ? () => {
       onClearIssue();
       setFulfillment("pickup");
+    } : undefined,
+    removeLines: onRemoveLines && shipIssue?.lineKeys.length ? () => {
+      onClearIssue();
+      onRemoveLines(shipIssue.lineKeys);
+    } : undefined,
+    chooseDelivery: settings.storeDeliveryEnabled && fulfillment === "ship" ? () => {
+      onClearIssue();
+      setFulfillment("store-delivery");
     } : undefined,
   };
   const issueHere = (section: IssueSection) =>
@@ -1328,6 +1393,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               ) : deliveryEditor ? (
                 <>
                   {/* Above the form: a basket that cannot ship says so before any typing. */}
+                  {shipIssue && <CheckoutIssueAlert issue={shipIssue} id={issueId("shipping")} actions={actions} />}
                   {shipping && !shipRate && courierReasons.length > 0 && !quotePending && (
                     <p className={styles.shipNote} role="status">
                       <CircleAlert size={18} aria-hidden />

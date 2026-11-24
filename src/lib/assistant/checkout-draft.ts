@@ -1,6 +1,7 @@
 import { platform, storeScoped } from "../db";
-import type { PickupSlot } from "../order/pickup-slots";
-import { pickupSlotsFor } from "../order/slot-schedule";
+import { slotOptions } from "../checkout/slots";
+import { ASAP_SLOT, type PickupSlot } from "../order/pickup-slots";
+import { describeQueue, storeAvailability } from "../order/store-queue";
 
 /**
  * The assistant's checkout draft (#247): the pickup slot chosen in chat. The
@@ -22,14 +23,26 @@ export function parseCheckoutDraft(value: unknown): CheckoutDraft | null {
 export async function readPickupStore(storeId: string) {
   return platform.store.findUnique({
     where: { id: storeId },
-    select: { hours: true, timezone: true, prepTimeMinutes: true, pickupEnabled: true, minimumOrderCents: true, pickupSlotSettings: true },
+    select: { hours: true, timezone: true, prepTimeMinutes: true, pickupEnabled: true, minimumOrderCents: true, pickupSlotSettings: true, storeDeliverySlotSettings: true },
   });
 }
 
-/** The store's pickup slots (capacity is checked at checkout); empty when the store is missing. */
-export async function offeredPickupSlots(storeId: string, now: Date): Promise<PickupSlot[]> {
-  const store = await readPickupStore(storeId);
-  return store ? pickupSlotsFor(store, now, new Map()) : [];
+type PickupStoreRow = NonNullable<Awaited<ReturnType<typeof readPickupStore>>>;
+
+/**
+ * The pickup times the checkout page offers this cart (#764): ASAP, or "when the store opens" while it is
+ * closed, unless a time is required; then the same times as the page's Schedule pickup. None when the store
+ * takes no orders now or pickup is off.
+ */
+export async function offeredPickupSlots(storeId: string, store: PickupStoreRow, cartId: string, now: Date): Promise<PickupSlot[]> {
+  const availability = storeAvailability(store.hours, store.timezone, now);
+  if (!store.pickupEnabled || availability.kind === "unavailable") return [];
+  const options = await slotOptions(storeScoped(storeId), storeId, store, "pickup", now, cartId);
+  if (options.required) return options.slots;
+  const prepMinutes = options.prepMinutes ?? store.prepTimeMinutes;
+  const queue = availability.kind === "queued" ? describeQueue(availability.clockStartsAt, prepMinutes, store.timezone) : null;
+  const asap = queue ? { id: ASAP_SLOT.id, label: `When the store opens: ${queue.opensAt}, ready about ${queue.readyAt}` } : ASAP_SLOT;
+  return [asap, ...options.slots];
 }
 
 export async function writeCheckoutDraft(storeId: string, conversationId: string, draft: CheckoutDraft): Promise<void> {
@@ -49,7 +62,7 @@ export async function readConversationDraft(storeId: string, conversationId: str
 
 /**
  * The draft for this cart's conversation, with its slot re-checked against
- * today's offered slots. A slot no longer offered is dropped, so checkout
+ * the offered slots. A slot no longer offered is dropped, so checkout
  * never pre-selects a time the store cannot meet.
  */
 export async function loadCheckoutDraft(
@@ -63,6 +76,7 @@ export async function loadCheckoutDraft(
   });
   const draft = parseCheckoutDraft(row?.checkoutDraft);
   if (!draft) return null;
-  const slot = (await offeredPickupSlots(storeId, now)).find((offered) => offered.id === draft.slot);
+  const store = await readPickupStore(storeId);
+  const slot = store ? (await offeredPickupSlots(storeId, store, cartId, now)).find((offered) => offered.id === draft.slot) : undefined;
   return slot ? { fulfillment: "pickup", slot } : null;
 }

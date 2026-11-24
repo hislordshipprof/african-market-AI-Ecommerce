@@ -93,6 +93,8 @@ export type FlowErrorCode =
   | "minimum-order"
   | "max-quantity"
   | "ineligible"
+  /** One line of the basket can't ship; lineKey names it (#763). */
+  | "cannot-ship"
   | "quote-changed"
   | "invalid-contact";
 export interface FlowProblem {

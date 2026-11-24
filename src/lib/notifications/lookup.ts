@@ -2,12 +2,16 @@ import { storeScoped } from "../db";
 
 const orderInclude = {
   customer: true,
-  coupon: { select: { code: true } },
+  coupon: { select: { code: true, kind: true, percentOff: true, amountOffCents: true } },
   lines: {
     include: {
       listingVariant: { include: { listing: { include: { masterProduct: { select: { name: true } } } } } },
+      // The receipt names a swap's replacement (#762).
+      substitutedVariant: { include: { listing: { include: { masterProduct: { select: { name: true } } } } } },
     },
   },
+  // The order page gives the answer deadline of a short item (#762).
+  substitutionRequests: { where: { status: "pending" }, select: { expiresAt: true }, orderBy: { expiresAt: "asc" }, take: 1 },
   issueReports: { select: { state: true, amountCents: true } },
   // The tracking page names what was refunded (#736).
   refundRequests: { select: { amountCents: true, providerStatus: true } },

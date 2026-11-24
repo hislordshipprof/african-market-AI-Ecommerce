@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines } from "./staff-copy";
+import { fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines, swapChoiceLine } from "./staff-copy";
 
 describe("captured line", () => {
   it("shows Captured only after the money is captured", () => {
@@ -18,21 +18,59 @@ describe("captured line", () => {
 });
 
 describe("storeOrderBreakdown", () => {
-  const base = { subtotalCents: 4194, discountCents: 0, serviceFeeCents: 126, tipCents: 0, deliveryFeeCents: 0, taxCents: 0, coupon: null };
+  const base = {
+    subtotalCents: 4194, discountCents: 0, serviceFeeCents: 126, tipCents: 0, deliveryFeeCents: 0, taxCents: 0, coupon: null,
+    serviceFeeBps: 300, serviceFeeMinCents: 99, serviceFeeMaxCents: 299, capturedAmountCents: null,
+    lines: [{ status: "pending", qtyOrdered: 6, qtyPicked: 0, unitPriceCents: 699, substitutedUnitPriceCents: null }],
+  };
   const sum = (lines: { cents: number }[]) => lines.reduce((total, line) => total + line.cents, 0);
 
+  // #1006 from walkthrough 3: Plantain Chips refunded, Egusi swapped for Ofada Rice, Suya Spice for Cameroon Pepper.
+  // The two swap prices are reconstructed: the screenshots give only their sum, $14.98.
+  const walk1006 = {
+    ...base,
+    fulfillment: "pickup",
+    subtotalCents: 3844,
+    discountCents: 384,
+    coupon: { code: "WALK10", kind: "percent", percentOff: 10, amountOffCents: null },
+    serviceFeeCents: 104,
+    lines: [
+      { status: "refunded", qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 399, substitutedUnitPriceCents: null },
+      { status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 199, substitutedUnitPriceCents: null },
+      { status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 1299, substitutedUnitPriceCents: null },
+      { status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 349, substitutedUnitPriceCents: null },
+      { status: "substituted", qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 1099, substitutedUnitPriceCents: 899 },
+      { status: "substituted", qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 499, substitutedUnitPriceCents: 599 },
+    ],
+  };
+
+  it("after a short pick and capture, the lines add up to what was captured (#762, #1006)", () => {
+    // Capture rewrote the discount and fee on $33.45 of goods: 33.45 − 3.35 + 0.99 = 31.09.
+    const view = storeOrderBreakdown({ ...walk1006, discountCents: 335, serviceFeeCents: 99, capturedAmountCents: 3109 });
+    expect(view.lines.map((line) => [line.key, line.cents])).toEqual([["subtotal", 3345], ["discount", -335], ["service-fee", 99]]);
+    expect(view.total).toEqual({ label: "Total", cents: 3109 });
+    expect(sum(view.lines)).toBe(3109);
+  });
+
+  it("before capture, an answered short shows the expected total from the goods now in the order (#762)", () => {
+    const view = storeOrderBreakdown(walk1006);
+    expect(view.lines.map((line) => [line.key, line.cents])).toEqual([["subtotal", 3345], ["discount", -335], ["service-fee", 99]]);
+    expect(view.total).toEqual({ label: "Expected total", cents: 3109 });
+  });
+
   it("shows the delivery fee, so a store-delivery order's lines add up to its total (#1007)", () => {
-    const lines = storeOrderBreakdown({ ...base, fulfillment: "store-delivery", deliveryFeeCents: 499 });
+    const { lines, total } = storeOrderBreakdown({ ...base, fulfillment: "store-delivery", deliveryFeeCents: 499 });
     expect(lines).toContainEqual(expect.objectContaining({ label: "Delivery fee", cents: 499 }));
     expect(sum(lines)).toBe(4819);
+    expect(total).toEqual({ label: "Total", cents: 4819 });
   });
 
   it("adds every stored part of the total: promo, tax, courier fee and tip", () => {
-    const lines = storeOrderBreakdown({
+    const { lines } = storeOrderBreakdown({
       ...base,
       fulfillment: "courier",
       discountCents: 300,
-      coupon: { code: "SAVE3" },
+      coupon: { code: "SAVE3", kind: "fixed", percentOff: null, amountOffCents: 300 },
       taxCents: 210,
       deliveryFeeCents: 799,
       tipCents: 500,
@@ -44,10 +82,10 @@ describe("storeOrderBreakdown", () => {
   });
 
   it("calls a shipped order's fee shipping and leaves out zero lines on pickup", () => {
-    expect(storeOrderBreakdown({ ...base, fulfillment: "ship", deliveryFeeCents: 1250 })).toContainEqual(
+    expect(storeOrderBreakdown({ ...base, fulfillment: "ship", deliveryFeeCents: 1250 }).lines).toContainEqual(
       expect.objectContaining({ label: "Shipping", cents: 1250 }),
     );
-    expect(storeOrderBreakdown({ ...base, fulfillment: "pickup" }).map((line) => line.label)).toEqual([
+    expect(storeOrderBreakdown({ ...base, fulfillment: "pickup" }).lines.map((line) => line.label)).toEqual([
       "Subtotal",
       "Service fee (platform)",
     ]);
@@ -174,5 +212,17 @@ describe("storePayoutLines", () => {
 
   it("reads exactly as before when the order has no refunds", () => {
     expect(storePayoutLines({ ...order1007, refundRequests: [] })).toEqual(storePayoutLines(order1007));
+  });
+});
+
+describe("swapChoiceLine", () => {
+  it("tells staff, before they tap Short, what the customer chose if the item is short (#762)", () => {
+    expect(swapChoiceLine("exact_only", null)).toBe("If short: exact item only, refund it");
+    expect(swapChoiceLine("store_suggests", null)).toBe("If short: the customer lets you suggest a swap");
+    expect(swapChoiceLine("named_substitute", "Cameroon Pepper")).toBe("If short: swap for Cameroon Pepper");
+  });
+
+  it("falls back to a refund when a named substitute is gone", () => {
+    expect(swapChoiceLine("named_substitute", null)).toBe("If short: exact item only, refund it");
   });
 });
