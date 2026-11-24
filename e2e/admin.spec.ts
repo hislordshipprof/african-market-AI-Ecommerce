@@ -792,6 +792,7 @@ test.describe("Admin shell (authenticated)", () => {
       ["count-orders-to-check", "/admin/orders/check"],
       ["count-messages", "/admin/support"],
       ["count-catalog-review", "/admin/catalog/review"],
+      ["count-applications", "/admin/applications"],
     ];
     for (const [testId, href] of links) {
       await expect(page.getByTestId(testId)).toHaveAttribute("href", href);

@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { QRCodeSVG } from "qrcode.react";
 import { authClient } from "@/lib/auth-client";
 import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
 import { Button } from "@/components/ui/button";
@@ -23,12 +22,15 @@ import {
   CopyRow,
   NETWORK_ERROR,
   PasswordInput,
+  QrCode,
   TOTP_ERRORS,
   authErrorMessage,
   fieldValue,
   NOT_READY_LABEL,
   focusField,
   missingField,
+  setupKeyFrom,
+  spacedSetupKey,
   totpDigits,
   useHydrated,
 } from "../auth-form-parts";
@@ -51,23 +53,6 @@ const ENROLL_CODE_ERRORS = {
 // The submit button that had focus is gone after the step changes. Focus lands on the
 // first instruction, because focusing the code field would open a phone keyboard over the page.
 const focusOnMount = (instruction: HTMLParagraphElement | null) => instruction?.focus();
-
-function setupKeyFrom(totpUri: string): string | null {
-  try {
-    return new URL(totpUri).searchParams.get("secret");
-  } catch {
-    return null;
-  }
-}
-
-function QrCode({ value }: { value: string }) {
-  return (
-    // A QR code has to stay dark on white to scan, in both color schemes.
-    <div className="mx-auto w-fit rounded-xl bg-white p-3">
-      <QRCodeSVG value={value} size={136} level="M" title="Authenticator setup code" />
-    </div>
-  );
-}
 
 export default function Enroll2FA() {
   const router = useRouter();
@@ -236,7 +221,7 @@ export default function Enroll2FA() {
                       <CopyRow
                         wrap
                         label="Setup key"
-                        display={setupKey.replace(/(.{4})(?=.)/g, "$1 ")}
+                        display={spacedSetupKey(setupKey)}
                         value={setupKey}
                       />
                     </div>

@@ -1979,7 +1979,7 @@ export async function claimImportRow(
  * The public /sell form's one write (#554): a new, undecided application. RLS lets this context insert and nothing
  * else, so the insert returns no row; a duplicate pending email or phone still raises P2002.
  */
-export async function insertStoreApplication(data: Omit<Prisma.StoreApplicationCreateManyInput, "id">): Promise<void> {
+export async function insertStoreApplication(data: Prisma.StoreApplicationCreateManyInput & { id: string }): Promise<void> {
   await prisma.$transaction([
     prisma.$executeRaw`SET LOCAL ROLE app_user`,
     prisma.storeApplication.createMany({ data: [data] }),
