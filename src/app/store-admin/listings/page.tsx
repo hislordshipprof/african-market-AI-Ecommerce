@@ -1,19 +1,25 @@
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { listListings } from "@/lib/listing/service";
+import { platform } from "@/lib/db";
 import { ListingManagement } from "./listing-management";
 
 export default async function ListingsPage() {
   const session = await requireStoreOwner();
-  const listings = await listListings(session.store.id, true);
+  const [listings, aisles] = await Promise.all([
+    listListings(session.store.id, true),
+    platform.category.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true, name: true } }),
+  ]);
 
   return (
     <ListingManagement
       storeName={session.store.name}
       storeSlug={session.store.slug}
       storeShips={session.store.shippingHandlingDays != null}
+      aisles={aisles}
       listings={listings.map((l) => ({
         id: l.id,
         masterProductId: l.masterProductId,
+        categoryId: l.categoryId,
         customName: l.customName,
         masterProductName: l.masterProduct?.name ?? null,
         price: l.price,

@@ -133,6 +133,49 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     expect(events[0].delta).toBe(10);
   });
 
+  // #782 AC1: a custom listing has an aisle the owner picks and can change.
+  it("stores and changes the aisle of a custom listing", async () => {
+    const [oils, spices] = await Promise.all([
+      rawPrisma.category.findUniqueOrThrow({ where: { slug: "oils-and-butters" } }),
+      rawPrisma.category.findUniqueOrThrow({ where: { slug: "spices-and-seasonings" } }),
+    ]);
+    const listing = await createListing({
+      storeId,
+      customName: "Red Palm Oil",
+      categoryId: oils.id,
+      price: 900,
+      stockMode: "counted",
+      qty: 4,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1L", price: 900, weightG: 1000 }],
+      actor,
+    });
+    expect(listing.categoryId).toBe(oils.id);
+
+    await updateListing({ storeId, listingId: listing.id, categoryId: spices.id, actor });
+    const scoped = storeScoped(storeId);
+    expect((await scoped.listing.findUnique({ where: { id: listing.id } }))?.categoryId).toBe(spices.id);
+
+    await updateListing({ storeId, listingId: listing.id, categoryId: null, actor });
+    expect((await scoped.listing.findUnique({ where: { id: listing.id } }))?.categoryId).toBeNull();
+  });
+
+  it("refuses an aisle that does not exist", async () => {
+    await expect(createListing({
+      storeId,
+      customName: "Mystery Aisle Item",
+      categoryId: "no-such-category",
+      price: 100,
+      stockMode: "counted",
+      qty: 1,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "Each", price: 100, weightG: 100 }],
+      actor,
+    })).rejects.toThrow("Choose an aisle from the list");
+  });
+
   it("updates listing price and creates audit entry", async () => {
     const listing = await createListing({
       storeId,

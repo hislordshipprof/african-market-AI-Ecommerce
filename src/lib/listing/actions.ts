@@ -23,6 +23,7 @@ const listingField = z.string().max(500).nullable();
 const listingFormSchema = z.strictObject({
   customName: listingField,
   masterProductId: listingField,
+  categoryId: z.string().max(200).nullable(),
   price: z.string().max(40).nullable(),
   stockMode: z.string().max(20).nullable(),
   qty: z.string().max(20).nullable(),
@@ -43,6 +44,7 @@ const listingFormSchema = z.strictObject({
 const LISTING_FIELDS = [
   "customName",
   "masterProductId",
+  "categoryId",
   "price",
   "stockMode",
   "qty",
@@ -69,6 +71,11 @@ function readListingForm(formData: FormData) {
   const parsed = parseInput(listingFormSchema, readFormFields(formData, LISTING_FIELDS));
   if (!parsed.ok) return null;
   return parsed.data;
+}
+
+/** The aisle is the owner's pick only for a custom listing; a master product brings its own. */
+function aisleFor(masterProductId: string | null, categoryId: string | null): string | null {
+  return masterProductId ? null : categoryId || null;
 }
 
 /** A count is a whole number the owner typed. Blank or bad input is refused, never read as 0. */
@@ -185,6 +192,7 @@ export async function createListingAction(formData: FormData) {
       storeId: session.store.id,
       customName: customName || null,
       masterProductId: masterProductId || null,
+      categoryId: aisleFor(masterProductId, fields.categoryId),
       price: cheapestPrice(variants),
       stockMode: stockMode as StockMode,
       qty,
@@ -270,6 +278,7 @@ export async function updateListingAction(formData: FormData) {
       listingId,
       ...(customName !== null && { customName: customName.trim() || null }),
       ...(masterProductId !== null && { masterProductId: masterProductId || null }),
+      ...(fields.categoryId !== null && { categoryId: aisleFor(masterProductId, fields.categoryId) }),
       ...(parsedVariants ? { price: cheapestPrice(parsedVariants) } : priceRaw !== null && { price: Number(priceRaw) }),
       ...(stockMode !== null && { stockMode: stockMode as StockMode }),
       ...(qtyRaw !== null && { qty: Number(qtyRaw) }),

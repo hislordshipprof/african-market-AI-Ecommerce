@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { shippableRefusal } from "../shipping/eligibility";
-import { storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lockListingVariantRows } from "../db";
+import { platform, storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lockListingVariantRows } from "../db";
 import { MAX_PREP_MINUTES, PREPARED_NEEDS_ALLERGENS, preparedSaleBlocked, type PreparedKind } from "./prepared";
 import { cateringFields } from "./catering";
 import { ListingInputError } from "./parse-variants";
@@ -127,6 +127,8 @@ export interface CreateListingInput {
   storeId: string;
   masterProductId?: string | null;
   customName?: string | null;
+  /** #782: the aisle of a custom listing; a master product's category wins. */
+  categoryId?: string | null;
   price: number;
   stockMode: StockMode;
   qty?: number | null;
@@ -144,6 +146,14 @@ export interface CreateListingInput {
   actor: Actor;
   /** Where the listing came from, recorded on its audit row (e.g. `photo_draft`). */
   source?: string;
+}
+
+/** The aisle id when it names a platform category; anything else is refused. The FK guards a later delete. */
+async function checkedAisle(categoryId: string | null): Promise<string | null> {
+  if (categoryId === null) return null;
+  const category = await platform.category.findUnique({ where: { id: categoryId }, select: { id: true } });
+  if (!category) throw new ListingInputError("Choose an aisle from the list");
+  return category.id;
 }
 
 /** Prepared food carries whole prep minutes up to MAX_PREP_MINUTES; grocery carries none. */
@@ -169,12 +179,14 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
   });
   const prepared = preparedFields(input.prepared ?? null, input.prepMinutes ?? null);
   const catering = cateringFields(prepared.prepared, input.cateringLeadHours ?? null, input.cateringMinQty ?? null);
+  const categoryId = await checkedAisle(input.categoryId ?? null);
 
   const listing = await tx.listing.create({
     data: {
       storeId: input.storeId,
       masterProductId: input.masterProductId ?? null,
       customName: input.customName ?? null,
+      categoryId,
       price: input.price,
       stockMode: stock.stockMode,
       qty: stock.qty,
@@ -214,6 +226,7 @@ export async function createListingInTransaction(tx: ListingTx, input: CreateLis
       after: {
         customName: listing.customName,
         masterProductId: listing.masterProductId,
+        categoryId: listing.categoryId,
         price: listing.price,
         stockMode: listing.stockMode,
         qty: listing.qty,
@@ -238,6 +251,7 @@ export interface UpdateListingInput {
   listingId: string;
   customName?: string | null;
   masterProductId?: string | null;
+  categoryId?: string | null;
   price?: number;
   stockMode?: StockMode;
   qty?: number | null;
@@ -279,6 +293,7 @@ export async function updateListing(input: UpdateListingInput) {
     const data: Record<string, unknown> = {};
     if (input.customName !== undefined) data.customName = input.customName;
     if (input.masterProductId !== undefined) data.masterProductId = input.masterProductId;
+    if (input.categoryId !== undefined) data.categoryId = await checkedAisle(input.categoryId);
     if (input.price !== undefined) data.price = input.price;
     if (input.stockMode !== undefined) data.stockMode = input.stockMode;
     if (input.frozen !== undefined) data.frozen = input.frozen;
