@@ -2,10 +2,13 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import directory from "@/components/directory/directory.module.css";
+import { PLAN_NAMES, PLAN_PRICES_USD } from "@/lib/billing/plan";
 import { SellForm } from "./sell-form";
 import styles from "./sell.module.css";
 
 export const metadata = { title: "Sell on African Markets" };
+
+const PLANS = `Plans are ${PLAN_NAMES.starter} at $${PLAN_PRICES_USD.starter} a month or ${PLAN_NAMES.pro} at $${PLAN_PRICES_USD.pro} a month.`;
 
 const STEPS = [
   { title: "Apply", body: "Tell us about your store. It takes about three minutes." },
@@ -26,7 +29,8 @@ export default async function SellPage() {
         <section className={styles.intro} aria-labelledby="sell-title">
           <h1 id="sell-title" className={directory.title}>Sell on African Markets</h1>
           <p className={directory.lede}>
-            Your own online shop under your store&apos;s name, for pickup and delivery. No commission on your sales.
+            Your own online shop under your store&apos;s name, for pickup and delivery. No commission on your sales.{" "}
+            {PLANS}
           </p>
           <ol className={styles.steps}>
             {STEPS.map((step, index) => (
