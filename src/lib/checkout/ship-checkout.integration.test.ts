@@ -71,6 +71,9 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     vi.stubEnv("E2E_FAKE_STRIPE", "1");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("CI", "true");
+    // Placement asks whether a label can be bought and kept (#765): the allowed Shippo fake and a proof bucket.
+    vi.stubEnv("E2E_FAKE_SHIPPO", "1");
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
     resetFakeCheckoutPayments();
     actor = { ...actor, id: (await raw.user.create({ data: { id: crypto.randomUUID(), email: actor.email, name: "Owner", emailVerified: true } })).id };
     await writeGeocodeCache(AR, { ...AR, formattedAddress: "500 W MARKHAM ST, LITTLE ROCK, AR, 72201", ...AR_POINT });
@@ -177,6 +180,39 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
       expect(quote.problems).toEqual([expect.objectContaining({ code: "ineligible", message: expect.stringMatching(message) })]);
       expect(quote.shipping).toBeUndefined();
       expect(fetch.calls).toHaveLength(0);
+    }
+  });
+
+  it("#765 AC1: Ship is refused at the quote and at placement while a label cannot be bought and kept (no Shippo, or no proof bucket)", async () => {
+    const unavailable = [expect.objectContaining({ code: "ineligible", message: expect.stringMatching(/^Shipping isn't available/) })];
+    try {
+      vi.stubEnv("R2_PROOF_BUCKET", "");
+      const noBucket = await seed();
+      const { fetch, provider } = shippo();
+      const refused = await quoteCheckout(noBucket.store.id, 0, noBucket.cartId, CONTACT, "ship", AR, { shipping: provider });
+      expect(refused.problems).toEqual(unavailable);
+      expect(refused.shipping).toBeUndefined();
+      expect(fetch.calls).toHaveLength(0);
+      vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
+
+      const noShippo = await seed();
+      const withoutShippo = await quoteCheckout(noShippo.store.id, 0, noShippo.cartId, CONTACT, "ship", AR, { shipping: null });
+      expect(withoutShippo.problems).toEqual(unavailable);
+
+      // The hold was taken with both in place; either one gone before placement makes no order.
+      for (const [name, value] of [["R2_PROOF_BUCKET", "proof-bucket"], ["E2E_FAKE_SHIPPO", "1"]] as const) {
+        const { store, cartId } = await seed();
+        const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", AR, { shipping: shippo().provider });
+        expect(quote.problems).toEqual([]);
+        const paymentIntentId = await payAndSave(store.id, cartId, quote.holdCents);
+        vi.stubEnv(name, "");
+        await expect(placeOrder(store.id, 0, cartId, CONTACT, "ship", null, null, paymentIntentId)).rejects.toThrow(BasketChangedError);
+        expect(await storeScoped(store.id).order.count()).toBe(0);
+        vi.stubEnv(name, value);
+      }
+    } finally {
+      vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
+      vi.stubEnv("E2E_FAKE_SHIPPO", "1");
     }
   });
 

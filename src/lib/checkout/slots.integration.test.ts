@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
@@ -35,9 +35,12 @@ describe.skipIf(!hasDb)("slot reservation at placeOrder (#565)", () => {
     raw = testPrismaClient();
     await raw.$connect();
     setStripeProvider({ ...fakeStripeProvider, cancelPaymentIntent: async (id) => ({ paymentIntentId: id, status: "canceled" }) });
+    // Store delivery is offered only while its proof photo can be kept (#765).
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     setStripeProvider(null);
     if (raw && storeIds.length > 0) {
       await raw.$transaction([

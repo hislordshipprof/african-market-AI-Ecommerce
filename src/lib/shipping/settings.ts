@@ -1,4 +1,5 @@
 import { platform } from "../db";
+import { deliveryProofBucket } from "../r2";
 import { fakeShippo } from "./shippo-fake";
 import { ShippoProvider } from "./shippo";
 import type { ShippingProvider } from "./provider";
@@ -20,4 +21,9 @@ export function shippingProvider(): ShippingProvider | null {
   if (process.env.SHIPPO_API_KEY) return new ShippoProvider();
   const fakeAllowed = !process.env.VERCEL && process.env.E2E_FAKE_SHIPPO === "1" && (process.env.CI === "true" || process.env.NODE_ENV !== "production");
   return fakeAllowed ? new ShippoProvider({ apiKey: FAKE_TOKEN, fetch: (fake ??= fakeShippo({ token: FAKE_TOKEN })) }) : null;
+}
+
+/** Ship is offered only while a label can be bought and its PDF kept (#765): Shippo, and the private proof bucket. */
+export function shippingReady(provider: ShippingProvider | null = shippingProvider()): boolean {
+  return provider !== null && deliveryProofBucket() !== null;
 }
