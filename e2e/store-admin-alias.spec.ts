@@ -52,9 +52,12 @@ test("store admin on the production alias: sign-in, sign-out, the new-order link
   const password = "AliasOwner-797!";
   const newPassword = "AliasOwner-797-new!";
   const userId = await insertStoreOwner({ email, password, authSecret, totpSecret: TOTP_SECRET });
-  const orderId = await inboxOrderId(1001);
-  const running = await startAliasServer(authSecret);
+  const running = await startAliasServer(authSecret).catch(async (error) => {
+    await deleteUser(userId);
+    throw error;
+  });
   try {
+    const orderId = await inboxOrderId(1001);
     const { context, page } = await aliasPage(browser, running.port);
     const prefetches: string[] = [];
     page.on("request", (request) => {
