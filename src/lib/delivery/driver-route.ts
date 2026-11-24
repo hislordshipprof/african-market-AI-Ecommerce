@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { lockStoreRow, platform, storeScoped, storeScopedTransaction } from "../db";
 import { haversineMiles } from "../address/geo";
+import { mapsUrl } from "../format";
 import { normalizeUsPhone } from "../notifications/phone";
 import { smsSender } from "../notifications/sms";
 import { providerSinkMode } from "../email/send";
@@ -217,7 +218,7 @@ export async function readDriverRoute(storeId: string, token: string, now: Date 
       leaveAtDoor: o.leaveAtDoor,
       frozen: o.lines.some((line) => line.listingVariant.listing.frozen),
       status: o.status,
-      mapsUrl: `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`,
+      mapsUrl: mapsUrl(address),
     };
     return { stop, lat: o.deliveryLat, lng: o.deliveryLng };
   });

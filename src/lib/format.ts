@@ -61,3 +61,16 @@ export function formatUsPhone(phone: string): string {
   if (local.length !== 10) return phone.trim();
   return `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`;
 }
+
+/** A `tel:` link for a phone; a 10-digit US number gets +1. */
+export function telHref(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `tel:+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `tel:+${digits}`;
+  return `tel:${phone.trim().startsWith("+") ? "+" : ""}${digits}`;
+}
+
+/** Google Maps directions to an address. */
+export function mapsUrl(address: string): string {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+}
