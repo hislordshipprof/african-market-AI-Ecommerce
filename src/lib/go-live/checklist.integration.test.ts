@@ -48,6 +48,7 @@ describe.skipIf(!hasDb)("go-live checklist (#555)", () => {
         stripeOnboardingStatus: "complete",
         hours: HOURS,
         timezone: "America/Chicago",
+        timezoneSetAt: new Date(),
         pickupEnabled: true,
       },
     });
@@ -148,6 +149,22 @@ describe.skipIf(!hasDb)("go-live checklist (#555)", () => {
         await raw.store.update({ where: { id: readyId }, data: { uberLocationId: null } });
       }
     });
+  });
+
+  it("hours count only once the owner or a platform admin saved the time zone (#786)", async () => {
+    // A store application guesses the zone from the address; that guess is not a saved zone.
+    const guessed = await raw.store.create({
+      data: { slug: `${RUN}-tz`, name: "Guessed Zone", status: "setup", hours: HOURS, timezone: "America/Chicago" },
+    });
+    try {
+      const before = await readGoLiveChecklist(guessed.id, NOW);
+      expect(before?.items.find((i) => i.key === "hours")).toEqual({ key: "hours", done: false, detail: "Time zone not confirmed" });
+      await platformAdminTransaction((tx) => tx.store.update({ where: { id: guessed.id }, data: { timezoneSetAt: NOW } }));
+      const after = await readGoLiveChecklist(guessed.id, NOW);
+      expect(after?.items.find((i) => i.key === "hours")?.done).toBe(true);
+    } finally {
+      await platformAdminTransaction((tx) => tx.store.delete({ where: { id: guessed.id } }));
+    }
   });
 
   it("returns null for an unknown store", async () => {

@@ -6,6 +6,8 @@ import { requirePlatformAdmin } from "@/lib/admin/session";
 import { getStoreNumber, storeNumberLinkMode } from "@/lib/whatsapp/store-number";
 import { setStoreMetroAction } from "@/lib/admin/metro-actions";
 import { listMetros } from "@/lib/admin/metros";
+import { headers } from "next/headers";
+import { storeWebAddress } from "@/lib/directory/links";
 import { StoreForm } from "../store-form";
 import { InviteOwnerForm } from "./invite-owner-form";
 import { WhatsAppNumberSection } from "./whatsapp-number-section";
@@ -30,6 +32,7 @@ export default async function EditStorePage({
   const store = await getStoreById(id);
   if (!store) notFound();
   const [subscription, storeNumber, metros] = await Promise.all([getStoreSubscription(store.id), getStoreNumber(store.id), listMetros()]);
+  const host = (await headers()).get("host");
   const plan = PLAN_NAMES[subscription?.plan ?? "starter"];
 
   return (
@@ -141,7 +144,7 @@ export default async function EditStorePage({
           failureCode: storeNumber.failureCode,
         }}
       />
-      <StoreForm mode="edit" store={store} />
+      <StoreForm mode="edit" store={store} webAddress={host ? storeWebAddress(store.slug, host) : null} />
       <div className="mt-8">
         <InviteOwnerForm storeId={store.id} />
       </div>

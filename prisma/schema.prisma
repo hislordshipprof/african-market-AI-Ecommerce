@@ -19,6 +19,8 @@ model Store {
   status                    String   @default("active")
   hours                     Json?
   timezone                  String   @default("America/New_York")
+  /// When the owner or a platform admin last saved the time zone (#786); null while it is only the default or a guess from the address.
+  timezoneSetAt             DateTime? @map("timezone_set_at")
   prepTimeMinutes           Int      @default(30) @map("prep_time_minutes")
   deliveryRadiusMi          Decimal  @default(8) @map("delivery_radius_mi")
   storeDeliveryEnabled      Boolean  @default(false) @map("store_delivery_enabled")
