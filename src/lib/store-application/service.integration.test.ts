@@ -10,7 +10,7 @@ vi.mock("next/cache", () => ({
 import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdmin, storeScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
-import { fakeAddressBackend, setAddressProvider } from "../address/provider";
+import { fakeAddressBackend, setAddressProvider, type AddressBackend } from "../address/provider";
 import { inngest } from "../inngest/client";
 import { COURIER_REGISTRATION_REQUESTED } from "../delivery/courier-registration";
 import { withAiOnboardingSettings } from "../admin/platform-settings-test-lock";
@@ -55,6 +55,7 @@ function ip(): string {
 }
 
 const actor = { id: `sell-admin-${run}`, email: `sell-admin-${run}@platform.test` };
+const platformAdminUser = { id: `sell-pa-${run}`, email: `sell-pa-${run}@platform.test` };
 
 describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
   let raw: PrismaClient;
@@ -62,6 +63,9 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
   beforeAll(async () => {
     raw = testPrismaClient();
     await raw.user.create({ data: { id: actor.id, email: actor.email, name: "Sell Admin", emailVerified: true } });
+    await raw.user.create({
+      data: { ...platformAdminUser, name: "Sell Platform Admin", emailVerified: true, role: "platform_admin" },
+    });
     setAddressProvider(fakeAddressBackend());
   });
 
@@ -69,6 +73,7 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     // Pending rows from earlier runs would push this run's rows out of the capped admin list.
     await platformAdmin.storeApplication.deleteMany({ where: { businessName: { startsWith: `Sell Test Market ${run}-` } } });
     setAddressProvider(null);
+    await raw.user.delete({ where: { id: platformAdminUser.id } });
     await raw.$disconnect();
   });
 
@@ -141,8 +146,74 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     const input = form(overrides);
     await submitStoreApplication(input, ip(), NOW);
     const [row] = await applicationsFor(input.email!);
+    clearTestSentEmails();
     return row;
   }
+
+  it("the applicant gets one confirmation and each platform admin one email; a duplicate or the honeypot sends nothing (#780)", async () => {
+    const input = form();
+    expect(await submitStoreApplication(input, ip(), NOW)).toEqual({ ok: true });
+    const applicant = input.email!.toLowerCase();
+    const toApplicant = getTestSentEmails().filter((m) => m.to === applicant);
+    expect(toApplicant).toHaveLength(1);
+    expect(toApplicant[0].subject).toContain("We have your application");
+    expect(toApplicant[0].html).toContain(input.businessName);
+    const toAdmin = getTestSentEmails().filter((m) => m.to === platformAdminUser.email);
+    expect(toAdmin).toHaveLength(1);
+    expect(toAdmin[0].subject).toContain(input.businessName!);
+    expect(toAdmin[0].html).toContain("/admin/applications");
+
+    expect(await submitStoreApplication({ ...input }, ip(), NOW)).toEqual({ ok: true });
+    expect(getTestSentEmails().filter((m) => m.to === applicant)).toHaveLength(1);
+    expect(getTestSentEmails().filter((m) => m.to === platformAdminUser.email)).toHaveLength(1);
+
+    const bot = form({ fax: "spam" });
+    await submitStoreApplication(bot, ip(), NOW);
+    expect(getTestSentEmails().filter((m) => m.to === bot.email!.toLowerCase())).toHaveLength(0);
+  });
+
+  it("an application is kept when its emails fail (#780)", async () => {
+    setEmailSenderForTests({ send: async () => { throw new Error("provider down"); } });
+    const input = form();
+    expect(await submitStoreApplication(input, ip(), NOW)).toEqual({ ok: true });
+    expect(await applicationsFor(input.email!)).toHaveLength(1);
+  });
+
+  it("approve sets the store's time zone from its address: Houston, El Paso, New York (#780)", async () => {
+    const points: Record<string, { lat: number; lng: number }> = {
+      HOUSTON: { lat: 29.7385, lng: -95.3796 },
+      "EL PASO": { lat: 31.7619, lng: -106.485 },
+      "NEW YORK": { lat: 40.7128, lng: -74.006 },
+    };
+    const backend: AddressBackend = {
+      suggest: async () => [],
+      locate: async (parts) => {
+        const point = points[parts.city.toUpperCase()];
+        if (!point) return { ok: false, code: "no-match" };
+        const match = { line1: parts.line1, city: parts.city, state: parts.state, zip: parts.zip, formattedAddress: parts.line1, ...point };
+        return { ok: true, match };
+      },
+    };
+    setAddressProvider(backend);
+    try {
+      const cases = [
+        { city: "Houston", state: "TX", zip: "77002", zone: "America/Chicago" },
+        { city: "El Paso", state: "TX", zip: "79901", zone: "America/Denver" },
+        { city: "New York", state: "NY", zip: "10007", zone: "America/New_York" },
+        // No geocode: the state's main zone, not New York's.
+        { city: "Nowhere", state: "TX", zip: "75001", zone: "America/Chicago" },
+      ];
+      for (const [index, place] of cases.entries()) {
+        const app = await pending({ city: place.city, state: place.state, zip: place.zip });
+        const result = await approveStoreApplication(app.id, `sell-${run}-tz-${index}`, actor);
+        if (!result.ok) throw new Error(result.error);
+        const store = await platformAdmin.store.findUniqueOrThrow({ where: { id: result.storeId } });
+        expect({ city: place.city, timezone: store.timezone }).toEqual({ city: place.city, timezone: place.zone });
+      }
+    } finally {
+      setAddressProvider(fakeAddressBackend());
+    }
+  });
 
   it("approve creates one store in setup, invites the owner, queues courier registration and records one audit row, even when approved twice at once", async () => {
     vi.stubEnv("INNGEST_EVENT_KEY", "test-key");

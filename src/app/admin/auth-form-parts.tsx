@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore, type ComponentProps } from "react";
-import { ArrowLeft, Check, CircleAlert, Copy, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Copy, Download, Eye, EyeOff } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,6 +102,28 @@ export function focusField(id: string) {
   const field = document.getElementById(id);
   field?.focus();
   if (field instanceof HTMLInputElement) field.select();
+}
+
+export function setupKeyFrom(totpUri: string): string | null {
+  try {
+    return new URL(totpUri).searchParams.get("secret");
+  } catch {
+    return null;
+  }
+}
+
+/** Groups of four, the way authenticator apps ask for a key typed by hand. */
+export function spacedSetupKey(setupKey: string): string {
+  return setupKey.replace(/(.{4})(?=.)/g, "$1 ");
+}
+
+export function QrCode({ value }: { value: string }) {
+  return (
+    // A QR code has to stay dark on white to scan, in both color schemes.
+    <div className="mx-auto w-fit rounded-xl bg-white p-3">
+      <QRCodeSVG value={value} size={136} level="M" title="Authenticator setup code" />
+    </div>
+  );
 }
 
 export function BackArrow() {
@@ -300,6 +323,17 @@ export function SecondStepForm({
   );
 }
 
+function downloadBackupCodes(codes: string[]) {
+  const text = `${AUTHENTICATOR_ENTRY} backup codes\nEach code signs you in once.\n\n${codes.join("\n")}\n`;
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "backup-codes.txt";
+  link.click();
+  // Safari can drop the download if the URL is revoked in the same task.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Shown once, right after setup: the only time the backup codes can be read. */
 export function BackupCodesNotice({ codes }: { codes: string[] }) {
   return (
@@ -317,6 +351,15 @@ export function BackupCodesNotice({ codes }: { codes: string[] }) {
         ))}
       </ul>
       <CopyRow label="Backup codes" display={`${codes.length} codes`} value={codes.join("\n")} />
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => downloadBackupCodes(codes)}
+        className="h-11 cursor-pointer rounded-full"
+      >
+        <Download aria-hidden="true" />
+        Download backup codes
+      </Button>
     </section>
   );
 }

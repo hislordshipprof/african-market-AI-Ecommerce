@@ -13,11 +13,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { QRCodeSVG } from "qrcode.react";
 import { UserPlus, ShieldCheck } from "lucide-react";
 import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
+import {
+  BackupCodesNotice,
+  CopyRow,
+  QrCode,
+  setupKeyFrom,
+  spacedSetupKey,
+} from "@/app/admin/auth-form-parts";
 
-type Step = "signup" | "totp-enroll" | "totp-verify" | "accepting";
+type Step = "signup" | "totp-enroll" | "totp-verify" | "accepting" | "backup-codes";
 
 interface Props {
   token: string;
@@ -40,6 +46,7 @@ export function InviteAcceptForm({
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [totpUri, setTotpUri] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -82,7 +89,11 @@ export function InviteAcceptForm({
         return;
       }
 
-      setTotpUri((enrollResult.data as Record<string, unknown>)?.totpURI as string ?? "");
+      const enrolled = enrollResult.data;
+      if (enrolled && "totpURI" in enrolled) {
+        setTotpUri(enrolled.totpURI ?? "");
+        setBackupCodes(enrolled.backupCodes ?? []);
+      }
       setStep("totp-enroll");
     } catch {
       setError("Something went wrong. Please try again.");
@@ -102,7 +113,10 @@ export function InviteAcceptForm({
         setError(result.error.message ?? "Invalid code");
         return;
       }
-      await acceptAndRedirect();
+      if (!(await accept())) return;
+      // Joined before the codes show, so closing the tab here can't leave 2FA on without the store.
+      if (backupCodes.length > 0) setStep("backup-codes");
+      else goToStoreAdmin();
     } catch {
       setError("Verification failed. Try again.");
     } finally {
@@ -110,7 +124,11 @@ export function InviteAcceptForm({
     }
   }
 
-  async function acceptAndRedirect() {
+  function goToStoreAdmin() {
+    router.push(`/store-admin?store=${storeSlug}`);
+  }
+
+  async function accept(): Promise<boolean> {
     setStep("accepting");
     try {
       const res = await fetch(`/api/invite/accept`, {
@@ -122,14 +140,17 @@ export function InviteAcceptForm({
       if (!res.ok || data.error) {
         setError(data.error ?? "Failed to accept invitation");
         setStep("signup");
-        return;
+        return false;
       }
-      router.push(`/store-admin?store=${storeSlug}`);
+      return true;
     } catch {
       setError("Failed to accept invitation");
       setStep("signup");
+      return false;
     }
   }
+
+  const setupKey = totpUri ? setupKeyFrom(totpUri) : null;
 
   return (
     <StorySurface>
@@ -211,18 +232,29 @@ export function InviteAcceptForm({
                 <ShieldCheck className="size-5 shrink-0 text-primary" />
                 <p className="text-sm text-muted-foreground">
                   Two-factor authentication is required. Scan this QR code with
-                  your authenticator app, then enter the 6-digit code below.
+                  your authenticator app, or enter the setup key in it, then
+                  enter the 6-digit code below.
                 </p>
               </div>
 
               {totpUri && (
-                <div className="flex justify-center rounded-md border border-border bg-card p-4">
-                  <QRCodeSVG
-                    value={totpUri}
-                    size={200}
-                    level="M"
-                    className="rounded"
-                  />
+                <div className="flex flex-col gap-3">
+                  <QrCode value={totpUri} />
+                  {/* A phone can't scan its own screen: it opens the app or types the key. */}
+                  <a
+                    href={totpUri}
+                    className="flex h-11 items-center justify-center rounded-full border border-input text-sm font-medium md:hidden"
+                  >
+                    Open in authenticator app
+                  </a>
+                  {setupKey && (
+                    <CopyRow
+                      wrap
+                      label="Setup key"
+                      display={spacedSetupKey(setupKey)}
+                      value={setupKey}
+                    />
+                  )}
                 </div>
               )}
 
@@ -277,6 +309,15 @@ export function InviteAcceptForm({
                 {loading ? "Verifying..." : "Verify & join store"}
               </Button>
             </form>
+          )}
+
+          {step === "backup-codes" && (
+            <div className="flex flex-col gap-4">
+              <BackupCodesNotice codes={backupCodes} />
+              <Button type="button" onClick={goToStoreAdmin} className="w-full">
+                I&apos;ve saved them. Continue
+              </Button>
+            </div>
           )}
 
           {step === "accepting" && (
