@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 
 const { headerState, cookieJar } = vi.hoisted(() => ({
@@ -40,6 +40,8 @@ import { createPaymentIntentAction, placeOrderAction, quoteCheckoutAction } from
 import * as checkoutService from "../checkout/service";
 import * as lookup from "./lookup";
 import OrderPage from "@/app/order/[token]/page";
+import SubstitutionsPage from "@/app/order/[token]/substitutions/page";
+import ReportPage from "@/app/order/[token]/report/page";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -170,6 +172,45 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
   it("another store's token is a 404", async () => {
     const order = await createOrder(storeB);
     await expect(render(slugA, order.trackingToken!)).rejects.toThrow("NOT_FOUND");
+  });
+
+  describe("on the production alias, where stores are named by ?store= (#796)", () => {
+    const alias = "african-market-ai-ecommerce.vercel.app";
+
+    beforeEach(() => {
+      vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
+      vi.stubEnv("VERCEL_ENV", "production");
+      vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", alias);
+      headerState.set("host", alias);
+    });
+
+    afterEach(() => {
+      headerState.delete("host");
+      headerState.delete("x-store-slug");
+      vi.unstubAllEnvs();
+    });
+
+    it("a bookmark with no store opens its own store's order", async () => {
+      const order = await createOrder(storeB);
+      headerState.delete("x-store-slug");
+      await expect(OrderPage({ params: Promise.resolve({ token: order.trackingToken! }), searchParams: Promise.resolve({}) }))
+        .rejects.toThrow(`REDIRECT:/order/${order.trackingToken}?store=${slugB}`);
+    });
+
+    it("a browser that last saw another store is sent to the order's store", async () => {
+      const order = await createOrder(storeB);
+      await expect(render(slugA, order.trackingToken!)).rejects.toThrow(`REDIRECT:/order/${order.trackingToken}?store=${slugB}`);
+      await expect(SubstitutionsPage({ params: Promise.resolve({ token: order.trackingToken! }) }))
+        .rejects.toThrow(`REDIRECT:/order/${order.trackingToken}/substitutions?store=${slugB}`);
+      await expect(ReportPage({ params: Promise.resolve({ token: order.trackingToken! }) }))
+        .rejects.toThrow(`REDIRECT:/order/${order.trackingToken}/report?store=${slugB}`);
+    });
+
+    it("the order's own store renders it, and an unknown token is still a 404", async () => {
+      const order = await createOrder(storeB);
+      expect(headingDescriptions(await render(slugB, order.trackingToken!))).toContain(`Order #${order.number} · Track B`);
+      await expect(render(slugA, newTrackingToken())).rejects.toThrow("NOT_FOUND");
+    });
   });
 
   it("checkout sends the shopper to the tracking token, not the order id", async () => {

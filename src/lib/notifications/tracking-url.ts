@@ -1,11 +1,11 @@
 import { allowStoreOverride } from "../../proxy";
 import { resolveAuthBaseUrl } from "../auth";
-import { isSlugRoutable } from "../slug";
+import { fallbackRootHost, isSlugRoutable } from "../slug";
 
 /**
  * The link in a customer message.
  * Production with a root domain uses the store subdomain.
- * `?store=` is only where the proxy honours it.
+ * `?store=` is only where the proxy honours it: the production alias, previews, local.
  * Otherwise there is no link, and the message is not sent.
  */
 export function orderTrackingUrl(
@@ -27,6 +27,9 @@ export function storePageUrl(
   if (!isSlugRoutable(store.slug)) return null;
   const root = env.PLATFORM_ROOT_DOMAIN?.trim();
   if (root) return `https://${store.slug}.${root}${path}`;
+  // The alias has no store subdomains; the proxy honours `?store=` there (#766, #796).
+  const alias = fallbackRootHost(env);
+  if (alias) return `https://${alias}${path}?store=${encodeURIComponent(store.slug)}`;
   if (!allowStoreOverride(env)) return null;
   const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
   return `${base}${path}?store=${encodeURIComponent(store.slug)}`;

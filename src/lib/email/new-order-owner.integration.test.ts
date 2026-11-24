@@ -5,7 +5,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { makeFakeStep } from "../inngest/fake-step";
 import { newOrderPush } from "../inngest/functions";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests } from "./send";
-import { newOrderEmailOn, setNewOrderEmail } from "./new-order-owner";
+import { newOrderEmailOn, sendNewOrderOwnerEmail, setNewOrderEmail } from "./new-order-owner";
 import { setNewOrderEmailAction } from "./new-order-owner-actions";
 
 const session = vi.hoisted(() => ({ storeId: "", userId: "", role: "owner" }));
@@ -93,6 +93,19 @@ describe.skipIf(!hasDb)("new-order email to the owner (#785)", () => {
     }
     expect(sentTo(email(staff))).toEqual([]);
     expect(sentTo(email(otherOwner))).toEqual([]);
+  });
+
+  it("on the production alias the link opens the alias, not the deployment's own URL (#796)", async () => {
+    const order = await createOrder();
+    const alias = "african-market-ai-ecommerce.vercel.app";
+    await sendNewOrderOwnerEmail(store, order.id, {
+      VERCEL: "1",
+      VERCEL_ENV: "production",
+      VERCEL_URL: "african-market-ai-ecommerce-h3x9.vercel.app",
+      VERCEL_PROJECT_PRODUCTION_URL: alias,
+    });
+    const [message] = sentTo(email(owner));
+    expect(message.html).toContain(`https://${alias}/store-admin/orders?store=${slug}&amp;order=${order.id}`);
   });
 
   it("an owner who turned it off gets no email; the other owner still does", async () => {
