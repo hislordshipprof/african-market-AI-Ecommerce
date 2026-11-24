@@ -3,6 +3,7 @@ import { getReviewStats } from "./catalog-actions";
 import { listOrdersToCheck } from "./orders-to-check";
 import { listRefundFailedOrders } from "./refund-resolution";
 import { listEscalatedThreads } from "../support/platform-actions";
+import { listStoreApplications, PENDING_APPLICATIONS_LISTED } from "../store-application/service";
 
 /** `incomplete` means the list behind the count was capped, so the real count is at least `count`. */
 export type QueueCount = { count: number; incomplete: boolean };
@@ -14,16 +15,18 @@ export type AdminHomeCounts = {
   ordersToCheck: QueueCount | null;
   messages: QueueCount | null;
   catalogReview: QueueCount | null;
+  applications: QueueCount | null;
 };
 
-/** Counts for the admin home page, read through each queue's own page query. Every query checks the admin. */
+/** Counts for the admin home page, read through each queue's own page query. The page checks the admin first. */
 export async function getAdminHomeCounts(): Promise<AdminHomeCounts> {
-  const [stores, refunds, orders, messages, review] = await Promise.allSettled([
+  const [stores, refunds, orders, messages, review, applications] = await Promise.allSettled([
     listStores(),
     listRefundFailedOrders(),
     listOrdersToCheck(),
     listEscalatedThreads(),
     getReviewStats(),
+    listStoreApplications(),
   ]);
   return {
     stores: settled(stores, (list) => {
@@ -43,6 +46,10 @@ export async function getAdminHomeCounts(): Promise<AdminHomeCounts> {
       return { count: waiting, incomplete: hidden > 0 && waiting === threads.length };
     }),
     catalogReview: settled(review, (stats) => ({ count: stats.needsReview, incomplete: false })),
+    applications: settled(applications, ({ pending }) => ({
+      count: pending.length,
+      incomplete: pending.length >= PENDING_APPLICATIONS_LISTED,
+    })),
   };
 }
 

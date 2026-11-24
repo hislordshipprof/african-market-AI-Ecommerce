@@ -24,6 +24,7 @@ export default async function AdminHome() {
     { href: "/admin/orders/check", label: "Orders to check", counted: counts.ordersToCheck, detail: "Stuck orders and payment alerts", testId: "count-orders-to-check" },
     { href: "/admin/support", label: "Escalated messages", counted: counts.messages, detail: "Threads waiting on the platform team", testId: "count-messages" },
     { href: "/admin/catalog/review", label: "Catalog review", counted: counts.catalogReview, detail: "Products awaiting review", testId: "count-catalog-review" },
+    { href: "/admin/applications", label: "Applications to review", counted: counts.applications, detail: "Stores waiting to hear back", testId: "count-applications" },
   ];
   const waiting = queues.filter((queue) => (queue.counted?.count ?? 0) > 0).length;
   const unloaded = queues.some((queue) => !queue.counted);

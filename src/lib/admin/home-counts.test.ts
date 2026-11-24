@@ -5,12 +5,17 @@ const listRefundFailedOrders = vi.fn();
 const listOrdersToCheck = vi.fn();
 const listEscalatedThreads = vi.fn();
 const getReviewStats = vi.fn();
+const listStoreApplications = vi.fn();
 
 vi.mock("./actions", () => ({ listStores: () => listStores() }));
 vi.mock("./refund-resolution", () => ({ listRefundFailedOrders: () => listRefundFailedOrders() }));
 vi.mock("./orders-to-check", () => ({ listOrdersToCheck: () => listOrdersToCheck() }));
 vi.mock("../support/platform-actions", () => ({ listEscalatedThreads: () => listEscalatedThreads() }));
 vi.mock("./catalog-actions", () => ({ getReviewStats: () => getReviewStats() }));
+vi.mock("../store-application/service", () => ({
+  PENDING_APPLICATIONS_LISTED: 3,
+  listStoreApplications: () => listStoreApplications(),
+}));
 
 import { getAdminHomeCounts } from "./home-counts";
 
@@ -32,6 +37,7 @@ describe("getAdminHomeCounts", () => {
     listOrdersToCheck.mockResolvedValue(queues({ stuck: 2, alerts: 3 }));
     listEscalatedThreads.mockResolvedValue({ threads: [{ id: "t1", waiting: true }, { id: "t2", waiting: false }], hidden: 0 });
     getReviewStats.mockResolvedValue({ needsReview: 313, active: 230, rejected: 5, total: 548 });
+    listStoreApplications.mockResolvedValue({ pending: [{ id: "p1" }, { id: "p2" }], decided: [{ id: "d1" }] });
   });
 
   it("counts every queue from its existing query, messages only when they wait on the platform team", async () => {
@@ -41,6 +47,7 @@ describe("getAdminHomeCounts", () => {
       ordersToCheck: { count: 5, incomplete: false },
       messages: { count: 1, incomplete: false },
       catalogReview: { count: 313, incomplete: false },
+      applications: { count: 2, incomplete: false },
     });
   });
 
@@ -55,6 +62,9 @@ describe("getAdminHomeCounts", () => {
     listOrdersToCheck.mockResolvedValue(queues({ alerts: 2, alertsCapped: true }));
     expect((await getAdminHomeCounts()).messages).toEqual({ count: 1, incomplete: false });
     expect((await getAdminHomeCounts()).ordersToCheck).toEqual({ count: 2, incomplete: true });
+
+    listStoreApplications.mockResolvedValue({ pending: [{ id: "p1" }, { id: "p2" }, { id: "p3" }], decided: [] });
+    expect((await getAdminHomeCounts()).applications).toEqual({ count: 3, incomplete: true });
   });
 
   it("keeps the other counts when one query fails", async () => {
