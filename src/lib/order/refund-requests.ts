@@ -72,14 +72,45 @@ export function taxRefundedCents(rows: Array<{ state: string; providerStatus: st
 }
 
 export type RefundedLine = ChargeLine & { id: string; discountCents: number; taxCents: number };
-export type RefundedLines = { goodsCents: number; lineTax: LineTax | null; lines: Array<{ reference: string; amountCents: number; taxCents: number }> };
+export type RefundedLines = {
+  goodsCents: number;
+  lineTax: LineTax | null;
+  lines: Array<{ reference: string; qty: number; amountCents: number; taxCents: number }>;
+};
+export type RefundLinePick = { lineId: string; qty: number };
+/** One line of a refund request (#798): the amounts of a request's lines sum to its amount. */
+export type RequestLine = { lineId: string; qty: number; amountCents: number };
+
+/** The stored lines of a refund request, or none when it is not tied to lines. */
+export function requestLines(value: Prisma.JsonValue | null | undefined): RequestLine[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const line = item as Partial<RequestLine> | null;
+    return line && typeof line.lineId === "string" && typeof line.qty === "number" && typeof line.amountCents === "number"
+      ? [{ lineId: line.lineId, qty: line.qty, amountCents: line.amountCents }]
+      : [];
+  });
+}
+
+/** Units of each line that earlier refunds, not known to have failed, already returned (#798). */
+export function refundedQtyByLine(rows: Array<{ state: string; providerStatus: string | null; lines: Prisma.JsonValue | null }>): Map<string, number> {
+  const qty = new Map<string, number>();
+  for (const row of counted(rows)) {
+    for (const line of requestLines(row.lines)) qty.set(line.lineId, (qty.get(line.lineId) ?? 0) + line.qty);
+  }
+  return qty;
+}
 
 /**
  * The goods of the chosen line quantities, less their coupon share, and each one's exact tax: its share of the
  * line's tax stored at capture (#671). `lineTax` is null for an order captured before lines kept their tax, which
  * refunds tax in proportion. Null when a pick is not a line of the order or asks for more than was picked.
  */
-export function refundedLines(order: { taxCents: number; lines: RefundedLine[] }, picks: Array<{ lineId: string; qty: number }>): RefundedLines | null {
+export function refundedLines(
+  order: { taxCents: number; lines: RefundedLine[] },
+  picks: RefundLinePick[],
+  alreadyRefunded: Map<string, number> = new Map(),
+): RefundedLines | null {
   if (picks.length === 0) return null;
   const byId = new Map(order.lines.map((line) => [line.id, line]));
   const seen = new Set<string>();
@@ -87,18 +118,24 @@ export function refundedLines(order: { taxCents: number; lines: RefundedLine[] }
   for (const pick of picks) {
     const line = byId.get(pick.lineId);
     if (!line || seen.has(pick.lineId)) return null;
-    if (!Number.isInteger(pick.qty) || pick.qty < 1 || pick.qty > line.qtyPicked) return null;
+    if (!Number.isInteger(pick.qty) || pick.qty < 1 || pick.qty > line.qtyPicked - (alreadyRefunded.get(line.id) ?? 0)) return null;
     seen.add(pick.lineId);
     const charge = lineChargeCents(line);
     const gross = pick.qty * line.unitPriceCents;
     const goods = gross - lineDiscountShareCents({ discountCents: line.discountCents, chargeCents: charge }, gross);
     const charged = charge - line.discountCents;
     const tax = charged > 0 ? Math.min(line.taxCents, Math.round((line.taxCents * goods) / charged)) : 0;
-    lines.push({ reference: line.id, amountCents: goods, taxCents: tax });
+    lines.push({ reference: line.id, qty: pick.qty, amountCents: goods, taxCents: tax });
   }
   const goodsCents = lines.reduce((sum, line) => sum + line.amountCents, 0);
   const exact = order.taxCents === 0 || order.lines.some((line) => line.taxCents > 0);
   return { goodsCents, lineTax: exact ? { goodsCents, taxCents: lines.reduce((sum, line) => sum + line.taxCents, 0) } : null, lines };
+}
+
+/** The request's lines: its amount split over them by their goods and tax, so a capped or lowered amount still sums. */
+function linesOfRequest(lines: RefundedLines, amountCents: number): RequestLine[] {
+  const shares = allocateLineDiscounts(lines.lines.map((line) => line.amountCents + line.taxCents), amountCents);
+  return lines.lines.map((line, index) => ({ lineId: line.reference, qty: line.qty, amountCents: shares[index] }));
 }
 
 /**
@@ -359,25 +396,67 @@ export async function remainingCaptureCents(paymentIntentId: string): Promise<nu
 /**
  * `cancel` refunds the whole remaining capture. `issue` refunds an amount after delivery (#428).
  * `platform` is a platform admin's refund after delivery (#538): refused, not capped, above the remaining capture.
+ * `store` is the owner's refund after capture (#798), of lines or an amount; refused like `platform`.
  */
 export type RefundCause =
   | { cause: "cancel" }
   | { cause: "issue"; amountCents: number; issueReportId?: string }
-  | { cause: "platform"; amountCents: number; submissionId: string; reason: string; actor: { id: string; email: string } };
+  | { cause: "platform"; amountCents: number; submissionId: string; reason: string; actor: { id: string; email: string } }
+  | {
+      cause: "store";
+      amountCents: number;
+      picks: RefundLinePick[] | null;
+      submissionId: string;
+      reason: string;
+      actor: { id: string; email: string };
+    };
+
+type FormCause = Extract<RefundCause, { cause: "platform" | "store" }>;
+
+/** A refund from a form: keyed by its submission id, refused above what is left, and audited with who and why. */
+function isFormCause(cause: RefundCause): cause is FormCause {
+  return cause.cause === "platform" || cause.cause === "store";
+}
 
 export const PLATFORM_REFUNDABLE_FROM = ["DELIVERED", "COMPLETED", "PARTIALLY_REFUNDED"] as const;
+
+/** Every status after capture that still holds money to refund (#798): Ready onward, not cancelling or refunded. */
+export const STORE_REFUNDABLE_FROM = [
+  "READY",
+  "AWAITING_PICKUP",
+  "COURIER_REQUESTED",
+  "COURIER_ASSIGNED",
+  "PICKED_UP",
+  "OUT_FOR_DELIVERY",
+  "SHIPPED",
+  "IN_TRANSIT",
+  "DELIVERED",
+  "COMPLETED",
+  "PARTIALLY_REFUNDED",
+] as const;
 
 const REFUNDABLE_FROM: Record<RefundCause["cause"], readonly string[]> = {
   cancel: ["CANCELLING"],
   issue: ["DELIVERED", "COMPLETED", "PARTIALLY_REFUNDED"],
   platform: PLATFORM_REFUNDABLE_FROM,
+  store: STORE_REFUNDABLE_FROM,
 };
 
 export const PLATFORM_REFUND_ACTION = "platform_refund";
+export const STORE_REFUND_ACTION = "store_refund";
 
 /** One key per platform refund form, so a double or concurrent submit reserves one request. */
 export function platformRefundKey(orderId: string, submissionId: string): string {
   return `refund:${orderId}:platform:${submissionId}`;
+}
+
+/** One key per store refund form (#798), like a platform refund's. */
+export function storeRefundKey(orderId: string, submissionId: string): string {
+  return `refund:${orderId}:store:${submissionId}`;
+}
+
+function formRefundKey(orderId: string, cause: FormCause): string {
+  return cause.cause === "platform" ? platformRefundKey(orderId, cause.submissionId) : storeRefundKey(orderId, cause.submissionId);
 }
 
 /** Courier recovery is kept on a courier order (spec §10, owner decision 3), and postage on a shipped one (#568). */
@@ -432,7 +511,7 @@ export async function submitRefund(
   const succeeded = countedCents(listed, ["succeeded"]);
   const remaining = unrefundedCents(captured, listed);
   // ADR-0019: an issue refund never exceeds what is still unrefunded.
-  if (cause.cause === "platform" && cause.amountCents > remaining) return { blocked: true };
+  if (isFormCause(cause) && cause.amountCents > remaining) return { blocked: true };
   const amount = cause.cause === "cancel" ? remaining : Math.min(cause.amountCents, remaining);
   if (cause.cause !== "cancel" && amount <= 0) return { blocked: true };
   if (remaining === 0) {
@@ -454,21 +533,25 @@ export async function submitRefund(
     if (manual || !current || !allowed.includes(current.status)) return { blocked: true as const, open: null, row: null };
     const again = await openRefundRequest(tx, orderId);
     if (again) return { open: again, row: null };
-    if (cause.cause === "platform" && await tx.refundRequest.count({ where: { key: platformRefundKey(orderId, cause.submissionId) } })) {
+    if (isFormCause(cause) && await tx.refundRequest.count({ where: { key: formRefundKey(orderId, cause) } })) {
       return { blocked: true as const, open: null, row: null };
     }
     const count = await tx.refundRequest.count({ where: { orderId } });
-    const key = cause.cause === "platform" ? platformRefundKey(orderId, cause.submissionId) : `refund:${orderId}:${count + 1}`;
+    const key = isFormCause(cause) ? formRefundKey(orderId, cause) : `refund:${orderId}:${count + 1}`;
     const refundApplicationFee = refundsApplicationFee(cause, current.fulfillment);
     const earlier = await tx.refundRequest.findMany({ where: { orderId } });
     const taxBefore = taxRefundedCents(earlier);
-    // A refund for an issue's lines returns their exact tax (#671); any other amount the tax in proportion.
+    // A refund of lines returns their exact tax (#671); any other amount the tax in proportion.
     const issue = cause.cause === "issue" && cause.issueReportId
       ? await tx.issueReport.findUnique({ where: { id: cause.issueReportId }, select: { lines: true } })
       : null;
-    const lines = issue
-      ? refundedLines({ taxCents: current.taxCents, lines: await tx.orderLine.findMany({ where: { orderId } }) }, issue.lines as Array<{ lineId: string; qty: number }>)
+    const picks = issue ? (issue.lines as RefundLinePick[]) : cause.cause === "store" ? cause.picks : null;
+    const orderLines = picks ? { taxCents: current.taxCents, lines: await tx.orderLine.findMany({ where: { orderId } }) } : null;
+    // A store refund of lines may not return a unit an earlier refund already returned.
+    const lines = orderLines && picks
+      ? refundedLines(orderLines, picks, cause.cause === "store" ? refundedQtyByLine(earlier) : undefined)
       : null;
+    if (cause.cause === "store" && picks && !lines) return { blocked: true as const, open: null, row: null };
     // A cancel refunds everything left, so all the tax left; any other refund is split into goods, fee share and tax share.
     const shares = cause.cause === "cancel"
       ? { goodsCents: 0, serviceFeeCents: 0, taxCents: Math.max(0, current.taxCents - taxBefore) }
@@ -488,6 +571,7 @@ export async function submitRefund(
         taxShareCents: shares.taxCents,
         platformTaxShareCents: refundApplicationFee || current.taxLiableParty === "store" ? 0 : shares.taxCents,
         taxReversal: taxReversal ?? undefined,
+        lines: lines ? linesOfRequest(lines, amount) : undefined,
         state: "RESERVED",
       },
     });
@@ -495,16 +579,22 @@ export async function submitRefund(
       // The issue shows what is refunded, capped at the unrefunded capture, even if the create call then fails.
       await tx.issueReport.update({ where: { id: cause.issueReportId }, data: { refundRequestId: row.id, amountCents: amount } });
     }
-    if (cause.cause === "platform") {
+    if (isFormCause(cause)) {
       await tx.auditLog.create({
         data: {
           storeId,
           actorId: cause.actor.id,
           actorEmail: cause.actor.email,
-          action: PLATFORM_REFUND_ACTION,
+          action: cause.cause === "platform" ? PLATFORM_REFUND_ACTION : STORE_REFUND_ACTION,
           entityType: "order",
           entityId: orderId,
-          after: { key, refundRequestId: row.id, amountCents: amount, reason: cause.reason },
+          after: {
+            key,
+            refundRequestId: row.id,
+            amountCents: amount,
+            reason: cause.reason,
+            ...(cause.cause === "store" ? { lines: cause.picks ?? "whole_order" } : {}),
+          },
         },
       });
     }
@@ -600,6 +690,14 @@ function baselineBody(after: Prisma.JsonValue): { refundedCents: number; counted
     countedRefundIds,
     raw,
   };
+}
+
+/**
+ * A store refund before hand-off leaves the status alone (#798). Once the order is handed off, the evaluation makes
+ * it Partly refunded or Refunded. Orders with no refund request skip the Stripe read.
+ */
+export async function evaluateRefundsAtHandOff(storeId: string, orderId: string): Promise<void> {
+  if (await storeScoped(storeId).refundRequest.count({ where: { orderId } })) await evaluateOrderRefundStateAfterCommit(orderId);
 }
 
 /**

@@ -378,6 +378,7 @@ export const CANCEL_REASON_LABELS: Record<string, string> = {
   store_closed: "Store closed",
   too_busy: "Too busy",
   other: "Other (store)",
+  no_show: "Not collected",
   auto_cancel: "Not accepted in time",
   pick_timeout: "Not ready in time",
   provider_canceled: "Card hold ended",

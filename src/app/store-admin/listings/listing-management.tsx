@@ -629,7 +629,15 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
             </div>
           )}
         </div>
-        {selectedMaster && <p className="text-xs text-muted-foreground">Check the catalogue photo is the item on your shelf.</p>}
+        {selectedMaster && (
+          <p className="text-xs text-muted-foreground">
+            {selectedMaster.imageUrl
+              ? "Check the catalogue photo is the item on your shelf."
+              : photoUploads
+                ? "The catalogue has no photo of this product. Add your photo so shoppers can see it."
+                : "The catalogue has no photo of this product yet."}
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">

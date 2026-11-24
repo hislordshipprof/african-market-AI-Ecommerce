@@ -1,6 +1,7 @@
 import { findDeliveryByExternalId, storeScopedTransaction } from "../db";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
+import { evaluateRefundsAtHandOff } from "../order/refund-requests";
 import { emitCourierEvent } from "./courier-functions";
 import { COURIER_PROOF_RECEIVED } from "./dispatch";
 import type { CourierEventType, DeliveryWebhookEvent } from "./provider";
@@ -83,7 +84,10 @@ export async function applyCourierWebhook(event: DeliveryWebhookEvent): Promise<
     return { result: "recorded" as const, notify, proof: photoUrl !== null && live };
   });
 
-  if (outcome.notify) scheduleOrderNotification(storeId, orderId, "delivered");
+  if (outcome.notify) {
+    scheduleOrderNotification(storeId, orderId, "delivered");
+    await evaluateRefundsAtHandOff(storeId, orderId);
+  }
   // A lost send is logged; the provider's photo URL stays on the delivery.
   if (outcome.proof) await emitCourierEvent({ name: COURIER_PROOF_RECEIVED, data: { storeId, deliveryId: found.id } });
   return outcome.result;
