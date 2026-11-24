@@ -207,6 +207,19 @@ describe("resolveAuthTrustedOrigins", () => {
     expect(origins).toContain("http://*.localhost:3000");
   });
 
+  it("trusts the production alias exactly, with no wildcard, until PLATFORM_ROOT_DOMAIN is set (#766)", () => {
+    const alias = "african-market-ai-ecommerce.vercel.app";
+    const env = { VERCEL: "1", VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: alias };
+    expect(resolveAuthTrustedOrigins(env)).toContain(`https://${alias}`);
+    const hosts = resolveAuthAllowedHosts(env);
+    expect(hosts).toContain(alias);
+    expect(hosts).not.toContain(`*.${alias}`);
+
+    const withRoot = { ...env, PLATFORM_ROOT_DOMAIN: "africanmarkets.com" };
+    expect(resolveAuthTrustedOrigins(withRoot)).not.toContain(`https://${alias}`);
+    expect(resolveAuthAllowedHosts(withRoot)).not.toContain(alias);
+  });
+
   it("ignores empty entries in BETTER_AUTH_TRUSTED_ORIGINS", () => {
     const origins = resolveAuthTrustedOrigins({
       BETTER_AUTH_TRUSTED_ORIGINS: "https://a.com,,, ",

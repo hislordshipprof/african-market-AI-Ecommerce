@@ -7,7 +7,7 @@ import { isPrivilegedEmail, isPrivilegedUser, isStaffUser } from "./privileged-u
 import { sendEmail } from "./email/send";
 import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
-import { isSlugRoutable, slugFromHost } from "./slug";
+import { fallbackRootHost, isFallbackRoot, isSlugRoutable, slugFromHost } from "./slug";
 import { testOnlyRoutesAllowed } from "./security/test-only-routes";
 
 /**
@@ -63,6 +63,10 @@ export function resolveAuthAllowedHosts(
     hosts.push(env.PLATFORM_ROOT_DOMAIN, `*.${env.PLATFORM_ROOT_DOMAIN}`);
   }
 
+  // Exactly the alias: it has no store subdomains (#766).
+  const alias = fallbackRootHost(env);
+  if (alias) hosts.push(alias);
+
   if (!isDeployment(env)) {
     const port = env.PORT ?? "3000";
     hosts.push(`localhost:${port}`, `*.localhost:${port}`);
@@ -91,6 +95,9 @@ export function resolveAuthTrustedOrigins(
   if (env.VERCEL_URL) {
     origins.push(`https://${env.VERCEL_URL}`);
   }
+
+  const alias = fallbackRootHost(env);
+  if (alias) origins.push(`https://${alias}`);
 
   if (!isDeployment(env)) {
     const port = env.PORT ?? "3000";
@@ -257,6 +264,16 @@ function magicLinkUrlForStore(url: string, ctx: unknown, store: RequestStore | n
   return onOrigin(url, `${base.protocol}//${store.slug}.${root}${base.port ? `:${base.port}` : ""}`);
 }
 
+// The production alias has no store subdomains: the link names its store, which the proxy remembers
+// on arrival, so it opens in a browser that never visited the store (#766).
+function nameStoreOnAlias(url: string, ctx: unknown, store: RequestStore | null): string {
+  const host = requestHeaders(ctx)?.get("host");
+  if (!store || !host || !isFallbackRoot(host, process.env)) return url;
+  const link = new URL(url);
+  link.searchParams.set("store", store.slug);
+  return link.toString();
+}
+
 const MAGIC_LINK_TTL_SECONDS = 900;
 const magicLinkStoreIdentifier = (token: string) => `magic-link-store:${token}`;
 
@@ -330,7 +347,7 @@ export const auth = betterAuth({
         });
         const message = magicLinkMessage({
           to: normalizedEmail,
-          url: confirmLinkUrl(magicLinkUrlForStore(url, ctx, store)),
+          url: nameStoreOnAlias(confirmLinkUrl(magicLinkUrlForStore(url, ctx, store)), ctx, store),
           storeName: store?.name ?? null,
           fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
         });
