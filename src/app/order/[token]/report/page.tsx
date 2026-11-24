@@ -5,6 +5,7 @@ import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { findOrderForIssueReport } from "@/lib/notifications/lookup";
 import { ISSUE_WINDOW_CLOSED, issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
+import { shownPack } from "@/lib/storefront/pack-order";
 import "@/components/storefront/flow/order-flow.css";
 
 export default async function ReportPage({
@@ -42,7 +43,7 @@ export default async function ReportPage({
                 .map((line) => ({
                   id: line.id,
                   // Product, then pack: a pack size alone ("8 oz") does not say which item (#743).
-                  name: [line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant?.label]
+                  name: [line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant && shownPack(line.listingVariant).label]
                     .filter(Boolean)
                     .join(" · ") || "Item",
                   qtyPicked: line.qtyPicked,

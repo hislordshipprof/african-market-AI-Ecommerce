@@ -19,6 +19,7 @@ import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
 import { formatClockInZone, money } from "@/lib/format";
+import { shownPack } from "@/lib/storefront/pack-order";
 import styles from "./tracking.module.css";
 
 type CourierJson = { name?: string | null; vehicle?: string | null; dropoffEta?: string | null } | null;
@@ -163,7 +164,7 @@ export default async function OrderPage({
               {realOrder.lines.map((line, index) => (
                 <li key={line.id}>
                   <span>
-                    {line.qtyOrdered} × {[line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant?.label].filter(Boolean).join(" · ") || "Item"}
+                    {line.qtyOrdered} × {[line.listingVariant?.listing?.customName ?? line.listingVariant?.listing?.masterProduct?.name, line.listingVariant && shownPack(line.listingVariant).label].filter(Boolean).join(" · ") || "Item"}
                     {receipt.items[index].note && <small className={styles.note}>{receipt.items[index].note}</small>}
                   </span>
                   <span>{money(receipt.items[index].cents)}</span>
