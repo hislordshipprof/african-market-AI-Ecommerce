@@ -1,13 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { insertStoreApplication, platformAdmin, platformAdminTransaction } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { normalizeEmail } from "../email";
 import { sendEmail, type EmailMessage } from "../email/send";
+import { emailPlatformAdmins } from "../email/platform-admins";
 import { escapeHtml } from "../format";
 import { USPS_STATE_CODES } from "../customer-account/address-validation";
 import { isSlugRoutable } from "../slug";
 import { coordinatesForStore, insertStore, type NewStoreValues } from "../admin/store-create";
+import { timezoneForAddress } from "../admin/timezone";
 import { recordInvite, sendInviteEmail, type CreateInviteInput } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { requestCourierRegistration } from "../delivery/courier-registration";
@@ -88,7 +91,9 @@ function formValue(input: Record<string, unknown>, key: string): string {
 /**
  * The public /sell form (#554). A filled honeypot gets the normal thank-you and nothing is stored. Valid applications
  * count against 5 an hour per IP, so a typo does not use one up. A second pending application from the same email or
- * phone is dropped silently, which also keeps the form from telling anyone who has applied.
+ * phone is dropped silently and mails no one, which also keeps the form from telling anyone who has applied.
+ * A stored application emails the applicant a confirmation and each platform admin a notice (#780); a failed email
+ * never fails the application.
  */
 export async function submitStoreApplication(
   input: Record<string, unknown>,
@@ -123,21 +128,71 @@ export async function submitStoreApplication(
   const limit = await takeRateLimit(`store-application:ip:${ip}`, PER_IP_PER_HOUR, HOUR_MS, now);
   if (!limit.ok) return { ok: false, rateLimited: true, retryAfter: limit.retryAfter };
 
+  const application = { id: randomUUID(), ...parsed.data };
   try {
-    await insertStoreApplication(parsed.data);
+    await insertStoreApplication(application);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return { ok: true };
     throw err;
   }
+  await emailNewApplication(application);
   return { ok: true };
 }
+
+type NewApplication = { id: string; businessName: string; ownerName: string; email: string; city: string; state: string };
+
+async function emailNewApplication(application: NewApplication): Promise<void> {
+  const results = await Promise.allSettled([
+    sendEmail(receivedMessage(application)),
+    emailPlatformAdmins(
+      `New store application: ${application.businessName}`,
+      adminNoticeHtml(application),
+      `store-application-new/${application.id}`,
+    ),
+  ]);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error(JSON.stringify({
+        event: "store_application_email_failed",
+        applicationId: application.id,
+        message: result.reason instanceof Error ? result.reason.message : "send failed",
+      }));
+    }
+  }
+}
+
+/** The applicant's confirmation (#780): what happens next, so "we reply by email" holds from the first step. */
+function receivedMessage(application: NewApplication): EmailMessage {
+  return {
+    to: application.email,
+    subject: "We have your application to sell on African Markets",
+    html: emailHtml([
+      `Hello ${escapeHtml(application.ownerName)},`,
+      `Thank you for applying to sell ${escapeHtml(application.businessName)} on African Markets.`,
+      "Our team checks every application and replies to this email address. If we approve it, you get an invite to set up your shop.",
+      "The African Markets team",
+    ]),
+    idempotencyKey: `store-application-received/${application.id}`,
+  };
+}
+
+function adminNoticeHtml(application: NewApplication): string {
+  const link = `${resolveAuthBaseUrl()}/admin/applications`;
+  return emailHtml([
+    `${escapeHtml(application.businessName)} in ${escapeHtml(application.city)}, ${escapeHtml(application.state)} applied to sell on African Markets.`,
+    `Review it on <a href="${escapeHtml(link)}">the Applications page</a>.`,
+  ]);
+}
+
+/** The admin list shows at most this many pending applications, oldest first. */
+export const PENDING_APPLICATIONS_LISTED = 200;
 
 export async function listStoreApplications() {
   const [pending, decided] = await Promise.all([
     platformAdmin.storeApplication.findMany({
       where: { status: "pending" },
       orderBy: { createdAt: "asc" },
-      take: 200,
+      take: PENDING_APPLICATIONS_LISTED,
     }),
     platformAdmin.storeApplication.findMany({
       where: { status: { not: "pending" } },
@@ -196,7 +251,7 @@ export async function approveStoreApplication(id: string, rawSlug: string, actor
     pickupEnabled: false,
     autoRefundLimitCents: 2500,
     supportSlaMinutes: 30,
-    timezone: "America/New_York",
+    timezone: timezoneForAddress(application.state, "error" in coords ? null : coords.lat, "error" in coords ? null : coords.lng),
     ...address,
     phone: application.phone,
     lat: "error" in coords ? null : coords.lat,
@@ -334,15 +389,20 @@ export function rejectionMessage(application: { id: string; email: string; owner
 }
 
 function rejectionHtml(ownerName: string, businessName: string): string {
+  return emailHtml([
+    `Hello ${escapeHtml(ownerName)},`,
+    `Thank you for applying to sell ${escapeHtml(businessName)} on African Markets. We can't offer you a store at this time.`,
+    "You're welcome to apply again later.",
+    "The African Markets team",
+  ]);
+}
+
+/** The plain layout of every application email. Paragraphs are HTML the caller has already escaped. */
+function emailHtml(paragraphs: string[]): string {
+  const body = paragraphs.map((p) => `<p style="font-size: 16px; line-height: 1.5;">${p}</p>`).join("\n      ");
   return `
     <div style="font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 16px; color: #1a1a18;">
-      <p style="font-size: 16px; line-height: 1.5;">Hello ${escapeHtml(ownerName)},</p>
-      <p style="font-size: 16px; line-height: 1.5;">
-        Thank you for applying to sell ${escapeHtml(businessName)} on African Markets.
-        We can't offer you a store at this time.
-      </p>
-      <p style="font-size: 16px; line-height: 1.5;">You're welcome to apply again later.</p>
-      <p style="font-size: 16px; line-height: 1.5;">The African Markets team</p>
+      ${body}
     </div>
   `;
 }
