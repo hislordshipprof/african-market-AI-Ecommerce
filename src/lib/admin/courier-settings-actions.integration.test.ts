@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { generateTOTP } from "../../../e2e/totp";
 
 vi.hoisted(() => {
@@ -66,7 +66,21 @@ function form(values: Partial<Record<"selectionMode" | "assignmentTimeoutSeconds
   return data;
 }
 
-const auditRows = () => platformAdmin.auditLog.findMany({ where: { entityType: "platform_settings", entityId: "platform" }, orderBy: { createdAt: "asc" } });
+// Scoped to the courier action: other files write platform_settings audit rows in parallel (#767).
+const auditRows = () =>
+  platformAdmin.auditLog.findMany({
+    where: { entityType: "platform_settings", entityId: "platform", action: "platform.courier_settings_update" },
+    orderBy: { createdAt: "asc" },
+  });
+
+/** Only the timeout is ever changed here, so other test files reading the shared row see no difference. */
+async function restoreTimeout(seconds: number) {
+  await authPrisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    await tx.$executeRaw`UPDATE platform_settings SET courier_assignment_timeout_s = ${seconds} WHERE id = 'platform'`;
+  });
+}
 
 describe.skipIf(!process.env.DATABASE_URL)("courier settings page (#535)", () => {
   const sessions: Record<keyof typeof emails, { userId: string; cookies: string }> = {} as never;
@@ -86,13 +100,16 @@ describe.skipIf(!process.env.DATABASE_URL)("courier settings page (#535)", () =>
     original = await readCourierSettings();
   }, 60_000);
 
+  // A failed attempt must not leave its timeout behind for the retry or the next test (#767).
+  afterEach(async () => {
+    if (original) await restoreTimeout(original.assignmentTimeoutSeconds);
+  });
+
   afterAll(async () => {
     const userIds = Object.values(sessions).map((s) => s.userId);
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      // Only the timeout is ever changed here, so other test files reading the shared row see no difference.
-      await tx.$executeRaw`UPDATE platform_settings SET courier_assignment_timeout_s = ${original.assignmentTimeoutSeconds} WHERE id = 'platform'`;
       for (const id of userIds) {
         await tx.$executeRaw`DELETE FROM audit_logs WHERE actor_id = ${id}`;
         await tx.$executeRaw`DELETE FROM store_memberships WHERE user_id = ${id}`;
