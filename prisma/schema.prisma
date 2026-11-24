@@ -425,6 +425,8 @@ model StoreMembership {
   storeId   String   @map("store_id")
   userId    String   @map("user_id")
   role      String
+  /// Owners get an email for each new order (#785) until they turn it off for themselves.
+  newOrderEmail Boolean @default(true) @map("new_order_email")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
