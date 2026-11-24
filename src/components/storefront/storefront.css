@@ -992,6 +992,7 @@
   display: flex;
   justify-content: space-between;
   gap: 32px;
+  align-items: flex-start;
   padding-block: 32px;
 }
 .sf-footer-brand {
