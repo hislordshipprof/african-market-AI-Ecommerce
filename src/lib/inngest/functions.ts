@@ -14,6 +14,7 @@ import { systemAuditData } from "../system-actor";
 import { runAssistantRetention } from "../assistant/retention";
 import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing/confidence-job";
 import { sendNewOrderPush } from "../push/new-order";
+import { sendNewOrderOwnerEmail } from "../email/new-order-owner";
 import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
@@ -233,7 +234,10 @@ export const autoCancel = inngest.createFunction(
   },
 );
 
-/** Web push to store staff. A push failure never touches checkout: this runs on the after-commit event. */
+/**
+ * Web push to store staff and the owners' new-order email (#785). Neither failure touches checkout: this runs on the
+ * after-commit event, and each step logs its own failures instead of throwing.
+ */
 export const newOrderPush = inngest.createFunction(
   {
     id: "order/new-order-push",
@@ -244,6 +248,7 @@ export const newOrderPush = inngest.createFunction(
     const { orderId, storeId } = event.data as { orderId?: string; storeId?: string };
     if (!orderId || !storeId) return;
     await step.run("send-push", () => sendNewOrderPush(storeId, orderId));
+    await step.run("send-owner-email", () => sendNewOrderOwnerEmail(storeId, orderId));
   },
 );
 
