@@ -64,6 +64,7 @@ import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine, storeOrderBreakdown } from "@/lib/order/staff-copy";
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
+import { formatDeliveryAddress } from "@/lib/order/delivery-address";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { ActionError } from "./action-error";
 import { CourierTiming } from "./courier-timing";
@@ -112,15 +113,14 @@ const LINES_SHOWN: readonly string[] = ["AUTHORIZED", "ACCEPTED", "PICKING", "SU
 
 /** How the order leaves the store, so the owner can decide before accepting (#742). */
 function fulfillmentLine(order: StoreOrderRow): string {
-  const street = [order.deliveryLine1, order.deliveryLine2].filter(Boolean).join(", ");
   const area = order.deliveryCity ? `${order.deliveryCity}, ${order.deliveryState} ${order.deliveryZip}` : "";
   if (order.fulfillment === "pickup") return "Pickup at the store";
   if (order.fulfillment === "store-delivery") {
-    return `Store delivery to ${[street, area].filter(Boolean).join(", ")}${order.leaveAtDoor ? " · Leave at door" : ""}`;
+    return `Store delivery to ${formatDeliveryAddress(order)}${order.leaveAtDoor ? " · Leave at door" : ""}`;
   }
   if (order.fulfillment === "courier") return area ? `Courier delivery to ${area}` : "Courier delivery";
   const carrier = [order.shippingCarrier, order.shippingService].filter(Boolean).join(" ");
-  return `Shipping${carrier ? ` · ${carrier}` : ""}${street ? ` to ${[street, area].filter(Boolean).join(", ")}` : ""}`;
+  return `Shipping${carrier ? ` · ${carrier}` : ""}${order.deliveryLine1 ? ` to ${formatDeliveryAddress(order)}` : ""}`;
 }
 
 function orderCustomerLabel(name: string, phone: string | null): string {

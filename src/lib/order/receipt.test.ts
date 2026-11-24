@@ -15,6 +15,7 @@ function order(overrides: Partial<ReceiptOrder> = {}): ReceiptOrder {
     taxCents: 0,
     totalAuthorizedCents: 5238,
     captureCents: null,
+    refundedCents: 0,
     lines: [{ id: "l1", status: "pending", qtyOrdered: 6, qtyPicked: 0, unitPriceCents: 699, substitutedUnitPriceCents: null }],
     ...overrides,
   };
@@ -103,5 +104,37 @@ describe("orderReceipt", () => {
     const view = orderReceipt(order({ status: "REFUNDED", captureCents: 4819 }));
     expect(view.total).toEqual({ label: "Charged", cents: 4819 });
     expect(view.holdCents).toBeNull();
+  });
+
+  it("shows a partial refund under the charge, and the net charged, which still add up (#753)", () => {
+    // Pickup from the 2026-11-23 walkthrough: $40.12 charged, $11.32 refunded for a reported item.
+    const view = orderReceipt(order({
+      status: "PARTIALLY_REFUNDED",
+      fulfillment: "pickup",
+      subtotalCents: 3895,
+      deliveryFeeCents: 0,
+      serviceFeeCents: 117,
+      captureCents: 4012,
+      refundedCents: 1132,
+      lines: [{ id: "l1", status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 3895, substitutedUnitPriceCents: null }],
+    }));
+    expect(sum(view)).toBe(view.total.cents);
+    expect(view.total).toEqual({ label: "Charged", cents: 4012 });
+    expect(view.refund).toEqual({ key: "refund", label: "Refunded", cents: -1132 });
+    expect(view.net).toEqual({ label: "Net charged", cents: 2880 });
+    expect(view.total.cents + view.refund!.cents).toBe(view.net!.cents);
+  });
+
+  it("nets a full refund to nothing charged", () => {
+    const view = orderReceipt(order({ status: "REFUNDED", captureCents: 4819, refundedCents: 4819 }));
+    expect(view.refund?.cents).toBe(-4819);
+    expect(view.net).toEqual({ label: "Net charged", cents: 0 });
+  });
+
+  it("shows no refund line without a succeeded refund, or before capture", () => {
+    expect(orderReceipt(order({ status: "READY", captureCents: 4819 })).refund).toBeNull();
+    const uncaptured = orderReceipt(order({ refundedCents: 500 }));
+    expect(uncaptured.refund).toBeNull();
+    expect(uncaptured.net).toBeNull();
   });
 });
