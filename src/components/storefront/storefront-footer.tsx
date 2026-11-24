@@ -1,6 +1,9 @@
 import Link from "next/link";
 import type { ValidatedStore } from "@/lib/get-store";
+import { formatUsPhone, mapsUrl, telHref } from "@/lib/format";
+import { storeContact } from "@/lib/order/delivery-address";
 export function StorefrontFooter({ store }: { store: ValidatedStore }) {
+  const contact = storeContact(store);
   return (
     <footer className="sf-footer" data-testid="storefront-footer">
       <div className="sf-container">
@@ -11,7 +14,29 @@ export function StorefrontFooter({ store }: { store: ValidatedStore }) {
               {store.neighborhood ||
                 "Your independent neighborhood grocery store."}
             </p>
+            {(contact.address || contact.phone) && (
+              <address className="sf-footer-contact">
+                {contact.address && (
+                  <a href={mapsUrl(contact.address)} target="_blank" rel="noopener noreferrer">
+                    {contact.address}
+                  </a>
+                )}
+                {contact.phone && <a href={telHref(contact.phone)}>{formatUsPhone(contact.phone)}</a>}
+              </address>
+            )}
           </div>
+          {contact.hours.length > 0 && (
+            <div className="sf-footer-hours">
+              <h3>Hours</h3>
+              <dl>
+                {contact.hours.map((line) => (
+                  <div key={line.day}>
+                    <dt>{line.day}</dt><dd>{line.text}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
           <nav aria-label="Footer">
             <Link href="/">Home</Link>
             <Link href="/categories">All aisles</Link>
@@ -24,7 +49,6 @@ export function StorefrontFooter({ store }: { store: ValidatedStore }) {
           <span>
             © {new Date().getFullYear()} {store.name}
           </span>
-          <span>Powered by the Platform</span>
         </div>
       </div>
     </footer>

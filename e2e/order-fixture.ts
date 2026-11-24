@@ -552,3 +552,8 @@ export async function deleteShipRequoteOrder(number: number): Promise<void> {
     await tx.listing.deleteMany({ where: { storeId, customName: `E2E garri ${number}` } });
   });
 }
+
+/** The id of a seeded mama-ngozi order, for the new-order email link (#785). */
+export async function inboxOrderId(number: number): Promise<string> {
+  return withMama(async (tx, storeId) => (await tx.order.findFirstOrThrow({ where: { storeId, number }, select: { id: true } })).id);
+}

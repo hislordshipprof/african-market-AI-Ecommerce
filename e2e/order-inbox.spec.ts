@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { deleteInboxOrder, insertCourierPackingOrder, insertInboxOrder, seedCaptureLabel, setInboxOrderStatus } from "./order-fixture";
+import { deleteInboxOrder, inboxOrderId, insertCourierPackingOrder, insertInboxOrder, seedCaptureLabel, setInboxOrderStatus } from "./order-fixture";
 import { storeOwnerSignIn } from "./store-owner-auth";
 import { formatClockInZone, formatListDate } from "../src/lib/format";
 
@@ -343,6 +343,77 @@ test.describe("Order inbox", () => {
       if (proofDir) await page.screenshot({ path: `${proofDir}/inbox-courier-pushed-1280-light.png` });
     } finally {
       await deleteInboxOrder(number);
+    }
+  });
+
+  test("#785: a partly refunded order leaves the inbox and is in Past orders with its total and payout, found by number", async ({ page }, testInfo) => {
+    const number = 19495 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    await insertInboxOrder({ number, status: "PARTIALLY_REFUNDED", capturedAmountCents: 4012, fees: { serviceFeeCents: 117, platformFeeCents: 260 }, refundCents: 1132 });
+    const proofDir = process.env.PROOF_DIR;
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await expect(page.locator("button", { hasText: "#1001" })).toBeVisible();
+      await expect(page.locator("button", { hasText: `#${number}` })).toHaveCount(0);
+
+      await page.getByRole("link", { name: "Past orders" }).click();
+      await expect(page.getByRole("heading", { name: "Past orders" })).toBeVisible();
+      await page.getByLabel("Order number or customer").fill(`#${number}`);
+      await page.getByRole("button", { name: "Search" }).click();
+      const rows = page.getByTestId("past-orders").locator("li");
+      await expect(rows).toHaveCount(1);
+      await expect(rows.first()).toContainText(`Order #${number}`);
+      await expect(rows.first()).toContainText("Partly refunded");
+      await expect(rows.first()).toContainText("$40.12");
+      // The same payout the order's breakdown gives (#757): capture less fees and the refund, plus the fee returned.
+      await expect(rows.first()).toContainText("$26.93");
+
+      await page.getByLabel("Order number or customer").fill("no-such-customer-785");
+      await page.getByRole("button", { name: "Search" }).click();
+      await expect(page.getByText('No past orders match "no-such-customer-785".')).toBeVisible();
+
+      if (proofDir) {
+        for (const [width, scheme] of [[390, "dark"], [1280, "light"]] as const) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.setViewportSize({ width, height: 900 });
+          await page.goto("/store-admin/orders/past?store=mama-ngozi");
+          await expect(page.getByTestId("past-orders")).toBeVisible();
+          expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(width);
+          await page.screenshot({ path: `${proofDir}/past-orders-${width}-${scheme}.png`, fullPage: true });
+          await page.goto(ORDERS_URL);
+          await expect(page.getByRole("link", { name: "Past orders" })).toBeVisible();
+          await page.screenshot({ path: `${proofDir}/inbox-header-${width}-${scheme}.png` });
+        }
+      }
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("#785: the new-order email's link opens that order ready to accept", async ({ page }) => {
+    const id = await inboxOrderId(1001);
+    await storeOwnerSignIn(page);
+    await page.goto(`${ORDERS_URL}&order=${id}`);
+    await expect(page.locator("text=Order #1001")).toBeVisible();
+    await expect(page.locator("text=Accept order")).toBeVisible();
+  });
+
+  test("#785: the owner turns their own new-order email off and on, and it stays after a reload", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(ORDERS_URL);
+    const toggle = page.getByRole("button", { name: /New-order email/ });
+    await expect(toggle).toHaveText("New-order email: on");
+    try {
+      await toggle.click();
+      await expect(toggle).toHaveText("New-order email: off");
+      await page.reload();
+      await expect(page.getByRole("button", { name: /New-order email/ })).toHaveText("New-order email: off");
+    } finally {
+      const current = page.getByRole("button", { name: /New-order email/ });
+      if ((await current.textContent())?.includes("off")) {
+        await current.click();
+        await expect(current).toHaveText("New-order email: on");
+      }
     }
   });
 

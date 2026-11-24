@@ -38,6 +38,7 @@ import {
   Truck,
   ShoppingBag,
   UserCheck,
+  History,
   XCircle,
 } from "lucide-react";
 import {
@@ -64,6 +65,7 @@ import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines, swapChoiceLine } from "@/lib/order/staff-copy";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
+import { NewOrderEmailToggle } from "./new-order-email-toggle";
 import { ActionError } from "./action-error";
 import { CourierTiming } from "./courier-timing";
 import { BatchPicking, packingHref } from "./batch-picking";
@@ -183,6 +185,8 @@ interface Props {
   defaultPrepMinutes: number;
   /** The store's zone, for the last-refresh time. */
   timeZone: string;
+  /** The owner's own new-order email (#785); null for staff, who do not get it. */
+  newOrderEmail: boolean | null;
   problems?: React.ReactNode;
 }
 
@@ -194,12 +198,14 @@ export function OrderInbox({
   autoAcceptOrders,
   defaultPrepMinutes,
   timeZone,
+  newOrderEmail,
   problems,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [orders, setOrders] = useState(initialOrders);
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  // The new-order email links here with ?order= (#785); an order no longer in the inbox opens nothing.
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(() => searchParams.get("order"));
   const [isPending, startTransition] = useTransition();
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState(() => new Date());
@@ -565,7 +571,15 @@ export function OrderInbox({
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <Link
+              href={`/store-admin/orders/past?store=${encodeURIComponent(storeParam)}`}
+              className={buttonVariants({ variant: "outline", size: "sm", className: "min-h-11" })}
+            >
+              <History className="size-4" aria-hidden />
+              Past orders
+            </Link>
             <OrderAlertsToggle publicKey={vapidPublicKey} />
+            {newOrderEmail !== null && <NewOrderEmailToggle initialOn={newOrderEmail} />}
             <Button
               variant="ghost"
               size="sm"

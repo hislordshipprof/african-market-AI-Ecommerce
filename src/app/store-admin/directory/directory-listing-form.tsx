@@ -107,7 +107,7 @@ export function DirectoryListingForm({ storeName, storeSlug, place, located, sta
               </div>
               <p id="listed-state" className="text-sm text-muted-foreground">
                 {listing.listed
-                  ? `Shoppers see ${storeName}${place ? ` in ${place}` : ""}. Your street address stays private.`
+                  ? `Shoppers see ${storeName}${place ? ` in ${place}` : ""}. The directory never shows your street address.`
                   : "Off. Shoppers can still reach your storefront by its link."}
               </p>
               {listing.listed && (!located || status !== "active") ? (
