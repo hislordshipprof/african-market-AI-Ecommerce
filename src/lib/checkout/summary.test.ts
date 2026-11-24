@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CheckoutQuote } from "../customer-flow/contracts";
-import { basketQuoteView, checkoutQuoteKey, orderSummary } from "./summary";
+import { basketFulfilmentNote, basketQuoteView, checkoutQuoteKey, orderSummary } from "./summary";
 
 function quote(overrides: Partial<CheckoutQuote> = {}): CheckoutQuote {
   return {
@@ -123,5 +123,34 @@ describe("checkoutQuoteKey (#708 P1)", () => {
     const pickup = key([garri]);
     const ship = checkoutQuoteKey({ contact, fulfillment: "ship", delivery: undefined, couponRev: 0, lines: [garri] });
     expect(ship).not.toBe(pickup);
+  });
+});
+
+describe("basketFulfilmentNote (#750)", () => {
+  const store = { pickupEnabled: true, storeDeliveryEnabled: false, storeDeliveryFeeCents: 599, courierOffered: false, shipsTo: [] as string[] };
+
+  it("names store delivery at the store's own fee and courier as quoted at checkout", () => {
+    expect(basketFulfilmentNote({ ...store, storeDeliveryEnabled: true, courierOffered: true })).toBe(
+      "Estimated for pickup. Store delivery from $5.99; courier quoted at checkout. Final fees depend on your choice.",
+    );
+  });
+
+  it("says nothing about delivery at a pickup-only store", () => {
+    expect(basketFulfilmentNote(store)).toBe("Estimated for pickup.");
+  });
+
+  it("names only what the store offers: free store delivery, or shipping without a courier", () => {
+    expect(basketFulfilmentNote({ ...store, storeDeliveryEnabled: true, storeDeliveryFeeCents: 0 })).toBe(
+      "Estimated for pickup. Free store delivery. Final fees depend on your choice.",
+    );
+    expect(basketFulfilmentNote({ ...store, shipsTo: ["MD"] })).toBe(
+      "Estimated for pickup. Shipping quoted at checkout. Final fees depend on your choice.",
+    );
+  });
+
+  it("never claims a pickup estimate at a store without pickup", () => {
+    expect(basketFulfilmentNote({ ...store, pickupEnabled: false, storeDeliveryEnabled: true })).toBe(
+      "Estimated before delivery. Store delivery from $5.99. Final fees depend on your choice.",
+    );
   });
 });
