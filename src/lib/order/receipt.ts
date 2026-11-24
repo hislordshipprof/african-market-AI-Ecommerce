@@ -2,7 +2,7 @@ import { FULFILLMENT_LABELS } from "./status-labels";
 import { captureCharge, lineChargeCents, type ChargeLine } from "./substitution-pricing";
 import { orderServiceFeeSettings } from "./platform-fee";
 import { couponTerms } from "../coupon/discount";
-import type { RequestLine } from "./refund-requests";
+import type { RequestLine } from "./request-lines";
 
 /** What an order's goods, discount and service fee come to now, from its stored amounts and its lines. */
 export type OrderMoneyInput = {

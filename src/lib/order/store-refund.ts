@@ -6,13 +6,13 @@ import {
   refundedLines,
   refundedQtyByLine,
   remainingCaptureCents,
-  STORE_REFUNDABLE_FROM,
   storeRefundKey,
   submitRefund,
   taxRefundedCents,
   type RefundLinePick,
 } from "./refund-requests";
-import { CANCELLABLE_AFTER_CAPTURE, cancelCapturedOrder, cancelShipment } from "./service";
+import { cancelCapturedOrder, cancelShipment } from "./service";
+import { CANCELLABLE_AFTER_CAPTURE, STORE_REFUNDABLE_FROM } from "./constants";
 import { redactedErrorMessage } from "./staff-copy";
 
 export const STORE_REFUND_REASON_MAX = 500;

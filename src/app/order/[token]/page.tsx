@@ -3,7 +3,7 @@ import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { OrderFlow } from "@/components/storefront/flow/order-flow";
 import { FeeLine, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { orderReceipt } from "@/lib/order/receipt";
-import { requestLines } from "@/lib/order/refund-requests";
+import { requestLines } from "@/lib/order/request-lines";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { orderOutcomeMessage } from "@/lib/customer-account/order-history-view";

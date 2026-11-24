@@ -2,7 +2,7 @@ import { Prisma, type Order, type OrderLine } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, evaluateRefundsAtHandOff, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION } from "./refund-requests";
+import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, evaluateRefundsAtHandOff, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION, STORE_REFUND_ACTION } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
@@ -321,7 +321,7 @@ export const SUCCEEDED_REFUNDS = {
   where: { providerStatus: "succeeded" },
   select: {
     id: true, createdAt: true, amountCents: true, refundApplicationFee: true, feeRefundId: true,
-    serviceFeeShareCents: true, platformTaxShareCents: true,
+    serviceFeeShareCents: true, platformTaxShareCents: true, lines: true,
   },
 } as const;
 
@@ -416,6 +416,29 @@ export async function getStoreOrders(storeId: string) {
 }
 
 export type StoreOrderRow = Awaited<ReturnType<typeof getStoreOrders>>[number];
+
+/** One order with the inbox's fields (#798, the past order detail), and why each refund from a form was made. */
+export async function getStoreOrder(storeId: string, orderId: string) {
+  const scoped = storeScoped(storeId);
+  const order = await scoped.order.findUnique({ where: { id: orderId }, include: ORDER_WITH_LINES });
+  if (!order) return null;
+  const audits = await scoped.auditLog.findMany({
+    where: { entityId: orderId, entityType: "order", action: { in: [PLATFORM_REFUND_ACTION, STORE_REFUND_ACTION, "store_cancel"] } },
+    select: { action: true, actorEmail: true, after: true },
+  });
+  const why = new Map(audits.flatMap((row) => {
+    const after = row.after as { refundRequestId?: string; reason?: string } | null;
+    return after?.refundRequestId ? [[after.refundRequestId, { by: row.action === PLATFORM_REFUND_ACTION ? "The platform team" : row.actorEmail, reason: after.reason ?? null }] as const] : [];
+  }));
+  const cancel = audits.find((row) => row.action === "store_cancel")?.after as { reason?: string; note?: string | null } | undefined;
+  return {
+    ...order,
+    // A user id is the same at every store; the page needs only the name and phone.
+    customer: { name: order.customer.name, phone: order.customer.phone },
+    refunds: order.refundRequests.map((refund) => ({ ...refund, ...(why.get(refund.id) ?? { by: null, reason: null }) })),
+    cancelReason: cancel ? { reason: cancel.reason ?? "other", note: cancel.note ?? null } : null,
+  };
+}
 
 /** The prep estimate an auto-accepted order gets: the store's prep plus its longest prepared item (#570). */
 export async function defaultPrepEstimate(storeId: string, orderId: string, storePrepMinutes: number): Promise<number> {
@@ -1647,9 +1670,6 @@ export async function cancelShipment(
   }
   return cancelled;
 }
-
-/** Captured orders the store still holds (#798): a store cancel refunds the whole capture. A ship order uses cancelShipment. */
-export const CANCELLABLE_AFTER_CAPTURE = ["READY", "AWAITING_PICKUP", "COURIER_REQUESTED", "COURIER_ASSIGNED"] as const;
 
 /**
  * Cancel after capture (#568, #798): claim CANCELLING with the store's cause under the store lock, refund the whole

@@ -18,6 +18,8 @@ import type { TaxReversalPlan } from "../tax/calculator";
 import { reverseRefundTax } from "../tax/capture-tax";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
+import { refundedUnits, type RequestLine } from "./request-lines";
+import { STORE_REFUNDABLE_FROM } from "./constants";
 
 /** Inside Stripe's 24h idempotency window. Coordinator default, pending owner confirmation. */
 export const REFUND_REQUEST_ABANDON_MS = 23 * 60 * 60 * 1000;
@@ -78,27 +80,10 @@ export type RefundedLines = {
   lines: Array<{ reference: string; qty: number; amountCents: number; taxCents: number }>;
 };
 export type RefundLinePick = { lineId: string; qty: number };
-/** One line of a refund request (#798): the amounts of a request's lines sum to its amount. */
-export type RequestLine = { lineId: string; qty: number; amountCents: number };
-
-/** The stored lines of a refund request, or none when it is not tied to lines. */
-export function requestLines(value: Prisma.JsonValue | null | undefined): RequestLine[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    const line = item as Partial<RequestLine> | null;
-    return line && typeof line.lineId === "string" && typeof line.qty === "number" && typeof line.amountCents === "number"
-      ? [{ lineId: line.lineId, qty: line.qty, amountCents: line.amountCents }]
-      : [];
-  });
-}
 
 /** Units of each line that earlier refunds, not known to have failed, already returned (#798). */
 export function refundedQtyByLine(rows: Array<{ state: string; providerStatus: string | null; lines: Prisma.JsonValue | null }>): Map<string, number> {
-  const qty = new Map<string, number>();
-  for (const row of counted(rows)) {
-    for (const line of requestLines(row.lines)) qty.set(line.lineId, (qty.get(line.lineId) ?? 0) + line.qty);
-  }
-  return qty;
+  return refundedUnits(counted(rows));
 }
 
 /**
@@ -419,21 +404,6 @@ function isFormCause(cause: RefundCause): cause is FormCause {
 }
 
 export const PLATFORM_REFUNDABLE_FROM = ["DELIVERED", "COMPLETED", "PARTIALLY_REFUNDED"] as const;
-
-/** Every status after capture that still holds money to refund (#798): Ready onward, not cancelling or refunded. */
-export const STORE_REFUNDABLE_FROM = [
-  "READY",
-  "AWAITING_PICKUP",
-  "COURIER_REQUESTED",
-  "COURIER_ASSIGNED",
-  "PICKED_UP",
-  "OUT_FOR_DELIVERY",
-  "SHIPPED",
-  "IN_TRANSIT",
-  "DELIVERED",
-  "COMPLETED",
-  "PARTIALLY_REFUNDED",
-] as const;
 
 const REFUNDABLE_FROM: Record<RefundCause["cause"], readonly string[]> = {
   cancel: ["CANCELLING"],

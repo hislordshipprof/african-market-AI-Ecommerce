@@ -57,7 +57,9 @@ import {
   cancelShipmentAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
-import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
+import { CANCELLABLE_AFTER_CAPTURE, CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, STORE_REFUNDABLE_FROM, type StoreCancelReason } from "@/lib/order/constants";
+import { refundableLines } from "@/lib/order/request-lines";
+import { RefundOrder } from "./refund-order";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { orderStatusLabel } from "@/lib/order/status-labels";
 import { formatClockInZone, formatUsPhone, mapsUrl, money, telHref } from "@/lib/format";
@@ -187,6 +189,8 @@ interface Props {
   timeZone: string;
   /** The owner's own new-order email (#785); null for staff, who do not get it. */
   newOrderEmail: boolean | null;
+  /** Only the owner refunds after capture (#798). */
+  isOwner: boolean;
   problems?: React.ReactNode;
 }
 
@@ -199,6 +203,7 @@ export function OrderInbox({
   defaultPrepMinutes,
   timeZone,
   newOrderEmail,
+  isOwner,
   problems,
 }: Props) {
   const searchParams = useSearchParams();
@@ -871,6 +876,20 @@ export function OrderInbox({
                   >
                     <XCircle className="mr-2 size-4" /> Cancel order
                   </Button>
+                )}
+
+                {isOwner && (STORE_REFUNDABLE_FROM as readonly string[]).includes(selectedOrder.status) && (
+                  <RefundOrder
+                    key={selectedOrder.id}
+                    orderId={selectedOrder.id}
+                    canMarkNoShow={selectedOrder.fulfillment === "pickup" && selectedOrder.status === "AWAITING_PICKUP"}
+                    wholeCancels={(CANCELLABLE_AFTER_CAPTURE as readonly string[]).includes(selectedOrder.status) || (selectedOrder.fulfillment === "ship" && selectedOrder.status === "READY")}
+                    lines={refundableLines(selectedOrder)}
+                    onDone={(message) => {
+                      toast.success(message);
+                      pollOrders();
+                    }}
+                  />
                 )}
 
                 {selectedOrder.status === "CAPTURING" && (
