@@ -16,7 +16,11 @@ function order(overrides: Partial<ReceiptOrder> = {}): ReceiptOrder {
     totalAuthorizedCents: 5238,
     captureCents: null,
     refundedCents: 0,
-    lines: [{ id: "l1", status: "pending", qtyOrdered: 6, qtyPicked: 0, unitPriceCents: 699, substitutedUnitPriceCents: null }],
+    coupon: null,
+    serviceFeeBps: 300,
+    serviceFeeMinCents: 99,
+    serviceFeeMaxCents: 299,
+    lines: [{ id: "l1", status: "pending", qtyOrdered: 6, qtyPicked: 0, unitPriceCents: 699, substitutedUnitPriceCents: null, substitutedName: null }],
     ...overrides,
   };
 }
@@ -47,6 +51,7 @@ describe("orderReceipt", () => {
       serviceFeeCents: 135,
       tipCents: 300,
       taxCents: 41,
+      lines: [{ id: "l1", status: "pending", qtyOrdered: 2, qtyPicked: 0, unitPriceCents: 2500, substitutedUnitPriceCents: null, substitutedName: null }],
     }));
     expect(rows(view)).toEqual([
       ["Subtotal", 5000],
@@ -78,7 +83,7 @@ describe("orderReceipt", () => {
     const view = orderReceipt(order({
       status: "READY",
       captureCents: 4819,
-      lines: [{ id: "l1", status: "picked", qtyOrdered: 6, qtyPicked: 6, unitPriceCents: 699, substitutedUnitPriceCents: null }],
+      lines: [{ id: "l1", status: "picked", qtyOrdered: 6, qtyPicked: 6, unitPriceCents: 699, substitutedUnitPriceCents: null, substitutedName: null }],
     }));
     expect(view.total).toEqual({ label: "Charged", cents: 4819 });
     expect(view.holdCents).toBeNull();
@@ -92,7 +97,7 @@ describe("orderReceipt", () => {
       serviceFeeCents: 84,
       taxCents: 12,
       captureCents: 3391,
-      lines: [{ id: "l1", status: "picked", qtyOrdered: 6, qtyPicked: 4, unitPriceCents: 699, substitutedUnitPriceCents: null }],
+      lines: [{ id: "l1", status: "picked", qtyOrdered: 6, qtyPicked: 4, unitPriceCents: 699, substitutedUnitPriceCents: null, substitutedName: null }],
     }));
     expect(view.items).toEqual([{ id: "l1", cents: 2796, note: "4 of 6 found" }]);
     expect(rows(view)[0]).toEqual(["Subtotal", 2796]);
@@ -116,7 +121,7 @@ describe("orderReceipt", () => {
       serviceFeeCents: 117,
       captureCents: 4012,
       refundedCents: 1132,
-      lines: [{ id: "l1", status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 3895, substitutedUnitPriceCents: null }],
+      lines: [{ id: "l1", status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 3895, substitutedUnitPriceCents: null, substitutedName: null }],
     }));
     expect(sum(view)).toBe(view.total.cents);
     expect(view.total).toEqual({ label: "Charged", cents: 4012 });
@@ -136,5 +141,42 @@ describe("orderReceipt", () => {
     const uncaptured = orderReceipt(order({ refundedCents: 500 }));
     expect(uncaptured.refund).toBeNull();
     expect(uncaptured.net).toBeNull();
+  });
+
+  // #1006 from walkthrough 3, pickup with WALK10: Plantain Chips refunded, Suya Spice swapped for Cameroon Pepper.
+  const swapped = {
+    fulfillment: "pickup",
+    deliveryFeeCents: 0,
+    subtotalCents: 1338,
+    discountCents: 134,
+    couponCode: "WALK10",
+    coupon: { kind: "percent" as const, percentOff: 10, amountOffCents: null },
+    serviceFeeCents: 99,
+    totalAuthorizedCents: 1500,
+    lines: [
+      { id: "a", status: "refunded", qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 399, substitutedUnitPriceCents: null, substitutedName: null },
+      { id: "b", status: "picked", qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 440, substitutedUnitPriceCents: null, substitutedName: null },
+      { id: "c", status: "substituted", qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 499, substitutedUnitPriceCents: 599, substitutedName: "Cameroon Pepper 4 oz" },
+    ],
+  };
+
+  it("names the replacement on a swapped line (#762)", () => {
+    const view = orderReceipt(order({ ...swapped, status: "READY", discountCents: 104, captureCents: 1034 }));
+    expect(view.items.map((item) => item.note)).toEqual(["0 of 1 found", null, "Swapped for Cameroon Pepper 4 oz"]);
+  });
+
+  it("before capture, shows the answered swaps and refunds and the expected new total (#762)", () => {
+    // Goods now 4.40 + 5.99 = 10.39; 10% off is 1.04; the fee stays at its 0.99 minimum.
+    const view = orderReceipt(order({ ...swapped, status: "PICKING" }));
+    expect(view.items.map((item) => [item.cents, item.note])).toEqual([[0, "0 of 1 found"], [440, null], [599, "Swapped for Cameroon Pepper 4 oz"]]);
+    expect(rows(view)).toEqual([["Subtotal", 1039], ["Promo WALK10", -104], ["Service fee", 99], ["Tax", 0]]);
+    expect(view.total).toEqual({ label: "Expected total", cents: 1034 });
+    expect(view.holdCents).toBe(1500);
+  });
+
+  it("before any short is answered, keeps the order's stored total", () => {
+    const view = orderReceipt(order({ ...swapped, status: "PICKING", lines: swapped.lines.map((line) => ({ ...line, status: "pending" })) }));
+    expect(view.items.map((item) => item.note)).toEqual([null, null, null]);
+    expect(view.total).toEqual({ label: "Total", cents: 1338 - 134 + 99 });
   });
 });

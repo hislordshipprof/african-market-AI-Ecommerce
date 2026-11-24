@@ -16,6 +16,14 @@ export function canOfferSwap(holdCents: number, currentTotalCents: number, swapD
 }
 
 /**
+ * What the timer does with an unanswered prompt (decision 2026-11-23-11): the offered swap only when it
+ * costs no more than the line it replaces; a pricier swap needs the customer's yes, so the units are refunded.
+ */
+export function timeoutDecision(proposedUnitPriceCents: number | null, unitPriceCents: number): "swap" | "refund" {
+  return proposedUnitPriceCents != null && proposedUnitPriceCents <= unitPriceCents ? "swap" : "refund";
+}
+
+/**
  * What one line charges. Found units at the ordered price; on a swap, the units found short
  * at the substitute's price. A refunded line charges only what was found. Unresolved lines
  * count as ordered, which is the estimate the hold was sized for.

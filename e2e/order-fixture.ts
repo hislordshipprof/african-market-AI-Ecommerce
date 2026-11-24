@@ -455,3 +455,63 @@ export async function insertTrackingOrder(input: {
     }
   });
 }
+
+/**
+ * A pickup order after short picks (#762): one line refunded, one found, one swapped for a named replacement.
+ * Before capture it also has a short line waiting on a pricier swap and a line not yet picked with a named
+ * substitute; captured, it is Ready with the fees rewritten on the goods picked and the subtotal left stale.
+ */
+export async function insertShortSwapOrder(input: { number: number; token: string; captured?: boolean; expiresAt?: Date }): Promise<{ swapName: string; pendingName: string; substituteName: string }> {
+  return withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number: input.number } });
+    const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
+    const listings = await tx.listing.findMany({
+      where: { storeId, active: true, variants: { some: {} }, OR: [{ customName: { not: null } }, { masterProductId: { not: null } }] },
+      include: { variants: { take: 1 }, masterProduct: { select: { name: true } } },
+      orderBy: { id: "asc" },
+      take: 6,
+    });
+    if (listings.length < 6) throw new Error("mama-ngozi needs more listings");
+    const [refunded, found, swapped, pending, unpicked, replacement] = listings.map((listing) => listing.variants[0]);
+    const name = (index: number) => listings[index].customName ?? listings[index].masterProduct!.name;
+    const captured = input.captured ?? false;
+    const lines = [
+      { listingVariantId: refunded.id, qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 399, status: "refunded" },
+      { listingVariantId: found.id, qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 1299, status: "picked" },
+      { listingVariantId: swapped.id, qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 499, status: "substituted", swapRule: "named_substitute", substituteVariantId: replacement.id, substitutedVariantId: replacement.id, substitutedUnitPriceCents: 599 },
+      ...(captured ? [] : [
+        { listingVariantId: pending.id, qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 1099, status: "short", swapRule: "store_suggests" },
+        { listingVariantId: unpicked.id, qtyOrdered: 1, qtyPicked: 0, unitPriceCents: 349, status: "pending", swapRule: "named_substitute", substituteVariantId: replacement.id },
+      ]),
+    ];
+    // Placed: $36.45 of goods (captured: $21.97) with a 3% fee; captured on $18.98 of goods at the $0.99 minimum fee.
+    const subtotalCents = captured ? 2197 : 3645;
+    const placedFee = captured ? 99 : 109;
+    const order = await tx.order.create({
+      data: {
+        storeId, number: input.number, customerId: customer.id, status: captured ? "READY" : "SUBSTITUTION_PENDING", fulfillment: "pickup",
+        subtotalCents, serviceFeeCents: placedFee, serviceFeeBps: 300, serviceFeeMinCents: 99, serviceFeeMaxCents: 299,
+        bufferCents: 400, totalAuthorizedCents: subtotalCents + placedFee + 400, totalCents: subtotalCents + placedFee,
+        capturedAmountCents: captured ? 1997 : null, captureCents: captured ? 1997 : null,
+        paymentIntentId: `pi_e2e_762_${input.number}_${Date.now()}`, trackingToken: input.token, acceptedAt: new Date(),
+        lines: { create: lines },
+      },
+      include: { lines: true },
+    });
+    const byStatus = (status: string) => order.lines.find((line) => line.status === status)!;
+    const answeredAt = new Date();
+    await tx.substitutionRequest.create({ data: { storeId, orderId: order.id, orderLineId: byStatus("refunded").id, qty: 1, status: "declined", expiresAt: answeredAt, answeredAt } });
+    await tx.substitutionRequest.create({
+      data: { storeId, orderId: order.id, orderLineId: byStatus("substituted").id, qty: 1, status: "approved", proposedVariantId: replacement.id, proposedUnitPriceCents: 599, expiresAt: answeredAt, answeredAt },
+    });
+    if (!captured) {
+      await tx.substitutionRequest.create({
+        data: {
+          storeId, orderId: order.id, orderLineId: byStatus("short").id, qty: 1, proposedVariantId: replacement.id, proposedUnitPriceCents: 1199,
+          expiresAt: input.expiresAt ?? new Date(Date.now() + 30 * 60_000),
+        },
+      });
+    }
+    return { swapName: name(5), pendingName: name(3), substituteName: name(5) };
+  });
+}
