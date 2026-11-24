@@ -15,6 +15,7 @@ export async function createReadyStore(raw: PrismaClient, slug: string, status =
       stripeOnboardingStatus: "complete",
       hours: GO_LIVE_TEST_HOURS,
       timezone: "America/Chicago",
+      timezoneSetAt: new Date(),
       pickupEnabled: true,
     },
   });

@@ -116,6 +116,12 @@ describe("store hours schema", () => {
     });
   });
 
+  it("a platform admin's save marks the time zone as set, for the go-live checklist (#786)", async () => {
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.timezoneSetAt).toBeNull();
+    expect(await updateStore({}, storeForm(storeId, storedShape))).toMatchObject({ success: true, storeId });
+    expect((await authPrisma.store.findUnique({ where: { id: storeId } }))?.timezoneSetAt).toBeInstanceOf(Date);
+  });
+
   it("store hours schema accepts overnight and stored shapes", async () => {
     const overnightResult = await updateStore({}, storeForm(storeId, overnight));
     expect(overnightResult).toMatchObject({ success: true, storeId });

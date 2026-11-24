@@ -381,7 +381,7 @@ export async function createStore(
   }
 
   const store = await platformAdminTransaction((tx) =>
-    insertStore(tx, { ...values, brandColor: finalBrandColor, lat: coords.lat, lng: coords.lng }, session.user),
+    insertStore(tx, { ...values, brandColor: finalBrandColor, lat: coords.lat, lng: coords.lng, timezoneSetAt: new Date() }, session.user),
   );
 
   revalidateStore(store);
@@ -470,6 +470,7 @@ export async function updateStore(
         autoRefundLimitCents: values.autoRefundLimitCents,
         supportSlaMinutes: values.supportSlaMinutes,
         timezone: values.timezone,
+        timezoneSetAt: new Date(),
         addressLine1: values.addressLine1,
         addressLine2: values.addressLine2,
         city: values.city,

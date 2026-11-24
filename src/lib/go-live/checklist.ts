@@ -66,6 +66,7 @@ export async function readGoLiveChecklist(storeId: string, now: Date): Promise<G
   // No hours at all means "always open" to checkout, so the checklist asks for a real weekly schedule.
   const weekly = typeof store.hours === "object" && store.hours !== null && !Array.isArray(store.hours);
   const hoursSet = weekly && isValidTimezone(store.timezone) && nextOpening(store.hours, store.timezone, now) !== null;
+  const zoneSaved = store.timezoneSetAt !== null;
   const storeDelivery = store.storeDeliveryEnabled && store.lat != null && store.lng != null && Number(store.deliveryRadiusMi) > 0;
   const courierNeeded = planAllows(billing.plan, "courier-delivery");
   const courierRegistered = Boolean(store.uberLocationId || store.doordashStoreId);
@@ -78,7 +79,11 @@ export async function readGoLiveChecklist(storeId: string, now: Date): Promise<G
       done: store.stripeOnboardingStatus === "complete",
       detail: store.stripeOnboardingStatus === "complete" ? "Stripe can pay you out" : "Finish Stripe setup to take payments",
     },
-    { key: "hours", done: hoursSet, detail: hoursSet ? `${store.timezone.replace("America/", "").replaceAll("_", " ")} time` : "Opening hours are not set" },
+    {
+      key: "hours",
+      done: hoursSet && zoneSaved,
+      detail: !hoursSet ? "Opening hours are not set" : !zoneSaved ? "Time zone not confirmed" : `${store.timezone.replace("America/", "").replaceAll("_", " ")} time`,
+    },
     {
       key: "fulfillment",
       done: store.pickupEnabled || storeDelivery || courier,
