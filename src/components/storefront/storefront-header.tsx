@@ -27,6 +27,8 @@ export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
             minutes={store.prepTimeMinutes}
             pickup={store.pickupEnabled}
             radius={Number(store.deliveryRadiusMi)}
+            hours={store.hours}
+            timezone={store.timezone}
           />
         </div>
         <div className="sf-header-search">

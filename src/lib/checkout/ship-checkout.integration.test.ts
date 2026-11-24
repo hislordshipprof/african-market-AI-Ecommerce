@@ -161,23 +161,50 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     expect(accepted.problems).toEqual([]);
   });
 
+  it("#763 AC4: the rate shows once the address is confirmed, before a name; the label is then rated under the shopper's real name", async () => {
+    setTaxCalculatorForTests(fakeTaxCalculator(RATES));
+    const { store, cartId } = await seed();
+    const { fetch, provider } = shippo();
+
+    const unnamed = await quoteCheckout(store.id, 0, cartId, { ...CONTACT, name: "" }, "ship", AR, { shipping: provider });
+    expect(unnamed.shipping?.feeCents).toBe(1305);
+    expect(unnamed.problems.filter((problem) => problem.code === "ineligible")).toEqual([]);
+
+    const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", AR, { shipping: provider });
+    expect(quote.shipping?.feeCents).toBe(1305);
+    const paymentIntentId = await payAndSave(store.id, cartId, quote.holdCents);
+    const placed = await placeOrder(store.id, 0, cartId, CONTACT, "ship", null, null, paymentIntentId);
+    const scoped = storeScoped(store.id);
+    await scoped.order.update({ where: { id: placed.token }, data: { status: "PICKING", acceptedAt: new Date() } });
+    await scoped.orderLine.updateMany({ where: { orderId: placed.token }, data: { status: "picked", qtyPicked: 2 } });
+    setStripeProvider(fakeStripeProvider);
+    setAuthorizedAmount(paymentIntentId, quote.holdCents);
+    await markReady(store.id, placed.token, { label: { provider, hasStorage: () => true, upload: async () => {} } });
+
+    // The label is bought from the order's rate, so that rate's shipment carries the shopper's name, never a stand-in.
+    const order = await scoped.order.findUniqueOrThrow({ where: { id: placed.token } });
+    const shipment = Number(/^rate_fake_(\d+)_/.exec(order.shippingRateId ?? "")?.[1]);
+    const shipments = fetch.calls.filter((call) => "address_to" in call);
+    expect(shipments[shipment - 1]).toMatchObject({ address_to: { name: "Ada Buyer" } });
+  });
+
   it("AC2–AC4: no rate unless every line ships, the store ships, the state is allowed and the order is at most 50 lb", async () => {
     const cases = [
-      { opts: { shippable: false }, address: AR, message: /can't ship/ },
+      { opts: { shippable: false }, address: AR, message: /^Garri can't ship\.$/, code: "cannot-ship" },
       // Marked shippable before it was frozen: it still does not ship.
-      { opts: { frozen: true }, address: AR, message: /can't ship/ },
+      { opts: { frozen: true }, address: AR, message: /^Garri can't ship\.$/, code: "cannot-ship" },
       // A CSV import's made-up 100 g never prices a parcel, even on a listing marked shippable (#752).
-      { opts: { weightG: 100, weightPlaceholder: true }, address: AR, message: /can't ship/ },
+      { opts: { weightG: 100, weightPlaceholder: true }, address: AR, message: /^Garri can't ship\.$/, code: "cannot-ship" },
       { opts: { handlingDays: null }, address: AR, message: /doesn't ship orders/ },
       { opts: {}, address: NV, message: /can't ship to that state/ },
       // 23 kg × 1 = 50.7 lb.
       { opts: { weightG: 23_000, qty: 1 }, address: AR, message: /up to 50 lb/ },
     ];
-    for (const { opts, address, message } of cases) {
+    for (const { opts, address, message, code = "ineligible" } of cases) {
       const { store, cartId } = await seed(opts);
       const { fetch, provider } = shippo();
       const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", address, { shipping: provider });
-      expect(quote.problems).toEqual([expect.objectContaining({ code: "ineligible", message: expect.stringMatching(message) })]);
+      expect(quote.problems).toEqual([expect.objectContaining({ code, message: expect.stringMatching(message) })]);
       expect(quote.shipping).toBeUndefined();
       expect(fetch.calls).toHaveLength(0);
     }
@@ -213,6 +240,20 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
     } finally {
       vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
       vi.stubEnv("E2E_FAKE_SHIPPO", "1");
+    }
+  });
+
+  it("#763 AC2: a mixed basket names only the line that can't ship, with its basket key, whatever the address", async () => {
+    const { store, cartId } = await seed();
+    const scoped = storeScoped(store.id);
+    const goat = await scoped.listing.create({ data: { storeId: store.id, customName: "Goat Meat", price: 1500, stockMode: "unlimited", frozen: true } });
+    const goatSize = await scoped.listingVariant.create({ data: { listingId: goat.id, label: "2 lb", price: 1500, weightG: 907 } });
+    await scoped.cartLine.create({ data: { storeId: store.id, cartId, variantId: goatSize.id, qty: 1, swapRule: "exact_only" } });
+    const { provider } = shippo();
+
+    for (const address of [null, AR]) {
+      const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", address, { shipping: provider });
+      expect(quote.problems).toEqual([{ code: "cannot-ship", message: "Goat Meat can't ship.", lineKey: JSON.stringify([goat.id, goatSize.id]) }]);
     }
   });
 

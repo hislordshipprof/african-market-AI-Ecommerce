@@ -80,7 +80,8 @@ async function chatToReview(page: Page, origin: string) {
 
   const review = sheet.getByRole("region", { name: "Review your order" });
   await expect(review).toBeVisible({ timeout: 20_000 });
-  await expect(review).toContainText(/Pickup · \d{1,2}:\d{2} [AP]M [CM][SD]T/);
+  // The assistant names the time as the checkout page does (#764).
+  await expect(review).toContainText(/Pickup · Today \d{1,2}:\d{2} [AP]M [CM][SD]T/);
   const slotLabel = (await review.getByText(/^Pickup · /).textContent())!.replace("Pickup · ", "");
   return { review, slotLabel };
 }
@@ -99,9 +100,9 @@ test("the assistant hands off to normal checkout with the pickup time pre-select
 
     await review.getByRole("link", { name: "Review and pay" }).click();
     await expect(page).toHaveURL(/\/checkout$/);
-    const pickupTime = page.locator("select").filter({ has: page.locator("option", { hasText: `Today ${slotLabel}` }) });
+    const pickupTime = page.locator("select").filter({ has: page.locator("option", { hasText: slotLabel }) });
     await expect(pickupTime).toHaveValue(/Z$/, { timeout: 15_000 });
-    await expect(pickupTime.locator("option:checked")).toHaveText(`Today ${slotLabel}`);
+    await expect(pickupTime.locator("option:checked")).toHaveText(slotLabel);
 
     await page.getByLabel("Full name").fill("Ada Buyer");
     await page.getByLabel("Phone number (required)").fill("2025550100");

@@ -36,7 +36,7 @@ export type CourierQuoteInput =
 /** The cheapest parcel rate the shopper was shown (#567), or why the basket cannot ship. */
 export type ShippingQuoteInput =
   | { ok: true; feeCents: number; carrier: string; service: string; days: number | null; handlingDays: number; changed?: boolean }
-  | { ok: false; problem: FlowProblem };
+  | { ok: false; problems: FlowProblem[] };
 
 /** The cart's code, with the coupon it names when the store accepts it here, or why not (#557). */
 export type QuoteCouponInput =
@@ -149,7 +149,7 @@ export function computeQuote(
     if (!shipping) {
       problems.push({ code: "ineligible", message: "This store doesn't ship orders." });
     } else if (!shipping.ok) {
-      problems.push(shipping.problem);
+      problems.push(...shipping.problems);
     } else {
       // The carrier's rate, no markup (ADR-0006, ADR-0023).
       shippingFee = { feeCents: shipping.feeCents, carrier: shipping.carrier, service: shipping.service, days: shipping.days, handlingDays: shipping.handlingDays };
