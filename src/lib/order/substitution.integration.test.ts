@@ -9,7 +9,7 @@ import { clearTestSentSms, getTestSentSms } from "../notifications/sms";
 import { makeFakeStep } from "../inngest/fake-step";
 import { sendCustomerNotification, substitutionTimeout } from "../inngest/functions";
 import { getStoreOrders, markLinePicked, markLineShort, markReady } from "./service";
-import { applySubstitutionTimeout, resolveSubstitutionByToken } from "./substitution";
+import { applySubstitutionTimeout, resolveSubstitutionByToken, substitutionPromptsForToken } from "./substitution";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t13-${Date.now().toString(36)}`;
@@ -255,16 +255,20 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
     expect(line).toMatchObject({ status: "refunded", substitutedVariantId: null });
   });
 
-  it("AC3: the timer applies each line's swap rule once, and only when due", async () => {
+  it("AC3: the timer applies each line's swap rule once, and only when due; a pricier swap is refunded (#762)", async () => {
     const placed = await order([
       { variantId: v.yam, qty: 1, price: 1600, swapRule: "exact_only" },
       { variantId: v.egusi, qty: 2, price: 1000, swapRule: "store_suggests" },
       { variantId: v.egusi, qty: 1, price: 1000, swapRule: "named_substitute", substituteVariantId: v.palmOil },
-    ], 10_000);
+      { variantId: v.ogbono, qty: 1, price: 1100, swapRule: "store_suggests" },
+    ], 12_000);
     for (const lineId of placed.lineIds) await markLineShort(storeId, lineId, 0);
     const requests = await Promise.all(placed.lineIds.map(requestFor));
 
     expect(await applySubstitutionTimeout(storeId, requests[0].id)).toEqual({ ok: false, error: "not_due" });
+    // The swap page says, per line, what the timer will do.
+    const view = await substitutionPromptsForToken(storeId, placed.token);
+    expect(view!.prompts.map((prompt) => prompt.timeoutOutcome)).toEqual(["refund", "refund", "refund", "swap"]);
     await expire(placed.id);
     for (const request of requests) {
       const step = makeFakeStep();
@@ -273,12 +277,15 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
     }
 
     const lines = await Promise.all(placed.lineIds.map((id) => storeScoped(storeId).orderLine.findUniqueOrThrow({ where: { id } })));
+    // Decision 2026-11-23-11: a timed-out swap is made only when it costs no more than the line.
+    expect(requests.map((request) => request.proposedVariantId)).toEqual([null, v.ogbono, v.palmOil, v.egusi]);
     expect(lines.map((line) => [line.status, line.substitutedVariantId])).toEqual([
       ["refunded", null],
-      ["substituted", v.ogbono],
-      ["substituted", v.palmOil],
+      ["refunded", null],
+      ["refunded", null],
+      ["substituted", v.egusi],
     ]);
-    expect((await Promise.all(placed.lineIds.map(requestFor))).map((request) => request.status)).toEqual(["timed_out", "timed_out", "timed_out"]);
+    expect((await Promise.all(placed.lineIds.map(requestFor))).map((request) => request.status)).toEqual(["timed_out", "timed_out", "timed_out", "timed_out"]);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.id } })).status).toBe("PICKING");
     // A second firing is a no-op.
     expect(await applySubstitutionTimeout(storeId, requests[1].id)).toEqual({ ok: false, error: "already_answered" });

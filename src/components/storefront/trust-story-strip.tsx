@@ -5,7 +5,7 @@ import { CountUp, SectionReveal } from "./scroll-motion";
 export const TRUST_COPY = {
   stepTitle: "Good food. Familiar people.",
   approvalNote:
-    "If an item is short, we ask you first: a swap or a refund. If you don’t reply in time, we use the store’s suggested swap, or refund the item.",
+    "If an item is short, we ask you first: a swap or a refund. If you don’t reply in time, we make the swap if it costs no more, or refund the item.",
   hoursTitle: "Come on in",
   hoursNote: "We ask before any swap.",
 };

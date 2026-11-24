@@ -15,7 +15,11 @@ function countdown(seconds: number): string {
 }
 
 function outcomeCopy(prompt: SubstitutionPromptView): string {
-  const timedOut = prompt.status === "timed_out" ? " Your swap preference was applied when the time ran out." : "";
+  const timedOut = prompt.status !== "timed_out"
+    ? ""
+    : prompt.outcome === "refund" && prompt.proposed && prompt.deltaCents > 0
+      ? " Time ran out, and a swap that costs more needs your yes."
+      : " Your swap preference was applied when the time ran out.";
   if (prompt.outcome === "swap") return `Swapped for ${prompt.proposed?.name ?? "the suggested item"}.${timedOut}`;
   return `Refunded: you won't be charged for ${prompt.qty} × ${prompt.original.name}.${timedOut}`;
 }
@@ -61,7 +65,7 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
         const seconds = Math.max(0, Math.ceil((Date.parse(prompt.expiresAt) - now) / 1000));
         const pending = prompt.status === "pending";
         return (
-          <FlowCard key={prompt.id} title={pending ? `${prompt.original.name} is short` : "Answered"}>
+          <FlowCard key={prompt.id} title={pending ? `${prompt.original.name} is short` : `${prompt.original.name}: answered`}>
             <p>
               The store found {prompt.qty} fewer {prompt.qty === 1 ? "item" : "items"} than you ordered.
               {prompt.proposed
@@ -102,7 +106,9 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
                   ) : (
                     <>Time is up. </>
                   )}
-                  If you don&rsquo;t answer, we&rsquo;ll {prompt.proposed ? "make the swap" : "refund this item"}.
+                  If you don&rsquo;t answer, we&rsquo;ll {prompt.timeoutOutcome === "swap"
+                    ? "make the swap"
+                    : prompt.proposed ? "refund this item, as the swap costs more" : "refund this item"}.
                 </p>
                 {busy === prompt.id && (
                   <p className="of-pending" role="status">Saving your choice…</p>
