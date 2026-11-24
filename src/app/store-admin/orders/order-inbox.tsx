@@ -59,11 +59,10 @@ import type { StoreOrderRow } from "@/lib/order/service";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { orderStatusLabel } from "@/lib/order/status-labels";
-import { formatClockInZone, formatUsPhone, money } from "@/lib/format";
+import { formatClockInZone, formatUsPhone, mapsUrl, money, telHref } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
-import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentLine, showCapturedLine, storeOrderBreakdown } from "@/lib/order/staff-copy";
-import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines } from "@/lib/order/staff-copy";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { ActionError } from "./action-error";
 import { CourierTiming } from "./courier-timing";
@@ -110,10 +109,48 @@ const STORE_CANCELLABLE: readonly string[] = CANCELLABLE_BEFORE_CAPTURE;
 /** Before accepting the owner sees what was ordered; after, the same lines are the pick list. */
 const LINES_SHOWN: readonly string[] = ["AUTHORIZED", "ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
 
-function orderCustomerLabel(name: string, phone: string | null): string {
+/** The customer's name and, when given, a phone the owner can tap to call (#751). */
+function CustomerContact({ name, phone }: { name: string; phone: string | null }) {
   const trimmed = phone?.trim() ?? "";
-  if (!trimmed) return name;
-  return `${name} · ${formatUsPhone(trimmed)}`;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-1">
+      {name}
+      {trimmed && (
+        <>
+          {" "}&middot;{" "}
+          <a
+            href={telHref(trimmed)}
+            className="inline-flex min-h-11 items-center text-primary underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            data-testid="order-phone"
+          >
+            {formatUsPhone(trimmed)}
+          </a>
+        </>
+      )}
+    </span>
+  );
+}
+
+/** How the order leaves the store; a street address opens in maps (#751). */
+function FulfillmentText({ order, timeZone }: { order: StoreOrderRow; timeZone: string }) {
+  const line = fulfillmentLine(order, timeZone);
+  return (
+    <span>
+      {line.before}
+      {line.address && (
+        <a
+          href={mapsUrl(line.address)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="py-3 text-primary underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          data-testid="order-address"
+        >
+          {line.address}
+        </a>
+      )}
+      {line.after}
+    </span>
+  );
 }
 
 /** Not a status, so it does not look like one. */
@@ -554,12 +591,7 @@ export function OrderInbox({
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                  <span>
-                    {orderCustomerLabel(
-                      selectedOrder.customer.name,
-                      selectedOrder.customer.phone,
-                    )}
-                  </span>
+                  <CustomerContact name={selectedOrder.customer.name} phone={selectedOrder.customer.phone} />
                   {selectedOrder.hasAccount && <AccountBadge />}
                 </div>
                 {selectedOrder.notes && (
@@ -572,7 +604,7 @@ export function OrderInbox({
                     const Icon = selectedOrder.fulfillment === "pickup" ? ShoppingBag : selectedOrder.fulfillment === "ship" ? Package : Truck;
                     return <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />;
                   })()}
-                  <span>{fulfillmentLine(selectedOrder)}</span>
+                  <FulfillmentText order={selectedOrder} timeZone={timeZone} />
                 </p>
                 {selectedOrder.status === "REFUND_FAILED" && (
                   <p className="mt-2 text-sm text-destructive">
@@ -855,31 +887,16 @@ export function OrderInbox({
                       {money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}
                     </span>
                   </div>
-                  {(() => {
-                    const captured = selectedOrder.capturedAmountCents;
-                    if (captured == null || !showCapturedLine(selectedOrder.status, captured)) return null;
-                    const split = capturedPayout({ ...selectedOrder, capturedAmountCents: captured });
-                    return (
-                      <>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Captured</span>
-                          <span className="tabular-nums" data-testid="order-captured">
-                            {money(captured)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Card fee on your part ({CARD_FEE_LABEL})</span>
-                          <span className="tabular-nums">−{money(split.storeCardFeeCents)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm font-medium">
-                          <span>Your payout</span>
-                          <span className="tabular-nums" data-testid="order-payout">
-                            {money(split.storeReceivesCents)}
-                          </span>
-                        </div>
-                      </>
-                    );
-                  })()}
+                  {selectedOrder.capturedAmountCents != null &&
+                    showCapturedLine(selectedOrder.status, selectedOrder.capturedAmountCents) &&
+                    storePayoutLines({ ...selectedOrder, capturedAmountCents: selectedOrder.capturedAmountCents }).map((line) => (
+                      <div key={line.key} className={`flex justify-between gap-3 text-sm${line.key === "payout" ? " font-medium" : ""}`}>
+                        <span className={line.key === "payout" ? undefined : "text-muted-foreground"}>{line.label}</span>
+                        <span className="tabular-nums" data-testid={line.key === "captured" || line.key === "payout" ? `order-${line.key}` : `payout-${line.key}`}>
+                          {line.cents < 0 ? `−${money(-line.cents)}` : money(line.cents)}
+                        </span>
+                      </div>
+                    ))}
                 </div>
               </CardContent>
             </Card>
@@ -927,9 +944,11 @@ export function OrderInbox({
                               >
                                 {orderStatusLabel(order.status, order.fulfillment)}
                               </Badge>
-                              {order.fulfillment === "ship" && <Badge variant="outline">Shipping</Badge>}
                               {order.disputed && <DisputedBadge />}
                               {order.hasAccount && <AccountBadge />}
+                            </div>
+                            <div className="mt-0.5 text-xs font-medium text-foreground" data-testid="order-card-fulfillment">
+                              {fulfillmentHeadline(order, timeZone)}
                             </div>
                             {/* At phone width the name takes its own line and the time joins the meta line (#737). */}
                             <div className="mt-0.5 flex flex-col text-xs text-muted-foreground sm:flex-row sm:items-baseline sm:gap-1">
