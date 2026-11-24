@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { LogOut, Menu, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { ADMIN_NAV, currentNavHref } from "./admin-nav";
-import { signOutAdmin } from "./sign-out";
+import { signOutTo } from "@/lib/sign-out";
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
@@ -21,7 +21,7 @@ export function AdminNav({ email }: { email: string }) {
     setSigningOut(true);
     setSignOutFailed(false);
     // A full load, so no cached admin page survives the session.
-    const left = await signOutAdmin(() => authClient.signOut(), (path) => window.location.assign(path));
+    const left = await signOutTo("/admin/sign-in", () => authClient.signOut(), (path) => window.location.assign(path));
     if (!left) {
       setSigningOut(false);
       setSignOutFailed(true);

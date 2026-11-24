@@ -24,6 +24,7 @@ describe.skipIf(!hasDb)("Go live and the admin's forced go live (#555)", () => {
   }
 
   const statusOf = async (id: string) => (await platformAdmin.store.findUniqueOrThrow({ where: { id } })).status;
+  const listedOf = async (id: string) => (await platformAdmin.store.findUniqueOrThrow({ where: { id } })).listed;
   const auditRows = (id: string) => platformAdmin.auditLog.findMany({ where: { storeId: id, action: { startsWith: "store.go_live" } } });
 
   beforeAll(async () => {
@@ -49,7 +50,7 @@ describe.skipIf(!hasDb)("Go live and the admin's forced go live (#555)", () => {
     expect(await auditRows(store.id)).toEqual([]);
   });
 
-  it("sets a ready store active with one audit row; going live again changes nothing; other stores stay in setup", async () => {
+  it("sets a ready store active and listed in the directory with one audit row; going live again changes nothing; other stores stay in setup (#784)", async () => {
     const store = await readyStore("ready");
     const neighbour = await readyStore("neighbour");
     await withAiOnboardingSettings({ goLiveListingFloor: 3 }, async () => {
@@ -57,7 +58,9 @@ describe.skipIf(!hasDb)("Go live and the admin's forced go live (#555)", () => {
       expect(await goLive(store.id, actor, NOW)).toEqual({ ok: true });
     });
     expect(await statusOf(store.id)).toBe("active");
+    expect(await listedOf(store.id)).toBe(true);
     expect(await statusOf(neighbour.id)).toBe("setup");
+    expect(await listedOf(neighbour.id)).toBe(false);
     const rows = await auditRows(store.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -66,8 +69,8 @@ describe.skipIf(!hasDb)("Go live and the admin's forced go live (#555)", () => {
       actorEmail: actor.email,
       entityType: "store",
       entityId: store.id,
-      before: { status: "setup" },
-      after: { status: "active" },
+      before: { status: "setup", listed: false },
+      after: { status: "active", listed: true },
     });
   });
 
@@ -98,5 +101,7 @@ describe.skipIf(!hasDb)("Go live and the admin's forced go live (#555)", () => {
       before: { status: "setup" },
       after: { status: "active", reason: "Owner finishing Stripe tonight", openItems: ["payouts"] },
     });
+    // A forced go-live is the platform's call; listing stays the owner's switch.
+    expect(await listedOf(store.id)).toBe(false);
   });
 });

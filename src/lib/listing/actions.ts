@@ -2,7 +2,7 @@
 import { revalidateStorefront } from "../storefront/cache";
 
 import { z } from "zod";
-import { requireStoreOwner } from "../store-admin/session";
+import { READ_ONLY_MESSAGE, requireStoreOwner, requireStoreWriter } from "../store-admin/session";
 import { INT4_MAX, ListingInputError, parseVariantsJson } from "./parse-variants";
 import {
   createListing,
@@ -304,6 +304,45 @@ export async function updateListingAction(formData: FormData) {
     };
   } catch (err) {
     return { error: errorText(err, "Failed to update listing") };
+  }
+}
+
+const stockFormSchema = z.strictObject({
+  listingId: z.string().min(1).max(200).nullable(),
+  qty: z.string().max(20).nullable(),
+  qtyLoaded: z.string().max(20).nullable(),
+  status: z.string().max(40).nullable(),
+});
+const STOCK_FIELDS = ["listingId", "qty", "qtyLoaded", "status"] as const;
+
+/** Stock only (#784): any member who may write sets a count or in/out of stock. Price, name and listings stay the owner's. */
+export async function updateStockAction(formData: FormData) {
+  const session = await requireStoreWriter();
+  if (!session) return { error: READ_ONLY_MESSAGE };
+  const parsed = parseInput(stockFormSchema, readFormFields(formData, STOCK_FIELDS));
+  if (!parsed.ok || !parsed.data.listingId) return { error: "Listing ID is required" };
+  const { listingId, qty, qtyLoaded, status } = parsed.data;
+  if (qty === null && status === null) return { error: "Enter a quantity or a stock status" };
+  if (qty !== null) {
+    const qtyError = quantityError(qty);
+    if (qtyError) return { error: qtyError };
+  }
+  if (qtyLoaded !== null && quantityError(qtyLoaded)) return { error: "Quantity must be a whole number, 0 or more" };
+  if (status !== null && !isStockStatus(status)) return { error: "Stock status must be in stock, low or out of stock" };
+
+  try {
+    const updated = await updateListing({
+      storeId: session.store.id,
+      listingId,
+      ...(qty !== null && { qty: Number(qty) }),
+      ...(qtyLoaded !== null && { qtyLoaded: Number(qtyLoaded) }),
+      ...(status !== null && { status }),
+      actor: toActor(session.user),
+    });
+    revalidateStorefront(session.store.id);
+    return { success: true, id: updated.id, qty: updated.qty, ...(updated.stockMoved && { stockMoved: updated.stockMoved }) };
+  } catch (err) {
+    return { error: errorText(err, "Failed to update stock") };
   }
 }
 

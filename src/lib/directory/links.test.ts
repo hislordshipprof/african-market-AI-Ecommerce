@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { directoryLink } from "./attribution";
-import { directoryOrigin, storefrontUrl } from "./links";
+import { directoryOrigin, storefrontUrl, storeWebAddress } from "./links";
 
 const ALIAS = "african-market-ai-ecommerce.vercel.app";
 const onAlias = { VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: ALIAS };
@@ -39,5 +39,24 @@ describe("directoryOrigin", () => {
   it("is the production alias until PLATFORM_ROOT_DOMAIN is set (#766)", () => {
     expect(directoryOrigin(onAlias)).toBe(`https://${ALIAS}`);
     expect(directoryOrigin({ ...onAlias, PLATFORM_ROOT_DOMAIN: "example.com" })).toBe("https://example.com");
+  });
+});
+
+describe("storeWebAddress (#784)", () => {
+  it("is the ?store= form on the production alias", () => {
+    expect(storeWebAddress("mama-ngozi", ALIAS, onAlias)).toBe(`https://${ALIAS}/?store=mama-ngozi`);
+  });
+
+  it("is the store's subdomain once PLATFORM_ROOT_DOMAIN is set", () => {
+    expect(storeWebAddress("mama-ngozi", "mama-ngozi.example.com", { PLATFORM_ROOT_DOMAIN: "example.com" })).toBe("https://mama-ngozi.example.com/");
+  });
+
+  it("with no root domain (local or a preview), is ?store= on the address the admin is open on", () => {
+    expect(storeWebAddress("mama-ngozi", "localhost:3195", {})).toBe("http://localhost:3195/?store=mama-ngozi");
+    expect(storeWebAddress("mama-ngozi", "app-git-x.vercel.app", { VERCEL_ENV: "preview" })).toBe("https://app-git-x.vercel.app/?store=mama-ngozi");
+  });
+
+  it("is null for a slug the proxy would not route", () => {
+    expect(storeWebAddress("www", "localhost:3195", {})).toBeNull();
   });
 });

@@ -1,15 +1,37 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { PartyPopper } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { GoLiveItems, type GoLiveItemView } from "@/components/go-live/go-live-items";
 import { goLiveAction } from "@/lib/store-admin/go-live-actions";
+import { testOrderHint } from "./go-live-hint";
 
-/** A store in setup: the go-live checklist, and the owner's Go live once every item is done (#555). */
-export function GoLiveCard({ items, isOwner }: { items: GoLiveItemView[]; isOwner: boolean }) {
+/** A store in setup: the go-live checklist, and the owner's Go live once every item is done (#555). Going live asks first (#784). */
+export function GoLiveCard({
+  items,
+  isOwner,
+  minimumOrderCents,
+  onLive,
+}: {
+  items: GoLiveItemView[];
+  isOwner: boolean;
+  minimumOrderCents: number;
+  onLive: () => void;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const done = items.filter((i) => i.done).length;
   const ready = done === items.length;
@@ -18,8 +40,11 @@ export function GoLiveCard({ items, isOwner }: { items: GoLiveItemView[]; isOwne
     setError(null);
     startTransition(async () => {
       const result = await goLiveAction();
-      if (result.ok) router.refresh();
-      else setError(result.error);
+      setConfirming(false);
+      if (result.ok) {
+        onLive();
+        router.refresh();
+      } else setError(result.error);
     });
   }
 
@@ -43,20 +68,81 @@ export function GoLiveCard({ items, isOwner }: { items: GoLiveItemView[]; isOwne
             className="min-h-11 rounded-full px-6"
             disabled={!ready || pending}
             aria-describedby="go-live-hint"
-            onClick={goLive}
+            onClick={() => setConfirming(true)}
           >
-            {pending ? "Going live…" : "Go live"}
+            Go live
           </Button>
         ) : null}
         <p id="go-live-hint" className="text-sm text-muted-foreground">
           {!isOwner
             ? "The owner goes live once every item is done."
             : ready
-              ? "After you go live, place one small order yourself and refund it, to see what shoppers see."
+              ? `After you go live: ${testOrderHint(minimumOrderCents)}`
               : "Go live turns on once every item is done."}
         </p>
       </div>
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+
+      <Dialog open={confirming} onOpenChange={(open) => { if (!pending) setConfirming(open); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Go live now?</DialogTitle>
+            <DialogDescription>
+              Shoppers can order and pay from now on, and your store is listed in the Store directory. You can unlist it
+              on the Directory listing page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" className="min-h-11 rounded-full" onClick={() => setConfirming(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="button" className="min-h-11 rounded-full px-6" onClick={goLive} disabled={pending}>
+              {pending ? "Going live…" : "Go live now"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
+}
+
+/** Shown once the owner's Go live lands (#784): the store's address, its directory listing and the test order. */
+export function LiveNotice({
+  storeAddress,
+  storeParam,
+  minimumOrderCents,
+}: {
+  storeAddress: string | null;
+  storeParam: string;
+  minimumOrderCents: number;
+}) {
+  return (
+    <section role="status" aria-labelledby="live-title" className="mb-6 flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/5 p-4 sm:p-6">
+      <PartyPopper className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+      <div className="min-w-0 text-sm text-foreground">
+        <h2 id="live-title" className="text-base font-semibold">You&apos;re live</h2>
+        {storeAddress && (
+          <p className="mt-1">
+            Shoppers can order now at{" "}
+            <a href={storeAddress} target="_blank" rel="noreferrer" className="break-all font-medium text-primary underline underline-offset-4">
+              {displayAddress(storeAddress)}
+            </a>
+          </p>
+        )}
+        <p className="mt-1">
+          Your store is listed in the Store directory. To unlist it, open{" "}
+          <Link href={`/store-admin/directory?store=${storeParam}`} className="font-medium text-primary underline underline-offset-4">
+            Directory listing
+          </Link>
+          .
+        </p>
+        <p className="mt-1 text-muted-foreground">{testOrderHint(minimumOrderCents)}</p>
+      </div>
+    </section>
+  );
+}
+
+/** The address as a shopper would type it: no scheme, no trailing slash. */
+export function displayAddress(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }

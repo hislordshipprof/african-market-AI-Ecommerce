@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -9,11 +10,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
-import { GoLiveCard } from "./go-live-card";
-import { AlertCircle, Camera, ChartColumn, ClipboardList, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck, type LucideIcon } from "lucide-react";
+import { displayAddress, GoLiveCard, LiveNotice } from "./go-live-card";
+import { SignOutButton } from "./sign-out-button";
+import { AlertCircle, Camera, ExternalLink, ChartColumn, ClipboardList, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck, type LucideIcon } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -26,6 +29,9 @@ interface Props {
   directoryOrders: number;
   /** The go-live checklist while the store is in setup (#555); null once it is live. */
   goLive: GoLiveItemView[] | null;
+  /** Where shoppers reach the store (#784); null when the slug cannot be routed. */
+  storeAddress: string | null;
+  minimumOrderCents: number;
   plan: {
     name: string;
     status: string;
@@ -55,10 +61,13 @@ export function StoreAdminDashboard({
   unreadMessages,
   directoryOrders,
   goLive,
+  storeAddress,
+  minimumOrderCents,
   plan,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
+  const [justLive, setJustLive] = useState(false);
 
   return (
     <div className="min-h-dvh bg-background">
@@ -81,6 +90,7 @@ export function StoreAdminDashboard({
           <div className="flex shrink-0 items-center gap-3">
             <span className="hidden text-sm text-muted-foreground sm:inline">{userName}</span>
             <Badge variant="secondary">{role}</Badge>
+            <SignOutButton storeSlug={storeSlug} />
           </div>
         </div>
       </header>
@@ -93,7 +103,28 @@ export function StoreAdminDashboard({
           </p>
         </div>
 
-        {goLive && <GoLiveCard items={goLive} isOwner={role === "owner"} />}
+        {storeAddress && (
+          <div className="mb-6 flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">Your store&apos;s web address</p>
+              <p className="break-all text-base font-medium text-foreground" data-testid="store-address">{displayAddress(storeAddress)}</p>
+            </div>
+            <a
+              href={storeAddress}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ variant: "outline", className: "min-h-11 shrink-0 rounded-full" })}
+            >
+              View store
+              <ExternalLink aria-hidden className="size-4" />
+            </a>
+          </div>
+        )}
+
+        {justLive && <LiveNotice storeAddress={storeAddress} storeParam={storeParam} minimumOrderCents={minimumOrderCents} />}
+        {goLive && (
+          <GoLiveCard items={goLive} isOwner={role === "owner"} minimumOrderCents={minimumOrderCents} onLive={() => setJustLive(true)} />
+        )}
 
         {role === "owner" && plan.paymentFailed && (
           <div role="alert" className="mb-4 flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
@@ -143,7 +174,7 @@ export function StoreAdminDashboard({
           </NavCard>
 
           <NavCard href={`/store-admin/listings?store=${storeParam}`} icon={Package} title="Products">
-            Manage your listings and stock
+            {role === "owner" ? "Manage your listings and stock" : "Update stock and what is out of stock"}
           </NavCard>
 
           {role === "owner" && (
