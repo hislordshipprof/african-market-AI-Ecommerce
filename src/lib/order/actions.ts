@@ -1,7 +1,20 @@
 "use server";
 
 import { z } from "zod";
-import { READ_ONLY_MESSAGE, requireStoreMember, requireStoreWriter } from "../store-admin/session";
+import { READ_ONLY_MESSAGE, requireStoreMember, requireStoreOwner, requireStoreWriter } from "../store-admin/session";
+import {
+  markNoShow,
+  NO_SHOW_WRONG_STATUS,
+  refundOrderAsStore,
+  STORE_REFUND_ABOVE_REMAINING_PREFIX,
+  STORE_REFUND_FAILED,
+  STORE_REFUND_LINES_INVALID,
+  STORE_REFUND_NOT_FOUND,
+  STORE_REFUND_NOT_STARTED,
+  STORE_REFUND_REASON_MISSING,
+  STORE_REFUND_REFUSED,
+  STORE_REFUND_WRONG_STATUS,
+} from "./store-refund";
 import { parseInput } from "../security/parse-input";
 import {
   getStoreOrders,
@@ -100,6 +113,14 @@ const ALLOWED_STAFF_ERRORS = new Set([
   ISSUE_DECLINE_REASON_MISSING,
   ISSUE_REFUND_NOT_STARTED,
   ISSUE_REFUND_FAILED,
+  STORE_REFUND_NOT_FOUND,
+  STORE_REFUND_WRONG_STATUS,
+  STORE_REFUND_REASON_MISSING,
+  STORE_REFUND_LINES_INVALID,
+  STORE_REFUND_NOT_STARTED,
+  STORE_REFUND_REFUSED,
+  STORE_REFUND_FAILED,
+  NO_SHOW_WRONG_STATUS,
 ]);
 
 function isAllowListed(message: string): boolean {
@@ -119,7 +140,8 @@ function isAllowListed(message: string): boolean {
     message.startsWith(UNITS_FOUND_PREFIX) ||
     message.startsWith(POSTAGE_ROSE_PREFIX) ||
     message.startsWith(LABEL_RATE_EXPIRED_PREFIX) ||
-    message.startsWith(ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX)
+    message.startsWith(ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX) ||
+    message.startsWith(STORE_REFUND_ABOVE_REMAINING_PREFIX)
   );
 }
 
@@ -354,6 +376,39 @@ export async function cancelOrderAction(orderId: string, input: { reason: string
       reason: parsed.data.reason,
       note: parsed.data.note || null,
     }),
+  );
+}
+
+const storeRefundSchema = z.strictObject({
+  picks: z.union([
+    z.literal("whole_order"),
+    z.array(z.strictObject({ lineId: z.string().min(1).max(64), qty: z.number().int().min(1).max(10_000) })).min(1).max(200),
+  ]),
+  reason: z.string().max(2_000),
+  submissionId: z.uuid(),
+});
+
+/** Owner only (#798): refund lines or the whole order after capture. The submission id makes a resubmit refund once. */
+export async function storeRefundAction(orderId: string, input: unknown) {
+  const session = await requireStoreOwner();
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: STORE_REFUND_NOT_FOUND };
+  const parsed = parseInput(storeRefundSchema, input);
+  if (!parsed.ok) return { ok: false as const, error: "The form was not valid. Reload the order and try again." };
+  return runStaffAction("storeRefund", id.data, () =>
+    refundOrderAsStore(session.store.id, id.data, parsed.data, { id: session.user.id, email: session.user.email }),
+  );
+}
+
+/** Owner only (#798): a pickup the customer never collected is cancelled and refunded in full. */
+export async function markNoShowAction(orderId: string, note?: string | null) {
+  const session = await requireStoreOwner();
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: STORE_REFUND_NOT_FOUND };
+  const parsed = parseInput(z.string().max(2_000).nullish(), note);
+  if (!parsed.ok) return { ok: false as const, error: STORE_REFUND_REASON_MISSING };
+  return runStaffAction("markNoShow", id.data, () =>
+    markNoShow(session.store.id, id.data, { id: session.user.id, email: session.user.email }, parsed.data ?? null),
   );
 }
 

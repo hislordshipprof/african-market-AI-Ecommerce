@@ -1,6 +1,7 @@
 import { findOrderByShippingLabel, storeScopedTransaction } from "../db";
 import { recordOrderNotification, type OrderNotifyEvent } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
+import { evaluateRefundsAtHandOff } from "../order/refund-requests";
 import type { TrackingEvent } from "./shippo";
 
 /** Shipped order statuses, forward only (ADR-0023): Ready buys the label; the carrier's scans do the rest. */
@@ -54,5 +55,6 @@ export async function applyTrackingWebhook(event: TrackingEvent): Promise<Tracki
     return { result: "recorded" as const, notify };
   });
   if (outcome.notify) scheduleOrderNotification(storeId, orderId, outcome.notify);
+  if (outcome.notify === "delivered") await evaluateRefundsAtHandOff(storeId, orderId);
   return outcome.result;
 }

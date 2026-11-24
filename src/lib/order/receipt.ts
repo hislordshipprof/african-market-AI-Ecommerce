@@ -2,6 +2,7 @@ import { FULFILLMENT_LABELS } from "./status-labels";
 import { captureCharge, lineChargeCents, type ChargeLine } from "./substitution-pricing";
 import { orderServiceFeeSettings } from "./platform-fee";
 import { couponTerms } from "../coupon/discount";
+import type { RequestLine } from "./request-lines";
 
 /** What an order's goods, discount and service fee come to now, from its stored amounts and its lines. */
 export type OrderMoneyInput = {
@@ -50,10 +51,10 @@ export type ReceiptOrder = Omit<OrderMoneyInput, "lines"> & {
   totalAuthorizedCents: number;
   /** What Stripe captured (#537); kept after a refund, null until the capture is confirmed. */
   captureCents: number | null;
-  /** Succeeded refunds to the customer's card. */
-  refundedCents: number;
-  /** `substitutedName` names the replacement on a swapped line. */
-  lines: Array<ChargeLine & { id: string; substitutedName: string | null }>;
+  /** Succeeded refunds to the customer's card, with the lines each returned (#798); none for a refund not tied to lines. */
+  refunds: Array<{ amountCents: number; lines: RequestLine[] }>;
+  /** `name` is the item's name; `substitutedName` names the replacement on a swapped line. */
+  lines: Array<ChargeLine & { id: string; name?: string; substitutedName: string | null }>;
 };
 
 export type ReceiptLine = { key: string; label: string; cents: number };
@@ -64,8 +65,8 @@ export type ReceiptView = {
   total: { label: "Total" | "Expected total" | "Charged"; cents: number };
   /** The card hold, shown only until the payment is captured. */
   holdCents: number | null;
-  /** After a refund of a captured payment: the refund under the charge, and what is left charged. */
-  refund: ReceiptLine | null;
+  /** After a refund of a captured payment: each refunded line and any refund not tied to a line, then what is left charged. */
+  refunds: ReceiptLine[];
   net: { label: "Net charged"; cents: number } | null;
 };
 
@@ -100,16 +101,36 @@ export function orderReceipt(order: ReceiptOrder): ReceiptView {
   lines.push({ key: "tax", label: "Tax", cents: order.taxCents });
 
   if (order.captureCents != null) {
-    const refunded = order.refundedCents > 0;
+    const refunds = refundLines(order);
+    const refundedCents = order.refunds.reduce((sum, refund) => sum + refund.amountCents, 0);
     return {
       items,
       lines,
       total: { label: "Charged", cents: order.captureCents },
       holdCents: null,
-      refund: refunded ? { key: "refund", label: "Refunded", cents: -order.refundedCents } : null,
-      net: refunded ? { label: "Net charged", cents: order.captureCents - order.refundedCents } : null,
+      refunds,
+      net: refundedCents > 0 ? { label: "Net charged", cents: order.captureCents - refundedCents } : null,
     };
   }
   const totalCents = lines.reduce((sum, line) => sum + line.cents, 0);
-  return { items, lines, total: { label: money.expected ? "Expected total" : "Total", cents: totalCents }, holdCents: order.totalAuthorizedCents, refund: null, net: null };
+  return { items, lines, total: { label: money.expected ? "Expected total" : "Total", cents: totalCents }, holdCents: order.totalAuthorizedCents, refunds: [], net: null };
+}
+
+/** One row per refunded item, in the order's line order, and one for what was refunded without lines. */
+function refundLines(order: ReceiptOrder): ReceiptLine[] {
+  const byLine = new Map<string, { qty: number; cents: number }>();
+  let other = 0;
+  for (const refund of order.refunds) {
+    if (refund.lines.length === 0) other += refund.amountCents;
+    for (const line of refund.lines) {
+      const sum = byLine.get(line.lineId) ?? { qty: 0, cents: 0 };
+      byLine.set(line.lineId, { qty: sum.qty + line.qty, cents: sum.cents + line.amountCents });
+    }
+  }
+  const rows: ReceiptLine[] = order.lines.flatMap((line) => {
+    const refunded = byLine.get(line.id);
+    return refunded ? [{ key: `refund-${line.id}`, label: `Refunded ${refunded.qty} × ${line.name ?? "Item"}`, cents: -refunded.cents }] : [];
+  });
+  if (other > 0) rows.push({ key: "refund", label: "Refunded", cents: -other });
+  return rows;
 }

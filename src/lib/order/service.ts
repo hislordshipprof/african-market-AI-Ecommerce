@@ -2,7 +2,7 @@ import { Prisma, type Order, type OrderLine } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION } from "./refund-requests";
+import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, evaluateRefundsAtHandOff, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund, PLATFORM_REFUND_ACTION, STORE_REFUND_ACTION } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, fulfilledStatus, type OrderLineStatus, type StoreCancelReason } from "./constants";
@@ -86,7 +86,8 @@ export type CancelCause =
   | {
       action: "store_cancel";
       actor: { id: string; email: string };
-      reason: StoreCancelReason;
+      /** `no_show` is a pickup the customer never collected (#798), cancelled after capture. */
+      reason: StoreCancelReason | "no_show";
       note: string | null;
     };
 
@@ -320,7 +321,7 @@ export const SUCCEEDED_REFUNDS = {
   where: { providerStatus: "succeeded" },
   select: {
     id: true, createdAt: true, amountCents: true, refundApplicationFee: true, feeRefundId: true,
-    serviceFeeShareCents: true, platformTaxShareCents: true,
+    serviceFeeShareCents: true, platformTaxShareCents: true, lines: true,
   },
 } as const;
 
@@ -415,6 +416,29 @@ export async function getStoreOrders(storeId: string) {
 }
 
 export type StoreOrderRow = Awaited<ReturnType<typeof getStoreOrders>>[number];
+
+/** One order with the inbox's fields (#798, the past order detail), and why each refund from a form was made. */
+export async function getStoreOrder(storeId: string, orderId: string) {
+  const scoped = storeScoped(storeId);
+  const order = await scoped.order.findUnique({ where: { id: orderId }, include: ORDER_WITH_LINES });
+  if (!order) return null;
+  const audits = await scoped.auditLog.findMany({
+    where: { entityId: orderId, entityType: "order", action: { in: [PLATFORM_REFUND_ACTION, STORE_REFUND_ACTION, "store_cancel"] } },
+    select: { action: true, actorEmail: true, after: true },
+  });
+  const why = new Map(audits.flatMap((row) => {
+    const after = row.after as { refundRequestId?: string; reason?: string } | null;
+    return after?.refundRequestId ? [[after.refundRequestId, { by: row.action === PLATFORM_REFUND_ACTION ? "The platform team" : row.actorEmail, reason: after.reason ?? null }] as const] : [];
+  }));
+  const cancel = audits.find((row) => row.action === "store_cancel")?.after as { reason?: string; note?: string | null } | undefined;
+  return {
+    ...order,
+    // A user id is the same at every store; the page needs only the name and phone.
+    customer: { name: order.customer.name, phone: order.customer.phone },
+    refunds: order.refundRequests.map((refund) => ({ ...refund, ...(why.get(refund.id) ?? { by: null, reason: null }) })),
+    cancelReason: cancel ? { reason: cancel.reason ?? "other", note: cancel.note ?? null } : null,
+  };
+}
 
 /** The prep estimate an auto-accepted order gets: the store's prep plus its longest prepared item (#570). */
 export async function defaultPrepEstimate(storeId: string, orderId: string, storePrepMinutes: number): Promise<number> {
@@ -1400,6 +1424,7 @@ export async function completePickup(
     return { ok: true as const, notify };
   });
   if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "completed");
+  if (result.ok) await evaluateRefundsAtHandOff(storeId, orderId);
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
@@ -1493,6 +1518,7 @@ export async function markDelivered(
     return { ok: false, error: result.error };
   }
   if (result.notify) scheduleOrderNotification(storeId, orderId, "delivered");
+  await evaluateRefundsAtHandOff(storeId, orderId);
   return { ok: true };
 }
 
@@ -1608,6 +1634,7 @@ export async function cancelShipment(
   orderId: string,
   actor: { id: string; email: string },
   deps: { provider?: ShippingProvider | null } = {},
+  note = "Shipment cancelled before the carrier's first scan",
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const scoped = storeScoped(storeId);
   const order = await scoped.order.findUnique({ where: { id: orderId } });
@@ -1632,19 +1659,38 @@ export async function cancelShipment(
   }
 
   // The claim: a scan that lands now finds CANCELLING and moves nothing.
-  const claimed = await storeScopedTransaction(storeId, async (tx) => {
-    await lockStoreRow(tx, storeId);
-    const { count } = await tx.order.updateMany({ where: { id: orderId, status: "READY", fulfillment: "ship" }, data: { status: "CANCELLING" } });
-    if (count === 0) return false;
-    await tx.auditLog.create({
-      data: causeAuditData(storeId, orderId, { action: "store_cancel", actor, reason: "other", note: "Shipment cancelled before the carrier's first scan" }),
-    });
-    return true;
-  });
-  if (!claimed) {
+  const cancelled = await cancelCapturedOrder(
+    storeId,
+    orderId,
+    { action: "store_cancel", actor, reason: "other", note },
+    { from: ["READY"], fulfillment: "ship" },
+  );
+  if (cancelled === "not_claimed") {
     console.error(JSON.stringify({ event: "shipping_cancel_lost_race", storeId, orderId, labelVoided: order.shippingLabelStatus === "bought" }));
     return { ok: false, error: "Order status changed during cancellation" };
   }
+  return cancelled;
+}
+
+/**
+ * Cancel after capture (#568, #798): claim CANCELLING with the store's cause under the store lock, refund the whole
+ * capture through the ledger, then the cancellation write, which also cancels a booked courier.
+ */
+export async function cancelCapturedOrder(
+  storeId: string,
+  orderId: string,
+  cause: Extract<CancelCause, { action: "store_cancel" }>,
+  claim: { from: readonly OrderStatus[]; fulfillment?: string },
+): Promise<{ ok: true } | { ok: false; error: string } | "not_claimed"> {
+  const order = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const where = { id: orderId, status: { in: [...claim.from] }, ...(claim.fulfillment ? { fulfillment: claim.fulfillment } : {}) };
+    const { count } = await tx.order.updateMany({ where, data: { status: "CANCELLING" } });
+    if (count === 0) return null;
+    await tx.auditLog.create({ data: causeAuditData(storeId, orderId, cause) });
+    return tx.order.findUnique({ where: { id: orderId }, select: { paymentIntentId: true } });
+  });
+  if (!order) return "not_claimed";
   if (!order.paymentIntentId) return { ok: false, error: "Order has no payment intent" };
   const refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
   if (refundBlocked(refund)) return { ok: false, error: "Order status changed during cancellation" };

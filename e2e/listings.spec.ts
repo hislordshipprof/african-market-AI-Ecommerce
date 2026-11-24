@@ -161,6 +161,17 @@ test.describe("Listing management (authenticated)", () => {
     await expect(option.locator("img")).toBeVisible({ timeout: 10000 });
     await option.click();
     await expect(page.getByRole("dialog").getByRole("img", { name: "Catalogue photo of Yam" })).toBeVisible();
+    await expect(page.getByRole("dialog").getByText("Check the catalogue photo is the item on your shelf.")).toBeVisible();
+
+    // #798 AC4: a catalogue product with no photo is not called "the catalogue photo".
+    await page.getByRole("dialog").locator("[data-slot='dialog-close']").last().click();
+    await page.click("text=Add listing");
+    await picker.click();
+    await picker.fill("Aboniki");
+    await page.getByRole("option", { name: /Aboniki balm/ }).click({ timeout: 10000 });
+    await expect(page.getByRole("dialog").getByText("No photo", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("dialog").getByText("Check the catalogue photo is the item on your shelf.")).toHaveCount(0);
+    await expect(page.getByRole("dialog").getByText(/The catalogue has no photo of this product/)).toBeVisible();
   });
 
   test("create a listing with a variant", async ({ page }) => {

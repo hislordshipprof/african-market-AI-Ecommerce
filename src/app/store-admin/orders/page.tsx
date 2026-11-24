@@ -36,6 +36,7 @@ export default async function OrdersPage() {
       defaultPrepMinutes={store?.prepTimeMinutes ?? 30}
       timeZone={session.store.timezone}
       newOrderEmail={newOrderEmail}
+      isOwner={owner}
       problems={(
         <>
           <ProblemsToReview issues={issues} timeZone={session.store.timezone} />

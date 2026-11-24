@@ -18,7 +18,7 @@ const orderInclude = {
   substitutionRequests: { where: { status: "pending" }, select: { expiresAt: true }, orderBy: { expiresAt: "asc" }, take: 1 },
   issueReports: { select: { state: true, amountCents: true } },
   // The tracking page names what was refunded (#736).
-  refundRequests: { select: { amountCents: true, providerStatus: true } },
+  refundRequests: { select: { amountCents: true, providerStatus: true, lines: true }, orderBy: { createdAt: "asc" } },
   // The live courier delivery; failover leaves the replaced one cancelled.
   deliveries: {
     where: { status: { not: "cancelled" } },

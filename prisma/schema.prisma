@@ -1716,6 +1716,9 @@ model RefundRequest {
   taxReversal           Json?     @map("tax_reversal")
   /// #671: the Stripe Tax reversal transaction, once made; null with a plan is pending for the sweep.
   taxReversalId         String?   @map("tax_reversal_id")
+  /// #798: the order lines this refund returns, [{ lineId, qty, amountCents }], the amounts summing to amount_cents.
+  /// Set for an issue refund and a store refund of lines; null for a refund not tied to lines.
+  lines                 Json?
   feeRefundId           String?   @map("fee_refund_id")
   /// #546: when provider_status first became 'succeeded', stamped by a trigger; kept if Stripe later fails the refund.
   succeededAt           DateTime? @map("succeeded_at")

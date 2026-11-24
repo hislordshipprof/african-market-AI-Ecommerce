@@ -67,10 +67,15 @@ export default async function PastOrdersPage({
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border bg-card" data-testid="past-orders">
             {rows.map((row) => (
-              <li key={row.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 px-4 py-3">
+              <li key={row.id} className="relative grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 px-4 py-3 transition-colors hover:bg-muted/50">
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground">
-                    Order #{row.number}
+                    <Link
+                      href={`/store-admin/orders/past/${row.id}?store=${slug}`}
+                      className="underline-offset-2 outline-none after:absolute after:inset-0 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                    >
+                      Order #{row.number}
+                    </Link>
                     <Badge variant={row.status === "COMPLETED" || row.status === "DELIVERED" ? "secondary" : "outline"}>
                       {orderStatusLabel(row.status, row.fulfillment)}
                     </Badge>
