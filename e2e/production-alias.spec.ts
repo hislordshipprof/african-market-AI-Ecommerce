@@ -28,7 +28,8 @@ async function serveVercelHostsFrom(context: BrowserContext, port: number) {
       const location = response.headers().location;
       if (response.status() >= 300 && response.status() < 400 && location) {
         const target = new URL(location, url).toString();
-        const { location: _, ...headers } = response.headers();
+        const headers = response.headers();
+        delete headers.location;
         await route.fulfill({ status: 200, headers: { ...headers, "content-type": "text/html" }, body: `<meta http-equiv="refresh" content="0;url=${target}">` });
         return;
       }
