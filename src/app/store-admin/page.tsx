@@ -10,6 +10,9 @@ import { goLiveItemLabel, readGoLiveChecklist, type GoLiveItemKey } from "@/lib/
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
 import { StoreAdminDashboard } from "./dashboard";
 
+/** Set by the owner on the Settings page (#786). */
+const OWNER_SET: readonly GoLiveItemKey[] = ["hours", "fulfillment"];
+
 async function goLiveItems(storeId: string, storeSlug: string, isOwner: boolean): Promise<GoLiveItemView[] | null> {
   const checklist = await readGoLiveChecklist(storeId, new Date());
   if (!checklist || checklist.status !== "setup") return null;
@@ -29,7 +32,7 @@ async function goLiveItems(storeId: string, storeSlug: string, isOwner: boolean)
   return checklist.items.map((item) => ({
     key: item.key,
     label: goLiveItemLabel(item.key, checklist.floor),
-    detail: item.detail,
+    detail: !isOwner && !item.done && OWNER_SET.includes(item.key) ? `${item.detail}. The owner sets this in Settings.` : item.detail,
     done: item.done,
     href: hrefs[item.key],
   }));
