@@ -21,6 +21,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { VALID_US_TIMEZONES } from "./timezone";
+import { storePhone } from "../store-settings/store-phone";
 import { SLOT_FIELD_NAMES, readSlotForm } from "./slot-form";
 import type { SlotSchedule } from "../order/slot-schedule";
 
@@ -119,13 +120,8 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
   const city = formText(data, "city")?.trim() || null;
   const state = formText(data, "state")?.trim().toUpperCase() || null;
   const zip = formText(data, "zip")?.trim() || null;
-  const phoneRaw = formText(data, "phone")?.trim() || null;
-  const phoneDigits = phoneRaw?.replace(/\D/g, "") ?? "";
-  // Couriers take E.164 (Uber Direct needs a pickup phone to book, #527).
-  const phone = !phoneRaw ? null
-    : phoneDigits.length === 10 ? `+1${phoneDigits}`
-    : phoneDigits.length === 11 && phoneDigits.startsWith("1") ? `+${phoneDigits}`
-    : null;
+  const parsedPhone = storePhone(formText(data, "phone"));
+  const phone = parsedPhone.ok ? parsedPhone.phone : null;
   const storeDeliveryEnabled = formText(data, "storeDeliveryEnabled") === "on";
   const storeDeliveryFeeCents = Math.round(parseFloatOrDefault(formText(data, "storeDeliveryFee"), 0) * 100);
 
@@ -199,7 +195,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
 
   if (state && !/^[A-Z]{2}$/.test(state)) errors.state = "State must be a 2-letter code";
   if (zip && !/^\d{5}$/.test(zip)) errors.zip = "ZIP must be 5 digits";
-  if (phoneRaw && !phone) errors.phone = "Phone must be a 10-digit US number";
+  if (!parsedPhone.ok) errors.phone = "Phone must be a 10-digit US number";
   if (!Number.isFinite(storeDeliveryFeeCents) || storeDeliveryFeeCents < 0 || storeDeliveryFeeCents > 10_000) {
     errors.storeDeliveryFee = "Delivery fee must be $0–$100";
   }
