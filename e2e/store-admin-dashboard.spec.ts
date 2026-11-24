@@ -135,13 +135,14 @@ test.describe.serial("Store admin dashboard (#784)", () => {
     await expect(page.locator("#go-live-hint")).toContainText("$35.00");
     await shoot(page, "owner-ready");
 
-    await page.getByRole("button", { name: "Go live" }).click();
+    await page.getByRole("button", { name: "Go live", exact: true }).click();
     const confirm = page.getByRole("dialog");
     await expect(confirm).toContainText("directory");
     await confirm.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirm).toBeHidden();
     expect((await asPlatformAdmin((tx) => tx.store.findUniqueOrThrow({ where: { id: storeId } }))).status).toBe("setup");
 
-    await page.getByRole("button", { name: "Go live" }).click();
+    await page.getByRole("button", { name: "Go live", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Go live now" }).click();
     const live = page.getByRole("status").filter({ hasText: "You're live" });
     await expect(live).toBeVisible();
