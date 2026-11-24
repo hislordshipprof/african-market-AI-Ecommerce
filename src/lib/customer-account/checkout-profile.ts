@@ -37,6 +37,8 @@ export interface CheckoutPrefill {
   cards: AccountCard[];
   cardsUnavailable: boolean;
   defaultAddress: AccountAddressView | null;
+  /** Every saved address, the default first, for checkout's picker (#763). */
+  addresses: AccountAddressView[];
 }
 
 export async function loadAccountBook(userId: string, now = new Date()): Promise<AccountBookSnapshot> {
@@ -75,11 +77,13 @@ async function lastOrderName(storeId: string, userId: string): Promise<string> {
 export async function loadCheckoutPrefill(userId: string, storeId?: string, now = new Date()): Promise<CheckoutPrefill> {
   const book = await loadAccountBook(userId, now);
   const name = book.name.trim() || (storeId ? await lastOrderName(storeId, userId) : "");
+  const defaultAddress = book.addresses.find((address) => address.isDefault) ?? null;
   return {
     contact: { name, email: book.email, phone: book.phone },
     cards: book.cards,
     cardsUnavailable: book.cardsUnavailable,
-    defaultAddress: book.addresses.find((address) => address.isDefault) ?? null,
+    defaultAddress,
+    addresses: defaultAddress ? [defaultAddress, ...book.addresses.filter((address) => address !== defaultAddress)] : book.addresses,
   };
 }
 

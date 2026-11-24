@@ -5,9 +5,9 @@ import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
 /**
  * Where a checkout failure is shown, so the message sits beside the control it
  * concerns (#708, #717 AC3): payment by the card, basket by the lines, session
- * and network by Pay, address by the address fields.
+ * and network by Pay, address and items that can't ship (#763) by the address fields.
  */
-export type IssueSection = "payment" | "basket" | "session" | "address" | "network" | "general";
+export type IssueSection = "payment" | "basket" | "shipping" | "session" | "address" | "network" | "general";
 
 export interface CheckoutIssue {
   section: IssueSection;
@@ -23,12 +23,13 @@ const SECTION_BY_CODE: Partial<Record<FlowErrorCode, IssueSection>> = {
   "minimum-order": "basket",
   "outside-radius": "address",
   ineligible: "address",
+  "cannot-ship": "shipping",
   "session-expired": "session",
   "quote-changed": "session",
 };
 
 /** Most pressing first: a basket problem must be fixed before anything else matters. */
-const ORDER: IssueSection[] = ["basket", "address", "session", "payment"];
+const ORDER: IssueSection[] = ["basket", "shipping", "address", "session", "payment"];
 
 const BASKET_CODES = new Set<FlowErrorCode>(["out-of-stock", "max-quantity", "minimum-order"]);
 

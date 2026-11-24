@@ -27,6 +27,15 @@ describe("checkout issue placement (#708, #717 AC3)", () => {
     expect(issueFromProblems([{ code: "outside-radius", message: "Outside the 8 mile delivery area." }])?.section).toBe("address");
   });
 
+  it("#763 AC2: items that can't ship get their own section naming them, not the address one", () => {
+    const GOAT = JSON.stringify(["listing-goat", "variant-2lb"]);
+    const issue = issueFromProblems([
+      { code: "cannot-ship", message: "Yellow Garri can't ship.", lineKey: GARRI },
+      { code: "cannot-ship", message: "Goat Meat can't ship.", lineKey: GOAT },
+    ]);
+    expect(issue).toEqual({ section: "shipping", message: "Yellow Garri can't ship. Goat Meat can't ship.", lineKeys: [GARRI, GOAT] });
+  });
+
   it("returns nothing when only contact problems remain (the fields show those)", () => {
     expect(issueFromProblems([{ code: "invalid-contact", message: "Required." }])).toBeNull();
   });
