@@ -66,7 +66,7 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
   });
 
   /** A captured pickup order: two lines, $10 × 2 and $5 × 1, plus a $1.50 service fee. */
-  async function capturedOrder(status: "AWAITING_PICKUP" | "COMPLETED" = "COMPLETED") {
+  async function capturedOrder(status: "AWAITING_PICKUP" | "COMPLETED" | "READY" = "COMPLETED", fulfillment: "pickup" | "ship" = "pickup") {
     number += 1;
     const scoped = storeScoped(storeId);
     const customer = await scoped.customer.create({ data: { storeId, name: `Refund ${number}`, email: `c${number}@${run}.test` } });
@@ -76,7 +76,7 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
     await fakeStripeProvider.capturePaymentIntent(pi, captured, `cap-sr798-${number}`);
     const order = await scoped.order.create({
       data: {
-        storeId, number, customerId: customer.id, status, fulfillment: "pickup", subtotalCents: 2500, bufferCents: 0,
+        storeId, number, customerId: customer.id, status, fulfillment, subtotalCents: 2500, bufferCents: 0,
         totalAuthorizedCents: captured, totalCents: captured, capturedAmountCents: captured, captureCents: captured,
         serviceFeeCents: 150, paymentIntentId: pi, trackingToken: `t-${run}-${number}`,
         completedAt: status === "COMPLETED" ? new Date() : null,
@@ -149,10 +149,23 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
   });
 
   it("refunding the whole of a collected order refunds what is left and marks it Refunded", async () => {
-    const { order, yam } = await capturedOrder();
+    const { order, yam, oil } = await capturedOrder();
     await refund(order.id, [{ lineId: yam.id, qty: 1 }]);
     expect(await refund(order.id, "whole_order")).toMatchObject({ ok: true, amountCents: 2650 - 1060 });
-    expect((await state(order.id)).order.status).toBe("REFUNDED");
+    const after = await state(order.id);
+    expect(after.order.status).toBe("REFUNDED");
+    // The receipt names each item the whole-order refund returned: the units left, with the amount split over them.
+    const lines = after.requests[1].lines as Array<{ lineId: string; qty: number; amountCents: number }>;
+    expect(lines.map(({ lineId, qty }) => ({ lineId, qty }))).toEqual([{ lineId: yam.id, qty: 1 }, { lineId: oil.id, qty: 1 }]);
+    expect(lines.reduce((sum, line) => sum + line.amountCents, 0)).toBe(2650 - 1060);
+  });
+
+  it("refunding the whole of a ready ship order cancels the shipment and keeps the owner's reason", async () => {
+    const { order } = await capturedOrder("READY", "ship");
+    expect(await refund(order.id, "whole_order")).toEqual({ ok: true, cancelled: true });
+    const after = await state(order.id);
+    expect(after.order.status).toBe("CANCELLED");
+    expect(after.audits[0].after).toEqual({ reason: "other", note: "Bruised yam" });
   });
 
   it("a no-show cancels an uncollected pickup with the reason no_show and refunds it in full", async () => {

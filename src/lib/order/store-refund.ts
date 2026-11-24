@@ -57,7 +57,7 @@ export async function refundOrderAsStore(storeId: string, orderId: string, input
   }
 
   if (input.picks === "whole_order") {
-    if (order.fulfillment === "ship" && order.status === "READY") return cancelled(await cancelShipment(storeId, orderId, actor));
+    if (order.fulfillment === "ship" && order.status === "READY") return cancelled(await cancelShipment(storeId, orderId, actor, {}, reason));
     if ((CANCELLABLE_AFTER_CAPTURE as readonly string[]).includes(order.status)) {
       const result = await cancelCapturedOrder(storeId, orderId, { action: "store_cancel", actor, reason: "other", note: reason }, { from: CANCELLABLE_AFTER_CAPTURE });
       return cancelled(result === "not_claimed" ? { ok: false, error: STORE_REFUND_NOT_STARTED } : result);
@@ -67,6 +67,9 @@ export async function refundOrderAsStore(storeId: string, orderId: string, input
   // Read Stripe outside the store lock (ADR-0014); submitRefund re-reads it and refuses again if it moved.
   const remaining = await remainingCaptureCents(order.paymentIntentId);
   let amountCents = remaining;
+  // A whole-order refund names the units left, so the receipt lists them; none left (fee rounding) stores no lines.
+  let picks: RefundLinePick[] | null = input.picks === "whole_order" ? unitsLeft(order.lines, order.refundRequests) : input.picks;
+  if (picks?.length === 0) picks = null;
   if (input.picks !== "whole_order") {
     const lines = refundedLines(order, input.picks, refundedQtyByLine(order.refundRequests));
     if (!lines || lines.goodsCents <= 0) return { ok: false, error: STORE_REFUND_LINES_INVALID };
@@ -79,7 +82,7 @@ export async function refundOrderAsStore(storeId: string, orderId: string, input
     await submitRefund(storeId, orderId, order.paymentIntentId, {
       cause: "store",
       amountCents,
-      picks: input.picks === "whole_order" ? null : input.picks,
+      picks,
       submissionId: input.submissionId,
       reason,
       actor,
@@ -109,6 +112,13 @@ export async function markNoShow(storeId: string, orderId: string, actor: Actor,
     { from: ["AWAITING_PICKUP"], fulfillment: "pickup" },
   );
   return cancelled(result === "not_claimed" ? { ok: false, error: NO_SHOW_WRONG_STATUS } : result);
+}
+
+function unitsLeft(lines: Array<{ id: string; qtyPicked: number }>, refunds: Parameters<typeof refundedQtyByLine>[0]): RefundLinePick[] {
+  const refunded = refundedQtyByLine(refunds);
+  return lines
+    .map((line) => ({ lineId: line.id, qty: line.qtyPicked - (refunded.get(line.id) ?? 0) }))
+    .filter((pick) => pick.qty > 0);
 }
 
 function cancelled(result: { ok: true } | { ok: false; error: string }): StoreRefundResult {

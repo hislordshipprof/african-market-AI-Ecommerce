@@ -1634,6 +1634,7 @@ export async function cancelShipment(
   orderId: string,
   actor: { id: string; email: string },
   deps: { provider?: ShippingProvider | null } = {},
+  note = "Shipment cancelled before the carrier's first scan",
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const scoped = storeScoped(storeId);
   const order = await scoped.order.findUnique({ where: { id: orderId } });
@@ -1661,7 +1662,7 @@ export async function cancelShipment(
   const cancelled = await cancelCapturedOrder(
     storeId,
     orderId,
-    { action: "store_cancel", actor, reason: "other", note: "Shipment cancelled before the carrier's first scan" },
+    { action: "store_cancel", actor, reason: "other", note },
     { from: ["READY"], fulfillment: "ship" },
   );
   if (cancelled === "not_claimed") {
