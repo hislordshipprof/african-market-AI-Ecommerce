@@ -9,9 +9,10 @@ import { rangeDays, type AnalyticsRange } from "./range";
  * - Goods = captured − service fee − tip − delivery fee (the service fee is the customer's separate line, D3).
  * - Card fee = the order's stored platform fee. Courier orders also pass the courier fee to the platform,
  *   capped with the card fee at captured, as at capture.
- * - Net to store = captured − card fee − courier fee − the store's share of succeeded refunds.
+ * - Net to store = captured − card fee − service fee − courier fee − tax the platform collects − refunds + fees returned.
  * - A refund with refund_application_fee returns the platform's fee in proportion (Stripe's rule), never more
- *   than that fee across all the order's refunds, so the store bears the amount less that share; otherwise all of it.
+ *   than that fee across all the order's refunds; a courier refund after delivery returns its service fee and
+ *   platform tax shares once that fee refund is made (fee_refund_id), as in the fee ledger. Otherwise none comes back.
  */
 
 export const FULFILLMENTS = ["pickup", "store-delivery", "courier", "ship"] as const;
@@ -23,7 +24,18 @@ export interface SalesTotals {
   averageOrderCents: number;
   /** Store-funded promo discounts on captured orders; goods are already net of them. */
   discountsCents: number;
+  /** The delivery or shipping fee the customer paid; the courier fee or postage passes through to the platform. */
+  deliveryFeeCents: number;
+  tipCents: number;
+  /** The customer's service fee, which the platform keeps. */
+  serviceFeeCents: number;
+  /** Sales tax the platform collects and remits as marketplace facilitator (ADR-0008); 0 when the store is liable. */
+  platformTaxCents: number;
+  /** What the customer was charged: goods + delivery fee + tip + service fee. */
+  chargedCents: number;
   refundsCents: number;
+  /** Platform fee Stripe credits back to the store with refunds. */
+  feeReturnedCents: number;
   cardFeeCents: number;
   courierFeeCents: number;
   netCents: number;
@@ -115,16 +127,24 @@ type MoneyRow = {
   goods: number;
   discounts: number;
   card_fee: number;
-  /** The customer's service fee the platform keeps; shown nowhere, but net to store still pays it. */
+  /** The customer's service fee the platform keeps. */
   service_fee: number;
   courier_fee: number;
+  delivery_fee: number;
+  tip: number;
+  platform_tax: number;
   captured: number;
   refunds: number;
-  refund_store_cost: number;
+  fee_returned: number;
 };
 
-/** What the platform kept at capture: card fee plus courier fee or postage (courierFeeCents), capped at captured. */
-const APPLICATION_FEE = Prisma.sql`LEAST(COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents WHEN o.fulfillment = 'ship' THEN COALESCE(o.shipping_postage_cents, o.delivery_fee_cents) ELSE 0 END, o.captured_amount_cents)`;
+const PASSED_THROUGH = Prisma.sql`COALESCE(o.platform_fee_cents, 0) + CASE WHEN o.fulfillment = 'courier' THEN o.delivery_fee_cents WHEN o.fulfillment = 'ship' THEN COALESCE(o.shipping_postage_cents, o.delivery_fee_cents) ELSE 0 END`;
+/** The platform's tax (platformTaxCents): what the store does not keep when the platform is the liable party. */
+const PLATFORM_TAX = Prisma.sql`CASE WHEN o.tax_liable_party = 'store' THEN 0 ELSE GREATEST(o.tax_cents, 0) END`;
+/** Platform fee plus courier fee or postage, capped at captured. */
+const COURIER_CAPPED = Prisma.sql`LEAST(${PASSED_THROUGH}, o.captured_amount_cents)`;
+/** What Stripe took at capture (capturedPayout): the above plus the platform's tax, capped at captured. */
+const APPLICATION_FEE = Prisma.sql`LEAST(${PASSED_THROUGH} + ${PLATFORM_TAX}, o.captured_amount_cents)`;
 
 /** The store's card fee: the stored platform fee is the service fee plus this (captureSplit), so take the service fee off. */
 const CARD_FEE = Prisma.sql`GREATEST(COALESCE(o.platform_fee_cents, 0) - o.service_fee_cents, 0)`;
@@ -139,7 +159,9 @@ export async function salesRows(storeId: string, range: AnalyticsRange, timeZone
       JOIN orders o ON o.id = r.order_id AND o.store_id = r.store_id
       CROSS JOIN LATERAL (SELECT ${APPLICATION_FEE} AS total) fee
       CROSS JOIN LATERAL (SELECT CASE WHEN r.refund_application_fee AND o.captured_amount_cents > 0
-        THEN ROUND(fee.total::numeric * r.amount_cents / o.captured_amount_cents) ELSE 0 END AS proportional) share, b
+        THEN ROUND(fee.total::numeric * r.amount_cents / o.captured_amount_cents)
+        WHEN r.fee_refund_id IS NOT NULL THEN r.service_fee_share_cents + r.platform_tax_share_cents
+        ELSE 0 END AS proportional) share, b
       WHERE r.store_id = ${storeId} AND r.provider_status = 'succeeded' AND r.created_at < b.hi
     )
     SELECT 'order' AS kind, ${storeDay(Prisma.sql`o.created_at`, timeZone)} AS day, o.fulfillment,
@@ -148,35 +170,47 @@ export async function salesRows(storeId: string, range: AnalyticsRange, timeZone
            SUM(o.discount_cents)::int AS discounts,
            SUM(${CARD_FEE})::int AS card_fee,
            SUM(COALESCE(o.platform_fee_cents, 0) - ${CARD_FEE})::int AS service_fee,
-           SUM(${APPLICATION_FEE} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
+           SUM(${COURIER_CAPPED} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
+           SUM(o.delivery_fee_cents)::int AS delivery_fee,
+           SUM(o.tip_cents)::int AS tip,
+           SUM(${APPLICATION_FEE} - ${COURIER_CAPPED})::int AS platform_tax,
            SUM(o.captured_amount_cents)::int AS captured,
-           0 AS refunds, 0 AS refund_store_cost
+           0 AS refunds, 0 AS fee_returned
     FROM orders o, b
     WHERE o.store_id = ${storeId} AND o.created_at >= b.lo AND o.created_at < b.hi AND o.captured_amount_cents > 0
     GROUP BY 2, 3
     UNION ALL
     -- Stripe returns the fee in proportion but never more than the fee in total across partial refunds (stripe/fake.ts).
     SELECT 'refund', ${storeDay(Prisma.sql`r.created_at`, timeZone)}, r.fulfillment,
-           0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
            SUM(r.amount_cents)::int,
-           SUM(r.amount_cents - (LEAST(r.fee_total, r.running) - LEAST(r.fee_total, r.running - r.proportional)))::int
+           SUM(LEAST(r.fee_total, r.running) - LEAST(r.fee_total, r.running - r.proportional))::int
     FROM r, b
     WHERE r.created_at >= b.lo
     GROUP BY 2, 3`);
 }
 
 function emptyTotals(): SalesTotals {
-  return { orders: 0, goodsCents: 0, averageOrderCents: 0, discountsCents: 0, refundsCents: 0, cardFeeCents: 0, courierFeeCents: 0, netCents: 0 };
+  return {
+    orders: 0, goodsCents: 0, averageOrderCents: 0, discountsCents: 0, deliveryFeeCents: 0, tipCents: 0, serviceFeeCents: 0,
+    platformTaxCents: 0, chargedCents: 0, refundsCents: 0, feeReturnedCents: 0, cardFeeCents: 0, courierFeeCents: 0, netCents: 0,
+  };
 }
 
 function addRow(totals: SalesTotals, row: MoneyRow) {
   totals.orders += row.orders;
   totals.goodsCents += row.goods;
   totals.discountsCents += row.discounts;
+  totals.deliveryFeeCents += row.delivery_fee;
+  totals.tipCents += row.tip;
+  totals.serviceFeeCents += row.service_fee;
+  totals.platformTaxCents += row.platform_tax;
+  totals.chargedCents += row.captured;
   totals.cardFeeCents += row.card_fee;
   totals.courierFeeCents += row.courier_fee;
   totals.refundsCents += row.refunds;
-  totals.netCents += row.captured - row.card_fee - row.service_fee - row.courier_fee - row.refund_store_cost;
+  totals.feeReturnedCents += row.fee_returned;
+  totals.netCents += row.captured - row.card_fee - row.service_fee - row.courier_fee - row.platform_tax - row.refunds + row.fee_returned;
 }
 
 function finish<T extends SalesTotals>(totals: T): T {

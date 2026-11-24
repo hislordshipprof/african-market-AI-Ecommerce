@@ -17,9 +17,12 @@ function row(fulfillment: string, capturedCents: number): MoneyRow {
     card_fee: 0,
     service_fee: 0,
     courier_fee: 0,
+    delivery_fee: 0,
+    tip: 0,
+    platform_tax: 0,
     captured: capturedCents,
     refunds: 0,
-    refund_store_cost: 0,
+    fee_returned: 0,
   };
 }
 
