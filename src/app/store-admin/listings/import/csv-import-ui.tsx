@@ -1,5 +1,6 @@
 "use client";
 
+import { ProductThumb } from "@/components/store-admin/product-thumb";
 import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
@@ -790,6 +791,7 @@ function MatchRow({
         onChange={onToggle}
         className="h-4 w-4 rounded border-[var(--color-line)] accent-[var(--color-primary)]"
       />
+      <ProductThumb src={match.masterImageUrl} />
       <div className="min-w-0 flex-1">
         <RowName name={match.csvName} price={match.price} />
         <p className="truncate text-xs text-[var(--color-muted)]">
@@ -863,6 +865,7 @@ function AmbiguousRow({
               onChange={() => onResolve(c.masterProductId)}
               className="h-3.5 w-3.5 accent-[var(--color-primary)]"
             />
+            <ProductThumb src={c.masterImageUrl} size="sm" />
             <span className="text-sm">{c.masterProductName}</span>
             <Badge variant="secondary" className="text-[10px]">
               {c.matchType === "exact" ? "Exact" : "Synonym"}

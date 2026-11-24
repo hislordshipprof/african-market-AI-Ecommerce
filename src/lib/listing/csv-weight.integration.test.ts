@@ -203,6 +203,20 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     expect(ambiguousStored.variant.price).toBe(800);
   });
 
+  // #787 AC4: the owner checks each proposed match by its catalogue photo before importing.
+  it("the preview carries the catalogue photo of each match and each candidate", async () => {
+    await platformAdmin.masterProduct.update({ where: { id: ambigId }, data: { imageUrl: "/images/products/egusi.webp" } });
+    const preview = await generatePreview(
+      storeBId,
+      `name,price\nAmbig Grain ${RUN},8.00\nAmbig Alpha ${RUN},2.00\n`,
+      userId,
+    );
+    expect(preview.matches.map((m) => m.masterImageUrl)).toEqual(["/images/products/egusi.webp"]);
+    const photos = Object.fromEntries(preview.ambiguous[0]!.candidates.map((c) => [c.masterProductId, c.masterImageUrl]));
+    expect(photos[ambigId]).toBe("/images/products/egusi.webp");
+    expect(Object.values(photos)).toContain(null);
+  });
+
   it("storeScoped(storeB) cannot read, change, delete or create store A's imported variants", async () => {
     const preview = await generatePreview(
       storeAId,

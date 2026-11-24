@@ -10,6 +10,8 @@ import {
   deactivateListing,
   reactivateListing,
   listMasterProducts,
+  getListing,
+  setListingPhoto,
   toActor,
   VALID_STOCK_MODES,
   isStockStatus,
@@ -18,6 +20,9 @@ import {
 } from "./service";
 import { isPreparedKind, MAX_PREP_MINUTES, type PreparedKind } from "./prepared";
 import { parseInput, readFormFields } from "../security/parse-input";
+import { uploadCatalogPhoto } from "../catalog-image";
+import { listingImage } from "../storefront/images";
+import { PHOTO_UPLOAD_MAX_BYTES } from "./csv-file-cap";
 
 const listingField = z.string().max(500).nullable();
 const listingFormSchema = z.strictObject({
@@ -390,5 +395,30 @@ export async function listMasterProductsAction(query?: string) {
   if (!parsed.ok) return [];
   const safeQuery = parsed.data?.slice(0, 100);
   const products = await listMasterProducts(safeQuery, 50);
-  return products.map((p) => ({ id: p.id, name: p.name }));
+  return products.map((p) => ({ id: p.id, name: p.name, imageUrl: listingImage({ masterProduct: p }) ?? null }));
+}
+
+const PHOTO_ERRORS = {
+  svg: "SVG images are not accepted. Upload a JPEG, PNG or WebP photo.",
+  not_photo: "Upload a JPEG, PNG or WebP photo.",
+  storage: "Photo storage is not set up.",
+  upload: "The photo could not be saved. Try again.",
+} as const;
+
+/** The owner's own product photo for one listing (#787). Owner-only, like every other listing edit. */
+export async function uploadListingPhotoAction(formData: FormData) {
+  const session = await requireStoreOwner();
+  const id = parseInput(z.string().min(1).max(200), formData.get("listingId"));
+  if (!id.ok) return { error: "Listing not found" };
+  const photo = formData.get("photo");
+  if (!(photo instanceof File) || photo.size === 0) return { error: "Choose a photo to upload." };
+  if (photo.size > PHOTO_UPLOAD_MAX_BYTES) return { error: "The photo is over 2 MB. Choose a smaller one." };
+  if (!(await getListing(session.store.id, id.data))) return { error: "Listing not found" };
+
+  const uploaded = await uploadCatalogPhoto(`listing-${id.data}`, new Uint8Array(await photo.arrayBuffer()));
+  if (!uploaded.ok) return { error: PHOTO_ERRORS[uploaded.reason] };
+  const saved = await setListingPhoto(session.store.id, id.data, uploaded.url, toActor(session.user));
+  if (!saved) return { error: "Listing not found" };
+  revalidateStorefront(session.store.id);
+  return { success: true, imageUrl: saved.imageUrl };
 }

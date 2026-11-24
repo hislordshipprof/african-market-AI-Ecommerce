@@ -12,6 +12,8 @@ SELECT image_ref FROM (
   UNION ALL
   SELECT image_url FROM store_collections
   UNION ALL
+  SELECT image_url FROM listings
+  UNION ALL
   SELECT logo_url FROM stores
   UNION ALL
   SELECT owner_photo_url FROM stores

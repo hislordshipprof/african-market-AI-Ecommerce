@@ -641,6 +641,8 @@ model Listing {
   customName          String?  @map("custom_name")
   /// #782: the aisle of a custom listing; a master product's category wins when there is one.
   categoryId          String?  @map("category_id")
+  /// #787: the store's own photo; overrides the master product's photo for this listing only.
+  imageUrl            String?  @map("image_url")
   price               Int
   stockMode           String   @map("stock_mode")
   qty                 Int?

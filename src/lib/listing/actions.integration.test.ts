@@ -148,10 +148,10 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
       await expect(listMasterProductsAction("garri")).rejects.toThrow(/NEXT_REDIRECT:\/store-admin\?store=/);
     });
 
-    it("returns only id and name to an owner of the store", async () => {
+    it("returns only id, name and photo to an owner of the store", async () => {
       asSession(userA, emailA);
       const result = await listMasterProductsAction(`Act147 Garri ${RUN}`);
-      expect(result).toEqual([{ id: masterId, name: `Act147 Garri ${RUN}` }]);
+      expect(result).toEqual([{ id: masterId, name: `Act147 Garri ${RUN}`, imageUrl: null }]);
     });
   });
 

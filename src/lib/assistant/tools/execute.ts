@@ -396,6 +396,7 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
       continue;
     }
     const photo = listingImage({
+      imageUrl: listing.imageUrl,
       customName: listing.customName,
       masterProduct: listing.masterProduct
         ? { name: listing.masterProduct.name, imageUrl: listing.masterProduct.imageUrl }
@@ -569,6 +570,7 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
     if (seenVariants.has(variant.id)) continue;
     seenVariants.add(variant.id);
     const photo = listingImage({
+      imageUrl: listing.imageUrl,
       customName: listing.customName,
       masterProduct: listing.masterProduct
         ? { name: listing.masterProduct.name, imageUrl: listing.masterProduct.imageUrl }
@@ -787,6 +789,7 @@ async function itemsNotShown(
 function describedAdd(applied: AppliedAddLine) {
   const master = applied.listing.masterProduct;
   const photo = listingImage({
+    imageUrl: applied.listing.imageUrl,
     customName: applied.listing.customName,
     masterProduct: master,
   });

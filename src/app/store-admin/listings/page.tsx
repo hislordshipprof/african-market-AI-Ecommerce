@@ -1,6 +1,8 @@
 import { requireStoreMember } from "@/lib/store-admin/session";
 import { listListings } from "@/lib/listing/service";
 import { platform } from "@/lib/db";
+import { catalogStorageConfigured } from "@/lib/catalog-image";
+import { listingImage } from "@/lib/storefront/images";
 import { ListingManagement } from "./listing-management";
 
 /** Every member sees Products; staff only update stock, and the server actions hold to that (#784). */
@@ -19,12 +21,16 @@ export default async function ListingsPage() {
       aisles={aisles}
       canManage={session.membership.role === "owner"}
       canEditStock={!session.membership.readOnly}
+      photoUploads={catalogStorageConfigured()}
       listings={listings.map((l) => ({
         id: l.id,
         masterProductId: l.masterProductId,
         categoryId: l.categoryId,
         customName: l.customName,
         masterProductName: l.masterProduct?.name ?? null,
+        photoUrl: listingImage(l) ?? null,
+        ownPhotoUrl: l.imageUrl ? listingImage({ imageUrl: l.imageUrl }) ?? null : null,
+        catalogPhotoUrl: l.masterProduct ? listingImage({ masterProduct: l.masterProduct }) ?? null : null,
         price: l.price,
         stockMode: l.stockMode,
         qty: l.qty,

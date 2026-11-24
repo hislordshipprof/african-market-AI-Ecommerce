@@ -1,3 +1,4 @@
+import { listingImage } from "../storefront/images";
 import { parse } from "csv-parse/sync";
 import { z } from "zod";
 import { platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow, IMPORT_TOKEN_TTL_MS } from "../db";
@@ -35,6 +36,8 @@ export interface CsvPreviewMatch {
   price: number;
   masterProductId: string;
   masterProductName: string;
+  /** The catalogue photo, a second check that it is the right item (#787). */
+  masterImageUrl: string | null;
   matchType: "exact" | "synonym";
   frozen: boolean;
   perishable: boolean;
@@ -47,6 +50,7 @@ export interface CsvPreviewAmbiguous {
   candidates: Array<{
     masterProductId: string;
     masterProductName: string;
+    masterImageUrl: string | null;
     matchType: "exact" | "synonym";
   }>;
 }
@@ -545,6 +549,7 @@ function normalizeForMatch(s: string): string {
 interface MasterProductRow {
   id: string;
   name: string;
+  imageUrl: string | null;
   weightG: number | null;
   frozen: boolean;
   perishable: boolean;
@@ -790,6 +795,10 @@ export async function buildMatchContext(csvText: string) {
   };
 }
 
+function catalogPhoto(product: { name: string; imageUrl: string | null }): string | null {
+  return listingImage({ masterProduct: product }) ?? null;
+}
+
 function classifyPreviewRows(
   rows: ParsedRow[],
   matchMap: Map<string, ProductMatchList>,
@@ -858,6 +867,7 @@ function classifyPreviewRows(
           price: row.price,
           masterProductId: m.product.id,
           masterProductName: m.product.name,
+          masterImageUrl: catalogPhoto(m.product),
           matchType: m.matchType,
           frozen: m.product.frozen,
           perishable: m.product.perishable,
@@ -871,6 +881,7 @@ function classifyPreviewRows(
         candidates: productMatches.map((m) => ({
           masterProductId: m.product.id,
           masterProductName: m.product.name,
+          masterImageUrl: catalogPhoto(m.product),
           matchType: m.matchType,
         })),
       });

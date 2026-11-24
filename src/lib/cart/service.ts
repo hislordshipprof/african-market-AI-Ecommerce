@@ -254,6 +254,7 @@ export interface AppliedAddLine {
     qty: number | null;
     status: string | null;
     customName: string | null;
+    imageUrl: string | null;
     maxPerOrder: number | null;
     prepared: string | null;
     masterProduct: { name: string; imageUrl: string | null } | null;
@@ -325,6 +326,7 @@ export async function applyAddLine(
     qty: variant.listing.qty,
     status: variant.listing.status,
     customName: variant.listing.customName,
+    imageUrl: variant.listing.imageUrl,
     maxPerOrder: variant.listing.maxPerOrder,
     prepared: variant.listing.prepared,
     masterProduct: variant.listing.masterProduct
