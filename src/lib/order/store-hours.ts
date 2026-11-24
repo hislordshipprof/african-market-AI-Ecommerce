@@ -322,3 +322,23 @@ export function openMinutesDeadline(
   }
   return null;
 }
+
+const WEEK = [1, 2, 3, 4, 5, 6, 0];
+const SHORT_DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function clockLabel(minutes: number): string {
+  const h = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
+}
+
+/** Monday to Sunday as a shopper reads them (#783); empty when the store has set no weekly hours. */
+export function weeklyHours(hours: unknown): { day: string; text: string }[] {
+  const schedule = parseSchedule(hours);
+  if (schedule.kind !== "weekly" || schedule.days.every((day) => day.kind === "none")) return [];
+  return WEEK.map((dow) => {
+    const day = schedule.days[dow];
+    const text = day.kind === "range" ? `${clockLabel(day.open)} – ${clockLabel(day.close)}` : day.kind === "unparseable" ? day.raw : "Closed";
+    return { day: SHORT_DAY[dow], text };
+  });
+}

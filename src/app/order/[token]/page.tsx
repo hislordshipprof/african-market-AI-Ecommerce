@@ -18,8 +18,8 @@ import { FULFILLMENT_LABELS } from "@/lib/order/status-labels";
 import { OrderUpdates } from "@/components/pwa/order-updates";
 import { vapidPublicKey } from "@/lib/push/sender";
 import { scheduledTimeLabel } from "@/lib/order/pickup-slots";
-import { deliveryDestination } from "@/lib/order/delivery-address";
-import { formatClockInZone, money } from "@/lib/format";
+import { deliveryDestination, storeContact } from "@/lib/order/delivery-address";
+import { formatClockInZone, formatUsPhone, mapsUrl, money, telHref } from "@/lib/format";
 import { shownPack } from "@/lib/storefront/pack-order";
 import styles from "./tracking.module.css";
 
@@ -69,6 +69,8 @@ export default async function OrderPage({
     const shipped = realOrder.fulfillment === "ship";
     // An address is the customer's own: shown only with the tracking token, like the PIN and the photo.
     const destination = owner ? deliveryDestination(realOrder) : null;
+    // A pickup order says where to collect it; the storefront footer shows the same store details (#783).
+    const pickupAt = realOrder.fulfillment === "pickup" ? storeContact(context.store) : null;
     const deadline = realOrder.substitutionRequests[0]?.expiresAt;
     const answerBy = deadline ? formatClockInZone(deadline, context.store.timezone) : null;
     const receipt = orderReceipt({
@@ -109,6 +111,20 @@ export default async function OrderPage({
                   <dd>{destination.address}</dd>
                 </div>
               )}
+              {pickupAt?.address && (
+                <div>
+                  <dt>Pick up at</dt>
+                  <dd>
+                    <a className="sf-text-link" href={mapsUrl(pickupAt.address)} target="_blank" rel="noopener noreferrer">{pickupAt.address}</a>
+                  </dd>
+                </div>
+              )}
+              {pickupAt?.phone && (
+                <div>
+                  <dt>Store phone</dt>
+                  <dd><a className="sf-text-link" href={telHref(pickupAt.phone)}>{formatUsPhone(pickupAt.phone)}</a></dd>
+                </div>
+              )}
               {scheduled && !outcome && (
                 <div>
                   <dt>{realOrder.fulfillment === "pickup" ? "Pickup time" : "Delivery time"}</dt>
@@ -132,6 +148,16 @@ export default async function OrderPage({
                 </div>
               )}
             </dl>
+            {pickupAt && pickupAt.hours.length > 0 && (
+              <div className={styles.block}>
+                <h3>Store hours</h3>
+                <dl className={styles.hours}>
+                  {pickupAt.hours.map((line) => (
+                    <div key={line.day}><dt>{line.day}</dt><dd>{line.text}</dd></div>
+                  ))}
+                </dl>
+              </div>
+            )}
             {realOrder.status === "SUBSTITUTION_PENDING" && owner && (
               <div className={styles.block}>
                 <h3>An item is short</h3>
