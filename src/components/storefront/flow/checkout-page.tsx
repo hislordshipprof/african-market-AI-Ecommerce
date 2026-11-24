@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CircleAlert, Clock, MapPin, Package, ShoppingBag, Truck } from "lucide-react";
 import { loadStripe, type Appearance, type Stripe as StripeJs } from "@stripe/stripe-js";
@@ -58,6 +58,7 @@ import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
 import { checkoutQuoteKey, placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
+import { paymentReadiness, type PaymentLoad } from "@/lib/checkout/payment-ready";
 import { contactPrefillNote, SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { AccountAddressView, CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import type { SlotOptions } from "@/lib/checkout/slots";
@@ -98,11 +99,24 @@ function getStripePromise(config: StripeConfig): Promise<StripeJs | null> {
   if (!cached) {
     cached = loadStripe(config.publishableKey);
     stripePromiseMap.set(config.publishableKey, cached);
+    // A failed load is forgotten, so Try again loads Stripe.js afresh (#783).
+    cached.catch(() => stripePromiseMap.delete(config.publishableKey));
   }
   return cached;
 }
 
-function StripeCardInput({ harness }: { harness?: boolean }) {
+/** Whether Stripe.js loaded, and how to load it again (#783). */
+const StripeLoad = createContext<{ load: PaymentLoad; retry: () => void }>({ load: "loading", retry: () => undefined });
+
+function StripeCardInput({
+  harness,
+  onReady,
+  onLoadError,
+}: {
+  harness?: boolean;
+  onReady: () => void;
+  onLoadError: () => void;
+}) {
   if (harness) {
     return (
       <p className={styles.muted}>
@@ -112,7 +126,7 @@ function StripeCardInput({ harness }: { harness?: boolean }) {
   }
   return (
     <div className={styles.stripeCard}>
-      <PaymentElement options={{ layout: "tabs", wallets: { link: "never" } }} />
+      <PaymentElement options={{ layout: "tabs", wallets: { link: "never" } }} onReady={onReady} onLoadError={onLoadError} />
     </div>
   );
 }
@@ -360,6 +374,18 @@ function RealCheckoutForm({
   const [whatsappUpdates, setWhatsappUpdates] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(cardView.preselectedId);
   const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
+  // Place order waits for Stripe.js and, for a new card, the card form; a failed load offers Try again (#783).
+  const stripeLoad = useContext(StripeLoad);
+  const [cardLoad, setCardLoad] = useState<PaymentLoad>(stripeConfig.harness ? "ready" : "loading");
+  const [cardAttempt, setCardAttempt] = useState(0);
+  const payment = paymentReadiness({ stripe: stripeLoad.load, cardForm: showCardForm, element: cardLoad });
+  const retryPayment = () => {
+    if (stripeLoad.load === "failed") stripeLoad.retry();
+    if (cardLoad === "failed") {
+      setCardLoad("loading");
+      setCardAttempt((n) => n + 1);
+    }
+  };
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   // The default saved address fills delivery, courier and ship; its notes join the order only off pickup (#763).
@@ -911,6 +937,7 @@ function RealCheckoutForm({
       weightG={weightG}
       courierEligible={settings.courierOffered}
       addressHold={addressRefused && fulfillment !== "pickup" && !delivery}
+      paymentHold={payment === "ready" ? null : payment}
       onSubmit={pay}
       contactNote={contactPrefillNote(stripeConfig.signedIn ? prefill?.contact ?? { name: "", phone: "", email: "" } : null)}
       paymentSection={
@@ -951,7 +978,26 @@ function RealCheckoutForm({
               Use a different card
             </button>
           ) : null}
-          {showCardForm ? <StripeCardInput harness={stripeConfig.harness} /> : null}
+          {payment === "failed" ? (
+            <div className={styles.issue} role="alert" id="checkout-payment-load">
+              <CircleAlert size={20} aria-hidden />
+              <div>
+                <p className={styles.issueTitle}>Card payment didn&rsquo;t load</p>
+                <p>Check your connection, then try again. Your basket and details are kept.</p>
+                <div className={styles.issueActions}>
+                  <Button type="button" onClick={retryPayment}>Try again</Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {showCardForm && stripeLoad.load === "ready" ? (
+            <StripeCardInput
+              key={cardAttempt}
+              harness={stripeConfig.harness}
+              onReady={() => setCardLoad("ready")}
+              onLoadError={() => setCardLoad("failed")}
+            />
+          ) : null}
           {cardView.showSaveTick && showCardForm ? (
             <label className={styles.choice}>
               <input
@@ -1060,15 +1106,38 @@ function StripeWrapper({
   estimatedHoldCents: number;
   children: React.ReactNode;
 }) {
-  const stripePromise = useMemo(
-    () => (config.harness ? Promise.resolve(createHarnessStripe()) : getStripePromise(config)),
-    [config],
-  );
+  // Loaded here, not handed to Elements as a promise: a rejected load must show Try again, never a silent wait (#783).
+  const [stripe, setStripe] = useState<StripeJs | null>(null);
+  const [load, setLoad] = useState<PaymentLoad>("loading");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const loading = config.harness ? Promise.resolve(createHarnessStripe()) : getStripePromise(config);
+    loading.then(
+      (loaded) => {
+        if (!live) return;
+        setStripe(loaded);
+        setLoad(loaded ? "ready" : "failed");
+      },
+      () => live && setLoad("failed"),
+    );
+    return () => {
+      live = false;
+    };
+  }, [config, attempt]);
+  const stripeLoad = useMemo(() => ({
+    load,
+    retry: () => {
+      setLoad("loading");
+      setAttempt((n) => n + 1);
+    },
+  }), [load]);
   const amount = Math.max(estimatedHoldCents, 50);
   const appearance = useStoreStripeAppearance();
   return (
+    <StripeLoad.Provider value={stripeLoad}>
     <Elements
-      stripe={stripePromise}
+      stripe={stripe}
       options={{
         mode: "payment",
         amount,
@@ -1080,6 +1149,7 @@ function StripeWrapper({
     >
       {children}
     </Elements>
+    </StripeLoad.Provider>
   );
 }
 
@@ -1162,6 +1232,8 @@ interface CheckoutLayoutProps {
   courierEligible: boolean;
   /** A failed address check holds Place order until an address is confirmed (#750). */
   addressHold?: boolean;
+  /** Place order waits while payment loads, or after it failed to load (#783). */
+  paymentHold?: "loading" | "failed" | null;
   onSubmit: (e: FormEvent) => void;
   paymentSection: React.ReactNode;
   payLabel: string;
@@ -1205,7 +1277,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, quoteFailed = false, quoteFailMessage, onRetryQuote,
     issue, onClearIssue, onUseAnotherCard, onRefresh, submitAttempt, errorHref, submitted, payState,
-    frozen, hot = false, prepMinutes, weightG, courierEligible, addressHold = false,
+    frozen, hot = false, prepMinutes, weightG, courierEligible, addressHold = false, paymentHold = null,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     contactNote = contactPrefillNote(null), identityLocked = false, whatsapp,
   } = props;
@@ -1758,12 +1830,17 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               type="submit"
               state={payState}
               realPayment={isRealPayment}
-              disabled={payState !== "idle" || quotePending || Boolean(blocking) || addressHold}
-              aria-describedby={blocking ? issueId("basket") : addressHold ? "checkout-address-hold" : undefined}
+              disabled={payState !== "idle" || quotePending || Boolean(blocking) || addressHold || Boolean(paymentHold)}
+              aria-describedby={blocking ? issueId("basket") : addressHold ? "checkout-address-hold" : paymentHold ? "checkout-payment-hold" : undefined}
               label={payLabel}
             />
             {addressHold && (
               <p className={styles.muted} id="checkout-address-hold">Confirm your address to place the order.</p>
+            )}
+            {paymentHold && !addressHold && (
+              <p className={styles.muted} id="checkout-payment-hold">
+                {paymentHold === "failed" ? "Card payment didn\u2019t load. Try again in the payment section." : "Loading secure payment\u2026"}
+              </p>
             )}
             <p className={styles.muted}>
               By placing this order, you approve the authorization hold and
