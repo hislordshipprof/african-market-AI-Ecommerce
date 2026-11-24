@@ -327,7 +327,7 @@ export const SUCCEEDED_REFUNDS = {
 const ORDER_WITH_LINES = {
   refundRequests: SUCCEEDED_REFUNDS,
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
-  coupon: { select: { code: true } },
+  coupon: { select: { code: true, kind: true, percentOff: true, amountOffCents: true } },
   // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.
   deliveries: {
     where: { status: { not: "cancelled" } },
@@ -338,6 +338,8 @@ const ORDER_WITH_LINES = {
   lines: {
     include: {
       substitutedVariant: NAMED_VARIANT,
+      // The pick list shows the customer's swap choice before staff tap Short (#762).
+      substituteVariant: NAMED_VARIANT,
       substitutionRequest: {
         select: { status: true, qty: true, expiresAt: true, proposedUnitPriceCents: true, proposedVariant: NAMED_VARIANT },
       },

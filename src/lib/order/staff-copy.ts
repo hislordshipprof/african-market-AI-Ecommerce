@@ -1,6 +1,7 @@
 import { FULFILLMENT_LABELS } from "./status-labels";
 import { formatClockInZone, formatListDate } from "../format";
 import { formatDeliveryAddress } from "./delivery-address";
+import { orderMoney, type OrderMoneyInput } from "./receipt";
 import { CARD_FEE_LABEL, capturedPayout, courierFeeCents, platformTaxCents, refundFeeReturns, type RefundFeeFacts } from "./platform-fee";
 
 export const STAFF_GENERIC_ERROR =
@@ -47,26 +48,36 @@ const FULFILLMENT_FEE_LABELS: Record<string, string> = {
   ship: "Shipping",
 };
 
-/** The store's money lines for an order, read from the amounts stored on it; they add up to its total. */
-export function storeOrderBreakdown(order: {
+/**
+ * The store's money lines for an order and the total they add up to, from the same source as the
+ * customer's receipt (`orderMoney`). Capture writes the captured amount with the rewritten fees, so
+ * from then on the total is what was captured; before it, an answered short gives the expected total.
+ */
+export function storeOrderBreakdown(order: OrderMoneyInput & {
   fulfillment: string;
-  subtotalCents: number;
-  discountCents: number;
-  coupon: { code: string } | null;
-  serviceFeeCents: number;
-  deliveryFeeCents: number;
+  coupon: { code: string; kind: string; percentOff: number | null; amountOffCents: number | null } | null;
   taxCents: number;
-  tipCents: number;
-}): { key: string; label: string; cents: number }[] {
+  capturedAmountCents: number | null;
+}): { lines: { key: string; label: string; cents: number }[]; total: { label: "Total" | "Expected total"; cents: number } } {
+  const captured = order.capturedAmountCents != null && order.capturedAmountCents > 0;
+  const money = orderMoney(order, captured);
   const lines = [
-    { key: "subtotal", label: "Subtotal", cents: order.subtotalCents },
-    { key: "discount", label: `Promo discount${order.coupon ? ` ${order.coupon.code}` : ""} (your store funds it)`, cents: -order.discountCents },
-    { key: "service-fee", label: "Service fee (platform)", cents: order.serviceFeeCents },
+    { key: "subtotal", label: "Subtotal", cents: money.goodsCents },
+    { key: "discount", label: `Promo discount${order.coupon ? ` ${order.coupon.code}` : ""} (your store funds it)`, cents: -money.discountCents },
+    { key: "service-fee", label: "Service fee (platform)", cents: money.serviceFeeCents },
     { key: "delivery", label: FULFILLMENT_FEE_LABELS[order.fulfillment] ?? "Delivery fee", cents: order.deliveryFeeCents },
     { key: "tax", label: "Tax", cents: order.taxCents },
     { key: "tip", label: "Tip", cents: order.tipCents },
-  ];
-  return lines.filter((line) => line.key === "subtotal" || line.cents !== 0);
+  ].filter((line) => line.key === "subtotal" || line.cents !== 0);
+  const cents = captured ? order.capturedAmountCents! : lines.reduce((sum, line) => sum + line.cents, 0);
+  return { lines, total: { label: money.expected ? "Expected total" : "Total", cents } };
+}
+
+/** The customer's swap choice for a line, shown on the pick list before staff tap Short (#762). */
+export function swapChoiceLine(swapRule: string, substituteName: string | null): string {
+  if (swapRule === "store_suggests") return "If short: the customer lets you suggest a swap";
+  if (swapRule === "named_substitute" && substituteName) return `If short: swap for ${substituteName}`;
+  return "If short: exact item only, refund it";
 }
 
 type ScheduledOrder = { fulfillment: string; pickupSlot: string | null };

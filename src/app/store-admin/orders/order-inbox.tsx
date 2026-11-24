@@ -62,7 +62,7 @@ import { orderStatusLabel } from "@/lib/order/status-labels";
 import { formatClockInZone, formatUsPhone, mapsUrl, money, telHref } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
-import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines } from "@/lib/order/staff-copy";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentHeadline, fulfillmentLine, showCapturedLine, storeOrderBreakdown, storePayoutLines, swapChoiceLine } from "@/lib/order/staff-copy";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { ActionError } from "./action-error";
 import { CourierTiming } from "./courier-timing";
@@ -510,6 +510,8 @@ export function OrderInbox({
     );
   }
 
+  const breakdown = selectedOrder ? storeOrderBreakdown(selectedOrder) : null;
+
   const sortedPickLines = selectedOrder
     ? sortPickListLines(
         selectedOrder.lines.map((l) => ({
@@ -682,6 +684,11 @@ export function OrderInbox({
                               {line.listingVariant.label} &middot; Qty:{" "}
                               {line.qtyOrdered}
                             </div>
+                            {line.status === "pending" && (
+                              <div className="mt-1 text-xs text-muted-foreground" data-testid="pick-line-swap-choice">
+                                {swapChoiceLine(line.swapRule, line.substituteVariant ? variantName(line.substituteVariant) : null)}
+                              </div>
+                            )}
                             {substitutionNote(line) && (
                               <div className="mt-1 text-xs font-medium text-foreground" role="status">
                                 {substitutionNote(line)}
@@ -873,7 +880,7 @@ export function OrderInbox({
                 )}
 
                 <div className="mt-6 space-y-1.5 border-t pt-4">
-                  {storeOrderBreakdown(selectedOrder).map((line) => (
+                  {breakdown!.lines.map((line) => (
                     <div key={line.key} className="flex justify-between gap-3 text-sm">
                       <span className="text-muted-foreground">{line.label}</span>
                       <span className="tabular-nums" data-testid={`order-${line.key}`}>
@@ -882,9 +889,9 @@ export function OrderInbox({
                     </div>
                   ))}
                   <div className="flex justify-between pt-1.5 text-base font-semibold">
-                    <span>Total</span>
+                    <span>{breakdown!.total.label}</span>
                     <span className="tabular-nums" data-testid="order-total">
-                      {money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}
+                      {money(breakdown!.total.cents)}
                     </span>
                   </div>
                   {selectedOrder.capturedAmountCents != null &&
