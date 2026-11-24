@@ -22,6 +22,6 @@ Spec §1 listed nationwide parcel shipping as a v1 non-goal and §17 named it a 
 
 ## Consequences
 
-- Without `SHIPPO_API_KEY` no rate is quoted and checkout says shipping isn't available. The fake is used only outside production with `E2E_FAKE_SHIPPO=1` (decision 2026-11-14-05).
+- Ship is offered only when a label can be bought and kept: `SHIPPO_API_KEY` and `R2_PROOF_BUCKET` (#765). Without either, checkout hides Ship, and the quote and both placement paths refuse it, so no shipped order strands at Packing with the card held. The fake is used only outside production with `E2E_FAKE_SHIPPO=1` (decision 2026-11-14-05).
 - With an empty allowlist nothing ships. Adding a state is a platform data change made after the advisor's sign-off; there is no admin screen for it yet.
 - Listing weights now carry money: a wrong weight means a wrong rate the store pays the difference on when it buys the label.
