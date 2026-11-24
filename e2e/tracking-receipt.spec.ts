@@ -5,6 +5,8 @@ import { deleteBatchOrders, insertTrackingOrder } from "./order-fixture";
 const base = storeUrl("mama-ngozi");
 const HELD = 741_001;
 const CHARGED = 741_002;
+const REFUNDED = 753_001;
+const DELIVERING = 753_002;
 const RUN = Date.now();
 // Order #1007 from the 2026-11-23 walkthrough: 6 × $6.99, store delivery $4.99, service fee $1.26.
 const ORDER_1007 = {
@@ -16,7 +18,7 @@ const ORDER_1007 = {
 /** Each receipt money row as [label, amount]. */
 async function receiptRows(page: Page): Promise<string[][]> {
   const receipt = page.locator("section", { has: page.getByRole("heading", { name: "Receipt" }) });
-  await expect(receipt.locator(".flow-fee-total")).toBeVisible();
+  await expect(receipt.locator(".flow-fee-total").first()).toBeVisible();
   return receipt.locator(".flow-fee").evaluateAll((rows) => rows.map((row) => [
     row.querySelector("div > span")?.textContent?.trim() ?? "",
     row.querySelector(".sf-price > [aria-label]")?.getAttribute("aria-label") ?? "",
@@ -27,7 +29,7 @@ test.describe("tracking receipt adds up and names fulfilment in words (#741)", (
   // Serial: each worker runs afterAll, so a parallel worker would delete the other test's order mid-run.
   test.describe.configure({ mode: "serial" });
   test.afterAll(async () => {
-    await deleteBatchOrders([HELD, CHARGED]);
+    await deleteBatchOrders([HELD, CHARGED, REFUNDED, DELIVERING]);
   });
 
   test("a delivery order lists the delivery fee, sums to its total and shows the hold before capture", async ({ page }) => {
@@ -61,5 +63,35 @@ test.describe("tracking receipt adds up and names fulfilment in words (#741)", (
       ["Charged", "$48.19"],
     ]);
     await expect(page.getByText("Authorization hold")).toHaveCount(0);
+  });
+
+  test("after a partial refund the receipt shows the refund under the charge and the net charged (#753)", async ({ page }) => {
+    const token = `e2e-753-refunded-${RUN}`;
+    // The walkthrough's pickup order: $40.12 charged, $11.32 refunded for a reported item.
+    await insertTrackingOrder({
+      number: REFUNDED, token, status: "PARTIALLY_REFUNDED", fulfillment: "pickup", capturedAmountCents: 4012, refundCents: 1132,
+      money: { subtotalCents: 3895, deliveryFeeCents: 0, serviceFeeCents: 117, totalAuthorizedCents: 4285, captureCents: 4012 },
+      line: { qtyOrdered: 1, qtyPicked: 1, unitPriceCents: 3895, status: "picked" },
+    });
+    await page.goto(`${base}/order/${token}`);
+    expect(await receiptRows(page)).toEqual([
+      ["Subtotal", "$38.95"],
+      ["Service fee", "$1.17"],
+      ["Tax", "$0.00"],
+      ["Charged", "$40.12"],
+      ["Refunded", "-$11.32"],
+      ["Net charged", "$28.80"],
+    ]);
+    await expect(page.getByText(/Delivering to|Shipping to/)).toHaveCount(0);
+  });
+
+  test("a delivery order says where it is going (#753)", async ({ page }) => {
+    const token = `e2e-753-delivering-${RUN}`;
+    await insertTrackingOrder({
+      number: DELIVERING, token, status: "OUT_FOR_DELIVERY", ...ORDER_1007,
+      address: { deliveryLine1: "12 Main St", deliveryCity: "Houston", deliveryState: "TX", deliveryZip: "77001" },
+    });
+    await page.goto(`${base}/order/${token}`);
+    await expect(page.getByRole("region", { name: "Out for delivery" })).toContainText(/Delivering to:?\s*12 Main St, Houston, TX 77001/);
   });
 });

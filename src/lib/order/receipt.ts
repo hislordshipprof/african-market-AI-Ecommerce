@@ -14,6 +14,8 @@ export type ReceiptOrder = {
   totalAuthorizedCents: number;
   /** What Stripe captured (#537); kept after a refund, null until the capture is confirmed. */
   captureCents: number | null;
+  /** Succeeded refunds to the customer's card. */
+  refundedCents: number;
   lines: Array<ChargeLine & { id: string }>;
 };
 
@@ -25,6 +27,9 @@ export type ReceiptView = {
   total: { label: "Total" | "Charged"; cents: number };
   /** The card hold, shown only until the payment is captured. */
   holdCents: number | null;
+  /** After a refund of a captured payment: the refund under the charge, and what is left charged. */
+  refund: ReceiptLine | null;
+  net: { label: "Net charged"; cents: number } | null;
 };
 
 function itemNote(line: ChargeLine): string | null {
@@ -60,8 +65,16 @@ export function orderReceipt(order: ReceiptOrder): ReceiptView {
   lines.push({ key: "tax", label: "Tax", cents: order.taxCents });
 
   if (order.captureCents != null) {
-    return { items, lines, total: { label: "Charged", cents: order.captureCents }, holdCents: null };
+    const refunded = order.refundedCents > 0;
+    return {
+      items,
+      lines,
+      total: { label: "Charged", cents: order.captureCents },
+      holdCents: null,
+      refund: refunded ? { key: "refund", label: "Refunded", cents: -order.refundedCents } : null,
+      net: refunded ? { label: "Net charged", cents: order.captureCents - order.refundedCents } : null,
+    };
   }
   const totalCents = lines.reduce((sum, line) => sum + line.cents, 0);
-  return { items, lines, total: { label: "Total", cents: totalCents }, holdCents: order.totalAuthorizedCents };
+  return { items, lines, total: { label: "Total", cents: totalCents }, holdCents: order.totalAuthorizedCents, refund: null, net: null };
 }

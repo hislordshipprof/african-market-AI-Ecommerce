@@ -31,19 +31,28 @@ const salesCells = (t: Totals) => [
   csvDollars(t.goodsCents),
   csvDollars(t.averageOrderCents),
   csvDollars(t.discountsCents),
+  csvDollars(t.deliveryFeeCents),
+  csvDollars(t.tipCents),
+  csvDollars(t.serviceFeeCents),
+  csvDollars(t.platformTaxCents),
+  csvDollars(t.chargedCents),
   csvDollars(t.refundsCents),
+  csvDollars(t.feeReturnedCents),
   csvDollars(t.cardFeeCents),
   csvDollars(t.courierFeeCents),
   csvDollars(t.netCents),
 ];
 
-/** One CSV per view, built from the same numbers the page shows. */
+/**
+ * One CSV per view, built from the same numbers the page shows. Each sales row reconciles:
+ * Charged − Refunds + Fees returned − Card fee − Platform service fee − Courier fee − Sales tax the platform remits = Net to store.
+ */
 export function analyticsCsv(view: AnalyticsView, data: StoreAnalytics, chatUsage: { chats: number; cap: number }): string {
   const range = `${data.range.from} to ${data.range.to}`;
   switch (view) {
     case "sales":
       return toCsv([
-        ["Row", "Orders", "Goods revenue", "Average order", "Discounts given", "Refunds", "Card fee", "Courier fee", "Net to store"],
+        ["Row", "Orders", "Goods revenue", "Average order", "Discounts given", "Delivery or shipping fee", "Tips", "Platform service fee", "Sales tax the platform remits", "Charged", "Refunds", "Fees returned on refunds", "Card fee", "Courier fee", "Net to store"],
         ...data.sales.days.map((d) => [d.day, ...salesCells(d)]),
         ...data.sales.byFulfillment.map((f) => [FULFILLMENT_LABELS[f.fulfillment] ?? f.fulfillment, ...salesCells(f)]),
         [`Total ${range}`, ...salesCells(data.sales.totals)],

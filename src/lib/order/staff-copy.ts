@@ -1,5 +1,6 @@
 import { FULFILLMENT_LABELS } from "./status-labels";
 import { formatClockInZone, formatListDate } from "../format";
+import { formatDeliveryAddress } from "./delivery-address";
 import { CARD_FEE_LABEL, capturedPayout, courierFeeCents, platformTaxCents } from "./platform-fee";
 
 export const STAFF_GENERIC_ERROR =
@@ -94,12 +95,6 @@ export function fulfillmentHeadline(order: ScheduledOrder, timeZone: string, now
   return due ? `${kind} ${due}` : kind;
 }
 
-/** The present parts of an address, joined (#751); null when there are none. */
-function joinAddress(street: (string | null)[], city: string | null, state: string | null, zip: string | null): string | null {
-  const region = [state, zip].filter(Boolean).join(" ");
-  return [...street, city, region].filter(Boolean).join(", ") || null;
-}
-
 /**
  * How the order leaves the store, so the owner can decide before accepting (#742): the text before the address,
  * the address (null when there is none to link) and the text after it.
@@ -110,15 +105,14 @@ export function fulfillmentLine(
   now: Date = new Date(),
 ): { before: string; address: string | null; after: string } {
   const headline = fulfillmentHeadline(order, timeZone, now);
-  const street = [order.deliveryLine1, order.deliveryLine2];
   if (order.fulfillment === "pickup") {
     return { before: dueLabel(order.pickupSlot, timeZone, now) ? headline : "Pickup at the store", address: null, after: "" };
   }
   if (order.fulfillment === "courier") {
-    const area = joinAddress([], order.deliveryCity, order.deliveryState, order.deliveryZip);
+    const area = formatDeliveryAddress({ ...order, deliveryLine1: null, deliveryLine2: null }) || null;
     return { before: area ? `${headline} to ` : headline, address: area, after: "" };
   }
-  const address = joinAddress(street, order.deliveryCity, order.deliveryState, order.deliveryZip);
+  const address = formatDeliveryAddress(order) || null;
   if (order.fulfillment === "store-delivery") {
     const door = order.leaveAtDoor ? " · Leave at door" : "";
     return address ? { before: `${headline} to `, address, after: door } : { before: `${headline} · address missing`, address: null, after: door };
