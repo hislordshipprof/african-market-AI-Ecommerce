@@ -483,7 +483,7 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
     const name = `Payload Yam ${RUN}`;
     const weighed = `Payload Rice ${RUN}`;
     const preview = await generatePreview(storeAId, `name,price,weight\n${name},8.00,\n${weighed},3.00,500 g\n`, userId);
-    const result = await commitImport(
+    await commitImport(
       storeAId,
       preview.importToken,
       { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
