@@ -71,9 +71,6 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567), a
     await expect(page.getByRole("heading", { name: "A thank-you for your driver" })).toHaveCount(0);
     await expect(page.getByLabel("Leave at door")).toHaveCount(0);
 
-    await page.getByLabel("Full name").fill("Ada Buyer");
-    await page.getByLabel("Phone number (required)").fill("2025550100");
-    await page.getByLabel("Email (required)").fill(`ada-${slug}@example.com`);
     // About 1,300 miles from the store: far outside its 8-mile delivery radius.
     await page.getByLabel("Street address").fill("8505 Fenton St");
     await page.getByLabel("City").fill("Silver Spring");
@@ -86,6 +83,13 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567), a
     await expect(rate).toBeVisible({ timeout: 15_000 });
     await expect(rate).toContainText("Arrives in about 7 business days");
     await expect(rate).toContainText("no markup");
+    // #763 AC4: the rate showed before any name was typed.
+    await expect(page.getByLabel("Full name")).toHaveValue("");
+    await page.getByLabel("Full name").fill("Ada Buyer");
+    await page.getByLabel("Phone number (required)").fill("2025550100");
+    await page.getByLabel("Email (required)").fill(`ada-${slug}@example.com`);
+    // The contact is part of the quote, so the rate is asked again for the named shopper.
+    await expect(ship).toHaveText(/\$\d+\.\d{2}/, { timeout: 15_000 });
     const fee = (await ship.textContent())?.match(/\$\d+\.\d{2}/)?.[0];
     expect(fee).toBeTruthy();
     await expect(page.locator("#review")).toContainText("Shipping · USPS");
