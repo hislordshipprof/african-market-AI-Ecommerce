@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { isStoreOpen, nextOpening, openMinutesDeadline } from "./store-hours";
+import { isStoreOpen, nextOpening, openMinutesDeadline, weeklyHours } from "./store-hours";
 
 const NY = "America/New_York";
 const CHICAGO = "America/Chicago";
@@ -296,5 +296,25 @@ describe("nextOpening and openMinutesDeadline", () => {
     expect(isStoreOpen(spring, CHICAGO, at("2026-03-08T08:00:00Z"))).toBe(true);
     expect(isStoreOpen(spring, CHICAGO, at("2026-03-08T07:59:00Z"))).toBe(false);
     spy.mockRestore();
+  });
+});
+
+describe("weeklyHours (#783)", () => {
+  it("lists Monday to Sunday from every stored shape; a missing day is closed, as isStoreOpen reads it", () => {
+    expect(weeklyHours({ mon: "9:00-17:00", tuesday: { open: "08:30", close: "21:00" }, wed: { closed: true }, thu: "closed", fri: "9am-9pm", sat: "whenever" })).toEqual([
+      { day: "Mon", text: "9 AM – 5 PM" },
+      { day: "Tue", text: "8:30 AM – 9 PM" },
+      { day: "Wed", text: "Closed" },
+      { day: "Thu", text: "Closed" },
+      { day: "Fri", text: "9 AM – 9 PM" },
+      { day: "Sat", text: "whenever" },
+      { day: "Sun", text: "Closed" },
+    ]);
+  });
+
+  it("lists nothing when the store has set no weekly hours", () => {
+    expect(weeklyHours(null)).toEqual([]);
+    expect(weeklyHours("open late")).toEqual([]);
+    expect(weeklyHours({})).toEqual([]);
   });
 });

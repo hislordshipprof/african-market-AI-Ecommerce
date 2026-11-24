@@ -271,7 +271,7 @@ The shared background is `StorySurface` (`src/components/story-surface/`, #35). 
 - Use yellow, amber, purple/indigo or gradient text.
 - Put eyebrow labels above headings, colored side borders on cards, or emoji as icons.
 - Use stock "smiling woman in a headwrap" heroes, flag colors or patterns as wallpaper. The home page story strip shows a marked placeholder until the store adds its own photo (owner, 2026-11-10).
-- Show the platform's brand on a storefront beyond the "Powered by" footer.
+- Show the platform's brand on a storefront; the footer carries the store's own address, phone and hours (#783).
 
 ## Design round 4: storefront presentation
 
