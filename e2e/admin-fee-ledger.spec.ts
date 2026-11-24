@@ -91,8 +91,8 @@ test.describe("platform fee ledger", () => {
     const cells = (row: import("@playwright/test").Locator) => row.locator("td, th").allInnerTexts();
     const rows = page.getByTestId("ledger-rows").locator("tbody tr");
     await expect(rows).toHaveCount(3);
-    expect(await cells(rows.nth(0))).toEqual(["2032-03-10", "Mama Ngozi African Market", `#${NUMBERS[0]}`, "Order", "$70.79", "$1.80", "$8.99", "$0.31", "$12.83", "$0.00", "$1.49"]);
-    expect(await cells(rows.nth(2))).toEqual(["2032-03-12", "Mama Ngozi African Market", `#${NUMBERS[1]}`, "Refund", "-$10.30", "$0.00", "$0.00", "$0.00", "$0.00", "-$0.84", "-$0.84"]);
+    expect(await cells(rows.nth(0))).toEqual(["2032-03-10", "Mama Ngozi African Market", `#${NUMBERS[0]}`, "Order", "$70.79", "$1.80", "$8.99", "$0.31", "$0.00", "$12.83", "$0.00", "$1.49"]);
+    expect(await cells(rows.nth(2))).toEqual(["2032-03-12", "Mama Ngozi African Market", `#${NUMBERS[1]}`, "Refund", "-$10.30", "$0.00", "$0.00", "$0.00", "$0.00", "$0.00", "-$0.84", "-$0.84"]);
 
     const download = page.waitForEvent("download");
     await page.getByRole("link", { name: "Download CSV" }).click();
