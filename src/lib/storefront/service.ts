@@ -60,6 +60,7 @@ async function readGetFlowCatalog(
           price: variant.price,
           packLabel: shownPack(variant).label,
           weightG: variant.weightG,
+          shownWeightG: shownPack(variant).weightG,
         }))
       : [{ ...base, price: listing.price, packLabel: "Each", weightG: 500 }];
   });

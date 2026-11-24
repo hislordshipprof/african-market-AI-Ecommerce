@@ -481,14 +481,16 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
 
   it("storefront and cart payloads for a placeholder listing carry no weightPlaceholder, no made-up size and no \"Default\" label (#752)", async () => {
     const name = `Payload Yam ${RUN}`;
-    const preview = await generatePreview(storeAId, `name,price\n${name},8.00\n`, userId);
+    const weighed = `Payload Rice ${RUN}`;
+    const preview = await generatePreview(storeAId, `name,price,weight\n${name},8.00,\n${weighed},3.00,500 g\n`, userId);
     const result = await commitImport(
       storeAId,
       preview.importToken,
-      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
       actor,
     );
-    const listingId = result.listingIds[0]!;
+    const [listingId, weighedId] = await Promise.all([name, weighed].map(async (customName) =>
+      (await storeScoped(storeAId).listing.findFirstOrThrow({ where: { customName } })).id));
     const variant = await storeScoped(storeAId).listingVariant.findFirstOrThrow({ where: { listingId } });
     expect(variant.weightPlaceholder).toBe(true);
 
@@ -512,6 +514,8 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
     ]);
     // The basket keeps the stored weight for the courier limit; the shopper never sees "Default".
     expect(item).toMatchObject({ variantId: variant.id, price: 800, packLabel: "Each", weightG: 100 });
+    expect(item?.shownWeightG).toBeUndefined();
+    expect(catalog.find((row) => row.listingId === weighedId)).toMatchObject({ weightG: 500, shownWeightG: 500 });
     expect(cart?.lines[0]?.variant).toMatchObject({ label: "Each", weightG: 100 });
     const own = [shown, detail, item, hit, cart];
     expect(JSON.stringify({ listings, detail, catalog, found, cart })).not.toContain("weightPlaceholder");

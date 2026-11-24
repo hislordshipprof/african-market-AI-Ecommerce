@@ -343,7 +343,7 @@ export function CartPage({
                           startingPrice: item.price,
                           imageUrl: item.imageUrl,
                           packLabel: item.packLabel,
-                          weightG: item.weightG,
+                          weightG: item.shownWeightG,
                           frozen: item.frozen,
                           perishable: item.frozen,
                           maxPerOrder: item.maxPerOrder,
