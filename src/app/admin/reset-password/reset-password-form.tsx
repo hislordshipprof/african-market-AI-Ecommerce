@@ -37,11 +37,16 @@ const RESET_ERRORS = {
 
 type Step = "request" | "sent" | "choose" | "done";
 
-/** `unavailable`: set while no reset link can reach anyone (#765); the request step says so instead of sending. */
-export function ResetPasswordForm({ unavailable }: { unavailable: string | null }) {
+/**
+ * `unavailable`: set while no reset link can reach anyone (#765); the request step says so instead of sending.
+ * `storeSlug`: the store remembered for this request; a reset started from store admin keeps it, link included (#797).
+ */
+export function ResetPasswordForm({ unavailable, storeSlug }: { unavailable: string | null; storeSlug: string | null }) {
   const params = useSearchParams();
   const token = params.get("token");
-  const signInHref = params.get("from") === "store-admin" ? "/store-admin/sign-in" : "/admin/sign-in";
+  const fromStoreAdmin = params.get("from") === "store-admin";
+  const store = storeSlug ? `store=${encodeURIComponent(storeSlug)}` : "";
+  const signInHref = fromStoreAdmin ? `/store-admin/sign-in${store ? `?${store}` : ""}` : "/admin/sign-in";
   const hydrated = useHydrated();
   const [step, setStep] = useState<Step>(token ? "choose" : "request");
   const [email, setEmail] = useState("");
@@ -61,7 +66,7 @@ export function ResetPasswordForm({ unavailable }: { unavailable: string | null 
     try {
       const result = await authClient.requestPasswordReset({
         email: submitted,
-        redirectTo: `/admin/reset-password${params.get("from") === "store-admin" ? "?from=store-admin" : ""}`,
+        redirectTo: `/admin/reset-password${fromStoreAdmin ? `?from=store-admin${store ? `&${store}` : ""}` : ""}`,
       });
       if (result.error) {
         setError(authErrorMessage(result.error, RESET_ERRORS, "Couldn't send the link. Try again."));

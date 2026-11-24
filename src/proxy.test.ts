@@ -46,10 +46,11 @@ describe("allowStoreOverride", () => {
 function makeRequest(
   url: string,
   cookies?: Record<string, string>,
+  headers?: Record<string, string>,
 ): NextRequest {
   const parsed = new URL(url);
   const req = new NextRequest(url, {
-    headers: { host: parsed.host },
+    headers: { host: parsed.host, ...headers },
   });
   if (cookies) {
     for (const [name, value] of Object.entries(cookies)) {
@@ -564,5 +565,23 @@ describe("stores on the production alias, by ?store= (#766)", () => {
   it("a storefront page keeps the store", () => {
     const res = proxy(makeRequest(`https://${ALIAS}/cart`, { store_override: "mama-ngozi" }));
     expect(res.cookies.get("store_override")).toBeUndefined();
+  });
+  it("a prefetch of a marketplace page never forgets the store (#797)", () => {
+    for (const headers of [{ "next-router-prefetch": "1" }, { "sec-purpose": "prefetch" }, { purpose: "prefetch" }] as Record<string, string>[]) {
+      const res = proxy(makeRequest(`https://${ALIAS}/sell`, { store_override: "mama-ngozi" }, headers));
+      expect(res.headers.get("x-middleware-request-x-platform-root")).toBe("1");
+      expect(res.cookies.get("store_override")).toBeUndefined();
+    }
+  });
+
+  it("password reset keeps the store, so store admin's reset leads back to that store (#797)", () => {
+    const res = proxy(makeRequest(`https://${ALIAS}/admin/reset-password?from=store-admin`, { store_override: "mama-ngozi" }));
+    expect(res.cookies.get("store_override")).toBeUndefined();
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
+  });
+
+  it("passes the page's path and query to the render, replacing a forged one (#797)", () => {
+    const res = proxy(makeRequest(`https://${ALIAS}/store-admin/orders?order=o1`, { store_override: "mama-ngozi" }, { "x-request-path": "//evil.example" }));
+    expect(res.headers.get("x-middleware-request-x-request-path")).toBe("/store-admin/orders?order=o1");
   });
 });

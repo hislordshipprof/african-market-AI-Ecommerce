@@ -1,42 +1,12 @@
 import { mkdirSync } from "fs";
-import { randomBytes } from "crypto";
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
+import { expect, test, type Page } from "@playwright/test";
+import { ALIAS, ALIAS_LAUNCH, serveVercelHostsFrom, startAliasServer } from "./vercel-hosts";
 
-// #766: until PLATFORM_ROOT_DOMAIN is set, the production alias serves the marketplace and stores by ?store=.
-const ALIAS = "african-market-ai-ecommerce.vercel.app";
 const PREVIEW = "african-market-ai-ecommerce-git-main-team.vercel.app";
 const SHOTS = process.env.PROOF_DIR ?? "screenshots";
 
-// Nothing may reach the real vercel.app hosts: they resolve to this machine, and every request to them
-// is answered by the local server with the Host header Vercel would send.
-test.use({ launchOptions: { args: ["--host-resolver-rules=MAP *.vercel.app 127.0.0.1"] } });
+test.use(ALIAS_LAUNCH);
 test.describe.configure({ mode: "serial" });
-
-async function serveVercelHostsFrom(context: BrowserContext, port: number) {
-  await context.route(
-    (url) => url.hostname.endsWith(".vercel.app"),
-    async (route) => {
-      const url = new URL(route.request().url());
-      const response = await route.fetch({
-        url: `http://127.0.0.1:${port}${url.pathname}${url.search}`,
-        headers: { ...route.request().headers(), host: url.hostname, "x-forwarded-proto": "https" },
-        maxRedirects: 0,
-      });
-      // Chromium sends the target of a fulfilled redirect to the network, past the route, so the redirect
-      // is replayed as a page that moves on; its cookies are kept.
-      const location = response.headers().location;
-      if (response.status() >= 300 && response.status() < 400 && location) {
-        const target = new URL(location, url).toString();
-        const headers = response.headers();
-        delete headers.location;
-        await route.fulfill({ status: 200, headers: { ...headers, "content-type": "text/html" }, body: `<meta http-equiv="refresh" content="0;url=${target}">` });
-        return;
-      }
-      await route.fulfill({ response });
-    },
-  );
-}
 
 async function shoot(page: Page, name: string) {
   mkdirSync(SHOTS, { recursive: true });
@@ -50,31 +20,9 @@ async function shoot(page: Page, name: string) {
 
 test("the production alias serves the directory, /sell, the admin and stores, noindex; a preview host still serves nothing", async ({ page, context }) => {
   test.setTimeout(240_000);
-  const port = await reservePort(laneSmokePort());
-  const running = await startSpawnedServer({
-    command: `pnpm exec next start -p ${port}`,
-    shell: true,
-    cwd: process.cwd(),
-    port,
-    env: {
-      ...process.env,
-      CI: "true",
-      VERCEL: "",
-      VERCEL_ENV: "production",
-      VERCEL_PROJECT_PRODUCTION_URL: ALIAS,
-      PLATFORM_ROOT_DOMAIN: "",
-      E2E_STORE_OVERRIDE: "",
-      STRIPE_SECRET_KEY: "",
-      // A production deployment refuses the committed test secret.
-      BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
-      BETTER_AUTH_URL: `https://${ALIAS}`,
-      BETTER_AUTH_TRUSTED_ORIGINS: "",
-    },
-    healthUrl: `http://127.0.0.1:${port}/api/health`,
-    healthOk: (status) => status === 200 || status === 503,
-  });
+  const running = await startAliasServer();
   try {
-    await serveVercelHostsFrom(context, port);
+    await serveVercelHostsFrom(context, running.port);
 
     const home = await page.goto(`https://${ALIAS}/`);
     expect(home?.headers()["x-robots-tag"]).toBe("noindex");

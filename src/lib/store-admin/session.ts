@@ -4,6 +4,7 @@ import { auth, type Session } from "../auth";
 import { getStore, type ValidatedStore } from "../get-store";
 import { storeScoped } from "../db";
 import { readOnlyStaffIds, storePlan } from "../billing/plan";
+import { storeSignInPath } from "./sign-in-path";
 
 export interface StoreSession {
   user: Session["user"];
@@ -25,13 +26,14 @@ async function getAuthSession(): Promise<Session | null> {
 
 export async function requireStoreMember(): Promise<StoreSession> {
   const [session, store] = await Promise.all([getAuthSession(), getStore()]);
+  const signIn = storeSignInPath(store.slug, (await headers()).get("x-request-path"));
 
   if (!session) {
-    redirect(`/store-admin/sign-in?store=${store.slug}`);
+    redirect(signIn);
   }
 
   if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
-    redirect(`/store-admin/sign-in?store=${store.slug}`);
+    redirect(signIn);
   }
 
   const scoped = storeScoped(store.id);
@@ -40,7 +42,7 @@ export async function requireStoreMember(): Promise<StoreSession> {
   });
 
   if (!membership) {
-    redirect(`/store-admin/sign-in?store=${store.slug}`);
+    redirect(signIn);
   }
 
   let readOnly = false;
