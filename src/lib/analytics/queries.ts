@@ -1,4 +1,5 @@
 import { Prisma, storeScopedRawQuery } from "../db";
+import { capturedApplicationFee, refundFeeReturns, type RefundFeeFacts } from "../order/platform-fee";
 import { rangeDays, type AnalyticsRange } from "./range";
 
 /**
@@ -10,9 +11,8 @@ import { rangeDays, type AnalyticsRange } from "./range";
  * - Card fee = the order's stored platform fee. Courier orders also pass the courier fee to the platform,
  *   capped with the card fee at captured, as at capture.
  * - Net to store = captured − card fee − service fee − courier fee − tax the platform collects − refunds + fees returned.
- * - A refund with refund_application_fee returns the platform's fee in proportion (Stripe's rule), never more
- *   than that fee across all the order's refunds; a courier refund after delivery returns its service fee and
- *   platform tax shares once that fee refund is made (fee_refund_id), as in the fee ledger. Otherwise none comes back.
+ * - The platform fee a refund returns is refundFeeReturns (src/lib/order/platform-fee.ts), the rule the fee ledger
+ *   and the order detail use too (#757).
  */
 
 export const FULFILLMENTS = ["pickup", "store-delivery", "courier", "ship"] as const;
@@ -149,45 +149,84 @@ const APPLICATION_FEE = Prisma.sql`LEAST(${PASSED_THROUGH} + ${PLATFORM_TAX}, o.
 /** The store's card fee: the stored platform fee is the service fee plus this (captureSplit), so take the service fee off. */
 const CARD_FEE = Prisma.sql`GREATEST(COALESCE(o.platform_fee_cents, 0) - o.service_fee_cents, 0)`;
 
+/** A succeeded refund with its order's facts, for the shared fee-share rule (refundFeeReturns). */
+type RefundFactRow = RefundFeeFacts & {
+  orderId: string;
+  day: string;
+  inRange: boolean;
+  fulfillment: string;
+  capturedAmountCents: number | null;
+  platformFeeCents: number | null;
+  serviceFeeCents: number;
+  deliveryFeeCents: number;
+  shippingPostageCents: number | null;
+  taxCents: number;
+  taxLiableParty: string;
+};
+
 export async function salesRows(storeId: string, range: AnalyticsRange, timeZone: string): Promise<MoneyRow[]> {
-  return storeScopedRawQuery<MoneyRow>(storeId, Prisma.sql`
-    WITH b AS (${bounds(range, timeZone)}),
-    r AS (
-      SELECT r.created_at, o.fulfillment, r.amount_cents, fee.total AS fee_total, share.proportional,
-             SUM(share.proportional) OVER (PARTITION BY r.order_id ORDER BY r.created_at, r.id) AS running
+  const [orders, refunds] = await Promise.all([
+    storeScopedRawQuery<MoneyRow>(storeId, Prisma.sql`
+      WITH b AS (${bounds(range, timeZone)})
+      SELECT 'order' AS kind, ${storeDay(Prisma.sql`o.created_at`, timeZone)} AS day, o.fulfillment,
+             COUNT(*)::int AS orders,
+             SUM(o.captured_amount_cents - o.service_fee_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
+             SUM(o.discount_cents)::int AS discounts,
+             SUM(${CARD_FEE})::int AS card_fee,
+             SUM(COALESCE(o.platform_fee_cents, 0) - ${CARD_FEE})::int AS service_fee,
+             SUM(${COURIER_CAPPED} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
+             SUM(o.delivery_fee_cents)::int AS delivery_fee,
+             SUM(o.tip_cents)::int AS tip,
+             SUM(${APPLICATION_FEE} - ${COURIER_CAPPED})::int AS platform_tax,
+             SUM(o.captured_amount_cents)::int AS captured,
+             0 AS refunds, 0 AS fee_returned
+      FROM orders o, b
+      WHERE o.store_id = ${storeId} AND o.created_at >= b.lo AND o.created_at < b.hi AND o.captured_amount_cents > 0
+      GROUP BY 2, 3`),
+    // Every succeeded refund before the range ends of an order with one in it: the fee cap counts earlier refunds too.
+    storeScopedRawQuery<RefundFactRow>(storeId, Prisma.sql`
+      WITH b AS (${bounds(range, timeZone)})
+      SELECT r.id, r.created_at AS "createdAt", r.amount_cents AS "amountCents", r.refund_application_fee AS "refundApplicationFee",
+             r.fee_refund_id IS NOT NULL AS "feeShareReturned", r.service_fee_share_cents AS "serviceFeeShareCents",
+             r.platform_tax_share_cents AS "platformTaxShareCents",
+             ${storeDay(Prisma.sql`r.created_at`, timeZone)} AS day, r.created_at >= b.lo AS "inRange",
+             o.id AS "orderId", o.fulfillment, o.captured_amount_cents AS "capturedAmountCents", o.platform_fee_cents AS "platformFeeCents",
+             o.service_fee_cents AS "serviceFeeCents", o.delivery_fee_cents AS "deliveryFeeCents",
+             o.shipping_postage_cents AS "shippingPostageCents", o.tax_cents AS "taxCents", o.tax_liable_party AS "taxLiableParty"
       FROM refund_requests r
       JOIN orders o ON o.id = r.order_id AND o.store_id = r.store_id
-      CROSS JOIN LATERAL (SELECT ${APPLICATION_FEE} AS total) fee
-      CROSS JOIN LATERAL (SELECT CASE WHEN r.refund_application_fee AND o.captured_amount_cents > 0
-        THEN ROUND(fee.total::numeric * r.amount_cents / o.captured_amount_cents)
-        WHEN r.fee_refund_id IS NOT NULL THEN r.service_fee_share_cents + r.platform_tax_share_cents
-        ELSE 0 END AS proportional) share, b
+      CROSS JOIN b
       WHERE r.store_id = ${storeId} AND r.provider_status = 'succeeded' AND r.created_at < b.hi
-    )
-    SELECT 'order' AS kind, ${storeDay(Prisma.sql`o.created_at`, timeZone)} AS day, o.fulfillment,
-           COUNT(*)::int AS orders,
-           SUM(o.captured_amount_cents - o.service_fee_cents - o.tip_cents - o.delivery_fee_cents)::int AS goods,
-           SUM(o.discount_cents)::int AS discounts,
-           SUM(${CARD_FEE})::int AS card_fee,
-           SUM(COALESCE(o.platform_fee_cents, 0) - ${CARD_FEE})::int AS service_fee,
-           SUM(${COURIER_CAPPED} - COALESCE(o.platform_fee_cents, 0))::int AS courier_fee,
-           SUM(o.delivery_fee_cents)::int AS delivery_fee,
-           SUM(o.tip_cents)::int AS tip,
-           SUM(${APPLICATION_FEE} - ${COURIER_CAPPED})::int AS platform_tax,
-           SUM(o.captured_amount_cents)::int AS captured,
-           0 AS refunds, 0 AS fee_returned
-    FROM orders o, b
-    WHERE o.store_id = ${storeId} AND o.created_at >= b.lo AND o.created_at < b.hi AND o.captured_amount_cents > 0
-    GROUP BY 2, 3
-    UNION ALL
-    -- Stripe returns the fee in proportion but never more than the fee in total across partial refunds (stripe/fake.ts).
-    SELECT 'refund', ${storeDay(Prisma.sql`r.created_at`, timeZone)}, r.fulfillment,
-           0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-           SUM(r.amount_cents)::int,
-           SUM(LEAST(r.fee_total, r.running) - LEAST(r.fee_total, r.running - r.proportional))::int
-    FROM r, b
-    WHERE r.created_at >= b.lo
-    GROUP BY 2, 3`);
+        AND r.order_id IN (
+          SELECT d.order_id FROM refund_requests d
+          WHERE d.store_id = ${storeId} AND d.provider_status = 'succeeded' AND d.created_at >= b.lo AND d.created_at < b.hi
+        )`),
+  ]);
+  return [...orders, ...refundMoneyRows(refunds)];
+}
+
+/** Refunds in the range by store day and fulfillment, each with the platform fee Stripe returned with it. */
+function refundMoneyRows(refunds: RefundFactRow[]): MoneyRow[] {
+  const byOrder = new Map<string, RefundFactRow[]>();
+  for (const refund of refunds) byOrder.set(refund.orderId, [...(byOrder.get(refund.orderId) ?? []), refund]);
+  const rows = new Map<string, MoneyRow>();
+  for (const orderRefunds of byOrder.values()) {
+    const order = orderRefunds[0];
+    const captured = Math.max(0, order.capturedAmountCents ?? 0);
+    const applicationFee = capturedApplicationFee({ ...order, capturedAmountCents: captured }) ?? 0;
+    for (const { refund, feeCents } of refundFeeReturns({ capturedCents: captured, applicationFeeCents: applicationFee }, orderRefunds)) {
+      if (!refund.inRange) continue;
+      const key = `${refund.day}|${refund.fulfillment}`;
+      const row = rows.get(key) ?? {
+        kind: "refund", day: refund.day, fulfillment: refund.fulfillment, orders: 0, goods: 0, discounts: 0, card_fee: 0,
+        service_fee: 0, courier_fee: 0, delivery_fee: 0, tip: 0, platform_tax: 0, captured: 0, refunds: 0, fee_returned: 0,
+      };
+      row.refunds += refund.amountCents;
+      row.fee_returned += feeCents;
+      rows.set(key, row);
+    }
+  }
+  return [...rows.values()];
 }
 
 function emptyTotals(): SalesTotals {

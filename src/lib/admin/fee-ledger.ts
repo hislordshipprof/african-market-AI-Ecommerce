@@ -1,5 +1,5 @@
 import { csvDollars, toCsv } from "@/lib/analytics/csv";
-import { captureSplit, courierFeeCents, platformTaxCents } from "@/lib/order/platform-fee";
+import { captureSplit, courierFeeCents, platformTaxCents, refundFeeReturns } from "@/lib/order/platform-fee";
 
 /**
  * Platform fee ledger (#546, ADR-0021): what the platform keeps per captured order, from our tables.
@@ -11,10 +11,8 @@ import { captureSplit, courierFeeCents, platformTaxCents } from "@/lib/order/pla
  * - Application fee = the stored platform fee (service fee + the store's card fee) + the courier fee or the postage of
  *   a shipped order (#568), capped at the capture, as sent to Stripe. Card fee share = the platform's part of the card-fee split.
  *   Net = application fee − courier fee − the store's card fee − the platform's card fee share.
- * - A refund row is dated when the refund succeeded and shown only when it returns fee: a refund with
- *   refund_application_fee returns the fee in proportion, never more than the fee across the order's refunds
- *   (Stripe's rule); a courier refund after delivery returns its service fee share, and its share of the tax the
- *   platform collected (#65), once that fee refund is made.
+ * - A refund row is dated when the refund succeeded and shown only when it returns fee, as refundFeeReturns
+ *   (src/lib/order/platform-fee.ts) works it out; the sales CSV and the order detail use the same rule (#757).
  *   Stripe keeps its card fee on a refund. The courier part of a returned fee goes back to the customer, so
  *   it reverses the courier pass-through and is not a platform loss; so does the tax part of a returned fee.
  * - A manual repayment is its own row in the month it was recorded: the amount repaid comes off the capture.
@@ -146,23 +144,17 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
   for (const refund of refunds) byOrder.set(refund.orderId, [...(byOrder.get(refund.orderId) ?? []), refund]);
   const rows: LedgerRow[] = [];
   for (const orderRefunds of byOrder.values()) {
-    orderRefunds.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.refundId.localeCompare(b.refundId));
     const order = orderRefunds[0];
     // An order still cancelling has no capture record yet: a refund at cancel returns the whole capture.
     const captured = order.capturedAmountCents ?? orderRefunds.reduce((sum, r) => sum + r.amountCents, 0);
     if (captured <= 0) continue;
     const money = orderMoney(order, captured);
     const platformTax = platformTaxCents(order);
-    let returned = 0;
-    for (const refund of orderRefunds) {
-      const left = Math.max(0, money.applicationFeeCents - returned);
-      let fee = 0;
-      if (refund.refundApplicationFee) {
-        fee = Math.min(Math.round((money.applicationFeeCents * refund.amountCents) / captured), left);
-      } else if (refund.feeShareReturned) {
-        fee = Math.min(refund.serviceFeeShareCents + refund.platformTaxShareCents, left);
-      }
-      returned += fee;
+    const returns = refundFeeReturns(
+      { capturedCents: captured, applicationFeeCents: money.applicationFeeCents },
+      orderRefunds.map((refund) => ({ ...refund, id: refund.refundId })),
+    );
+    for (const { refund, feeCents: fee } of returns) {
       const inMonth = refund.succeededAt >= month.startsAt && refund.succeededAt < month.endsAt;
       if (fee <= 0 || !inMonth) continue;
       const share = (cents: number) => (refund.refundApplicationFee && money.applicationFeeCents > 0

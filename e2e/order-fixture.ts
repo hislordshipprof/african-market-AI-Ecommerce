@@ -35,6 +35,8 @@ export async function insertInboxOrder(input: {
   pickupSlot?: string;
   /** The platform service fee and the fee stored at capture (service fee + the store's card fee). */
   fees?: { serviceFeeCents: number; platformFeeCents: number };
+  /** A succeeded refund that returns the platform fee in proportion (#757). */
+  refundCents?: number;
 }): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
@@ -46,6 +48,8 @@ export async function insertInboxOrder(input: {
     const variant = listing.variants[0];
     if (!variant) throw new Error("mama-ngozi has no listing variant");
     const amount = input.capturedAmountCents ?? 1000;
+    // The total already holds the service fee, so the goods are what is left of it.
+    const goods = amount - (input.fees?.serviceFeeCents ?? 0);
     const discountCents = input.discountCents ?? 0;
     const coupon = discountCents > 0
       ? await tx.storeCoupon.upsert({
@@ -61,7 +65,7 @@ export async function insertInboxOrder(input: {
         customerId: customer.id,
         status: input.status,
         fulfillment: input.delivery ? "store-delivery" : "pickup",
-        subtotalCents: amount,
+        subtotalCents: goods,
         bufferCents: 100,
         pickupSlot: input.pickupSlot ?? null,
         totalAuthorizedCents: amount + (input.delivery?.feeCents ?? 0) + 100,
@@ -85,11 +89,19 @@ export async function insertInboxOrder(input: {
           create: {
             listingVariantId: variant.id,
             qtyOrdered: 1,
-            unitPriceCents: amount,
+            unitPriceCents: goods,
           },
         },
       },
     });
+    if (input.refundCents) {
+      await tx.refundRequest.create({
+        data: {
+          storeId, orderId: order.id, paymentIntentId: order.paymentIntentId!, key: `e2e-inbox-refund-${input.number}-${Date.now()}`,
+          amountCents: input.refundCents, refundApplicationFee: true, state: "CREATED", providerStatus: "succeeded",
+        },
+      });
+    }
     if (input.platformResolved) {
       await tx.auditLog.create({
         data: {

@@ -1,7 +1,7 @@
 import { FULFILLMENT_LABELS } from "./status-labels";
 import { formatClockInZone, formatListDate } from "../format";
 import { formatDeliveryAddress } from "./delivery-address";
-import { CARD_FEE_LABEL, capturedPayout, courierFeeCents, platformTaxCents } from "./platform-fee";
+import { CARD_FEE_LABEL, capturedPayout, courierFeeCents, platformTaxCents, refundFeeReturns, type RefundFeeFacts } from "./platform-fee";
 
 export const STAFF_GENERIC_ERROR =
   "Something went wrong. Try again, or contact support if it keeps happening.";
@@ -122,24 +122,36 @@ export function fulfillmentLine(
   return { before: address ? `${kind} to ` : kind, address, after: "" };
 }
 
-type PayoutOrder = Parameters<typeof capturedPayout>[0];
+/** A succeeded refund as the inbox loads it; fee_refund_id is set once a courier refund's fee share is returned. */
+type StoredRefund = Omit<RefundFeeFacts, "feeShareReturned"> & { feeRefundId: string | null };
+
+type PayoutOrder = Parameters<typeof capturedPayout>[0] & { refundRequests?: StoredRefund[] };
 
 /**
  * The store's payout on a captured order as lines that add up (#751): the capture less the card fee, the platform
- * service fee, a courier fee or postage passed through and tax the platform remits. The last line is the payout.
+ * service fee, a courier fee or postage passed through and tax the platform remits, then refunds and the platform
+ * fee Stripe returns with them (#757), as the sales CSV counts them. The last line is the payout.
  */
 export function storePayoutLines(order: PayoutOrder): { key: string; label: string; cents: number }[] {
   const split = capturedPayout(order);
+  const returns = refundFeeReturns(
+    { capturedCents: order.capturedAmountCents, applicationFeeCents: order.capturedAmountCents - split.storeReceivesCents },
+    (order.refundRequests ?? []).map(({ feeRefundId, ...refund }) => ({ ...refund, feeShareReturned: feeRefundId !== null })),
+  );
+  const refundsCents = returns.reduce((sum, { refund }) => sum + refund.amountCents, 0);
+  const feeReturnedCents = returns.reduce((sum, { feeCents }) => sum + feeCents, 0);
   const lines = [
     { key: "captured", label: "Captured", cents: order.capturedAmountCents },
     { key: "card-fee", label: `Card fee on your part (${CARD_FEE_LABEL})`, cents: -split.storeCardFeeCents },
     { key: "service-fee", label: "Service fee (platform)", cents: -order.serviceFeeCents },
     { key: "courier-fee", label: order.fulfillment === "ship" ? "Postage (paid for the label)" : "Courier fee (paid to the courier)", cents: -courierFeeCents(order) },
     { key: "tax", label: "Tax (the platform pays it to the state)", cents: -platformTaxCents(order) },
+    { key: "refunds", label: "Refunds", cents: -refundsCents },
+    { key: "fee-returned", label: "Fees returned on refunds", cents: feeReturnedCents },
   ];
   return [
     ...lines.filter((line) => line.key === "captured" || line.cents !== 0),
-    { key: "payout", label: "Your payout", cents: split.storeReceivesCents },
+    { key: "payout", label: "Your payout", cents: split.storeReceivesCents - refundsCents + feeReturnedCents },
   ];
 }
 

@@ -243,6 +243,37 @@ test.describe("Order inbox", () => {
     }
   });
 
+  test("#757: a refunded order's payout takes off the refund and adds back Stripe's fee share, as the sales CSV does", async ({ page }, testInfo) => {
+    const number = 18995 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    await insertInboxOrder({ number, status: "AWAITING_PICKUP", capturedAmountCents: 4012, fees: { serviceFeeCents: 117, platformFeeCents: 260 }, refundCents: 1132 });
+    const proofDir = process.env.PROOF_DIR;
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByTestId("order-captured")).toHaveText("$40.12");
+      await expect(page.getByTestId("payout-card-fee")).toHaveText("−$1.43");
+      await expect(page.getByTestId("payout-service-fee")).toHaveText("−$1.17");
+      await expect(page.getByTestId("payout-refunds")).toHaveText("−$11.32");
+      await expect(page.getByTestId("payout-fee-returned")).toHaveText("$0.73");
+      await expect(page.getByTestId("order-payout")).toHaveText("$26.93");
+      if (proofDir) {
+        for (const scheme of ["light", "dark"] as const) {
+          for (const width of [390, 1280]) {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(ORDERS_URL);
+            await page.locator("button", { hasText: `#${number}` }).click();
+            await expect(page.getByTestId("order-payout")).toBeVisible();
+            await page.screenshot({ path: `${proofDir}/order-refunded-${width}-${scheme}.png`, fullPage: true });
+          }
+        }
+      }
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
   test("a refund-failed order tells staff the platform is resolving it", async ({ page }) => {
     const number = 18602;
     await insertInboxOrder({ number, status: "REFUND_FAILED", capturedAmountCents: 1800 });

@@ -4,6 +4,8 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { Prisma, storeScopedRawQuery } from "../db";
 import { storeAnalytics, type StoreAnalytics } from "./queries";
 import { analyticsCsv } from "./csv";
+import { SUCCEEDED_REFUNDS } from "../order/service";
+import { storePayoutLines } from "../order/staff-copy";
 import type { AnalyticsRange } from "./range";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -354,6 +356,14 @@ describe.skipIf(!hasDb)("store analytics (lane DB)", () => {
     expect(byDay["2026-11-03"]).toMatchObject({ chargedCents: 2100, platformTaxCents: 100, cardFeeCents: 88, netCents: 1912 });
     expect(byDay["2026-11-04"]).toMatchObject({ chargedCents: 2599, deliveryFeeCents: 500, courierFeeCents: 500, refundsCents: 1000, feeReturnedCents: 38, netCents: 950 });
     expect(payout.sales.totals.netCents).toBe(2693 + 1912 + 950);
+  });
+
+  it("the order detail's payout equals the sales CSV's net for the same order, refunds and returned fees included (#757)", async () => {
+    const orders = await asStore(storeF, (tx) => tx.order.findMany({ where: { storeId: storeF }, include: { refundRequests: SUCCEEDED_REFUNDS }, orderBy: { number: "asc" } }));
+    const payouts = orders.map((order) => storePayoutLines({ ...order, capturedAmountCents: order.capturedAmountCents ?? 0 }).at(-1)?.cents);
+    const byDay = Object.fromEntries(payout.sales.days.map((d) => [d.day, d.netCents]));
+    expect(payouts).toEqual([byDay["2026-11-02"], byDay["2026-11-03"], byDay["2026-11-04"]]);
+    expect(payouts).toEqual([2693, 1912, 950]);
   });
 
   it("every sales CSV row reconciles: charged − refunds + fees returned − card fee − service fee − courier fee − platform tax = net", () => {
