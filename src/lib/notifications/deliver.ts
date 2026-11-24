@@ -78,6 +78,13 @@ async function loadOrderRow(storeId: string, orderId: string) {
             brandColor: true,
             themePreset: true,
             timezone: true,
+            addressLine1: true,
+            addressLine2: true,
+            city: true,
+            state: true,
+            zip: true,
+            phone: true,
+            hours: true,
           },
         },
         // A fixed order keeps a re-rendered body identical, so a retry replays its idempotency key.

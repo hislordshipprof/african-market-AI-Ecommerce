@@ -142,3 +142,29 @@ describe("#571: a scheduled order's emails show its time", () => {
     expect(html).not.toContain("Scheduled for");
   });
 });
+
+describe("#783: a pickup order's emails say where to collect it", () => {
+  const where = {
+    addressLine1: "12 Main St", addressLine2: null, city: "Houston", state: "TX", zip: "77001",
+    phone: "+17135550100", hours: { mon: "9:00-17:00" },
+  };
+  const pickup = (status: string): NotifyOrder => {
+    const base = order(status);
+    return { ...base, fulfillment: "pickup", deliveryFeeCents: 0, store: { ...base.store, ...where } };
+  };
+
+  it("the confirmation and the ready email give the store's address, phone and hours", () => {
+    for (const [status, event] of [["PLACED", "placed"], ["READY", "ready"]] as const) {
+      const html = renderEmail(pickup(status), event, URL, "orders@example.com").html ?? "";
+      expect(html).toContain("Pick up at 12 Main St, Houston, TX 77001");
+      expect(html).toContain('href="tel:+17135550100"');
+      expect(html).toContain("Mon 9 AM – 5 PM");
+    }
+  });
+
+  it("a delivery order's email does not send the shopper to the store", () => {
+    const base = order("PLACED");
+    const html = renderEmail({ ...base, store: { ...base.store, ...where } }, "placed", URL, "orders@example.com").html;
+    expect(html).not.toContain("Pick up at");
+  });
+});
