@@ -7,10 +7,12 @@ import { OrderInbox } from "./order-inbox";
 import { ProblemsToReview } from "./problems-to-review";
 import { DriverRoutes } from "./driver-routes";
 import { driverRouteBoard } from "@/lib/delivery/driver-route";
+import { newOrderEmailOn } from "@/lib/email/new-order-owner";
 
 export default async function OrdersPage() {
   const session = await requireStoreMember();
-  const [orders, issues, store, routeSlots] = await Promise.all([
+  const owner = session.membership.role === "owner";
+  const [orders, issues, store, routeSlots, newOrderEmail] = await Promise.all([
     getStoreOrders(session.store.id),
     issuesToReview(session.store.id),
     platform.store.findUnique({
@@ -21,6 +23,7 @@ export default async function OrdersPage() {
       },
     }),
     driverRouteBoard(session.store.id, session.store.timezone),
+    owner ? newOrderEmailOn(session.store.id, session.user.id) : null,
   ]);
 
   return (
@@ -32,6 +35,7 @@ export default async function OrdersPage() {
       autoAcceptOrders={store?.autoAcceptOrders ?? false}
       defaultPrepMinutes={store?.prepTimeMinutes ?? 30}
       timeZone={session.store.timezone}
+      newOrderEmail={newOrderEmail}
       problems={(
         <>
           <ProblemsToReview issues={issues} timeZone={session.store.timezone} />
