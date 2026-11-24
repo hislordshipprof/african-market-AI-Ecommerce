@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { discountedGoodsCents, maxGoodsWithin, orderServiceFeeSettings, serviceFeeCents } from "./platform-fee";
-import { canOfferSwap, lineChargeCents, type ChargeLine } from "./substitution-pricing";
+import { canOfferSwap, lineChargeCents, timeoutDecision, type ChargeLine } from "./substitution-pricing";
 import { couponTerms } from "../coupon/discount";
 import type { TaxLine } from "../tax/calculator";
 
@@ -146,7 +146,7 @@ export type ResolveResult =
 
 /**
  * Applies one answer. `customer` is the customer's tap; `timeout` applies the line's rule
- * (a proposed swap is accepted, otherwise the units are refunded). When no prompt is left,
+ * (a proposed swap costing no more than the line is made, otherwise the units are refunded). When no prompt is left,
  * the order goes back to Picking. Idempotent: an answered prompt is never changed again.
  */
 async function resolveInTx(
@@ -161,7 +161,12 @@ async function resolveInTx(
   if (!order || order.status !== "SUBSTITUTION_PENDING") return { ok: false, error: "not_waiting" };
   if (how.by === "timeout" && request.expiresAt.getTime() > Date.now()) return { ok: false, error: "not_due" };
 
-  const decision: SubstitutionDecision = how.by === "customer" ? how.decision : request.proposedVariantId ? "swap" : "refund";
+  let decision: SubstitutionDecision;
+  if (how.by === "customer") decision = how.decision;
+  else {
+    const line = await tx.orderLine.findUniqueOrThrow({ where: { id: request.orderLineId }, select: { unitPriceCents: true } });
+    decision = request.proposedVariantId ? timeoutDecision(request.proposedUnitPriceCents, line.unitPriceCents) : "refund";
+  }
   if (decision === "swap" && !request.proposedVariantId) return { ok: false, error: "no_swap_offered" };
 
   const status = how.by === "timeout" ? "timed_out" : decision === "swap" ? "approved" : "declined";
@@ -216,6 +221,8 @@ export type SubstitutionPromptView = {
   proposed: { name: string; unitPriceCents: number } | null;
   deltaCents: number;
   outcome: "swap" | "refund" | null;
+  /** What the timer does if the customer does not answer. */
+  timeoutOutcome: "swap" | "refund";
 };
 
 function variantName(variant: { label: string; listing: { customName: string | null; masterProduct: { name: string } | null } }): string {
@@ -254,6 +261,7 @@ export async function substitutionPromptsForToken(storeId: string, token: string
       : null,
     deltaCents: request.proposedUnitPriceCents == null ? 0 : request.qty * (request.proposedUnitPriceCents - request.orderLine.unitPriceCents),
     outcome: request.status === "pending" ? null : request.orderLine.status === "substituted" ? "swap" : "refund",
+    timeoutOutcome: request.proposedVariantId ? timeoutDecision(request.proposedUnitPriceCents, request.orderLine.unitPriceCents) : "refund",
   }));
   return { number: order.number, status: order.status, prompts };
 }
