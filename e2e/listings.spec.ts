@@ -142,10 +142,11 @@ test.describe("Listing management (authenticated)", () => {
 
   // #787 AC4: the catalogue photo is a second check that the listing is the right item.
   test("an owner sees catalogue photos in the list, the picker and the dialogs, and No photo otherwise", async ({ page }) => {
-    const custom = `E2E No Photo ${Date.now()}`;
+    const custom = `E2E Bare Custom ${Date.now()}`;
     await createListingViaUI(page, { name: custom, price: "3.00" });
-    await expect(listingRow(page, custom).first().getByText("No photo")).toBeVisible();
-    await expect(listingRow(page, "Yam").first().locator("img[src*='/images/products/']")).toBeVisible();
+    await expect(listingRow(page, custom).first().getByText("No photo", { exact: true })).toBeVisible();
+    const yamRow = page.locator("div.py-3").filter({ has: page.getByRole("button", { name: "Edit Yam", exact: true }) });
+    await expect(yamRow.locator("img[src*='/images/products/']")).toBeVisible();
 
     await page.getByRole("button", { name: "Edit Yam", exact: true }).click();
     await expect(page.getByRole("dialog").getByRole("img", { name: "Catalogue photo of Yam" })).toBeVisible();
