@@ -24,9 +24,10 @@ vi.mock("../auth", () => ({ auth: { api: { getSession: async () => state.session
 vi.mock("../get-store", () => ({ getStore: async () => state.store }));
 vi.mock("../storefront/cache", () => ({ revalidateStorefront: vi.fn() }));
 
-import { listMasterProductsAction, updateListingAction } from "./actions";
+import { createListingAction, deactivateListingAction, listMasterProductsAction, updateListingAction, updateStockAction } from "./actions";
 import { getListing } from "./service";
 import { platformAdmin } from "../db";
+import { READ_ONLY_MESSAGE } from "../store-admin/session";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
@@ -63,6 +64,9 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
   const userA = `act147-ua-${RUN}`;
   const userB = `act147-ub-${RUN}`;
   const staffId = `act147-us-${RUN}`;
+  const clerkId = `act784-clerk-${RUN}`;
+  const clerk2Id = `act784-clerk2-${RUN}`;
+  const seatlessId = `act784-seatless-${RUN}`;
   let storeA: { id: string; slug: string };
   let storeB: { id: string; slug: string };
   let masterId: string;
@@ -108,7 +112,7 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
     ]);
     await raw.masterProduct.deleteMany({ where: { id: masterId } });
     await asAdmin(raw, (tx) => tx.storeMembership.deleteMany({ where: { storeId: { in: [storeA.id, storeB.id] } } }));
-    await raw.user.deleteMany({ where: { id: { in: [userA, userB, staffId] } } });
+    await raw.user.deleteMany({ where: { id: { in: [userA, userB, staffId, clerkId, clerk2Id, seatlessId] } } });
     await raw.store.deleteMany({ where: { id: { in: [storeA.id, storeB.id] } } });
     await raw.$disconnect();
   });
@@ -250,6 +254,78 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
       expect(result.error).toBeTruthy();
       const after = await getListing(storeA.id, listingId);
       expect(after!.price).toBe(650);
+    });
+  });
+
+  // #784: staff keep the shelf right (stock and in/out of stock); listings and prices stay the owner's.
+  describe("staff stock edits", () => {
+    let statusListingId: string;
+
+    beforeAll(async () => {
+      // Starter allows two staff seats; the earliest two write, the third is read-only (ADR-0021).
+      const seats = [[clerkId, "2001-01-01"], [clerk2Id, "2001-01-02"], [seatlessId, "2001-01-03"]] as const;
+      for (const [id, joined] of seats) {
+        await raw.user.create({ data: { id, email: `${id}@example.com`, name: id, emailVerified: true } });
+        await asAdmin(raw, (tx) => tx.storeMembership.create({ data: { storeId: storeA.id, userId: id, role: "staff", createdAt: new Date(joined) } }));
+      }
+      await asAdmin(raw, async (tx) => {
+        const listing = await tx.listing.create({ data: { storeId: storeA.id, customName: `Act784 Yam ${RUN}`, price: 900, stockMode: "status", status: "in_stock" } });
+        statusListingId = listing.id;
+        await tx.listingVariant.create({ data: { listingId: listing.id, label: "Tuber", price: 900, weightG: 2000 } });
+      });
+    });
+
+    it("staff set a counted listing's quantity, and the price stays", async () => {
+      asSession(clerkId, `${clerkId}@example.com`);
+      const before = await getListing(storeA.id, listingId);
+      const result = await updateStockAction(formData({ listingId, qty: "17", qtyLoaded: String(before!.qty) }));
+      expect(result).toMatchObject({ success: true, qty: 17 });
+      const after = await getListing(storeA.id, listingId);
+      expect(after!.qty).toBe(17);
+      expect(after!.price).toBe(before!.price);
+    });
+
+    it("staff mark a status listing out of stock and back in", async () => {
+      asSession(clerkId, `${clerkId}@example.com`);
+      expect(await updateStockAction(formData({ listingId: statusListingId, status: "out_of_stock" }))).toMatchObject({ success: true });
+      expect((await getListing(storeA.id, statusListingId))!.status).toBe("out_of_stock");
+      expect(await updateStockAction(formData({ listingId: statusListingId, status: "in_stock" }))).toMatchObject({ success: true });
+      expect((await getListing(storeA.id, statusListingId))!.status).toBe("in_stock");
+    });
+
+    it("the stock action ignores a price, name or stock mode sent with it", async () => {
+      asSession(clerkId, `${clerkId}@example.com`);
+      const before = await getListing(storeA.id, listingId);
+      await updateStockAction(formData({ listingId, qty: "3", price: "1", customName: "Renamed" }));
+      const after = await getListing(storeA.id, listingId);
+      expect(after!.qty).toBe(3);
+      expect(after!.price).toBe(before!.price);
+      expect(after!.customName).toBe(before!.customName);
+      await updateStockAction(formData({ listingId: statusListingId, stockMode: "counted", qty: "5" }));
+      expect((await getListing(storeA.id, statusListingId))!.stockMode).toBe("status");
+    });
+
+    it("staff cannot add, change the price of, or deactivate a listing", async () => {
+      asSession(clerkId, `${clerkId}@example.com`);
+      const home = /NEXT_REDIRECT:\/store-admin\?store=/;
+      await expect(createListingAction(formData({ customName: "Staff add", variants: "[]" }))).rejects.toThrow(home);
+      await expect(updateListingAction(formData({ listingId, price: "1" }))).rejects.toThrow(home);
+      await expect(deactivateListingAction(listingId)).rejects.toThrow(home);
+      expect((await getListing(storeA.id, listingId))!.active).toBe(true);
+    });
+
+    it("read-only staff cannot change stock", async () => {
+      asSession(seatlessId, `${seatlessId}@example.com`);
+      expect(await updateStockAction(formData({ listingId, qty: "99" }))).toEqual({ error: READ_ONLY_MESSAGE });
+      expect((await getListing(storeA.id, listingId))!.qty).not.toBe(99);
+    });
+
+    it("a member of another store cannot change this store's stock", async () => {
+      asSession(userB, emailB);
+      state.store = storeB;
+      const result = await updateStockAction(formData({ listingId, qty: "55" }));
+      expect(result).toEqual({ error: expect.any(String) });
+      expect((await getListing(storeA.id, listingId))!.qty).not.toBe(55);
     });
   });
 });

@@ -16,6 +16,17 @@ export function storefrontUrl(slug: string, requestHost: string, env: Env = proc
   return `${local ? "http" : "https"}://${slug}.${root}${local && port ? `:${port}` : ""}/`;
 }
 
+/**
+ * The address the store admin shows for its store (#784): the storefront link, or, with no root domain
+ * (local, a preview), `?store=<slug>` on the host the admin is open on, which the proxy honours there.
+ */
+export function storeWebAddress(slug: string, requestHost: string, env: Env = process.env): string | null {
+  if (fallbackRootHost(env) || env.PLATFORM_ROOT_DOMAIN?.trim()) return storefrontUrl(slug, requestHost, env);
+  if (!isSlugRoutable(slug)) return null;
+  const local = requestHost.split(":")[0] === "localhost";
+  return `${local ? "http" : "https"}://${requestHost}/?store=${slug}`;
+}
+
 /** The directory's own origin, for sitemap and canonical URLs. Pages cached for every request cannot read the host. */
 export function directoryOrigin(env: Env = process.env): string {
   const alias = fallbackRootHost(env);

@@ -46,7 +46,7 @@ _Avoid_: Draft, pending, password page
 What a store in setup must finish before it goes live, shown on the store admin home and the platform admin's store page: payouts connected, hours and time zone set, pickup or a delivery option on, at least the go-live listing floor of active listings with a price (a platform setting, default 20), no placeholder weights on active listings, a plan chosen or a pilot store, and courier registration done or not needed (Starter). A test order is recommended after going live, never required.
 
 **Go live**:
-The store owner's button that moves a store from setup to live once every checklist item is done, with an audit row. A platform admin can go live for a store with items still open, only with a reason, which the audit row keeps.
+The store owner's button that moves a store from setup to live once every checklist item is done, and lists it in the Store directory, with an audit row. The owner confirms first and can unlist later. A platform admin can go live for a store with items still open, only with a reason, which the audit row keeps.
 _Avoid_: Launch, publish
 
 **Suspended**:

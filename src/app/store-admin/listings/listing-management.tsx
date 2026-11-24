@@ -48,6 +48,7 @@ import {
   listMasterProductsAction,
 } from "@/lib/listing/actions";
 import { AttributesDialog } from "./attributes-dialog";
+import { StockDialog, type StockListing } from "./stock-dialog";
 import { listingNeedsWeight } from "./needs-weight";
 import { loadedVariantRow, serializeVariants } from "./variant-form";
 import { displayNameOf, searchListings } from "./listing-search";
@@ -110,6 +111,10 @@ interface Props {
   /** The store has opted in to shipping (#567). */
   storeShips: boolean;
   listings: Listing[];
+  /** Owner: add, edit, price and deactivate listings. Staff only update stock (#784). */
+  canManage: boolean;
+  /** Staff with a seat; read-only staff only look. */
+  canEditStock: boolean;
 }
 
 function stockLabel(listing: Listing) {
@@ -212,7 +217,7 @@ const PREPARED_LABELS: Record<string, string> = {
 
 const HELD_FOR_ALLERGENS = "Saved, off sale. State its allergens under Ingredients and allergens, then reactivate it.";
 
-export function ListingManagement({ storeName, storeSlug, storeShips, listings }: Props) {
+export function ListingManagement({ storeName, storeSlug, storeShips, listings, canManage, canEditStock }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -220,6 +225,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   const [createOpen, setCreateOpen] = useState(false);
   const [editListing, setEditListing] = useState<Listing | null>(null);
   const [attributesListing, setAttributesListing] = useState<Listing | null>(null);
+  const [stockListing, setStockListing] = useState<StockListing | null>(null);
   const [query, setQuery] = useState("");
 
   const [name, setName] = useState("");
@@ -768,6 +774,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
             <h1 className="text-base font-semibold text-foreground">Products</h1>
             <p className="text-xs text-muted-foreground">{storeName}</p>
           </div>
+          {canManage && (
           <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
             <Link href={`/store-admin/listings/import?store=${storeParam}`}>
               <Button size="sm" variant="outline">
@@ -783,6 +790,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
               <Plus className="size-4" /> Add listing
             </Button>
           </div>
+          )}
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
@@ -806,11 +814,13 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
             <CardContent className="flex flex-col items-center gap-3 py-12">
               <Package className="size-10 text-muted-foreground/50" />
               <p className="text-sm text-muted-foreground">
-                No listings yet. Add your first product to get started.
+                {canManage ? "No listings yet. Add your first product to get started." : "No listings yet. The owner adds products."}
               </p>
-              <Button size="sm" onClick={openCreate}>
-                <Plus className="size-4" /> Add listing
-              </Button>
+              {canManage && (
+                <Button size="sm" onClick={openCreate}>
+                  <Plus className="size-4" /> Add listing
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -863,6 +873,9 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
                           onEdit={() => openEdit(listing)}
                           onAttributes={() => setAttributesListing(listing)}
                           onToggle={() => handleToggleActive(listing)}
+                          onStock={() => setStockListing(stockOf(listing))}
+                          canManage={canManage}
+                          canEditStock={canEditStock}
                           isPending={isPending}
                         />
                       ))}
@@ -891,6 +904,9 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
                             onEdit={() => openEdit(listing)}
                             onAttributes={() => setAttributesListing(listing)}
                             onToggle={() => handleToggleActive(listing)}
+                            onStock={() => setStockListing(stockOf(listing))}
+                            canManage={canManage}
+                            canEditStock={canEditStock}
                             isPending={isPending}
                           />
                         ))}
@@ -904,6 +920,8 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
           </div>
         )}
       </main>
+
+      <StockDialog listing={stockListing} onClose={() => setStockListing(null)} />
 
       <AttributesDialog
         key={attributesListing?.id ?? "closed"}
@@ -930,17 +948,27 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings }
   );
 }
 
+function stockOf(listing: Listing): StockListing {
+  return { id: listing.id, name: displayNameOf(listing), stockMode: listing.stockMode, qty: listing.qty, status: listing.status };
+}
+
 function ListingRow({
   listing,
   onEdit,
   onAttributes,
   onToggle,
+  onStock,
+  canManage,
+  canEditStock,
   isPending,
 }: {
   listing: Listing;
   onEdit: () => void;
   onAttributes: () => void;
   onToggle: () => void;
+  onStock: () => void;
+  canManage: boolean;
+  canEditStock: boolean;
   isPending: boolean;
 }) {
   const displayName = displayNameOf(listing);
@@ -991,33 +1019,39 @@ function ListingRow({
       <Badge variant={stockBadgeVariant(listing)} className="shrink-0">
         {stockLabel(listing)}
       </Badge>
-      <div className="flex items-center gap-1 shrink-0">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-11"
-          onClick={onEdit}
-          aria-label={`Edit ${displayName}`}
-        >
-          <Pencil className="size-4" />
+      {canManage ? (
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-11"
+            onClick={onEdit}
+            aria-label={`Edit ${displayName}`}
+          >
+            <Pencil className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-11"
+            onClick={onAttributes}
+            aria-label={`Ingredients and allergens for ${displayName}`}
+          >
+            <ListChecks className="size-4" />
+          </Button>
+          <Switch
+            checked={listing.active}
+            className="mx-2 after:-inset-y-3.5"
+            onCheckedChange={onToggle}
+            disabled={isPending}
+            aria-label={listing.active ? `Deactivate ${displayName}` : `Reactivate ${displayName}`}
+          />
+        </div>
+      ) : canEditStock ? (
+        <Button variant="outline" className="min-h-11 shrink-0 rounded-full" onClick={onStock} aria-label={`Update stock for ${displayName}`}>
+          <Pencil className="size-4" aria-hidden /> Stock
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-11"
-          onClick={onAttributes}
-          aria-label={`Ingredients and allergens for ${displayName}`}
-        >
-          <ListChecks className="size-4" />
-        </Button>
-        <Switch
-          checked={listing.active}
-          className="mx-2 after:-inset-y-3.5"
-          onCheckedChange={onToggle}
-          disabled={isPending}
-          aria-label={listing.active ? `Deactivate ${displayName}` : `Reactivate ${displayName}`}
-        />
-      </div>
+      ) : null}
     </div>
   );
 }

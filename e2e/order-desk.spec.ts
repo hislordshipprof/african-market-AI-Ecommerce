@@ -76,9 +76,11 @@ test.describe("Order desk (#725)", () => {
     await page.goto(DASHBOARD_URL);
     const links = page.getByRole("main").getByRole("link");
     await expect(links.first()).toBeVisible();
-    // Payment and plan warnings sit above the cards in alert/status boxes; the cards start after them.
+    // Payment and plan warnings (alert/status boxes) and the store's View store link (new tab) sit above the cards.
     const cards = await links.evaluateAll((els) =>
-      els.filter((el) => !el.closest("[role=alert],[role=status]")).map((el) => new URL((el as HTMLAnchorElement).href).pathname),
+      els
+        .filter((el) => !el.closest("[role=alert],[role=status]") && el.getAttribute("target") !== "_blank")
+        .map((el) => new URL((el as HTMLAnchorElement).href).pathname),
     );
     expect(cards.slice(0, 3)).toEqual(["/store-admin/orders", "/store-admin/messages", "/store-admin/listings"]);
   });

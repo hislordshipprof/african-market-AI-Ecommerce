@@ -2,7 +2,7 @@
 
 Date: 2026-10-30 · Status: accepted · Supersedes spec D2 and the §4 Phase 2 marketplace view · Amended 2026-11-14 (#448)
 
-Stores never share a cart or checkout. Instead of the planned combined marketplace app, the platform gets a **Store directory** (Phase 2): a public site where people search by state, city or "near me", then click through to that store's own storefront. Listing is opt-in per store. Product search across stores is deferred, because it would put competing stores' prices side by side, against stores owning their customers (ADR-0003). One customer account (ADR-0002) works at every store, but sessions are cookies scoped to each store's domain (ADR-0015), so a customer arriving from the directory signs in once more on that store's site.
+Stores never share a cart or checkout. Instead of the planned combined marketplace app, the platform gets a **Store directory** (Phase 2): a public site where people search by state, city or "near me", then click through to that store's own storefront. The owner's Go live lists the store, and the owner can unlist it (a platform admin's forced go-live does not list it, #784). Product search across stores is deferred, because it would put competing stores' prices side by side, against stores owning their customers (ADR-0003). One customer account (ADR-0002) works at every store, but sessions are cookies scoped to each store's domain (ADR-0015), so a customer arriving from the directory signs in once more on that store's site.
 
 ## Note, 2026-11-14 (#448): owner decisions of 2026-11-11 (#447)
 - No "3 stores in a metro" gate: the directory lists every listed store, wherever it is (amends ADR-0001).

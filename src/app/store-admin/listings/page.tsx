@@ -1,9 +1,10 @@
-import { requireStoreOwner } from "@/lib/store-admin/session";
+import { requireStoreMember } from "@/lib/store-admin/session";
 import { listListings } from "@/lib/listing/service";
 import { ListingManagement } from "./listing-management";
 
+/** Every member sees Products; staff only update stock, and the server actions hold to that (#784). */
 export default async function ListingsPage() {
-  const session = await requireStoreOwner();
+  const session = await requireStoreMember();
   const listings = await listListings(session.store.id, true);
 
   return (
@@ -11,6 +12,8 @@ export default async function ListingsPage() {
       storeName={session.store.name}
       storeSlug={session.store.slug}
       storeShips={session.store.shippingHandlingDays != null}
+      canManage={session.membership.role === "owner"}
+      canEditStock={!session.membership.readOnly}
       listings={listings.map((l) => ({
         id: l.id,
         masterProductId: l.masterProductId,
