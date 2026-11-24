@@ -83,6 +83,10 @@ export default defineConfig({
           E2E_FAKE_ASSISTANT: "1",
           ANTHROPIC_API_KEY: "e2e-fake-anthropic-key",
           STRIPE_SECRET_KEY: "",
+          // Store delivery and shipping need somewhere to keep proof (#765); no e2e uploads to it.
+          R2_PROOF_BUCKET: "e2e-proof-bucket",
+          EMAIL_FROM: "",
+          SHIPPO_API_KEY: "",
           VERCEL_ENV: "preview",
           STOREFRONT_REVALIDATION_SECRET: "e2e-storefront-revalidate",
         },

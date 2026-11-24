@@ -25,7 +25,8 @@ import { pinnedCheckoutTax, quoteCheckoutTax, TaxLocationError, TaxUnavailableEr
 import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type CourierQuoteInput, type QuoteCouponInput, type ShippingQuoteInput, type StoreDeliveryQuote } from "./quote";
 import { cheapestRate, ShippingProviderError, type ShippingProvider } from "../shipping/provider";
 import { lineShips, orderWeightG, shipRefusal, type ShipLine } from "../shipping/eligibility";
-import { readShippingStates, shippingProvider } from "../shipping/settings";
+import { deliveryProofBucket } from "../r2";
+import { readShippingStates, shippingProvider, shippingReady } from "../shipping/settings";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, quoteCourier } from "../delivery/dispatch";
 import { checkCourierEligibility } from "../delivery/eligibility";
@@ -152,7 +153,8 @@ function deliveryQuoteInput(
     ? { withinRadius: assessRadius(point, { lat: store.lat as number, lng: store.lng as number, radiusMi }).withinRadius }
     : null;
   return {
-    enabled: store.storeDeliveryEnabled,
+    // Not offered while the delivered photo has nowhere to be kept: the order could never be marked delivered (#765).
+    enabled: store.storeDeliveryEnabled && deliveryProofBucket() !== null,
     feeCents: store.storeDeliveryFeeCents,
     radiusMi,
     hasCoordinates,
@@ -366,6 +368,7 @@ async function courierQuoteFor(
 }
 
 const SHIP_ADDRESS_NEEDED = "Enter your shipping address to see the shipping rate.";
+const SHIPPING_NOT_OFFERED = "Shipping isn't available right now. Choose pickup or delivery.";
 
 /** The rate depends on where the box goes and what it weighs; the key ties a saved rate to both. */
 function shippingKey(state: string, zip: string, weightG: number): string {
@@ -385,6 +388,8 @@ async function shippingQuoteFor(
   options: QuoteCheckoutOptions,
 ): Promise<ShippingQuoteInput> {
   const unavailable = (message: string): ShippingQuoteInput => ({ ok: false, problems: [{ code: "ineligible", message }] });
+  const provider = options.shipping === undefined ? shippingProvider() : options.shipping;
+  if (!provider || !shippingReady(provider)) return unavailable(SHIPPING_NOT_OFFERED);
   // Each line that can't ship is named, so the shopper can remove it or choose pickup or delivery (#763).
   const stuck = cart.lines.filter((line) => !line.variant.ships);
   if (store.shippingHandlingDays != null && stuck.length > 0) {
@@ -428,8 +433,6 @@ async function shippingQuoteFor(
     return { ok: true, feeCents: shown, carrier: saved.shippingCarrier ?? "", service: saved.shippingService ?? "", days: saved.shippingDays, handlingDays };
   }
 
-  const provider = options.shipping === undefined ? shippingProvider() : options.shipping;
-  if (!provider) return unavailable("Shipping isn't available right now. Choose pickup or delivery.");
   let rate = null;
   try {
     rate = cheapestRate(await provider.rates({
@@ -476,6 +479,7 @@ function shownShipping(
   allowedStates: readonly string[],
   now: Date,
 ): ShippingQuoteInput {
+  if (!shippingReady()) return { ok: false, problems: [{ code: "ineligible", message: SHIPPING_NOT_OFFERED }] };
   const refusal = shipRefusal({ lines, handlingDays, state: cart.deliveryState, allowedStates });
   if (refusal) return { ok: false, problems: [{ code: "ineligible", message: refusal }] };
   if (cart.shippingFeeCents == null || !cart.deliveryLine1 || !cart.deliveryState || !cart.deliveryZip) {

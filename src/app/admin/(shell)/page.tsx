@@ -2,8 +2,16 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { getAdminHomeCounts, type QueueCount } from "@/lib/admin/home-counts";
 import { requirePlatformAdmin } from "@/lib/admin/session";
+import { missingSetup } from "@/lib/health";
 
 export const metadata = { title: "Home — Platform Admin" };
+
+/** What each missing setup turns off (#765); the names are the env variables, never their values. */
+const SETUP_EFFECT: Record<string, string> = {
+  EMAIL_FROM: "Sign-in links and order emails reach no one. Shoppers and staff are told email sign-in is not available yet.",
+  R2_PROOF_BUCKET: "Store delivery and shipping are hidden at checkout: delivery photos and labels have nowhere to be kept.",
+  SHIPPO_API_KEY: "Shipping is hidden at checkout: labels cannot be bought.",
+};
 
 type Queue = { href: string; label: string; counted: QueueCount | null; detail: string; testId: string };
 
@@ -19,6 +27,7 @@ export default async function AdminHome() {
   ];
   const waiting = queues.filter((queue) => (queue.counted?.count ?? 0) > 0).length;
   const unloaded = queues.some((queue) => !queue.counted);
+  const missing = missingSetup(process.env);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
@@ -30,6 +39,20 @@ export default async function AdminHome() {
             ? "Some counts could not be loaded."
             : "Every queue is clear."}
       </p>
+
+      {missing.length > 0 && (
+        <section aria-labelledby="missing-setup">
+          <h2 id="missing-setup" className="mb-3 mt-8 text-sm font-semibold text-muted-foreground">Missing setup</h2>
+          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+            {missing.map((name) => (
+              <li key={name} className="px-4 py-4 sm:px-5">
+                <code className="block font-mono text-sm font-semibold text-foreground">{name}</code>
+                <span className="mt-1 block text-sm text-muted-foreground">{SETUP_EFFECT[name]}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <h2 className="mb-3 mt-8 text-sm font-semibold text-muted-foreground">Queues</h2>
       <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">

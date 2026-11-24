@@ -800,6 +800,27 @@ test.describe("Admin shell (authenticated)", () => {
     await expect(page.getByTestId("count-catalog-review")).toContainText(/\d+/);
   });
 
+  test("home names the setup this deployment is missing, by name only (#765)", async ({ page }) => {
+    // The e2e server has a proof bucket but no sender address and no Shippo key (playwright.config.ts).
+    const missing = page.getByRole("region", { name: "Missing setup" });
+    await expect(missing).toBeVisible();
+    await expect(missing.getByRole("listitem")).toHaveCount(2);
+    await expect(missing).toContainText("EMAIL_FROM");
+    await expect(missing).toContainText("Sign-in links and order emails reach no one");
+    await expect(missing).toContainText("SHIPPO_API_KEY");
+    await expect(missing).not.toContainText("R2_PROOF_BUCKET");
+    const proof = process.env.PROOF_DIR;
+    if (proof) {
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        for (const width of [390, 1280]) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.screenshot({ path: `${proof}/admin-missing-setup-${width}-${scheme}.png`, fullPage: true });
+        }
+      }
+    }
+  });
+
   test("the phone menu opens, closes with Escape and navigates", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const toggle = page.getByRole("button", { name: "Menu" });

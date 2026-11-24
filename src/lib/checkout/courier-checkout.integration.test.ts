@@ -71,6 +71,8 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
   beforeAll(async () => {
     raw = testPrismaClient();
     await raw.$connect();
+    // Store delivery is offered only while its proof photo can be kept (#765).
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
     await writeGeocodeCache(ADDRESS, { ...ADDRESS, formattedAddress: "1100 WAYNE AVE, SILVER SPRING, MD, 20910", lat: 38.9946, lng: -77.0247 });
   }, 30_000);
 
@@ -79,6 +81,7 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     for (const id of storeIds) {
       const scoped = storeScoped(id);
       await scoped.deliveryEvent.deleteMany({});

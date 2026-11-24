@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 
 vi.mock("next/cache", () => ({
@@ -93,7 +93,12 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
     })).id;
   });
 
-  afterEach(() => setAddressProvider(null));
+  // Store delivery is offered only while its proof photo can be kept (#765).
+  beforeEach(() => vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket"));
+  afterEach(() => {
+    setAddressProvider(null);
+    vi.unstubAllEnvs();
+  });
 
   afterAll(async () => {
     for (const id of [storeA, storeB].filter(Boolean)) {
@@ -237,6 +242,15 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
       storeDelivery: { enabled: true, feeCents: 599, radiusMi: 8 },
     });
     expect(info).not.toHaveProperty("orders");
+  });
+
+  it("#765 AC1: without the proof bucket the assistant offers no store delivery, as checkout offers none", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    setAddressProvider(fakeAddressBackend());
+    const run = runner({ actorUserId: null });
+    expect(await run("check_delivery_area", { line1: "3700 Main St", city: "Houston", state: "TX", zip: "77002" }))
+      .toMatchObject({ ok: true, withinRadius: true, storeDelivery: false, pickup: true });
+    expect(await run("get_store_info", {})).toMatchObject({ ok: true, storeDelivery: { enabled: false } });
   });
 
   it("forward_to_store opens the order's support thread with the order context and refuses guests and other customers", async () => {

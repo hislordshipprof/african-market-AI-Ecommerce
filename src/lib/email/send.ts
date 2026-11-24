@@ -115,9 +115,29 @@ class UnconfiguredSender implements EmailSender {
   }
 }
 
+/** Resend's shared sender: it delivers only to the Resend account owner. */
+export const RESEND_SANDBOX_FROM = "onboarding@resend.dev";
+
+/** A sender address that reaches shoppers and staff: set, and not Resend's sandbox one. */
+export function emailFromSet(env: Record<string, string | undefined> = process.env): boolean {
+  const from = env.EMAIL_FROM?.trim();
+  return !!from && !from.includes(RESEND_SANDBOX_FROM);
+}
+
 /** Build, test and CI send to the in-memory fakes, never a provider. */
 export function providerSinkMode(env: Record<string, string | undefined> = process.env): boolean {
   return env.NEXT_PHASE === "phase-production-build" || env.NODE_ENV === "test" || env.CI === "true";
+}
+
+/** Shown wherever a sign-in or reset link would be sent while none can reach anyone (#765). */
+export const EMAIL_SIGN_IN_UNAVAILABLE = "Email sign-in is not available yet.";
+
+/**
+ * Sign-in links can reach shoppers and staff (#765): a real sender address in production. Build, tests and CI send
+ * to the in-memory sink, and development logs, so links work there without one.
+ */
+export function emailSignInAvailable(env: Record<string, string | undefined> = process.env): boolean {
+  return providerSinkMode(env) || env.NODE_ENV !== "production" || emailFromSet(env);
 }
 
 export function createSender(
@@ -126,7 +146,7 @@ export function createSender(
   if (providerSinkMode(env)) return new TestSender();
 
   const apiKey = env.RESEND_API_KEY;
-  const from = env.EMAIL_FROM ?? "onboarding@resend.dev";
+  const from = env.EMAIL_FROM ?? RESEND_SANDBOX_FROM;
 
   if (!apiKey) {
     if (env.NODE_ENV === "production") return new UnconfiguredSender();

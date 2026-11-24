@@ -72,6 +72,8 @@ describe.skipIf(!hasDb)("customer notifications", () => {
 
   beforeEach(() => {
     vi.stubEnv("PLATFORM_ROOT_DOMAIN", "markets.example");
+    // Store delivery is offered only while its proof photo can be kept (#765).
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
     clearTestSentEmails();
     clearTestSentSms();
     setEmailSenderForTests(null);

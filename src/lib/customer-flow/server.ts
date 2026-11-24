@@ -8,7 +8,8 @@ import { storeMayUse } from "@/lib/billing/plan";
 import { courierOffered } from "@/lib/delivery/courier-offered";
 import { anyCourierEnabled, readStoreCourierSettings } from "@/lib/delivery/courier-settings";
 import { storeShipsTo } from "@/lib/shipping/eligibility";
-import { readShippingStates } from "@/lib/shipping/settings";
+import { readShippingStates, shippingReady } from "@/lib/shipping/settings";
+import { deliveryProofBucket } from "@/lib/r2";
 import type { FlowStore } from "./contracts";
 
 export const getFlowContext = cache(async () => {
@@ -31,7 +32,9 @@ export const getFlowContext = cache(async () => {
       || "this market",
     minimumOrderCents: store.minimumOrderCents,
     pickupEnabled: store.pickupEnabled,
+    // Store delivery and Ship are offered only when their orders can be completed (#765).
     storeDeliveryEnabled: store.storeDeliveryEnabled
+      && deliveryProofBucket() !== null
       && store.lat != null
       && store.lng != null
       && Number(store.deliveryRadiusMi) > 0,
@@ -43,7 +46,7 @@ export const getFlowContext = cache(async () => {
     courierOffered: courierOffered(store)
       && (await storeMayUse(store.id, "courier-delivery"))
       && anyCourierEnabled(await readStoreCourierSettings(store.id), store.id),
-    shipsTo: storeShipsTo(store.shippingHandlingDays, await readShippingStates()),
+    shipsTo: shippingReady() ? storeShipsTo(store.shippingHandlingDays, await readShippingStates()) : [],
     closed: availability.kind === "queued",
     opensAt: queue?.opensAt ?? "",
     readyAt: queue?.readyAt ?? "",

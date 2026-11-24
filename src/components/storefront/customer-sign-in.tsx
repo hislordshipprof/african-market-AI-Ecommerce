@@ -17,11 +17,13 @@ import { Mail, ArrowLeft } from "lucide-react";
 interface Props {
   storeName: string;
   linkError?: string | null;
+  /** Set while no sign-in link can reach anyone (#765): shown instead of the form. */
+  unavailable?: string | null;
 }
 
 const INITIAL: SignInLinkState = { status: "idle", email: "" };
 
-export function CustomerSignIn({ storeName, linkError = null }: Props) {
+export function CustomerSignIn({ storeName, linkError = null, unavailable = null }: Props) {
   // A server action, so a submit before hydration (or with no JS) still sends the typed email.
   const [state, formAction, pending] = useActionState(sendSignInLinkAction, INITIAL);
   const [dismissed, setDismissed] = useState<SignInLinkState | null>(null);
@@ -61,7 +63,17 @@ export function CustomerSignIn({ storeName, linkError = null }: Props) {
             </div>
           )}
 
-          {!sent && (
+          {unavailable && (
+            <div className="flex flex-col items-center gap-4 py-2 text-center" role="status">
+              <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
+                <Mail className="size-6" style={{ color: "var(--color-primary-text)" }} />
+              </div>
+              <p className="font-medium text-foreground">{unavailable}</p>
+              <p className="text-sm text-muted-foreground">You can still order without an account.</p>
+            </div>
+          )}
+
+          {!sent && !unavailable && (
             <form action={formAction} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="email">Email address</Label>

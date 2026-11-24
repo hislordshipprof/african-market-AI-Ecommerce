@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { addLine } from "../cart/service";
@@ -50,6 +50,7 @@ import {
   computeQuote,
   createPaymentIntent,
   placeOrder,
+  quoteCheckout,
   recordAuthorizedOrder,
 } from "./service";
 import { fakeCheckoutCallCount, getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
@@ -98,7 +99,13 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     }
   }, 30_000);
 
+  // Store delivery is offered only while its proof photo can be kept (#765).
+  beforeEach(() => {
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
+  });
+
   afterEach(() => {
+    vi.unstubAllEnvs();
     checkoutTestHooks.afterMissedOrderLookup = null;
     checkoutTestHooks.aroundCartRead = null;
     checkoutTestHooks.afterPostReadLookupMiss = null;
@@ -1062,6 +1069,33 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
         substituteVariantId: null,
       }],
     })).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+  });
+
+  it("#765 AC1: without the proof bucket store delivery is refused at the quote and at both placements, so no order strands at Out for delivery", async () => {
+    const seeded = await seedDeliveryCart("no-proof");
+    const NOT_OFFERED = "Only pickup is available for this store.";
+    const offered = await quoteCheckout(seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null);
+    expect(offered.problems.map((problem) => problem.message)).not.toContain(NOT_OFFERED);
+
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    const refused = await quoteCheckout(seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null);
+    expect(refused.problems).toContainEqual(expect.objectContaining({ code: "ineligible", message: NOT_OFFERED }));
+    await expect(recordAuthorizedOrder(seeded.store.id, {
+      cartId: seeded.cart.id,
+      contact: CONTACT,
+      fulfillment: "store-delivery",
+      pickupSlot: null,
+      notes: null,
+      paymentIntentId: seeded.paymentIntentId,
+      quote: seeded.quote,
+      paymentAmount: seeded.quote.holdCents,
+      minimumOrderCents: 0,
+      lines: [{ variantId: seeded.variant.id, qty: 1, price: 4000, swapRule: "exact_only", substituteVariantId: null }],
+    })).rejects.toBeInstanceOf(BasketChangedError);
+    await expect(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+    ).rejects.toBeInstanceOf(BasketChangedError);
     expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
   });
 

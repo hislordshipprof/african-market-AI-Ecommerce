@@ -12,6 +12,7 @@ vi.hoisted(() => {
 // Production would pick the live Resend sender: record sends instead.
 const { sent } = vi.hoisted(() => ({ sent: [] as { to: string; html?: string }[] }));
 vi.mock("./email/send", () => ({
+  RESEND_SANDBOX_FROM: "onboarding@resend.dev",
   sendEmail: async (message: { to: string; html?: string }) => {
     sent.push(message);
   },

@@ -85,6 +85,8 @@ describe.skipIf(!hasDb)("sales tax at checkout (#65, lane DB)", () => {
     vi.stubEnv("E2E_FAKE_STRIPE", "1");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("CI", "true");
+    // Store delivery is offered only while its proof photo can be kept (#765).
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
     resetFakeCheckoutPayments();
     foodMaster = await category(FOOD);
     beautyMaster = await category(BEAUTY);

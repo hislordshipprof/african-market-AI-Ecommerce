@@ -115,6 +115,9 @@ describe.skipIf(!hasDb)("shipping labels, tracking and the Shipped state (#568, 
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("CI", "true");
     vi.stubEnv("SHIPPO_WEBHOOK_SECRET", SECRET);
+    // Checkout places a shipped order only while a label can be bought and kept (#765).
+    vi.stubEnv("E2E_FAKE_SHIPPO", "1");
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
     resetFakeCheckoutPayments();
     staff = { ...staff, id: (await raw.user.create({ data: { id: crypto.randomUUID(), email: staff.email, name: "Staff", emailVerified: true } })).id };
     setStripeProvider(fakeStripeProvider);

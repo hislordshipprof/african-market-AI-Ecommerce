@@ -84,8 +84,8 @@ export function isDeliveryProofKey(key: string): boolean {
 }
 
 /** Proofs live only in their own private bucket, never the catalog one (ADR 0013). */
-export function deliveryProofBucket(): string | null {
-  return process.env.R2_PROOF_BUCKET?.trim() || null;
+export function deliveryProofBucket(env: Record<string, string | undefined> = process.env): string | null {
+  return env.R2_PROOF_BUCKET?.trim() || null;
 }
 
 export async function uploadDeliveryProof(key: string, body: Buffer | Uint8Array): Promise<void> {

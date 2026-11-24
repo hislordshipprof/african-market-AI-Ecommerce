@@ -1,4 +1,6 @@
+import { emailFromSet } from "./email/send";
 import { inngestDevOn } from "./inngest/event-key";
+import { deliveryProofBucket } from "./r2";
 
 export type QueryRawFn = (
   strings: TemplateStringsArray,
@@ -69,6 +71,18 @@ export function checkEnv(
   return result;
 }
 
+/**
+ * Optional setup the platform runs without, by name only (#765). Without a sender sign-in links reach no one;
+ * without the proof bucket store delivery and shipping are hidden; without Shippo shipping is. Never fails the probe.
+ */
+export function missingSetup(env: Record<string, string | undefined>): string[] {
+  const missing: string[] = [];
+  if (!emailFromSet(env)) missing.push("EMAIL_FROM");
+  if (!deliveryProofBucket(env)) missing.push("R2_PROOF_BUCKET");
+  if (!env.SHIPPO_API_KEY?.trim()) missing.push("SHIPPO_API_KEY");
+  return missing;
+}
+
 export async function checkDatabase(
   queryRaw: QueryRawFn,
 ): Promise<{ reachable: boolean; user: string | null }> {
@@ -119,6 +133,7 @@ export interface HealthResult {
   database: { reachable: boolean; user: string | null };
   migrations: { upToDate: boolean };
   env: Record<string, boolean>;
+  missingSetup: string[];
 }
 
 export interface MinimalHealthResult {
@@ -156,6 +171,6 @@ export async function runHealthChecks(deps: {
 
   return {
     status: healthy ? 200 : 503,
-    body: { version, database, migrations, env: envResult },
+    body: { version, database, migrations, env: envResult, missingSetup: missingSetup(deps.env) },
   };
 }
