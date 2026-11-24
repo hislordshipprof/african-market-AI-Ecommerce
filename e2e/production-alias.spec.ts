@@ -48,7 +48,7 @@ async function shoot(page: Page, name: string) {
   await page.setViewportSize({ width: 1280, height: 1000 });
 }
 
-test("the production alias serves the directory, /sell and stores, noindex; a preview host still serves nothing", async ({ page, context }) => {
+test("the production alias serves the directory, /sell, the admin and stores, noindex; a preview host still serves nothing", async ({ page, context }) => {
   test.setTimeout(240_000);
   const port = await reservePort(laneSmokePort());
   const running = await startSpawnedServer({
@@ -84,10 +84,8 @@ test("the production alias serves the directory, /sell and stores, noindex; a pr
     await expect(card).toHaveAttribute("href", `https://${ALIAS}/?store=mama-ngozi&ref=directory`);
     await shoot(page, "directory");
 
-    await page.goto(`https://${ALIAS}/stores/texas`);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Texas");
-    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `https://${ALIAS}/stores/texas`);
-
+    // State and city pages are ISR output shared with every server on this build, so other specs'
+    // servers would read what this one renders; directoryOrigin's unit test covers their canonical URL.
     await page.goto(`https://${ALIAS}/sell`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Store not found")).toHaveCount(0);
@@ -106,10 +104,14 @@ test("the production alias serves the directory, /sell and stores, noindex; a pr
     await page.goto(`https://${ALIAS}/`);
     await shoot(page, "store");
 
-    // The marketplace's own pages forget the store, so its "All stores" link leads home.
-    await page.goto(`https://${ALIAS}/stores/texas`);
-    await page.getByRole("link", { name: "All stores" }).click();
+    // The marketplace's own pages forget the store, so their links to / lead home.
+    await page.goto(`https://${ALIAS}/sell`);
+    await page.getByRole("link", { name: "African Markets", exact: true }).click();
     await expect(page).toHaveTitle(/Store directory/);
+
+    const admin = await page.goto(`https://${ALIAS}/admin/sign-in`);
+    expect(admin?.headers()["x-robots-tag"]).toBe("noindex");
+    await expect(page.getByRole("heading", { name: "Platform Admin" })).toBeVisible();
 
     const preview = await page.goto(`https://${PREVIEW}/?store=mama-ngozi`);
     expect(preview?.headers()["x-robots-tag"]).toBeUndefined();
