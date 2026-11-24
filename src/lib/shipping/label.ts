@@ -45,10 +45,7 @@ function postageMessage(paidCents: number, newCents: number): string {
 export async function fixPostage(storeId: string, orderId: string, confirmPostageCents: number | undefined, deps: LabelDeps = {}): Promise<PostageResult> {
   const now = (deps.now ?? (() => new Date()))();
   const scoped = storeScoped(storeId);
-  const order = await scoped.order.findUnique({
-    where: { id: orderId },
-    include: { store: true, customer: true, lines: { include: { listingVariant: { select: { weightG: true } } } } },
-  });
+  const order = await scoped.order.findUnique({ where: { id: orderId } });
   if (!order || order.fulfillment !== "ship" || order.status !== "PICKING" || order.shippingPostageCents !== null) return { ok: true };
   if (!(deps.hasStorage ?? (() => deliveryProofBucket() !== null))()) return { ok: false, error: LABEL_STORAGE_NOT_SET_UP };
 
