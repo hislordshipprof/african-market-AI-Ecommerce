@@ -64,6 +64,31 @@ export function storeOrderBreakdown(order: {
   return lines.filter((line) => line.key === "subtotal" || line.cents !== 0);
 }
 
+type FulfillmentOrder = {
+  fulfillment: string;
+  deliveryLine1: string | null;
+  deliveryLine2: string | null;
+  deliveryCity: string | null;
+  deliveryState: string | null;
+  deliveryZip: string | null;
+  leaveAtDoor: boolean;
+  shippingCarrier: string | null;
+  shippingService: string | null;
+};
+
+/** How the order leaves the store, so the owner can decide before accepting (#742). */
+export function fulfillmentLine(order: FulfillmentOrder): string {
+  const street = [order.deliveryLine1, order.deliveryLine2].filter(Boolean).join(", ");
+  const area = order.deliveryCity ? `${order.deliveryCity}, ${order.deliveryState} ${order.deliveryZip}` : "";
+  if (order.fulfillment === "pickup") return "Pickup at the store";
+  if (order.fulfillment === "store-delivery") {
+    return `Store delivery to ${[street, area].filter(Boolean).join(", ")}${order.leaveAtDoor ? " · Leave at door" : ""}`;
+  }
+  if (order.fulfillment === "courier") return area ? `Courier delivery to ${area}` : "Courier delivery";
+  const carrier = [order.shippingCarrier, order.shippingService].filter(Boolean).join(" ");
+  return `Shipping${carrier ? ` · ${carrier}` : ""}${street ? ` to ${[street, area].filter(Boolean).join(", ")}` : ""}`;
+}
+
 export type StaffCourier = { provider: string; status: string; pickupReadyAt: Date | string | null; courierJson: unknown };
 
 const COURIER_BRAND: Record<string, string> = { uber: "Uber Direct", doordash: "DoorDash Drive" };

@@ -62,7 +62,7 @@ import { orderStatusLabel } from "@/lib/order/status-labels";
 import { formatClockInZone, formatUsPhone, money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
-import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine, storeOrderBreakdown } from "@/lib/order/staff-copy";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentLine, showCapturedLine, storeOrderBreakdown } from "@/lib/order/staff-copy";
 import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { ActionError } from "./action-error";
@@ -109,19 +109,6 @@ const STORE_CANCELLABLE: readonly string[] = CANCELLABLE_BEFORE_CAPTURE;
 
 /** Before accepting the owner sees what was ordered; after, the same lines are the pick list. */
 const LINES_SHOWN: readonly string[] = ["AUTHORIZED", "ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
-
-/** How the order leaves the store, so the owner can decide before accepting (#742). */
-function fulfillmentLine(order: StoreOrderRow): string {
-  const street = [order.deliveryLine1, order.deliveryLine2].filter(Boolean).join(", ");
-  const area = order.deliveryCity ? `${order.deliveryCity}, ${order.deliveryState} ${order.deliveryZip}` : "";
-  if (order.fulfillment === "pickup") return "Pickup at the store";
-  if (order.fulfillment === "store-delivery") {
-    return `Store delivery to ${[street, area].filter(Boolean).join(", ")}${order.leaveAtDoor ? " · Leave at door" : ""}`;
-  }
-  if (order.fulfillment === "courier") return area ? `Courier delivery to ${area}` : "Courier delivery";
-  const carrier = [order.shippingCarrier, order.shippingService].filter(Boolean).join(" ");
-  return `Shipping${carrier ? ` · ${carrier}` : ""}${street ? ` to ${[street, area].filter(Boolean).join(", ")}` : ""}`;
-}
 
 function orderCustomerLabel(name: string, phone: string | null): string {
   const trimmed = phone?.trim() ?? "";
