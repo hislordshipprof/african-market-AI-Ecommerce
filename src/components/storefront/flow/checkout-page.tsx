@@ -379,6 +379,11 @@ function RealCheckoutForm({
   const [cardLoad, setCardLoad] = useState<PaymentLoad>(stripeConfig.harness ? "ready" : "loading");
   const [cardAttempt, setCardAttempt] = useState(0);
   const payment = paymentReadiness({ stripe: stripeLoad.load, cardForm: showCardForm, element: cardLoad });
+  // A card form shown again mounts a new Payment Element, which must load again before Place order.
+  const openCardForm = () => {
+    setShowCardForm(true);
+    setCardLoad(stripeConfig.harness ? "ready" : "loading");
+  };
   const retryPayment = () => {
     if (stripeLoad.load === "failed") stripeLoad.retry();
     if (cardLoad === "failed") {
@@ -647,7 +652,7 @@ function RealCheckoutForm({
         }
         if (piResult.code === "saved_card_unavailable") {
           setSelectedCardId(null);
-          setShowCardForm(true);
+          openCardForm();
           setSaveCard(false);
           fail("payment", piResult.error);
           setPayState("idle");
@@ -754,7 +759,7 @@ function RealCheckoutForm({
     setIssue(null);
     if (selectedCardId && !showCardForm) {
       setSelectedCardId(null);
-      setShowCardForm(true);
+      openCardForm();
       setSaveCard(false);
     }
     const card = elements?.getElement("payment") as { clear?: () => void; focus?: () => void } | null | undefined;
@@ -971,7 +976,7 @@ function RealCheckoutForm({
               className="sf-text-link"
               onClick={() => {
                 setSelectedCardId(null);
-                setShowCardForm(true);
+                openCardForm();
                 setSaveCard(false);
               }}
             >
