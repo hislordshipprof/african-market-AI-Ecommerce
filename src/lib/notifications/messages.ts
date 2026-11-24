@@ -1,6 +1,7 @@
 import { orderStatusLabel } from "../order/status-labels";
 import { quotedFrom, stripHeaderChars } from "../email/from";
-import { escapeHtml, money } from "../format";
+import { escapeHtml, formatUsPhone, money, telHref } from "../format";
+import { storeContact, type StoreContactFields } from "../order/delivery-address";
 import { fulfilledStatus } from "../order/constants";
 import { scheduledTimeLabel } from "../order/pickup-slots";
 import type { PushMessage } from "../push/sender";
@@ -56,7 +57,7 @@ export type NotifyOrder = {
     brandColor: string | null;
     themePreset: string;
     timezone: string;
-  };
+  } & Partial<StoreContactFields>;
   lines: NotifyLine[];
   manualResolution: { refundedCents: number; repaidCents: number; capturedCents: number } | null;
   /** Set only when the customer opted in to WhatsApp updates at checkout (#560). */
@@ -196,6 +197,25 @@ function carrierLink(order: NotifyOrder, event: OrderNotifyEvent): string | null
   }
 }
 
+/** Where a pickup order is collected, on its confirmation and when it is ready (#783). */
+function pickupPlace(order: NotifyOrder, event: OrderNotifyEvent): string {
+  if (order.fulfillment !== "pickup" || (event !== "placed" && event !== "ready")) return "";
+  const { address, phone, hours } = storeContact({
+    addressLine1: order.store.addressLine1 ?? null,
+    addressLine2: order.store.addressLine2 ?? null,
+    city: order.store.city ?? null,
+    state: order.store.state ?? null,
+    zip: order.store.zip ?? null,
+    phone: order.store.phone ?? null,
+    hours: order.store.hours ?? null,
+  });
+  const parts: string[] = [];
+  if (address) parts.push(`<p><strong>Pick up at ${escapeHtml(address)}</strong></p>`);
+  if (phone) parts.push(`<p>Call the store: <a href="${escapeHtml(telHref(phone))}">${escapeHtml(formatUsPhone(phone))}</a></p>`);
+  if (hours.length) parts.push(`<p>${hours.map((line) => escapeHtml(`${line.day} ${line.text}`)).join("<br />")}</p>`);
+  return parts.join("");
+}
+
 function promoLine(order: NotifyOrder): string {
   if (order.discountCents <= 0) return "";
   const label = order.coupon ? `Promo ${order.coupon.code}` : "Promo discount";
@@ -256,6 +276,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   parts.push(`<p>${escapeHtml(status)}. Order #${order.number}.</p>`);
   if (scheduled) parts.push(`<p>Scheduled for ${escapeHtml(scheduled)}.</p>`);
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
+  parts.push(pickupPlace(order, event));
   if (event !== "cancelled" && event !== "store_replied" && event !== "refunded" && event !== "substitution") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {
     const estimate = order.subtotalCents - order.discountCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;

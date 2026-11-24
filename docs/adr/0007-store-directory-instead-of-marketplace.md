@@ -7,7 +7,7 @@ Stores never share a cart or checkout. Instead of the planned combined marketpla
 ## Note, 2026-11-14 (#448): owner decisions of 2026-11-11 (#447)
 - No "3 stores in a metro" gate: the directory lists every listed store, wherever it is (amends ADR-0001).
 - When no store is nearby, it shows the nearest stores with their distance, then the list of states. "Tell me when a store opens near me" came in D7 (#455).
-- The store owner turns the listing on and writes the blurb. Listing is off by default, and a platform admin can override it. The street address is shown only to platform admins.
+- The store owner turns the listing on and writes the blurb. Listing is off by default, and a platform admin can override it. In the directory, the street address is shown only to platform admins. The store's own storefront footer and its pickup orders show it, because shoppers come to the store (#783).
 - Cards show distance and "delivers to you", using the store's own delivery radius only, because courier coverage is known only from a quote (ADR-0006).
 - ZIP and city lookups use static US Census Gazetteer tables in Postgres, with no new runtime provider (ADR-0017). The Census geocoder resolves only full street addresses.
 - The directory is served on `PLATFORM_ROOT_DOMAIN`. Until the platform name is chosen and that variable is set, the project's production alias stands in for it (decision 2026-11-23-12, #766), and the stand-in ends by itself once the variable is set:
