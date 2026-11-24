@@ -12,6 +12,9 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
+/** The slug field's HTML pattern. Browsers compile it with the v flag, where a bare "-" in a class is a syntax error. */
+export const SLUG_INPUT_PATTERN = "[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?";
+
 // Every slug-rejection rule lives here. validateStoreFields and slugFromHost both call this.
 export function isSlugRoutable(slug: string): boolean {
   if (!SLUG_RE.test(slug)) return false;

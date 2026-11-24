@@ -17,6 +17,8 @@ export type NewStoreValues = {
   autoRefundLimitCents: number;
   supportSlaMinutes: number;
   timezone: string;
+  /** Set when a person chose the zone (the admin form); null when it was guessed from the address. */
+  timezoneSetAt: Date | null;
   addressLine1: string | null;
   addressLine2: string | null;
   city: string | null;
@@ -56,6 +58,7 @@ export async function insertStore(
       autoRefundLimitCents: values.autoRefundLimitCents,
       supportSlaMinutes: values.supportSlaMinutes,
       timezone: values.timezone,
+      timezoneSetAt: values.timezoneSetAt,
       addressLine1: values.addressLine1,
       addressLine2: values.addressLine2,
       city: values.city,

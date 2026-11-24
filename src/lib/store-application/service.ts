@@ -252,6 +252,8 @@ export async function approveStoreApplication(id: string, rawSlug: string, actor
     autoRefundLimitCents: 2500,
     supportSlaMinutes: 30,
     timezone: timezoneForAddress(application.state, "error" in coords ? null : coords.lat, "error" in coords ? null : coords.lng),
+    // A guess from the address: the owner confirms it in Settings before going live (#786).
+    timezoneSetAt: null,
     ...address,
     phone: application.phone,
     lat: "error" in coords ? null : coords.lat,

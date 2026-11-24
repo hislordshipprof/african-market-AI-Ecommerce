@@ -34,3 +34,8 @@ export function directoryOrigin(env: Env = process.env): string {
   const root = (env.PLATFORM_ROOT_DOMAIN ?? "").toLowerCase();
   return root === "localhost" ? `http://localhost${env.PORT ? `:${env.PORT}` : ""}` : `https://${root}`;
 }
+
+/** The address as a shopper would type it: no scheme, no trailing slash. */
+export function displayAddress(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}

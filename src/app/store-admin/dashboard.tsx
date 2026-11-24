@@ -14,7 +14,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
-import { displayAddress, GoLiveCard, LiveNotice } from "./go-live-card";
+import { displayAddress } from "@/lib/directory/links";
+import { GoLiveCard, LiveNotice } from "./go-live-card";
 import { SignOutButton } from "./sign-out-button";
 import { AlertCircle, Camera, ExternalLink, ChartColumn, ClipboardList, Gem, Info, MapPin, Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageCircle, MessageSquare, MessagesSquare, TicketPercent, Truck, type LucideIcon } from "lucide-react";
 
@@ -32,6 +33,8 @@ interface Props {
   /** Where shoppers reach the store (#784); null when the slug cannot be routed. */
   storeAddress: string | null;
   minimumOrderCents: number;
+  /** The store's address has a map point, so the directory can show it (#786). */
+  located: boolean;
   plan: {
     name: string;
     status: string;
@@ -63,6 +66,7 @@ export function StoreAdminDashboard({
   goLive,
   storeAddress,
   minimumOrderCents,
+  located,
   plan,
 }: Props) {
   const searchParams = useSearchParams();
@@ -121,9 +125,9 @@ export function StoreAdminDashboard({
           </div>
         )}
 
-        {justLive && <LiveNotice storeAddress={storeAddress} storeParam={storeParam} minimumOrderCents={minimumOrderCents} />}
+        {justLive && <LiveNotice storeAddress={storeAddress} storeParam={storeParam} minimumOrderCents={minimumOrderCents} located={located} />}
         {goLive && (
-          <GoLiveCard items={goLive} isOwner={role === "owner"} minimumOrderCents={minimumOrderCents} onLive={() => setJustLive(true)} />
+          <GoLiveCard items={goLive} isOwner={role === "owner"} minimumOrderCents={minimumOrderCents} located={located} onLive={() => setJustLive(true)} />
         )}
 
         {role === "owner" && plan.paymentFailed && (
@@ -287,19 +291,11 @@ export function StoreAdminDashboard({
             />
           )}
 
-          <Card className="opacity-60">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Settings className="size-5 text-primary" />
-                </div>
-                <div>
-                  <CardTitle className="text-base">Settings</CardTitle>
-                  <CardDescription>Coming soon</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
+          {role === "owner" && (
+            <NavCard href={`/store-admin/settings?store=${storeParam}`} icon={Settings} title="Settings">
+              Hours, time zone, pickup, minimum order and phone
+            </NavCard>
+          )}
         </div>
       </main>
     </div>
