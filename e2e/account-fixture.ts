@@ -43,7 +43,10 @@ export async function insertStoreOwner(input: { email: string; password: string;
         backupCodes: await symmetricEncrypt({ key: input.authSecret, data: "[]" }),
       },
     });
-    await prisma.storeMembership.create({ data: { storeId: store.id, userId: id, role: "owner", newOrderEmail: false } });
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      await tx.storeMembership.create({ data: { storeId: store.id, userId: id, role: "owner", newOrderEmail: false } });
+    });
     return id;
   } finally {
     await prisma.$disconnect();
@@ -67,7 +70,7 @@ export async function latestResetToken(userId: string): Promise<string> {
 export async function deleteUser(userId: string): Promise<void> {
   const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
   try {
-    await prisma.storeMembership.deleteMany({ where: { userId } });
+    // Memberships go with the user (cascade), past the store-scoped row policy.
     await prisma.verification.deleteMany({ where: { value: userId } });
     await prisma.user.deleteMany({ where: { id: userId } });
   } finally {

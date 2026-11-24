@@ -91,6 +91,7 @@ test("store admin on the production alias: sign-in, sign-out, the new-order link
     await signIn(page, email, password);
     await expect(page).toHaveURL(`https://${ALIAS}/store-admin/orders?order=${orderId}`);
     await expect(page.getByText("Order #1001").first()).toBeVisible();
+    await page.getByRole("link", { name: "Back to dashboard" }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(`https://${ALIAS}/store-admin/sign-in`);
 
