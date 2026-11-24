@@ -217,6 +217,45 @@ export function capturedApplicationFee(order: {
   return captured - capturedPayout({ ...order, capturedAmountCents: captured }).storeReceivesCents;
 }
 
+/** A succeeded refund, as stored, with what decides the platform fee it returns. */
+export type RefundFeeFacts = {
+  id: string;
+  createdAt: Date | string;
+  amountCents: number;
+  refundApplicationFee: boolean;
+  /** A courier refund's service fee and platform tax shares have been returned (fee_refund_id is set, #495, #65). */
+  feeShareReturned: boolean;
+  serviceFeeShareCents: number;
+  platformTaxShareCents: number;
+};
+
+/**
+ * The platform fee each refund returns to the store, oldest refund first (by created, then id). The one rule the
+ * order detail, the sales CSV and the fee ledger use (#757). A refund with refund_application_fee returns the
+ * application fee in proportion to the capture; a courier refund returns its service fee and platform tax shares
+ * once that fee refund is made; never more than the application fee across all the order's refunds (Stripe's rule).
+ */
+export function refundFeeReturns<T extends RefundFeeFacts>(
+  order: { capturedCents: number; applicationFeeCents: number },
+  refunds: T[],
+): Array<{ refund: T; feeCents: number }> {
+  const time = (refund: T) => new Date(refund.createdAt).getTime();
+  const ordered = [...refunds].sort((a, b) => time(a) - time(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  let returned = 0;
+  return ordered.map((refund) => {
+    const left = Math.max(0, order.applicationFeeCents - returned);
+    let fee = 0;
+    if (refund.refundApplicationFee) {
+      if (order.capturedCents > 0) fee = Math.round((order.applicationFeeCents * refund.amountCents) / order.capturedCents);
+    } else if (refund.feeShareReturned) {
+      fee = refund.serviceFeeShareCents + refund.platformTaxShareCents;
+    }
+    fee = Math.min(fee, left);
+    returned += fee;
+    return { refund, feeCents: fee };
+  });
+}
+
 /** The card fee rate as the store sees it, e.g. "2.9% + 30¢". */
 export const CARD_FEE_LABEL = `${CARD_FEE_BPS / 100}% + ${CARD_FEE_FIXED_CENTS}¢`;
 

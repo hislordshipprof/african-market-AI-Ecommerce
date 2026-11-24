@@ -139,4 +139,40 @@ describe("storePayoutLines", () => {
     expect(parts.tax).toBe(-250);
     expect(Object.values(parts).reduce((sum, cents) => sum + cents, 0)).toBe(payout);
   });
+  const walkthrough = {
+    fulfillment: "pickup",
+    capturedAmountCents: 4012,
+    platformFeeCents: 260,
+    serviceFeeCents: 117,
+    deliveryFeeCents: 0,
+    shippingPostageCents: null,
+    taxCents: 0,
+    taxLiableParty: "platform",
+  };
+  const refund = (id: string, amountCents: number, at: string) => ({
+    id, amountCents, createdAt: new Date(at), refundApplicationFee: true, feeRefundId: null, serviceFeeShareCents: 0, platformTaxShareCents: 0,
+  });
+
+  it("takes a refund off and gives back Stripe's platform fee share, so the payout matches the sales CSV (#757)", () => {
+    const lines = storePayoutLines({ ...walkthrough, refundRequests: [refund("r1", 1132, "2026-11-02T18:00:00Z")] });
+    expect(amounts(lines)).toEqual({ captured: 4012, "card-fee": -143, "service-fee": -117, refunds: -1132, "fee-returned": 73, payout: 2693 });
+    expect(lines.slice(0, -1).reduce((sum, line) => sum + line.cents, 0)).toBe(2693);
+  });
+
+  it("never returns more platform fee than Stripe took across partial refunds", () => {
+    const lines = storePayoutLines({ ...walkthrough, refundRequests: [refund("r2", 2880, "2026-11-03T00:00:00Z"), refund("r1", 1132, "2026-11-02T00:00:00Z")] });
+    expect(amounts(lines)).toMatchObject({ refunds: -4012, "fee-returned": 260, payout: 0 });
+  });
+
+  it("returns a courier refund's service fee share only once that fee refund is made", () => {
+    const courier = { ...refund("r1", 1000, "2026-11-04T00:00:00Z"), refundApplicationFee: false, serviceFeeShareCents: 38 };
+    const before = amounts(storePayoutLines({ ...walkthrough, refundRequests: [courier] }));
+    expect(before).not.toHaveProperty("fee-returned");
+    expect(before.payout).toBe(2752);
+    expect(amounts(storePayoutLines({ ...walkthrough, refundRequests: [{ ...courier, feeRefundId: "fr_1" }] }))).toMatchObject({ "fee-returned": 38, payout: 2790 });
+  });
+
+  it("reads exactly as before when the order has no refunds", () => {
+    expect(storePayoutLines({ ...order1007, refundRequests: [] })).toEqual(storePayoutLines(order1007));
+  });
 });

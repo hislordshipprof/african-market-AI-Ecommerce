@@ -315,7 +315,17 @@ const NAMED_VARIANT = {
   select: { label: true, listing: { select: { customName: true, masterProduct: { select: { name: true } } } } },
 } as const;
 
+/** The refunds that reached the card, with what decides the platform fee each returns (storePayoutLines, #757). */
+export const SUCCEEDED_REFUNDS = {
+  where: { providerStatus: "succeeded" },
+  select: {
+    id: true, createdAt: true, amountCents: true, refundApplicationFee: true, feeRefundId: true,
+    serviceFeeShareCents: true, platformTaxShareCents: true,
+  },
+} as const;
+
 const ORDER_WITH_LINES = {
+  refundRequests: SUCCEEDED_REFUNDS,
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
   coupon: { select: { code: true } },
   // The courier the store is waiting for (#562): its booked ready time and the driver's ETA from the webhook.

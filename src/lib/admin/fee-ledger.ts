@@ -1,5 +1,5 @@
 import { csvDollars, toCsv } from "@/lib/analytics/csv";
-import { captureSplit, courierFeeCents, platformTaxCents } from "@/lib/order/platform-fee";
+import { captureSplit, courierFeeCents, platformTaxCents, refundFeeReturns } from "@/lib/order/platform-fee";
 
 /**
  * Platform fee ledger (#546, ADR-0021): what the platform keeps per captured order, from our tables.
@@ -146,23 +146,17 @@ function refundRows(refunds: RefundFacts[], month: LedgerMonth): LedgerRow[] {
   for (const refund of refunds) byOrder.set(refund.orderId, [...(byOrder.get(refund.orderId) ?? []), refund]);
   const rows: LedgerRow[] = [];
   for (const orderRefunds of byOrder.values()) {
-    orderRefunds.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.refundId.localeCompare(b.refundId));
     const order = orderRefunds[0];
     // An order still cancelling has no capture record yet: a refund at cancel returns the whole capture.
     const captured = order.capturedAmountCents ?? orderRefunds.reduce((sum, r) => sum + r.amountCents, 0);
     if (captured <= 0) continue;
     const money = orderMoney(order, captured);
     const platformTax = platformTaxCents(order);
-    let returned = 0;
-    for (const refund of orderRefunds) {
-      const left = Math.max(0, money.applicationFeeCents - returned);
-      let fee = 0;
-      if (refund.refundApplicationFee) {
-        fee = Math.min(Math.round((money.applicationFeeCents * refund.amountCents) / captured), left);
-      } else if (refund.feeShareReturned) {
-        fee = Math.min(refund.serviceFeeShareCents + refund.platformTaxShareCents, left);
-      }
-      returned += fee;
+    const returns = refundFeeReturns(
+      { capturedCents: captured, applicationFeeCents: money.applicationFeeCents },
+      orderRefunds.map((refund) => ({ ...refund, id: refund.refundId })),
+    );
+    for (const { refund, feeCents: fee } of returns) {
       const inMonth = refund.succeededAt >= month.startsAt && refund.succeededAt < month.endsAt;
       if (fee <= 0 || !inMonth) continue;
       const share = (cents: number) => (refund.refundApplicationFee && money.applicationFeeCents > 0
