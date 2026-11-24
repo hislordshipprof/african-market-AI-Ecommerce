@@ -382,6 +382,7 @@ describe("toMinimalResult", () => {
     database: { reachable: true, user: "app_runtime" },
     migrations: { upToDate: true },
     env: { DATABASE_URL: true },
+    missingSetup: ["SHIPPO_API_KEY"],
   };
 
   it("returns ok for healthy status", () => {
@@ -403,6 +404,7 @@ describe("toMinimalResult", () => {
     expect(result).not.toHaveProperty("database");
     expect(result).not.toHaveProperty("env");
     expect(result).not.toHaveProperty("migrations");
+    expect(result).not.toHaveProperty("missingSetup");
   });
 });
 
