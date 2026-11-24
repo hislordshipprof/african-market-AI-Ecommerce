@@ -57,6 +57,18 @@ describe("createListingAction", () => {
     expect(revalidateStorefront).toHaveBeenCalledWith("store-1");
   });
 
+  // #782 AC1: the dialog's aisle reaches the service for a custom listing only.
+  it("passes the picked aisle for a custom listing and none with a master product", async () => {
+    mockCreateListing.mockResolvedValue({ id: "created" });
+    await createListingAction(formData({ ...VALID_LISTING, categoryId: "cat_oils" }));
+    expect(mockCreateListing).toHaveBeenLastCalledWith(expect.objectContaining({ categoryId: "cat_oils" }));
+    await createListingAction(formData({ ...VALID_LISTING, masterProductId: "mp-1", categoryId: "cat_oils" }));
+    expect(mockCreateListing).toHaveBeenLastCalledWith(expect.objectContaining({ categoryId: null }));
+    mockUpdateListing.mockResolvedValue({ id: "l-1", qty: 25 });
+    await updateListingAction(formData({ listingId: "l-1", masterProductId: "", categoryId: "" }));
+    expect(mockUpdateListing).toHaveBeenLastCalledWith(expect.objectContaining({ categoryId: null }));
+  });
+
   it("does not invalidate a failed listing mutation", async () => {
     mockCreateListing.mockRejectedValueOnce(new Error("Not saved"));
     expect(await createListingAction(formData(VALID_LISTING))).toEqual({ error: "Failed to create listing" });

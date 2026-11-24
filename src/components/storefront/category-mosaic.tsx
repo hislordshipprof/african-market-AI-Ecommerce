@@ -19,18 +19,8 @@ export function CategoryMosaic({
   all?: boolean;
 }) {
   if (!categories.length) return null;
-  const visible = all
-    ? categories
-    : categories.filter((c) =>
-        [
-          "tubers-and-roots",
-          "grains-and-flours",
-          "spices-and-seasonings",
-          "vegetables",
-          "fish-and-meat",
-          "snacks",
-        ].includes(c.slug),
-      );
+  // The home rail: the first six aisles this store stocks (#782), in platform order.
+  const visible = all ? categories : categories.slice(0, 6);
   return (
     <section data-testid="category-mosaic" aria-label="Store aisles">
       <RailScroller className={all ? "sf-category-rail sf-all-categories" : "sf-category-rail"} label="Categories" title={all ? "Find your favorites" : "Aisles full of home"} description="The staples you know. A few new favorites." href={all ? undefined : "/categories"} hrefLabel="See all aisles">

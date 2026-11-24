@@ -83,9 +83,18 @@ interface MasterProductOption {
   name: string;
 }
 
+interface Aisle {
+  id: string;
+  name: string;
+}
+
+/** The aisle Select's value for a custom listing with no aisle. */
+const NO_AISLE = "none";
+
 interface Listing {
   id: string;
   masterProductId: string | null;
+  categoryId: string | null;
   customName: string | null;
   masterProductName: string | null;
   price: number;
@@ -110,6 +119,8 @@ interface Props {
   storeSlug: string;
   /** The store has opted in to shipping (#567). */
   storeShips: boolean;
+  /** Platform aisles a custom listing can be put in (#782). */
+  aisles: Aisle[];
   listings: Listing[];
   /** Owner: add, edit, price and deactivate listings. Staff only update stock (#784). */
   canManage: boolean;
@@ -173,6 +184,7 @@ interface ListingFormFields {
   cateringMinQty: string;
   maxPerOrder: string;
   masterProductId: string | null;
+  categoryId: string;
 }
 
 
@@ -205,6 +217,7 @@ function buildListingFormData(
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
   else if (listingId) fd.set("masterProductId", "");
+  fd.set("categoryId", fields.categoryId === NO_AISLE ? "" : fields.categoryId);
   fd.set("variants", serializeVariants(variants));
   return fd;
 }
@@ -217,7 +230,7 @@ const PREPARED_LABELS: Record<string, string> = {
 
 const HELD_FOR_ALLERGENS = "Saved, off sale. State its allergens under Ingredients and allergens, then reactivate it.";
 
-export function ListingManagement({ storeName, storeSlug, storeShips, listings, canManage, canEditStock }: Props) {
+export function ListingManagement({ storeName, storeSlug, storeShips, aisles, listings, canManage, canEditStock }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -243,6 +256,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings, 
   const [cateringMinQty, setCateringMinQty] = useState("1");
   const [maxPerOrder, setMaxPerOrder] = useState("");
   const [masterProductId, setMasterProductId] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState(NO_AISLE);
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
   const [selectedMasterOption, setSelectedMasterOption] = useState<MasterProductOption | null>(null);
   const searchSeq = useRef(0);
@@ -267,6 +281,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings, 
     setCateringMinQty("1");
     setMaxPerOrder("");
     setMasterProductId(null);
+    setCategoryId(NO_AISLE);
     setSelectedMasterOption(null);
     selectedMasterNameRef.current = null;
     setVariants([emptyVariantRow()]);
@@ -324,6 +339,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings, 
     setCateringMinQty(String(listing.cateringMinQty ?? 1));
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
     setMasterProductId(listing.masterProductId);
+    setCategoryId(listing.categoryId ?? NO_AISLE);
     setVariants(listing.variants.map(loadedVariantRow));
     searchMasterProducts("");
     const currentMaster =
@@ -371,6 +387,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings, 
     cateringMinQty,
     maxPerOrder,
     masterProductId,
+    categoryId,
   };
 
   function handleCreate() {
@@ -483,6 +500,24 @@ export function ListingManagement({ storeName, storeSlug, storeShips, listings, 
         </Combobox>
         <p className="text-xs text-muted-foreground">Leave empty for a custom product.</p>
       </div>
+
+      {!masterProductId && (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="listing-aisle">Aisle</Label>
+          <Select value={categoryId} onValueChange={(v) => { if (v) setCategoryId(v); }}>
+            <SelectTrigger id="listing-aisle">
+              <SelectValue>{(v: string) => aisles.find((aisle) => aisle.id === v)?.name ?? "No aisle"}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_AISLE}>No aisle</SelectItem>
+              {aisles.map((aisle) => (
+                <SelectItem key={aisle.id} value={aisle.id}>{aisle.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">Shoppers find it in this aisle. Without one, only search finds it.</p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="listing-name">Product name</Label>

@@ -6,7 +6,8 @@ import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { CategoryMosaic } from "@/components/storefront/category-mosaic";
 import { EmptyState } from "@/components/storefront/primitives";
 export default async function CategoriesPage() {
-  const [store, categories] = await Promise.all([getStore(), listCategories()]);
+  const store = await getStore();
+  const categories = await listCategories(store.id);
   return (
     <StorefrontShell store={store}>
       <div className="sf-container sf-stack">

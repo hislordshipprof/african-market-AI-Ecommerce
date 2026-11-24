@@ -8,7 +8,7 @@ import { StorefrontShell } from "./storefront-shell";
 export async function PageNotFound() {
   const store = await findStoreForHeaders(await headers());
   if (!store) return <main className="sf-storefront"><div className="sf-container sf-not-found"><div className="sf-not-found-number" aria-hidden>404</div><h1 className="sf-page-title">Store not found</h1><p className="sf-page-intro">We could not find a store at this address.</p></div></main>;
-  const categories = await listCategories();
+  const categories = await listCategories(store.id);
   return <StorefrontShell store={store}><section className="sf-container sf-not-found" data-testid="page-not-found">
     <div className="sf-not-found-number" aria-hidden>404</div>
     <h2 className="sf-page-title">Page not found</h2>

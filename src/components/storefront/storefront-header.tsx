@@ -12,7 +12,7 @@ import { StoreLogo } from "./store-logo";
 export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
   const headerList = await headers();
   const [categories, session] = await Promise.all([
-    listCategories(),
+    listCategories(store.id),
     auth.api.getSession({ headers: headerList }),
   ]);
   return (

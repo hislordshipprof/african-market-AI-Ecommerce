@@ -21,6 +21,7 @@ import {
   type PreviewActionResult,
 } from "@/lib/listing/csv-import-actions";
 import { needsWeightSentence } from "../needs-weight";
+import { LISTINGS_CSV_TEMPLATE } from "@/lib/listing/csv-template";
 import { money } from "@/lib/format";
 import { CSV_FILE_CAP_BYTES, CSV_FILE_TOO_LARGE_MESSAGE } from "@/lib/listing/csv-file-cap";
 import type {
@@ -43,6 +44,7 @@ import {
   Copy,
   HelpCircle,
   FileSpreadsheet,
+  Download,
 } from "lucide-react";
 
 function countPhrase(count: number, singular: string, plural: string): string {
@@ -328,6 +330,10 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
 
 /* ── Upload Step ────────────────────────────────────────────────── */
 
+function Col({ children }: { children: string }) {
+  return <code className="rounded bg-[var(--color-raised)] px-1 py-0.5 text-xs">{children}</code>;
+}
+
 function UploadStep({
   selectedFile,
   dragOver,
@@ -354,12 +360,23 @@ function UploadStep({
           <FileSpreadsheet className="h-5 w-5" />
           Upload CSV
         </CardTitle>
-        <CardDescription>
-          Your CSV must have <code className="rounded bg-[var(--color-raised)] px-1 py-0.5 text-xs">name</code> and{" "}
-          <code className="rounded bg-[var(--color-raised)] px-1 py-0.5 text-xs">price</code> columns. Optional:{" "}
-          <code className="rounded bg-[var(--color-raised)] px-1 py-0.5 text-xs">stock_mode</code>,{" "}
-          <code className="rounded bg-[var(--color-raised)] px-1 py-0.5 text-xs">qty</code>,{" "}
-          <code className="rounded bg-[var(--color-raised)] px-1 py-0.5 text-xs">status</code>.
+        <CardDescription className="space-y-1.5">
+          <p>
+            Your CSV must have <Col>name</Col> and <Col>price</Col> columns. Optional: <Col>weight</Col> (or{" "}
+            <Col>weight_g</Col>, <Col>weight (lb)</Col>, <Col>weight (oz)</Col>, <Col>weight (kg)</Col>),{" "}
+            <Col>category</Col> or <Col>aisle</Col>, <Col>stock_mode</Col>, <Col>qty</Col>, <Col>status</Col>.
+          </p>
+          <p>
+            A row without a weight blocks go-live until you add one. The category or aisle column takes an aisle name, such as Oils &amp; Butters.
+          </p>
+          <a
+            href={`data:text/csv;charset=utf-8,${encodeURIComponent(LISTINGS_CSV_TEMPLATE)}`}
+            download="listings-template.csv"
+            className="inline-flex items-center gap-1 font-medium text-[var(--color-primary)] underline-offset-4 hover:underline"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden />
+            Download a template CSV
+          </a>
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -810,7 +827,7 @@ function NewRow({
         <RowName name={item.csvName} price={item.price} />
         <p className="truncate text-xs text-[var(--color-muted)]">
           <PlusCircle className="mr-1 inline h-3 w-3 text-[var(--color-primary)]" />
-          Will be created as a custom listing
+          Will be created as a custom listing{item.aisle ? ` in ${item.aisle}` : ", in no aisle"}
         </p>
       </div>
     </label>

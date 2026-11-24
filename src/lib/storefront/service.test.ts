@@ -54,6 +54,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let e2eListingId: string;
   let frozenListingId: string;
   let customOnlyListingId: string;
+  let aisledCustomListingId: string;
   let collectionId: string;
 
   it("projects checkout catalog variants without crossing stores or including inactive listings", async () => {
@@ -254,6 +255,11 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     };
     frozenListingId = await mkListing({ masterProductId, customName: "Frozen Ugu Cubes", frozen: true });
     customOnlyListingId = await mkListing({ masterProductId: null, customName: "Custom Item", frozen: false });
+    // #782: a custom listing in an aisle, and an inactive one whose aisle must stay hidden.
+    const oils = await rawPrisma.category.findUniqueOrThrow({ where: { slug: "oils-and-butters" } });
+    const snacks = await rawPrisma.category.findUniqueOrThrow({ where: { slug: "snacks" } });
+    aisledCustomListingId = await mkListing({ masterProductId: null, customName: "Red Palm Oil 1L", categoryId: oils.id });
+    await mkListing({ masterProductId: null, customName: "Old Chin Chin", categoryId: snacks.id, active: false });
 
     // Create a collection in store A with an item
     const collection = await rawPrisma.$transaction([
@@ -321,31 +327,12 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     await rawPrisma.$disconnect();
   });
 
-  // Seam 7: category seed migration. Seed rows use cat_ ids. A parallel
-  // catalog-prune test inserts its own category and deletes it afterwards, so
-  // a raw count of the table flaps between 17 and 18 under file parallelism.
-  it("has exactly 17 categories after seed", async () => {
-    const categories = await listCategories();
-    const seeded = categories.filter((category) => category.id.startsWith("cat_"));
-    expect(seeded).toHaveLength(17);
-    const slugs = seeded.map((c) => c.slug);
-    expect(slugs).toContain("tubers-and-roots");
-    expect(slugs).toContain("vegetables");
-    expect(slugs).toContain("spices-and-seasonings");
-    expect(slugs).toContain("grains-and-flours");
-    expect(slugs).toContain("fish-and-meat");
-    expect(slugs).toContain("frozen");
-    expect(slugs).toContain("snacks");
-    expect(slugs).toContain("drinks");
-    expect(slugs).toContain("beauty");
-    expect(slugs).toContain("oils-and-butters");
-    expect(slugs).toContain("pantry-staples");
-    expect(slugs).toContain("beans-and-legumes");
-    expect(slugs).toContain("breakfast-and-dairy");
-    expect(slugs).toContain("canned-and-packaged");
-    expect(slugs).toContain("fruits");
-    expect(slugs).toContain("household");
-    expect(slugs).toContain("seasonings-and-sauces");
+  // #782 AC2: the aisle menu lists only aisles this store has an active listing in.
+  it("lists only the aisles a store stocks", async () => {
+    const slugsA = (await listCategories(storeAId)).map((category) => category.slug);
+    expect(slugsA).toEqual(["oils-and-butters", "vegetables"]);
+    const slugsB = (await listCategories(storeBId)).map((category) => category.slug);
+    expect(slugsB).toEqual(["vegetables"]);
   });
 
   // Seam 1: category browse store isolation
@@ -373,7 +360,20 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(fresh.find((r) => r.id === listingAId)?.frozen).toBe(false);
   });
 
-  // #72 AC5: custom-name-only listings are excluded from category browse but searchable
+  // #782 AC1: a custom listing with an aisle is browsed in that aisle and carries its slug.
+  it("custom listing with an aisle shows in that aisle", async () => {
+    const browse = await listingsByCategory(storeAId, "oils-and-butters");
+    expect(browse.listings.map((l) => l.id)).toEqual([aisledCustomListingId]);
+    expect(browse.listings[0]?.categorySlug).toBe("oils-and-butters");
+    expect((await getListingDetail(storeAId, aisledCustomListingId))?.categorySlug).toBe("oils-and-butters");
+    const rails = await getListingsByCategory(storeAId);
+    expect(rails.find((rail) => rail.categorySlug === "oils-and-butters")?.listings.map((l) => l.id)).toEqual([aisledCustomListingId]);
+    const flow = await getFlowCatalog(storeAId);
+    expect(flow.find((item) => item.listingId === aisledCustomListingId)?.categoryId).toBeTruthy();
+    expect(flow.find((item) => item.listingId === aisledCustomListingId)?.categoryId).not.toBe("uncategorized");
+  });
+
+  // #72 AC5, #782 AC4: a custom listing without an aisle stays out of aisles but is searchable
   it("custom-only listing is absent from category browse but found by search", async () => {
     const browse = await listingsByCategory(storeAId, "vegetables");
     expect(browse.listings.some((l) => l.id === customOnlyListingId)).toBe(false);

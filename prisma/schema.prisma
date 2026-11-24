@@ -478,6 +478,7 @@ model Category {
   children         Category[]        @relation("CategoryTree")
   masterProducts   MasterProduct[]
   productProposals ProductProposal[]
+  listings         Listing[]
 
   @@index([parentId])
   @@map("categories")
@@ -638,6 +639,8 @@ model Listing {
   storeId             String   @map("store_id")
   masterProductId     String?  @map("master_product_id")
   customName          String?  @map("custom_name")
+  /// #782: the aisle of a custom listing; a master product's category wins when there is one.
+  categoryId          String?  @map("category_id")
   price               Int
   stockMode           String   @map("stock_mode")
   qty                 Int?
@@ -661,6 +664,7 @@ model Listing {
 
   store              Store                    @relation(fields: [storeId], references: [id])
   masterProduct      MasterProduct?           @relation(fields: [masterProductId], references: [id])
+  category           Category?                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   variants           ListingVariant[]
   stockEvents        StockEvent[]
   ownerReportItems   OwnerReportItem[]
@@ -677,6 +681,7 @@ model Listing {
   @@index([storeId])
   @@index([storeId, active])
   @@index([masterProductId])
+  @@index([categoryId])
   @@map("listings")
 }
 

@@ -20,6 +20,22 @@ const notE2eListing = {
 /** Same rule for the raw search SQL. LIKE is wrapped so NULL custom_name rows are kept. */
 const notE2eListingSql = Prisma.sql`(l.custom_name IS NULL OR LEFT(l.custom_name, ${E2E_LISTING_PREFIX.length}) <> ${E2E_LISTING_PREFIX})`;
 
+/**
+ * Listings in one aisle (#782): a master product's category, or the listing's own aisle when it
+ * has no master product.
+ */
+function inAisle(categoryId: string | { in: string[] }) {
+  // AND keeps this OR apart from notE2eListing's OR when both are spread into one where.
+  return {
+    AND: [{ OR: [{ masterProduct: { categoryId } }, { masterProductId: null, categoryId }] }],
+  } satisfies Prisma.ListingWhereInput;
+}
+
+/** The aisle a listing is shown in: its master product's category wins over its own. */
+function aisleOf<C>(listing: { masterProduct: { category?: C | null } | null; category?: C | null }): C | null {
+  return listing.masterProduct ? listing.masterProduct.category ?? null : listing.category ?? null;
+}
+
 /** Cheapest pack first, then id. The projection sorts the same way with UTF-8 bytes. */
 const variantsCheapestFirst = {
   orderBy: [{ price: "asc" as const }, { id: "asc" as const }],
@@ -32,7 +48,8 @@ async function readGetFlowCatalog(
   const listings = await storeScoped(storeId).listing.findMany({
     where: { active: true, ...notE2eListing },
     include: {
-      masterProduct: true,
+      masterProduct: { include: { category: true } },
+      category: true,
       variants: variantsCheapestFirst,
     },
     orderBy: { createdAt: "desc" },
@@ -44,7 +61,7 @@ async function readGetFlowCatalog(
       listingId: listing.id,
       name: item.displayName,
       imageUrl: item.imageUrl,
-      categoryId: listing.masterProduct?.categoryId ?? "uncategorized",
+      categoryId: aisleOf(listing)?.id ?? "uncategorized",
       frozen: listing.frozen,
       prepared: isPreparedKind(listing.prepared) ? listing.prepared : null,
       catering: listing.cateringLeadHours != null && listing.cateringMinQty != null
@@ -83,9 +100,9 @@ export async function readCartAlternatives(
       active: true,
       ...notE2eListing,
       id: { notIn: excludeListingIds },
-      masterProduct: { categoryId: { in: [...new Set(wanted.map((entry) => entry.categoryId))] } },
+      ...inAisle({ in: [...new Set(wanted.map((entry) => entry.categoryId))] }),
     },
-    include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
+    include: { masterProduct: { include: { category: true } }, category: true, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
     take: 60,
   });
@@ -94,7 +111,7 @@ export async function readCartAlternatives(
     result.set(
       lineId,
       inStock
-        .filter((listing) => listing.masterProduct?.categoryId === categoryId)
+        .filter((listing) => aisleOf(listing)?.id === categoryId)
         .slice(0, perLine)
         .map((listing) => {
           const card = projectStorefrontListing(listing);
@@ -113,8 +130,20 @@ export async function readCartAlternatives(
   return result;
 }
 
-export async function listCategories() {
+/** The aisles this store has an active listing in (#782), in platform order. */
+async function readListCategories(storeId: string) {
+  const listings = await storeScoped(storeId).listing.findMany({
+    where: { active: true, ...notE2eListing },
+    select: { categoryId: true, masterProductId: true, masterProduct: { select: { categoryId: true } } },
+  });
+  const stocked = new Set(
+    listings.flatMap((listing) => {
+      const id = listing.masterProductId ? listing.masterProduct?.categoryId : listing.categoryId;
+      return id ? [id] : [];
+    }),
+  );
   const categories = await platform.category.findMany({
+    where: { id: { in: [...stocked] } },
     orderBy: { sortOrder: "asc" },
     include: { masterProducts: { where: { imageUrl: { not: null }, status: "active" }, orderBy: { id: "asc" }, take: 1, select: { imageUrl: true } } },
   });
@@ -172,6 +201,7 @@ export function projectStorefrontListing(listing: {
   maxPerOrder?: number | null;
   imageUrl?: string | null;
   masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
+  category?: { slug: string } | null;
   variants: { id?: string; label?: string; price: number; weightG?: number; weightPlaceholder?: boolean }[];
 }): StorefrontListing {
   const names = deriveNames(
@@ -200,7 +230,7 @@ export function projectStorefrontListing(listing: {
     ...names,
     altName: names.altName ?? localNameFor(names.displayName),
     imageUrl: listingImage(listing),
-    categorySlug: listing.masterProduct?.category?.slug,
+    categorySlug: aisleOf(listing)?.slug,
     variantId: pack?.id,
     packLabel: pack?.label ?? "Each",
     weightG: pack?.weightG,
@@ -223,8 +253,6 @@ export function projectStorefrontListing(listing: {
   };
 }
 
-// Custom-name-only listings (those without a masterProductId) are excluded by design: categories
-// derive from master products. These listings are reachable via search and the all-products view.
 async function readListingsByCategory(
   storeId: string,
   categorySlug: string,
@@ -242,9 +270,9 @@ async function readListingsByCategory(
     where: {
       active: true,
       ...notE2eListing,
-      masterProduct: { categoryId: category.id },
+      ...inAisle(category.id),
     },
-    include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
+    include: { masterProduct: { include: { category: true } }, category: true, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
   });
 
@@ -283,6 +311,7 @@ async function readGetListingDetail(
     where: { id: listingId },
     include: {
       masterProduct: { include: { category: true } },
+      category: true,
       variants: variantsCheapestFirst,
     },
   });
@@ -301,7 +330,7 @@ async function readGetListingDetail(
     altName: names.altName ?? localNameFor(names.displayName),
     imageUrl: listingImage(listing),
     description: photo?.description,
-    categorySlug: listing.masterProduct?.category?.slug,
+    categorySlug: aisleOf(listing)?.slug,
     price: listing.price,
     maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
     badge: stockBadge({
@@ -642,6 +671,7 @@ async function readGetListingsByCategory(
     where: { active: true, ...notE2eListing },
     include: {
       masterProduct: { include: { category: true } },
+      category: true,
       variants: variantsCheapestFirst,
     },
     orderBy: { createdAt: "desc" },
@@ -653,8 +683,8 @@ async function readGetListingsByCategory(
     { slug: string; listings: StorefrontListing[] }
   >();
   for (const listing of listings) {
-    const catName = listing.masterProduct?.category?.name ?? "Other";
-    const catSlug = listing.masterProduct?.category?.slug ?? "other";
+    const catName = aisleOf(listing)?.name ?? "Other";
+    const catSlug = aisleOf(listing)?.slug ?? "other";
     const existing = byCategory.get(catName) ?? { slug: catSlug, listings: [] };
     existing.listings.push(projectStorefrontListing(listing));
     byCategory.set(catName, existing);
@@ -667,6 +697,10 @@ async function readGetListingsByCategory(
       listings: data.listings,
     }))
     .sort((a, b) => a.categoryName.localeCompare(b.categoryName));
+}
+
+export function listCategories(storeId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["listCategories"]), () => readListCategories(storeId));
 }
 
 export function getFlowCatalog(storeId: string) {

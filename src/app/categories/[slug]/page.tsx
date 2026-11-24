@@ -21,7 +21,7 @@ export default async function CategoryPage({
   ]);
   const [{ category, listings }, categories] = await Promise.all([
     listingsByCategory(store.id, slug),
-    listCategories(),
+    listCategories(store.id),
   ]);
   if (!category) notFound();
   const value = (key: string) =>

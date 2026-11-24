@@ -69,7 +69,7 @@ export default async function StorefrontPage() {
       </main>
     );
   const [categories, banners, collections, rails] = await Promise.all([
-    listCategories(),
+    listCategories(store.id),
     getActiveBanners(store.id),
     getActiveCollections(store.id),
     getListingsByCategory(store.id),
