@@ -54,14 +54,13 @@ export async function GET(request: NextRequest) {
   }
 
   const { nearby, stores } = await nearestStores(point!);
-  const root = process.env.PLATFORM_ROOT_DOMAIN ?? "";
-  const host = request.headers.get("host") ?? root;
+  const host = request.headers.get("host") ?? "";
   return NextResponse.json({
     kind: "stores",
     label: point!.label,
     nearby,
     stores: stores.flatMap((store) => {
-      const href = storefrontUrl(store.slug, root, host);
+      const href = storefrontUrl(store.slug, host);
       return href ? [{ ...store, href }] : [];
     }),
   });

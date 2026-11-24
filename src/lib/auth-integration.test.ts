@@ -463,6 +463,42 @@ describe("auth integration (real DB, app_runtime)", () => {
     }
   });
 
+  it("#766: a link asked for on the production alias names its store, so it opens there in a browser that never visited it", async () => {
+    const alias = "african-market-ai-ecommerce.vercel.app";
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", alias);
+    try {
+      const res = await authPost(
+        "/sign-in/magic-link",
+        { email: bindEmail, callbackURL: "/account" },
+        undefined,
+        { "x-store-slug": storeSlug, host: alias },
+      );
+      expect(res.status).toBe(200);
+      const href = getTestSentEmails().at(-1)?.html?.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+      const confirm = new URL(href!);
+      expect(confirm.pathname).toBe("/account/sign-in/confirm");
+      // The proxy turns ?store= into the store cookie, then the token is redeemed as on any store host.
+      expect(confirm.searchParams.get("store")).toBe(storeSlug);
+      const onStore = await authGet(extractVerifyUrl(), undefined, { "x-store-slug": storeSlug, host: alias });
+      expect(collectCookies(onStore)).toContain("session_token");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("#766: off the alias a magic link carries no store param", async () => {
+    await authPost(
+      "/sign-in/magic-link",
+      { email: bindEmail, callbackURL: "/account" },
+      undefined,
+      { "x-store-slug": storeSlug, host: `${storeSlug}.localhost:3000` },
+    );
+    const href = getTestSentEmails().at(-1)?.html?.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+    expect(new URL(href!).searchParams.has("store")).toBe(false);
+  });
+
   it("#711 AC2: a token with no recorded store is refused", async () => {
     const onStore = { "x-store-slug": storeSlug, host: `${storeSlug}.localhost:3000` };
     await authPost("/sign-in/magic-link", { email: bindEmail, callbackURL: "/account" }, undefined, onStore);

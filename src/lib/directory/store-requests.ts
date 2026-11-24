@@ -97,7 +97,7 @@ export function storeOpenedText(zip: string, store: OpenedStore): string {
 function storeHref(slug: string, env: Record<string, string | undefined> = process.env): string | null {
   const root = env.PLATFORM_ROOT_DOMAIN ?? "";
   if (!root) return null;
-  const href = storefrontUrl(slug, root, root === "localhost" && env.PORT ? `localhost:${env.PORT}` : root);
+  const href = storefrontUrl(slug, root === "localhost" && env.PORT ? `localhost:${env.PORT}` : root, env);
   return href ? directoryLink(href) : null;
 }
 

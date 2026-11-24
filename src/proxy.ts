@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
-import { resolveHost, isSlugRoutable } from "@/lib/slug";
+import { resolveHost, isSlugRoutable, isFallbackRoot } from "@/lib/slug";
 import { ATTRIBUTION_COOKIE, ATTRIBUTION_MAX_AGE, DIRECTORY_REF } from "@/lib/directory/attribution";
 import { needsNoScriptCsp, newCspNonce, NO_SCRIPT_CSP, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
@@ -17,13 +17,25 @@ export function allowStoreOverride(
 }
 
 export function proxy(request: NextRequest) {
+  const host = request.headers.get("host");
+  const fallbackRoot = host !== null && isFallbackRoot(host, process.env);
+  const response = route(request, host, fallbackRoot);
+  // The stand-in address must never compete with the real domain in search (#766).
+  if (fallbackRoot) response.headers.set("X-Robots-Tag", "noindex");
+  return response;
+}
+
+function route(request: NextRequest, host: string | null, fallbackRoot: boolean): NextResponse {
   const headers = new Headers(request.headers);
   headers.delete("x-store-slug");
   headers.delete("x-custom-domain");
   headers.delete("x-platform-root");
 
-  const host = request.headers.get("host");
-  const overrideAllowed = allowStoreOverride(process.env);
+  // The alias has no store subdomains, so stores are reached there the way previews reach them (#766).
+  const overrideAllowed = fallbackRoot || allowStoreOverride(process.env);
+  // The directory home and a store's home are both "/" there: a marketplace page forgets the store,
+  // so the marketplace's own links to "/" lead home.
+  const forgetsStore = fallbackRoot && isMarketplacePath(request.nextUrl.pathname);
   let slug: string | null = null;
 
   if (overrideAllowed) {
@@ -46,12 +58,14 @@ export function proxy(request: NextRequest) {
     }
 
     const cookieSlug = request.cookies.get(COOKIE_NAME)?.value;
-    if (cookieSlug && isSlugRoutable(cookieSlug)) {
+    if (cookieSlug && isSlugRoutable(cookieSlug) && !forgetsStore) {
       slug = cookieSlug;
     }
   }
 
-  if (!slug && host) {
+  if (!slug && fallbackRoot) {
+    headers.set("x-platform-root", "1");
+  } else if (!slug && host) {
     const resolution = resolveHost(host, process.env.PLATFORM_ROOT_DOMAIN);
     if (resolution.kind === "slug") {
       slug = resolution.slug;
@@ -95,11 +109,25 @@ export function proxy(request: NextRequest) {
       secure: request.nextUrl.protocol === "https:",
     });
   }
+  if (forgetsStore && request.cookies.has(COOKIE_NAME)) {
+    response.cookies.set(COOKIE_NAME, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
+      secure: request.nextUrl.protocol === "https:",
+    });
+  }
   return response;
 }
 
 function isDirectoryOnlyPath(pathname: string): boolean {
   return pathname === "/sitemap.xml" || pathname === "/robots.txt" || pathname.startsWith("/stores/");
+}
+
+/** Pages of the platform itself, which a store remembered on the alias must not take over. */
+function isMarketplacePath(pathname: string): boolean {
+  return isDirectoryOnlyPath(pathname) || pathname === "/sell" || pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
 function stampSecurity(requestHeaders: Headers, response: NextResponse) {

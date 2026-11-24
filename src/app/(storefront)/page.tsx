@@ -29,10 +29,9 @@ export default async function StorefrontPage() {
   const headerList = await headers();
   // The proxy marks the root domain and www only when no store matched the request.
   if (headerList.get("x-platform-root") === "1") {
-    const root = process.env.PLATFORM_ROOT_DOMAIN ?? "";
-    const host = headerList.get("host") ?? root;
+    const host = headerList.get("host") ?? "";
     const stores = (await listDirectoryStores()).flatMap((store) => {
-      const href = storefrontUrl(store.slug, root, host);
+      const href = storefrontUrl(store.slug, host);
       return href ? [{ ...store, href }] : [];
     });
     const states = statePages(stores).map(({ code, name, slug, stores }) => ({

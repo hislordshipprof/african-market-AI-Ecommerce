@@ -81,7 +81,7 @@ export async function listDirectoryCards(): Promise<(DirectoryStore & { href: st
   const root = process.env.PLATFORM_ROOT_DOMAIN ?? "";
   const host = process.env.PORT ? `${root}:${process.env.PORT}` : root;
   return (await listDirectoryStores()).flatMap((store) => {
-    const href = storefrontUrl(store.slug, root, host);
+    const href = storefrontUrl(store.slug, host);
     return href ? [{ ...store, href }] : [];
   });
 }

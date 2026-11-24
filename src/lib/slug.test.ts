@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slugFromHost, resolveHost, RESERVED_SLUGS, isSlugRoutable } from "./slug";
+import { slugFromHost, resolveHost, RESERVED_SLUGS, isSlugRoutable, isFallbackRoot } from "./slug";
 
 describe("slugFromHost", () => {
   it("extracts slug from subdomain with root domain", () => {
@@ -197,5 +197,44 @@ describe("RESERVED_SLUGS", () => {
     for (const slug of ["www", "admin", "api", "app", "mail", "static", "assets", "cdn", "vercel"]) {
       expect(RESERVED_SLUGS.has(slug)).toBe(true);
     }
+  });
+});
+
+describe("isFallbackRoot (#766): the production alias stands in for the platform root", () => {
+  const ALIAS = "african-market-ai-ecommerce.vercel.app";
+  const production = { VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: ALIAS };
+
+  it("is the production alias while PLATFORM_ROOT_DOMAIN is unset, whatever its case or port", () => {
+    expect(isFallbackRoot(ALIAS, production)).toBe(true);
+    expect(isFallbackRoot("African-Market-AI-Ecommerce.vercel.app:443", production)).toBe(true);
+  });
+
+  it("is not a preview, branch or deployment vercel.app host of the same project", () => {
+    for (const host of [
+      "african-market-ai-ecommerce-git-main-team.vercel.app",
+      "african-market-ai-ecommerce-abc123-team.vercel.app",
+    ]) {
+      expect(isFallbackRoot(host, production)).toBe(false);
+    }
+  });
+
+  it("is not a spoofed Host that only contains the alias", () => {
+    for (const host of [`${ALIAS}.evil.example`, `mama-ngozi.${ALIAS}`, `evil-${ALIAS}`, "evil.example"]) {
+      expect(isFallbackRoot(host, production)).toBe(false);
+    }
+  });
+
+  it("ends once PLATFORM_ROOT_DOMAIN is set", () => {
+    expect(isFallbackRoot(ALIAS, { ...production, PLATFORM_ROOT_DOMAIN: "platform.example" })).toBe(false);
+  });
+
+  it("is never a preview deployment, which Vercel also gives the production URL", () => {
+    expect(isFallbackRoot(ALIAS, { ...production, VERCEL_ENV: "preview" })).toBe(false);
+    expect(isFallbackRoot(ALIAS, { VERCEL_PROJECT_PRODUCTION_URL: ALIAS })).toBe(false);
+  });
+
+  it("is never a custom domain, which Vercel picks as the production URL once one is attached (a store's)", () => {
+    const env = { VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "shop.mamasmarket.com" };
+    expect(isFallbackRoot("shop.mamasmarket.com", env)).toBe(false);
   });
 });
