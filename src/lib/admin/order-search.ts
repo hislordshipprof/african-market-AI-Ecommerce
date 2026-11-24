@@ -75,7 +75,7 @@ export function encodeOrderCursor(cursor: OrderCursor): string {
   return Buffer.from(`${cursor.createdAt.toISOString()}|${cursor.id}`).toString("base64url");
 }
 
-function decodeOrderCursor(raw: string): OrderCursor | null {
+export function decodeOrderCursor(raw: string): OrderCursor | null {
   const [at, id, ...rest] = Buffer.from(raw, "base64url").toString("utf8").split("|");
   if (rest.length > 0 || !at || !id || !ID.test(id)) return null;
   const createdAt = new Date(at);
