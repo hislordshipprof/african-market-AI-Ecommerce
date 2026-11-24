@@ -3,7 +3,7 @@ import { ReportFlow } from "@/components/storefront/flow/report-flow";
 import { IssueReportForm } from "@/components/storefront/flow/issue-report-form";
 import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { getFlowContext } from "@/lib/customer-flow/server";
-import { findOrderForIssueReport } from "@/lib/notifications/lookup";
+import { findOrderForIssueReport, redirectToOrderStore } from "@/lib/notifications/lookup";
 import { ISSUE_WINDOW_CLOSED, issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
 import { shownPack } from "@/lib/storefront/pack-order";
 import "@/components/storefront/flow/order-flow.css";
@@ -13,7 +13,9 @@ export default async function ReportPage({
 }: {
   params: Promise<{ token: string }>;
 }) {
-  const [{ token }, context] = await Promise.all([params, getFlowContext()]);
+  const { token } = await params;
+  await redirectToOrderStore(token, "/report");
+  const context = await getFlowContext();
   // No catch: a database error goes to error.tsx, so a customer never reads it as "checkout opens soon".
   const order = await findOrderForIssueReport(context.store.id, token);
   if (order) {

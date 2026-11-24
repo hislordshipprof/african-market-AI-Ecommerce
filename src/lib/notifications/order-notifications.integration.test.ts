@@ -178,6 +178,25 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     });
   }
 
+  it("on the production alias with no root domain a placed order is sent with a link to the alias, not skipped (#796)", async () => {
+    const alias = "african-market-ai-ecommerce.vercel.app";
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_URL", "african-market-ai-ecommerce-h3x9.vercel.app");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", alias);
+    vi.stubEnv("BETTER_AUTH_URL", "");
+    const orderId = await place("pickup");
+    const order = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } });
+    await run(orderId, "placed");
+
+    const rows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId, event: "placed" } });
+    expect(rows.map((row) => row.reason)).not.toContain("tracking_url_unavailable");
+    expect(rows.filter((row) => row.status === "sent").map((row) => row.channel).sort()).toEqual(["email", "sms"]);
+    const link = `https://${alias}/order/${order.trackingToken}?store=`;
+    expect(getTestSentEmails().at(-1)!.html).toContain(link);
+    expect(getTestSentSms().at(-1)!.text).toContain(link);
+  });
+
   it("a pickup order sends one branded email and one SMS at placed, accepted, ready and completed, and a timed-out order sends one cancelled message", async () => {
     const orderId = await place("pickup");
     const order = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } });

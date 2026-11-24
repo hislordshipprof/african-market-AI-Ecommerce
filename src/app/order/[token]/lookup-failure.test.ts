@@ -18,7 +18,7 @@ vi.mock("@/components/storefront/storefront-shell", () => ({
 vi.mock("@/lib/customer-flow/server", () => ({
   getFlowContext: async () => ({ store: { id: "s1", name: "Mama Ngozi" }, enabled: false, settings: {}, catalog: [] }),
 }));
-vi.mock("@/lib/notifications/lookup", () => ({ findOrderForIssueReport: lookups.report }));
+vi.mock("@/lib/notifications/lookup", () => ({ findOrderForIssueReport: lookups.report, redirectToOrderStore: async () => {} }));
 vi.mock("@/lib/order/substitution", () => ({ substitutionPromptsForToken: lookups.substitutions }));
 
 import ReportPage from "./report/page";

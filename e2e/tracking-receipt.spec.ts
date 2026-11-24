@@ -8,6 +8,7 @@ const CHARGED = 741_002;
 const REFUNDED = 753_001;
 const DELIVERING = 753_002;
 const COLLECTING = 783_001;
+const BOOKMARKED = 796_001;
 const RUN = Date.now();
 // Order #1007 from the 2026-11-23 walkthrough: 6 × $6.99, store delivery $4.99, service fee $1.26.
 const ORDER_1007 = {
@@ -30,7 +31,7 @@ test.describe("tracking receipt adds up and names fulfilment in words (#741)", (
   // Serial: each worker runs afterAll, so a parallel worker would delete the other test's order mid-run.
   test.describe.configure({ mode: "serial" });
   test.afterAll(async () => {
-    await deleteBatchOrders([HELD, CHARGED, REFUNDED, DELIVERING, COLLECTING]);
+    await deleteBatchOrders([HELD, CHARGED, REFUNDED, DELIVERING, COLLECTING, BOOKMARKED]);
   });
 
   test("a delivery order lists the delivery fee, sums to its total and shows the hold before capture", async ({ page }) => {
@@ -108,5 +109,19 @@ test.describe("tracking receipt adds up and names fulfilment in words (#741)", (
     await expect(status).toContainText(/Pick up at:?\s*8400 Park Place Blvd, Houston, TX 77017/);
     await expect(status.getByRole("link", { name: /8400 Park Place Blvd/ })).toHaveAttribute("href", /google\.com\/maps/);
     await expect(status).toContainText(/Mon\s*9 AM – 8 PM/);
+  });
+
+  test("an order link opens its own store with no ?store=, even after another store (#796)", async ({ page }) => {
+    const token = `e2e-796-bookmark-${RUN}`;
+    await insertTrackingOrder({ number: BOOKMARKED, token, status: "ACCEPTED", ...ORDER_1007 });
+    const root = storeUrl();
+    await page.goto(`${root}/order/${token}`);
+    await expect(page).toHaveURL(`${root}/order/${token}`);
+    await expect(page.getByRole("heading", { name: `Order #${BOOKMARKED}` })).toBeVisible();
+
+    await page.goto(`${root}/?store=tante-marie`);
+    await page.goto(`${root}/order/${token}`);
+    await expect(page.getByRole("heading", { name: `Order #${BOOKMARKED}` })).toBeVisible();
+    await expect(page.getByText(`Order #${BOOKMARKED} · Mama Ngozi African Market`)).toBeVisible();
   });
 });

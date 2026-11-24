@@ -8,7 +8,7 @@ import { getFlowContext } from "@/lib/customer-flow/server";
 import { orderOutcomeMessage } from "@/lib/customer-account/order-history-view";
 import { orderStatusLabel } from "@/lib/order/status-labels";
 import { notFound } from "next/navigation";
-import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications/lookup";
+import { deliveryProofTokenFor, findOrderForTracking, redirectToOrderStore } from "@/lib/notifications/lookup";
 import { OrderMessages } from "@/components/storefront/flow/order-messages";
 import { readCustomerMessages } from "@/lib/support/thread";
 import { issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
@@ -37,11 +37,9 @@ export default async function OrderPage({
   params: Promise<{ token: string }>;
   searchParams: Promise<{ placed?: string }>;
 }) {
-  const [{ token }, query, context] = await Promise.all([
-    params,
-    searchParams,
-    getFlowContext(),
-  ]);
+  const { token } = await params;
+  await redirectToOrderStore(token, "");
+  const [query, context] = await Promise.all([searchParams, getFlowContext()]);
 
   // No catch: a database error goes to error.tsx, so a customer never reads it as "order not found".
   const realOrder = await findOrderForTracking(context.store.id, token);

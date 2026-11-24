@@ -101,6 +101,18 @@ describe("resolveAuthBaseUrl", () => {
   it("defaults to http://localhost:3000 when nothing is set", () => {
     expect(resolveAuthBaseUrl({})).toBe("http://localhost:3000");
   });
+
+  it("uses the production alias, not the per-deployment VERCEL_URL, in production without BETTER_AUTH_URL (#796)", () => {
+    const alias = "african-market-ai-ecommerce.vercel.app";
+    const env = { VERCEL: "1", VERCEL_ENV: "production", VERCEL_URL: "african-market-ai-ecommerce-h3x9.vercel.app", VERCEL_PROJECT_PRODUCTION_URL: alias };
+    const base = resolveAuthBaseUrl(env);
+    expect(base).toBe(`https://${alias}`);
+    expect(resolveAuthAllowedHosts(env)).toContain(new URL(base).host);
+    expect(resolveAuthTrustedOrigins(env)).toContain(base);
+
+    expect(resolveAuthBaseUrl({ ...env, BETTER_AUTH_URL: "https://custom.example.com" })).toBe("https://custom.example.com");
+    expect(resolveAuthBaseUrl({ ...env, VERCEL_ENV: "preview" })).toBe("https://african-market-ai-ecommerce-h3x9.vercel.app");
+  });
 });
 
 describe("resolveAuthAllowedHosts", () => {
@@ -476,6 +488,23 @@ describe("the auth config built in production", () => {
     expect(built.rateLimit?.customRules?.["/sign-in/email"]).toEqual({ window: 60, max: 5 });
     expect(built.rateLimit?.customRules?.["/magic-link/verify"]).toEqual({ window: 60, max: 5 });
     expect(built.advanced?.useSecureCookies).toBe(true);
+  });
+
+  it("builds sign-in and reset links on the production alias when BETTER_AUTH_URL is unset (#796)", async () => {
+    const alias = "african-market-ai-ecommerce.vercel.app";
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_URL", "african-market-ai-ecommerce-h3x9.vercel.app");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", alias);
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
+    vi.stubEnv("BETTER_AUTH_URL", "");
+    vi.stubEnv("BETTER_AUTH_SECRET", "p".repeat(40));
+    vi.resetModules();
+    const built = (await import("./auth")).auth.options;
+    const baseURL = built.baseURL as { fallback: string; allowedHosts: string[] };
+    expect(baseURL.fallback).toBe(`https://${alias}`);
+    expect(baseURL.allowedHosts).toContain(alias);
   });
 
   // The magic-link plugin caps /magic-link/verify at 5 a minute per IP on its own rule (#748).
