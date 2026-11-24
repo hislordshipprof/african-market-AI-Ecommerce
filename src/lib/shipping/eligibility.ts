@@ -1,5 +1,7 @@
 /** Which goods may ship, and when an order may (ADR-0023, #567). */
 
+import { isStateCode, STATE_NAMES } from "../directory/us-states";
+
 const GRAMS_PER_LB = 453.59237;
 /** The heaviest order that ships, one box (#567). */
 export const SHIPPING_WEIGHT_LIMIT_LB = 50;
@@ -46,6 +48,7 @@ export function shipRefusal(input: {
   allowedStates: readonly string[];
 }): string | null {
   if (input.handlingDays == null) return "This store doesn't ship orders.";
+  if (input.allowedStates.length === 0) return "We don't ship to any state yet.";
   if (input.lines.some((line) => !line.ships)) return "Some items in your basket can't ship. Choose pickup or delivery.";
   const weightG = input.lines.reduce((sum, line) => sum + line.weightG * line.qty, 0);
   if (weightG > SHIPPING_WEIGHT_LIMIT_LB * GRAMS_PER_LB) return `Shipped orders can weigh up to ${SHIPPING_WEIGHT_LIMIT_LB} lb.`;
@@ -55,4 +58,16 @@ export function shipRefusal(input: {
 
 export function orderWeightG(lines: readonly ShipLine[]): number {
   return lines.reduce((sum, line) => sum + line.weightG * line.qty, 0);
+}
+
+/** The states this store's parcels can go to: none without handling days or while the platform ships nowhere (#750). */
+export function storeShipsTo(handlingDays: number | null, allowedStates: readonly string[]): string[] {
+  return handlingDays == null ? [] : [...allowedStates].sort();
+}
+
+/** "Ships to Maryland and Virginia", shown before the shopper types an address (#750). */
+export function shipsToLabel(states: readonly string[]): string {
+  const names = states.map((code) => (isStateCode(code) ? STATE_NAMES[code] : code));
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join("");
+  return `Ships to ${list}`;
 }

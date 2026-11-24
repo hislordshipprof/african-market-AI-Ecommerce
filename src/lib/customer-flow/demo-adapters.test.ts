@@ -16,6 +16,7 @@ const store: FlowStore = {
   autoRefundLimitCents: 500,
   insulatedPackaging: true,
   courierOffered: false,
+  shipsTo: [],
   closed: false,
   opensAt: "9 am",
   readyAt: "9:30 AM",

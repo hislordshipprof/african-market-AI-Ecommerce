@@ -28,7 +28,7 @@ import type {
 } from "@/lib/customer-flow/contracts";
 import { setSwapRule as serverSetSwapRule } from "@/lib/cart/actions";
 import { applyCouponAction, quoteCheckoutAction, removeCouponAction } from "@/lib/checkout/actions";
-import { basketQuoteView, type BasketQuoteResponse } from "@/lib/checkout/summary";
+import { basketFulfilmentNote, basketQuoteView, type BasketQuoteResponse } from "@/lib/checkout/summary";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import type { SwapRuleValue } from "@/lib/cart/service";
 import { toast } from "sonner";
@@ -384,12 +384,7 @@ export function CartPage({
                   </p>
                 </>
               )}
-              <p className={styles.muted}>
-                Estimated for pickup. Delivery starts at{" "}
-                {money(settings.storeDeliveryFeeCents)} with the store, or a
-                simulated {money(699)} courier quote. Final fees depend on your
-                choices.
-              </p>
+              <p className={styles.muted}>{basketFulfilmentNote(settings)}</p>
               {settings.minimumOrderCents > 0 && (
                 <>
                   <progress
