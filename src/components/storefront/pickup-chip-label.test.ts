@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickupChipLabel } from "./fulfillment-chip";
+import { pickupChipLabel } from "./pickup-chip-label";
 
 const WEEKDAYS_9_TO_8 = {
   monday: "9:00 AM - 8:00 PM",

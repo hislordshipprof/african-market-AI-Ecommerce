@@ -1,23 +1,10 @@
 "use client";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
+import dynamic from "next/dynamic";
 import { MapPin, ChevronDown } from "lucide-react";
-import { openStatus } from "@/lib/directory/open-status";
 
-const MINUTE_MS = 60_000;
-
-function subscribe(onChange: () => void) {
-  const id = setInterval(onChange, MINUTE_MS / 2);
-  return () => clearInterval(id);
-}
-
-const currentMinute = () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
-
-/** A pickup time only while the store is open; otherwise when it opens (#763). */
-export function pickupChipLabel(minutes: number, hours: unknown, timezone: string, now: Date, viewerZone?: string): string {
-  const status = openStatus(hours, timezone, now, viewerZone);
-  // Closed: only when it opens, which fits the chip on a phone.
-  return status.open ? `Pickup · ${minutes} min` : status.detail ?? status.label;
-}
+// Loaded after first paint: the store-hours rules would push the storefront home over its JS budget (#629).
+const PickupChipLabel = dynamic(() => import("./pickup-chip-label"), { ssr: false, loading: () => <>Pickup</> });
 
 export function FulfillmentChip({
   minutes,
@@ -32,8 +19,6 @@ export function FulfillmentChip({
   hours: unknown;
   timezone: string;
 }) {
-  // Worked out in the browser each minute, like the directory's Open now: blank until then.
-  const minute = useSyncExternalStore(subscribe, currentMinute, () => null);
   const [open, setOpen] = useState(false);
   const [zip, setZip] = useState("");
   const [draft, setDraft] = useState("");
@@ -47,11 +32,7 @@ export function FulfillmentChip({
       >
         <MapPin size={16} aria-hidden />
         <span>
-          {!pickup
-            ? "Local delivery"
-            : minute === null
-              ? "Pickup"
-              : pickupChipLabel(minutes, hours, timezone, new Date(minute), Intl.DateTimeFormat().resolvedOptions().timeZone)}
+          {pickup ? <PickupChipLabel minutes={minutes} hours={hours} timezone={timezone} /> : "Local delivery"}
           <small>{zip || "Set ZIP code"}</small>
         </span>
         <ChevronDown size={14} aria-hidden />
