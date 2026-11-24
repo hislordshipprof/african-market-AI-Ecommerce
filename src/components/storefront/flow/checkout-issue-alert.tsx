@@ -10,6 +10,7 @@ import styles from "./cart-checkout.module.css";
 const TITLES: Record<IssueSection, string> = {
   payment: "Payment didn't go through",
   basket: "Your basket needs a change",
+  shipping: "Some items can't ship",
   session: "Your checkout needs a refresh",
   address: "We can't deliver there",
   network: "We couldn't reach the store",
@@ -22,6 +23,9 @@ export interface IssueActions {
   retry?: () => void;
   editAddress?: () => void;
   choosePickup?: () => void;
+  /** Items that can't ship (#763): take them out of the basket, or go by store delivery. */
+  removeLines?: () => void;
+  chooseDelivery?: () => void;
 }
 
 /**
@@ -52,8 +56,14 @@ export function CheckoutIssueAlert({ issue, id, actions }: { issue: CheckoutIssu
           {section === "address" && actions.editAddress && (
             <Button type="button" onClick={actions.editAddress}>Edit address</Button>
           )}
-          {section === "address" && actions.choosePickup && (
+          {(section === "address" || section === "shipping") && actions.choosePickup && (
             <Button type="button" onClick={actions.choosePickup}>Choose pickup</Button>
+          )}
+          {section === "shipping" && actions.removeLines && (
+            <Button type="button" onClick={actions.removeLines}>{issue.lineKeys.length > 1 ? "Remove them" : "Remove it"}</Button>
+          )}
+          {section === "shipping" && actions.chooseDelivery && (
+            <Button type="button" onClick={actions.chooseDelivery}>Choose store delivery</Button>
           )}
         </div>
       </div>

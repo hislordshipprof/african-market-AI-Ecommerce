@@ -187,23 +187,37 @@ describe.skipIf(!hasDb)("shipping at checkout (#567, lane DB)", () => {
 
   it("AC2–AC4: no rate unless every line ships, the store ships, the state is allowed and the order is at most 50 lb", async () => {
     const cases = [
-      { opts: { shippable: false }, address: AR, message: /can't ship/ },
+      { opts: { shippable: false }, address: AR, message: /^Garri can't ship\.$/, code: "cannot-ship" },
       // Marked shippable before it was frozen: it still does not ship.
-      { opts: { frozen: true }, address: AR, message: /can't ship/ },
+      { opts: { frozen: true }, address: AR, message: /^Garri can't ship\.$/, code: "cannot-ship" },
       // A CSV import's made-up 100 g never prices a parcel, even on a listing marked shippable (#752).
-      { opts: { weightG: 100, weightPlaceholder: true }, address: AR, message: /can't ship/ },
+      { opts: { weightG: 100, weightPlaceholder: true }, address: AR, message: /^Garri can't ship\.$/, code: "cannot-ship" },
       { opts: { handlingDays: null }, address: AR, message: /doesn't ship orders/ },
       { opts: {}, address: NV, message: /can't ship to that state/ },
       // 23 kg × 1 = 50.7 lb.
       { opts: { weightG: 23_000, qty: 1 }, address: AR, message: /up to 50 lb/ },
     ];
-    for (const { opts, address, message } of cases) {
+    for (const { opts, address, message, code = "ineligible" } of cases) {
       const { store, cartId } = await seed(opts);
       const { fetch, provider } = shippo();
       const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", address, { shipping: provider });
-      expect(quote.problems).toEqual([expect.objectContaining({ code: "ineligible", message: expect.stringMatching(message) })]);
+      expect(quote.problems).toEqual([expect.objectContaining({ code, message: expect.stringMatching(message) })]);
       expect(quote.shipping).toBeUndefined();
       expect(fetch.calls).toHaveLength(0);
+    }
+  });
+
+  it("#763 AC2: a mixed basket names only the line that can't ship, with its basket key, whatever the address", async () => {
+    const { store, cartId } = await seed();
+    const scoped = storeScoped(store.id);
+    const goat = await scoped.listing.create({ data: { storeId: store.id, customName: "Goat Meat", price: 1500, stockMode: "unlimited", frozen: true } });
+    const goatSize = await scoped.listingVariant.create({ data: { listingId: goat.id, label: "2 lb", price: 1500, weightG: 907 } });
+    await scoped.cartLine.create({ data: { storeId: store.id, cartId, variantId: goatSize.id, qty: 1, swapRule: "exact_only" } });
+    const { provider } = shippo();
+
+    for (const address of [null, AR]) {
+      const quote = await quoteCheckout(store.id, 0, cartId, CONTACT, "ship", address, { shipping: provider });
+      expect(quote.problems).toEqual([{ code: "cannot-ship", message: "Goat Meat can't ship.", lineKey: JSON.stringify([goat.id, goatSize.id]) }]);
     }
   });
 

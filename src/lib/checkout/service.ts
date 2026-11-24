@@ -5,6 +5,7 @@ import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNex
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
+import { cartItemKey } from "../storefront/cart-store";
 import { getStripeClient } from "../stripe/provider";
 import { checkoutPaymentsUseFake, getCheckoutPayments, holdAuthorizedAt, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
@@ -383,7 +384,19 @@ async function shippingQuoteFor(
   request: DeliveryRequest | null,
   options: QuoteCheckoutOptions,
 ): Promise<ShippingQuoteInput> {
-  const unavailable = (message: string): ShippingQuoteInput => ({ ok: false, problem: { code: "ineligible", message } });
+  const unavailable = (message: string): ShippingQuoteInput => ({ ok: false, problems: [{ code: "ineligible", message }] });
+  // Each line that can't ship is named, so the shopper can remove it or choose pickup or delivery (#763).
+  const stuck = cart.lines.filter((line) => !line.variant.ships);
+  if (store.shippingHandlingDays != null && stuck.length > 0) {
+    return {
+      ok: false,
+      problems: stuck.map((line) => ({
+        code: "cannot-ship",
+        message: `${line.variant.listing.customName || line.variant.listing.masterProduct?.name || "An item"} can't ship.`,
+        lineKey: cartItemKey({ listingId: line.variant.listing.id, variantId: line.variantId }),
+      })),
+    };
+  }
   const lines = shipLines(cart.lines);
   const allowedStates = await readShippingStates();
   const refusal = shipRefusal({ lines, handlingDays: store.shippingHandlingDays, state: null, allowedStates });
@@ -464,13 +477,13 @@ function shownShipping(
   now: Date,
 ): ShippingQuoteInput {
   const refusal = shipRefusal({ lines, handlingDays, state: cart.deliveryState, allowedStates });
-  if (refusal) return { ok: false, problem: { code: "ineligible", message: refusal } };
+  if (refusal) return { ok: false, problems: [{ code: "ineligible", message: refusal }] };
   if (cart.shippingFeeCents == null || !cart.deliveryLine1 || !cart.deliveryState || !cart.deliveryZip) {
-    return { ok: false, problem: { code: "ineligible", message: SHIP_ADDRESS_NEEDED } };
+    return { ok: false, problems: [{ code: "ineligible", message: SHIP_ADDRESS_NEEDED }] };
   }
   if (cart.shippingQuoteKey !== shippingKey(cart.deliveryState, cart.deliveryZip, orderWeightG(lines))
     || !cart.shippingQuoteExpiresAt || cart.shippingQuoteExpiresAt <= now) {
-    return { ok: false, problem: { code: "quote-changed", message: "Your shipping rate needs a refresh. Check the new rate, then place your order." } };
+    return { ok: false, problems: [{ code: "quote-changed", message: "Your shipping rate needs a refresh. Check the new rate, then place your order." }] };
   }
   return { ok: true, feeCents: cart.shippingFeeCents, carrier: cart.shippingCarrier ?? "", service: cart.shippingService ?? "", days: cart.shippingDays, handlingDays: handlingDays as number };
 }
