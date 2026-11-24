@@ -331,7 +331,7 @@ export async function applyAddLine(
       ? { name: variant.listing.masterProduct.name, imageUrl: variant.listing.masterProduct.imageUrl }
       : null,
   };
-  const variantView = { id: variant.id, label: variant.label, price: variant.price };
+  const variantView = { id: variant.id, label: shownPack(variant).label, price: variant.price };
 
   if (existing) {
     const current = await tx.cartLine.findUnique({ where: { id: existing.id } });

@@ -10,6 +10,7 @@ import { Client } from "pg";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { runtimeDatabaseUrl } from "../env";
 import { addLine, getCartWithLines, getOrCreateCart } from "../cart/service";
+import { addToCart, getCartSummary, showProducts } from "../assistant/tools/execute";
 import { getActiveListings, getFlowCatalog, getListingDetail, searchListings } from "../storefront/service";
 import { seedDemoCatalog } from "../../../prisma/seed-demo-catalog";
 import { commitImport, generatePreview } from "./csv-import";
@@ -83,6 +84,8 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
       raw.$executeRaw`SET LOCAL ROLE app_user`,
       raw.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       raw.cartLine.deleteMany({ where: { storeId: { in: ids } } }),
+      raw.aiAction.deleteMany({ where: { storeId: { in: ids } } }),
+      raw.aiConversation.deleteMany({ where: { storeId: { in: ids } } }),
       raw.cart.deleteMany({ where: { storeId: { in: ids } } }),
       raw.auditLog.deleteMany({ where: { storeId: { in: ids } } }),
       raw.stockEvent.deleteMany({ where: { storeId: { in: ids } } }),
@@ -501,8 +504,17 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
       searchListings(storeAId, name),
     ]);
     const cartId = await getOrCreateCart(storeAId, null, null);
-    await addLine(storeAId, cartId, variant.id, 1);
+    const added = await addLine(storeAId, cartId, variant.id, 1);
     const cart = await getCartWithLines(storeAId, cartId);
+    const talk = await storeScoped(storeAId).aiConversation.create({
+      data: { storeId: storeAId, cartId, model: "claude-haiku-5-5", messages: [] },
+    });
+    const ctx = { storeId: storeAId, cartId, conversationId: talk.id, actorUserId: null };
+    const assistant = [
+      await showProducts(ctx, { listing_ids: [listingId] }),
+      await addToCart(ctx, { items: [{ variant_id: variant.id, qty: 1 }] }),
+      await getCartSummary(ctx, {}),
+    ];
     const shown = listings.find((row) => row.id === listingId);
     const item = catalog.find((row) => row.listingId === listingId);
     const hit = found.find((row) => row.id === listingId);
@@ -520,6 +532,8 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
     const own = [shown, detail, item, hit, cart];
     expect(JSON.stringify({ listings, detail, catalog, found, cart })).not.toContain("weightPlaceholder");
     expect(JSON.stringify(own)).not.toContain("Default");
+    expect(assistant.every((result) => result.ok)).toBe(true);
+    expect(JSON.stringify({ added, assistant })).not.toContain("Default");
   });
 
   it("a placeholder flag does not depend on the clock", async () => {

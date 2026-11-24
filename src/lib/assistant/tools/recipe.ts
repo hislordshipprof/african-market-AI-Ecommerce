@@ -6,6 +6,7 @@ import type { ShopperNeed } from "../../catalog/attributes";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
 import { stockBadge } from "../../storefront/stock-badge";
+import { shownPack } from "../../storefront/pack-order";
 import { listingName, recordRead, type AssistantContext, type ToolResult } from "./execute";
 import { getRecipeInput, parseToolInput } from "./schemas";
 
@@ -49,7 +50,7 @@ async function listingForMaster(storeId: string, masterProductId: string): Promi
     listingId: listing.id,
     name: listingName(listing),
     variantId: variant.id,
-    packLabel: variant.label,
+    packLabel: shownPack(variant).label,
     priceCents: variant.price,
     mayBeUnavailable: stockBadge(listing) !== "in-stock",
   };
