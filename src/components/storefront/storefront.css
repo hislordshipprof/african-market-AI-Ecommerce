@@ -575,6 +575,23 @@
 .sf-category-tile:last-child {
   grid-column: span 2;
 }
+/* The aisles page: every aisle at once, wrapping, no rail. */
+.sf-aisle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 32px 16px;
+}
+.sf-aisle-grid .sf-category-tile {
+  width: auto;
+  grid-row: auto;
+  grid-column: auto;
+}
+@media (max-width: 767px) {
+  .sf-aisle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 16px;
+  }
+}
 .sf-category-tile img {
   object-fit: cover;
   transition: transform 200ms var(--ease-std);
@@ -1022,16 +1039,18 @@
 .sf-footer-contact {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   margin-top: 16px;
   font-style: normal;
   font-size: 14px;
 }
 .sf-footer-contact a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--foreground);
   text-decoration: underline;
   text-underline-offset: 3px;
-  padding-block: 4px;
 }
 .sf-footer-hours h3 {
   font-size: 14px;
@@ -1066,7 +1085,12 @@
   gap: 10px;
   font-size: 13px;
   color: var(--muted-foreground);
-  padding-block: 24px;
+  padding-block: 12px;
+}
+.sf-breadcrumb a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 /* Crumbs stay on one line; a long current page name truncates (it is the heading below). */
 .sf-breadcrumb > * {
@@ -1134,7 +1158,7 @@
   top: 160px;
   align-self: start;
 }
-.sf-sidebar h3 {
+.sf-sidebar h2 {
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 12px;
@@ -1739,7 +1763,7 @@
     padding-bottom: 60px;
   }
   .sf-breadcrumb {
-    padding-block: 20px;
+    padding-block: 8px;
     font-size: 13px;
   }
   .sf-browse {

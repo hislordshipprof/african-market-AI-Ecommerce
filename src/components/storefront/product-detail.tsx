@@ -56,7 +56,7 @@ export function ProductDetail({
       </div>
       <div className="sf-detail-copy">
         <StockBadgeChip badge={listing.badge} stockLeft={stockLeft} />
-        <h2 className="sf-page-title">{listing.displayName}</h2>
+        <h1 className="sf-page-title">{listing.displayName}</h1>
         {listing.altName && <p>{listing.altName}</p>}
         <PriceDisplay
           cents={price}
