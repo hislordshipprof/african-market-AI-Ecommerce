@@ -79,6 +79,7 @@ export function ReviewButtons({ kind, conversationId, nextUnlabelledHref }: {
         </span>
         <textarea
           name="note"
+          autoComplete="off"
           value={note}
           maxLength={1000}
           rows={2}

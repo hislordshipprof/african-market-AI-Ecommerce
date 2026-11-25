@@ -30,7 +30,7 @@ export function TranscriptPane({ transcript, nextUnlabelledHref }: { transcript:
   return (
     <article aria-labelledby="chat-title" className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_14rem] xl:items-start">
       <header className="xl:col-start-1">
-        <h2 id="chat-title" className="font-heading text-[22px] font-bold leading-tight text-foreground">
+        <h2 id="chat-title" className="text-balance font-heading text-[22px] font-bold leading-tight text-foreground">
           {KIND_TEXT[kind]} chat · {transcript.storeName ?? "Platform"}
         </h2>
         <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
