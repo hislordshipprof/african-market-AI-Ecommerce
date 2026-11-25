@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import {
   backupSwap,
+  countedStockLeft,
   decideAddQty,
   decideLineQty,
   decideNamedSubstitute,
@@ -867,11 +868,11 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       if (saved.budgetCents != null) {
         const variant = await tx.listingVariant.findUnique({
           where: { id: item.variant_id },
-          select: { price: true, listing: { select: { maxPerOrder: true } } },
+          select: { price: true, listing: { select: { maxPerOrder: true, stockMode: true, qty: true } } },
         });
         const existing = variant ? await lockCartLineByVariant(tx, ctx.cartId, item.variant_id) : null;
         const decision = variant
-          ? decideAddQty({ existingQty: existing?.qty ?? 0, addQty: item.qty, maxPerOrder: variant.listing.maxPerOrder, clampToMax: true })
+          ? decideAddQty({ existingQty: existing?.qty ?? 0, addQty: item.qty, maxPerOrder: variant.listing.maxPerOrder, stockLeft: countedStockLeft(variant.listing), clampToMax: true })
           : null;
         if (variant && decision?.ok && subtotal + variant.price * decision.added > saved.budgetCents) {
           items.push({ ...fail("over_budget"), variantId: item.variant_id, budgetCents: saved.budgetCents, subtotalCents: subtotal });
@@ -956,7 +957,7 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
       const money = await readCartMoney(tx, ctx.cartId);
       return { ok: true, removed: true, lineId: line.id, qty: 0, ...money.totals };
     }
-    const decision = decideLineQty(parsed.qty, line.variant.listing.maxPerOrder);
+    const decision = decideLineQty(parsed.qty, line.variant.listing.maxPerOrder, countedStockLeft(line.variant.listing));
     if (!decision.ok) return fail("max_per_order");
     const { budgetCents } = await readConstraints(ctx.storeId, ctx.conversationId);
     if (budgetCents != null && parsed.qty > line.qty) {
