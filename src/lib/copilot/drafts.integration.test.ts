@@ -258,6 +258,35 @@ describe.skipIf(!hasDb)("copilot drafts: coupons, prices and store changes (#819
     expect(gariId).toBeTruthy();
   });
 
+  it("a coupon code the store already has is refused at confirm with the promotions page's message", async () => {
+    const sent = await send("10% off code WKND10 again", [
+      { kind: "tool", toolName: "draft_coupon", toolInput: { code: "WKND10", percentOff: 10, startsAt: "2099-12-05T00:00" } },
+      { kind: "text", text: "Drafted." },
+    ]);
+    const result = await confirmCopilotDraft({ draftId: sent.drafts[0]!.id });
+    expect(result).toMatchObject({ ok: false, code: "invalid", message: expect.stringMatching(/already has the code WKND10/) });
+    expect(await storeScoped(storeId).storeCoupon.count({ where: { code: "WKND10" } })).toBe(1);
+  });
+
+  it("a price draft prices only listings that match the owner's words, not look-alikes found beside a master-product match", async () => {
+    const master = await platformAdmin.masterProduct.create({ data: { name: `Qzobo ${RUN}` } });
+    const named = await storeScoped(storeId).listing.create({
+      data: { storeId, masterProductId: master.id, customName: "Hibiscus petals", price: 500, stockMode: "counted", qty: 3,
+        variants: { create: [{ label: "1 lb", price: 500, weightG: 450 }] } },
+    });
+    await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Qzobbo drink mix", price: 700, stockMode: "counted", qty: 3,
+        variants: { create: [{ label: "1 lb", price: 700, weightG: 450 }] } },
+    });
+    const sent = await send("raise qzobo by 50 cents", [
+      { kind: "tool", toolName: "draft_price_change", toolInput: { query: "qzobo", change: "add", cents: 50 } },
+      { kind: "text", text: "Drafted." },
+    ]);
+    const card = sent.drafts[0];
+    if (card?.kind !== "price") throw new Error(`expected a price card: ${sent.reply}`);
+    expect(card.lines.map((line) => line.listingId)).toEqual([named.id]);
+  });
+
   it("a price draft refuses a listing the owner did not name and a price below one cent", async () => {
     const sent = await send("lower yam flour by $5", [
       { kind: "tool", toolName: "draft_price_change", toolInput: { query: "rice", change: "add", cents: -500 } },

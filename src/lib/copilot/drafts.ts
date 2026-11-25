@@ -97,16 +97,18 @@ export async function draftPrices(storeId: string, input: PriceDraftInput, owner
   if (found.outcome === "none" || found.nearOnly) {
     throw new DraftError(`no item matches ${input.query}; ask the owner which item they mean`);
   }
+  // Look-alikes can come back beside a listing matched through its master product; they were not named.
+  const matched = found.listings.filter((listing) => !listing.near);
   const listings = await storeScopedRawQuery<{ listing_id: string; variant_id: string; label: string; price: number }>(
     storeId,
     Prisma.sql`
       SELECT v.listing_id, v.id AS variant_id, v.label, v.price
       FROM listing_variants v
-      WHERE v.listing_id IN (${Prisma.join(found.listings.map((listing) => listing.id))})
+      WHERE v.listing_id IN (${Prisma.join(matched.map((listing) => listing.id))})
       ORDER BY v.listing_id, v.price, v.id
     `,
   );
-  const names = new Map(found.listings.map((listing) => [listing.id, listing.name]));
+  const names = new Map(matched.map((listing) => [listing.id, listing.name]));
   const size = input.variant ? squash(input.variant) : null;
   const lines: PriceLine[] = [];
   for (const row of listings) {

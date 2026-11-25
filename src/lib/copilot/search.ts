@@ -8,6 +8,8 @@ export interface ListingMatch {
   stockMode: string;
   qty: number | null;
   status: string | null;
+  /** A trigram look-alike: it does not match every word of the query. */
+  near: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ interface SearchRow {
   qty: number | null;
   status: string | null;
   tier: "one" | "several" | "near";
+  near: boolean;
 }
 
 const NONE: ListingSearch = { outcome: "none", nearOnly: false, listings: [] };
@@ -63,7 +66,7 @@ export async function searchListingMatches(storeId: string, rawQuery: string, li
         SELECT COUNT(*) AS n, COALESCE(BOOL_AND(by_name), false) AS by_name FROM named WHERE rank < 3
       ),
       near AS (SELECT COUNT(*) AS n FROM named WHERE rank >= 3)
-      SELECT m.id, m.name, m.stock_mode, m.qty, m.status,
+      SELECT m.id, m.name, m.stock_mode, m.qty, m.status, m.rank >= 3 AS near,
         CASE
           WHEN s.n = 1 AND (s.by_name OR nr.n = 0) THEN 'one'
           WHEN s.n >= 1 THEN 'several'
@@ -81,6 +84,7 @@ export async function searchListingMatches(storeId: string, rawQuery: string, li
     stockMode: row.stock_mode,
     qty: row.qty,
     status: row.status,
+    near: row.near,
   }));
   const first = listings[0];
   if (!first) return NONE;
