@@ -169,6 +169,7 @@ export function scriptStep(messages: unknown): ScriptStep {
   if (last.name === "prepare_checkout") {
     return { kind: "text", text: "Here is your order to review. Tap Review and pay to pay on the checkout page." };
   }
+  if (last.name === "find_stores") return { kind: "text", text: "These stores are still in setup. Tap a store below to open it." };
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
   if (last.name === "show_products" || last.name === "add_to_cart") {
@@ -241,6 +242,8 @@ function openingStep(lower: string, raw: string, messages: unknown): ScriptStep 
     if (retriedFailure(messages, needle)) return { kind: "text", text: "Recovered after the interruption." };
     return { kind: "error" };
   }
+  // The platform admin assistant (#831) reads the stores still in setup.
+  if (lower.includes("stuck in onboarding")) return { kind: "tool", name: "find_stores", input: { status: "setup" } };
   if (lower.includes("cut the stream")) return { kind: "cut" };
   if (lower.includes("hold please")) return { kind: "text", text: "Finished waiting.", delayMs: 2500 };
   if (lower.includes("$1.00") || lower.includes("stray price")) return { kind: "text", text: "That is $1.00." };
@@ -368,8 +371,20 @@ export const scriptedAssistantFetch: typeof fetch = async (input, init) => {
   const step = scriptStep(body?.messages);
   if (step.kind === "text" && step.delayMs) await new Promise((resolve) => setTimeout(resolve, step.delayMs));
   const model = String(body?.model ?? "");
-  // generateText sends no stream flag and reads one JSON message; only a text step is scripted that way.
+  // generateText sends no stream flag and reads one JSON message; text and tool steps are scripted that way.
   if (body?.stream !== true) {
+    if (step.kind === "tool") {
+      return Response.json({
+        id: "msg_fake",
+        type: "message",
+        role: "assistant",
+        model,
+        content: [{ type: "tool_use", id: toolUseId(), name: step.name, input: step.input }],
+        stop_reason: "tool_use",
+        stop_sequence: null,
+        usage: { input_tokens: 12, output_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      });
+    }
     if (step.kind !== "text") {
       return Response.json({ type: "error", error: { type: "overloaded_error", message: "Overloaded" }, request_id: "req_fake" }, { status: 529 });
     }

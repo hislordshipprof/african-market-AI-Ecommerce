@@ -66,7 +66,7 @@ class TurnLost extends Error {
   }
 }
 
-function logModelFailure(error: unknown): void {
+export function logModelFailure(error: unknown): void {
   if (APICallError.isInstance(error)) {
     const headers = error.responseHeaders;
     const requestId = headers && typeof headers === "object"
@@ -94,7 +94,7 @@ function isContention(error: unknown): boolean {
   return message.includes("40P01") || message.includes("deadlock detected");
 }
 
-async function bestEffort(fn: () => Promise<void>): Promise<void> {
+export async function bestEffort(fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
   } catch (error) {
@@ -218,7 +218,7 @@ export const NUMBER_REFUSED =
 const NUMBER = /\d+(?:[.,]\d+)*/g;
 const REPLY_ROWS = 5;
 
-function numbersIn(text: string): string[] {
+export function numbersIn(text: string): string[] {
   return (text.match(NUMBER) ?? []).map((token) => String(Number(token.replace(/,(?=\d{3}\b)/g, ""))));
 }
 
@@ -394,14 +394,14 @@ export async function sendCopilotTurn(input: {
   }
 }
 
-interface TurnUsage {
+export interface TurnUsage {
   tokensIn: number;
   tokensOut: number;
   costMicros: number;
 }
 
 /** Tokens and cost of one turn's model steps. An unpriced model still saves the turn; the spend gate already failed closed. */
-function turnUsage(modelId: string, steps: unknown): TurnUsage {
+export function turnUsage(modelId: string, steps: unknown): TurnUsage {
   let tokensIn = 0;
   let tokensOut = 0;
   let cost = BigInt(0);

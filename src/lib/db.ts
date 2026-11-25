@@ -344,6 +344,8 @@ export async function appUserQuery<T>(
 }
 
 const PLATFORM_ADMIN_TX_MODELS = [
+  "adminAssistantClientMessage",
+  "adminAssistantConversation",
   "aiAction",
   "aiConversation",
   "aiReviewFlag",
@@ -1022,6 +1024,154 @@ export async function saveCopilotTurn(
 ): Promise<void> {
   await tx.$executeRaw`
     UPDATE copilot_conversations
+    SET messages = ${JSON.stringify(input.messages)}::jsonb,
+        last_message_at = (clock_timestamp() AT TIME ZONE 'UTC'),
+        in_flight_until = NULL,
+        tokens_in = tokens_in + ${input.tokensIn},
+        tokens_out = tokens_out + ${input.tokensOut},
+        cost_micros = cost_micros + ${input.costMicros}
+    WHERE id = ${input.conversationId}
+  `;
+}
+
+/** Claims an admin's client message id for 60 seconds (#831). False when it is already claimed. */
+export async function insertAdminAssistantClientMessage(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  userId: string,
+  messageId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    INSERT INTO admin_assistant_client_messages (id, user_id, client_message_id, claimed_until, created_at)
+    VALUES (
+      ${crypto.randomUUID()}, ${userId}, ${messageId},
+      (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds',
+      (clock_timestamp() AT TIME ZONE 'UTC')
+    )
+    ON CONFLICT (user_id, client_message_id) DO NOTHING
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/** Takes over an admin's claim that lapsed without a reply. */
+export async function retakeAdminAssistantClientMessage(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  userId: string,
+  messageId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE admin_assistant_client_messages
+    SET claimed_until = (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds'
+    WHERE user_id = ${userId}
+      AND client_message_id = ${messageId}
+      AND reply IS NULL
+      AND claimed_until <= (clock_timestamp() AT TIME ZONE 'UTC')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function releaseAdminAssistantClientMessage(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  userId: string,
+  messageId: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    DELETE FROM admin_assistant_client_messages
+    WHERE user_id = ${userId} AND client_message_id = ${messageId} AND reply IS NULL
+  `;
+}
+
+/** Stores the reply on the admin's claimed message. False when the claim was lost. */
+export async function recordAdminAssistantReply(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  input: { userId: string; messageId: string; reply: string; conversationId: string },
+): Promise<boolean> {
+  const updated = await tx.$executeRaw`
+    UPDATE admin_assistant_client_messages
+    SET reply = ${input.reply}, conversation_id = ${input.conversationId}
+    WHERE user_id = ${input.userId} AND client_message_id = ${input.messageId} AND reply IS NULL
+  `;
+  return updated > 0;
+}
+
+/** False when the id is taken. */
+export async function insertAdminAssistantConversation(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  input: { id: string; userId: string; model: string },
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    INSERT INTO admin_assistant_conversations (id, user_id, model, messages, created_at, last_message_at)
+    VALUES (
+      ${input.id}, ${input.userId}, ${input.model}, '[]'::jsonb,
+      (clock_timestamp() AT TIME ZONE 'UTC'),
+      (clock_timestamp() AT TIME ZONE 'UTC')
+    )
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function deleteEmptyAdminAssistantConversation(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  conversationId: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    DELETE FROM admin_assistant_conversations WHERE id = ${conversationId} AND messages = '[]'::jsonb
+  `;
+}
+
+/** The copilot's 60-second lease, on an admin chat. Null while another turn holds it. */
+export async function takeAdminAssistantLease(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  conversationId: string,
+): Promise<string | null> {
+  const rows = await tx.$queryRaw<Array<{ token: string }>>`
+    UPDATE admin_assistant_conversations
+    SET in_flight_until = (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds'
+    WHERE id = ${conversationId}
+      AND (in_flight_until IS NULL OR in_flight_until <= (clock_timestamp() AT TIME ZONE 'UTC'))
+    RETURNING to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') AS token
+  `;
+  return rows[0]?.token ?? null;
+}
+
+export async function releaseAdminAssistantLease(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  conversationId: string,
+  token: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE admin_assistant_conversations
+    SET in_flight_until = NULL
+    WHERE id = ${conversationId}
+      AND to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') = ${token}
+  `;
+}
+
+/** Locks the admin chat row while this lease token still holds it. False when the lease was lost. */
+export async function lockAdminAssistantLease(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  conversationId: string,
+  token: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM admin_assistant_conversations
+    WHERE id = ${conversationId}
+      AND to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') = ${token}
+    FOR UPDATE
+  `;
+  return rows.length > 0;
+}
+
+/** Saves the turn's messages, releases the lease and adds the turn's usage. The caller holds lockAdminAssistantLease. */
+export async function saveAdminAssistantTurn(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  input: { conversationId: string; messages: unknown; tokensIn: number; tokensOut: number; costMicros: number },
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE admin_assistant_conversations
     SET messages = ${JSON.stringify(input.messages)}::jsonb,
         last_message_at = (clock_timestamp() AT TIME ZONE 'UTC'),
         in_flight_until = NULL,
