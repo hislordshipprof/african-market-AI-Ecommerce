@@ -6,6 +6,7 @@ import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server
 import { storeOwnerSignIn } from "./store-owner-auth";
 import { generateTOTP } from "./totp";
 import { contrastRatio } from "../src/lib/theme";
+import { PLAN_NAMES, PLAN_PRICES_USD, PLANS, planComparisonRows } from "../src/lib/billing/plan";
 
 // Both tests read Mama Ngozi's listing and the second changes it, so they never overlap.
 test.describe.configure({ mode: "serial" });
@@ -79,10 +80,11 @@ test("the root domain serves the Store directory and store hosts still serve the
     await expect(page.getByText("Tante Marie Caribbean Grocer")).toHaveCount(0);
     await expect(page).toHaveTitle(/Store directory/);
     // #810: every state with a listed store is one tap from the home, and the footer leads there.
-    const byState = page.getByRole("region", { name: "Stores by state" });
+    const byState = page.getByRole("region", { name: "Markets by state and city" });
     await expect(byState.getByRole("link", { name: /^Texas/ })).toHaveAttribute("href", "/stores/texas");
+    await expect(byState.getByRole("link", { name: /^Houston/ })).toHaveAttribute("href", "/stores/texas/houston");
     await expect(page.getByRole("contentinfo").getByRole("link", { name: "Stores by state" })).toHaveAttribute("href", "/#stores-by-state");
-    await shoot(page, "810-home-states", "Stores by state");
+    await shoot(page, "810-home-states", "Markets by state and city");
 
     await card.click();
     await expect(page).toHaveURL(`http://mama-ngozi.localhost:${port}/?ref=directory`);
@@ -161,7 +163,7 @@ test("the owner lists the store, writes the blurb and picks cuisines; the direct
     await expect(card).toContainText(blurb);
     // Cuisine tags show one per tag (#690), in the fixed list's order.
     await expect(card).toContainText(/West African.*East African.*Caribbean/);
-    await shoot(page, "450-directory-card", "Your food, from the families who know it");
+    await shoot(page, "450-directory-card", "Markets to order from");
 
     await page.goto(`${store}/store-admin/directory?store=mama-ngozi`);
     await listed.click();
@@ -232,7 +234,7 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     expect(await page.evaluate(() => (window as unknown as { locationAsks: number }).locationAsks)).toBe(1);
     await expect(page.getByText("Location is off for this site. Enter your ZIP code or city instead.")).toBeVisible();
     await expect(page.getByLabel("ZIP code or city")).toBeFocused();
-    await shoot(page, "452-near-denied", "Your food, from the families who know it");
+    await shoot(page, "452-near-denied", "Order from the African market near you");
 
     await page.getByLabel("ZIP code or city").fill("77002");
     await page.getByRole("button", { name: "Find stores" }).click();
@@ -250,12 +252,12 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await expect(kept).toHaveAttribute("aria-busy", "true");
     await expect(kept.getByText("Refreshing…")).toBeVisible();
     await expect(kept.getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^\d+ markets?$/ })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Markets to order from" })).toHaveCount(0);
     await shoot(page, "728-near-refreshing", "Stores near 77002");
     await expect(page.getByText("Search took too long to answer.")).toBeVisible({ timeout: 15_000 });
     await expect(kept).not.toHaveAttribute("aria-busy", "true");
     await expect(kept.getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^\d+ markets?$/ })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Markets to order from" })).toHaveCount(0);
     await expect(page.locator("[aria-live=polite]").getByText(/stores? found/)).toHaveCount(0);
     // Keyboard: ZIP field, Find stores, Use my location, then Retry.
     await page.getByLabel("ZIP code or city").focus();
@@ -304,16 +306,15 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
 
     await page.getByLabel("ZIP code or city").fill("New York, NY");
     await page.getByRole("button", { name: "Find stores" }).click();
-    await expect(page.getByRole("heading", { name: "No stores within 50 miles of New York, NY" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Mama Ngozi African Market Parkside/ })).toContainText(/1,\d{3} mi/);
-    await expect(page.getByRole("heading", { name: "Browse by state" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Texas", level: 3 })).toBeVisible();
-    await shoot(page, "452-near-fallback", "No stores within 50 miles of New York, NY");
+    await expect(page.getByRole("heading", { name: "No stores serve New York, NY yet" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "The closest stores" }).getByRole("link", { name: /Mama Ngozi African Market/ })).toContainText(/1,\d{3} mi/);
+    await expect(page.getByRole("region", { name: "Markets by state and city" }).getByRole("link", { name: /^Texas/ })).toBeVisible();
+    await shoot(page, "452-near-fallback", "No stores serve New York, NY yet");
 
     await page.getByLabel("ZIP code or city").fill("Springfield");
     await page.getByRole("button", { name: "Find stores" }).click();
     await page.getByRole("button", { name: "Springfield, IL" }).click();
-    await expect(page.getByRole("heading", { name: "No stores within 50 miles of Springfield, IL" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No stores serve Springfield, IL yet" })).toBeVisible();
 
     // 77001 is a real Houston ZIP of PO boxes only, so the Census ZIP areas leave it out.
     await page.getByLabel("ZIP code or city").fill("77001");
@@ -328,9 +329,8 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await away.goto(`${root}/`);
     await away.getByRole("button", { name: "Use my location" }).click();
     await expect(away.getByText("You look to be outside the US.")).toBeVisible();
-    await expect(away.getByRole("heading", { name: "Browse by state" })).toBeVisible();
-    await expect(away.getByRole("link", { name: "Mama Ngozi African Market" })).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
-    await shoot(away, "452-near-outside", "Browse by state");
+    await expect(away.getByRole("region", { name: "Markets by state and city" }).getByRole("link", { name: /^Texas/ })).toHaveAttribute("href", "/stores/texas");
+    await shoot(away, "452-near-outside", "Markets by state and city");
     await abroad.close();
 
     const houston = await browser.newContext({ permissions: ["geolocation"], geolocation: { latitude: 29.7604, longitude: -95.3698 } });
@@ -415,7 +415,7 @@ test("state and city pages: cached, GroceryStore JSON-LD, sitemap and robots, 40
     // The footer of a state page leads to every state from the home (#810).
     await page.getByRole("contentinfo").getByRole("link", { name: "Stores by state" }).click();
     await expect(page).toHaveURL(`${root}/#stores-by-state`);
-    const byState = page.getByRole("region", { name: "Stores by state" });
+    const byState = page.getByRole("region", { name: "Markets by state and city" });
     await expect(byState).toBeInViewport();
     await byState.getByRole("link", { name: /^Texas/ }).click();
     await expect(page).toHaveURL(`${root}/stores/texas`);
@@ -505,7 +505,7 @@ test("unlisting the only Houston store turns its city page into a 404 at once, a
 
 // Store cards (#453). Mama Ngozi is seeded in Houston (America/Chicago) with pickup, its own delivery within 8 miles
 // and an owner story; ZIP 77002 is about 5 miles away. The browser clock is fixed, so open and closed never depend on the hour.
-test("store cards: open now or opens at from the browser clock, distance, pickup and delivers to you, the owner's face and story", async ({ browser }) => {
+test("store cards: open now or opens at from the browser clock, distance, pickup, delivers to you and the store's own delivery fee", async ({ browser }) => {
   test.setTimeout(240_000);
   const port = await reservePort(laneSmokePort());
   const root = `http://localhost:${port}`;
@@ -521,8 +521,7 @@ test("store cards: open now or opens at from the browser clock, distance, pickup
     await expect(card).toContainText("Pickup");
     await expect(card).toContainText("Delivery");
     await expect(card).not.toContainText("Delivers to you");
-    await expect(card).toContainText("Run by Ngozi Okafor");
-    await expect(card).toContainText("bringing the flavors of home");
+    await expect(card).toContainText("Delivery · $4.99");
     await expect(card).toContainText("West African");
 
     await page.getByLabel("ZIP code or city").fill("77002");
@@ -585,7 +584,7 @@ test("no store nearby: the shopper asks to hear when one opens, and platform adm
     await shopper.goto(`${root}/`);
     await shopper.getByLabel("ZIP code or city").fill("10001");
     await shopper.getByRole("button", { name: "Find stores" }).click();
-    await expect(shopper.getByRole("heading", { name: "No stores within 50 miles of 10001" })).toBeVisible();
+    await expect(shopper.getByRole("heading", { name: "No stores serve 10001 yet" })).toBeVisible();
     const panel = shopper.getByRole("region", { name: "Tell me when a store opens near me" });
     await expect(panel.getByLabel("ZIP code", { exact: true })).toHaveValue("10001");
     await panel.getByLabel("Email or mobile number").fill(`${marker}@example.com`);
@@ -629,4 +628,93 @@ test("no store nearby: the shopper asks to hear when one opens, and platform adm
   await expect(page.getByText(`${marker}@example.com`)).toHaveCount(0);
   await shoot(page, "455-admin-requests", "Store requests");
   await clearStoreRequests("10001", marker);
+});
+
+test("directory home B2 (#863): hero search, the owner link, delivery or pickup, plans from plan.ts, the empty area, LCP on slow 4G", async ({ browser }) => {
+  test.setTimeout(240_000);
+  const port = await reservePort(laneSmokePort());
+  const root = `http://localhost:${port}`;
+  const running = await rootServer(port);
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, timezoneId: "America/Chicago" });
+    const page = await context.newPage();
+    await page.goto(`${root}/`);
+    await expect(page.getByRole("heading", { level: 1, name: "Order from the African market near you" })).toBeVisible();
+    // Cuisine is a filter on results only: no tiles, no chips before a search.
+    await expect(page.getByText(/Shop by cuisine/i)).toHaveCount(0);
+    await expect(page.getByRole("list", { name: "Filter markets by cuisine" })).toHaveCount(0);
+
+    // The plan table is plan.ts, row for row.
+    const plans = page.getByRole("table", { name: "Starter and Pro compared" });
+    for (const plan of PLANS) {
+      await expect(plans.getByRole("columnheader", { name: new RegExp(`${PLAN_NAMES[plan]}\\s*\\$${PLAN_PRICES_USD[plan]}`) })).toBeVisible();
+    }
+    const rows = planComparisonRows();
+    await expect(plans.getByRole("rowheader")).toHaveText(rows.map((row) => `${row.label}${row.comingSoon ? " (coming soon)" : ""}`));
+    for (const row of rows) {
+      const cells = PLANS.map((plan) => {
+        const value = row[plan];
+        return typeof value === "string" ? value : `${value ? "Included" : "Not included"} on ${PLAN_NAMES[plan]}`;
+      });
+      const name = new RegExp(`^${row.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+      await expect(plans.getByRole("row", { name })).toContainText(cells.join(""));
+    }
+
+    // The search splits stores whose own delivery reaches the shopper from pickup ones. The answer gains a pickup-only copy.
+    await page.route("**/api/directory/near**", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const [first] = body.stores;
+      body.stores = [
+        { ...first, deliversToYou: true },
+        { ...first, slug: "t863-pickup", name: "Pickup Only Market", deliversToYou: false, storeDeliveryEnabled: false, storeDeliveryFeeCents: null, courierMayDeliver: false },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    await page.getByLabel("ZIP code or city").fill("77002");
+    await page.getByRole("button", { name: "Find stores" }).click();
+    const door = page.getByRole("region", { name: "Delivers to your door" });
+    const pickup = page.getByRole("region", { name: "Pickup nearby" });
+    await expect(door.getByRole("link", { name: /Mama Ngozi African Market/ })).toContainText("Delivers to you · $4.99");
+    await expect(door.getByRole("link")).toHaveCount(1);
+    await expect(pickup.getByRole("link", { name: /Pickup Only Market/ })).toContainText("Pickup");
+    await expect(pickup.getByRole("link", { name: /Pickup Only Market/ })).not.toContainText("$");
+    await expect(page.getByRole("region", { name: "Stores near 77002" }).getByRole("list", { name: "Filter markets by cuisine" })).toBeVisible();
+    await shoot(page, "863-results", "Stores near 77002");
+    await page.unroute("**/api/directory/near**");
+
+    // No store within 50 miles: the request form, the closest stores and the sell page.
+    await page.getByLabel("ZIP code or city").fill("10001");
+    await page.getByRole("button", { name: "Find stores" }).click();
+    await expect(page.getByRole("heading", { name: "No stores serve 10001 yet" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Tell me when a store opens near me" }).getByLabel("ZIP code", { exact: true })).toHaveValue("10001");
+    await expect(page.getByRole("region", { name: "The closest stores" }).getByRole("link", { name: /Mama Ngozi African Market/ })).toBeVisible();
+    await shoot(page, "863-empty", "No stores serve 10001 yet");
+
+    await page.goto(`${root}/`);
+    await shoot(page, "863-home", "Order from the African market near you");
+    // The owner's way in from the hero.
+    const hero = page.getByRole("region", { name: "Order from the African market near you" });
+    await hero.getByRole("link", { name: "Open your store" }).click();
+    await expect(page).toHaveURL(`${root}/sell`);
+    await expect(page.getByRole("heading", { level: 1, name: "Sell on African Markets" })).toBeVisible();
+    await context.close();
+
+    // Lighthouse's mobile slow 4G, as for the city page: the home must keep the 2.5 s LCP budget.
+    const slow = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const phone = await slow.newPage();
+    const cdp = await slow.newCDPSession(phone);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 562.5, downloadThroughput: (1474.56 * 1024) / 8, uploadThroughput: (607.5 * 1024) / 8 });
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+    await phone.goto(`${root}/`, { waitUntil: "load" });
+    const lcp = await phone.evaluate(() => new Promise<number>((resolve) => {
+      new PerformanceObserver((list) => resolve(list.getEntries().at(-1)!.startTime)).observe({ type: "largest-contentful-paint", buffered: true });
+    }));
+    console.log(`Home LCP on slow 4G: ${Math.round(lcp)} ms`);
+    expect(lcp).toBeLessThan(2500);
+    await slow.close();
+  } finally {
+    await running.stop();
+  }
 });
