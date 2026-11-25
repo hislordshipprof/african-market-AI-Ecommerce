@@ -16,6 +16,7 @@ import { findCourierIncidents, NOTE_MAX } from "../courier-incidents-query";
 import { saveCourierSettingsAction } from "../courier-settings-actions";
 import { retryCourierRegistration } from "../courier-retry";
 import { setStoreMetro } from "../metros";
+import { WORKFLOW_KINDS } from "./workflow-kinds";
 
 type Actor = { id: string; email: string };
 type Json = Prisma.InputJsonValue;
@@ -37,6 +38,16 @@ export interface DraftView {
   /** Set when the change cannot be taken back, such as an email that goes out. */
   warning: string | null;
   href: string | null;
+  /** A workflow's steps, run in this order on confirm (#833). */
+  steps?: string[];
+  /** A batch's items, each with its problems; the admin unticks any to leave out (#833). */
+  items?: DraftItem[];
+}
+
+export interface DraftItem {
+  key: string;
+  label: string;
+  problems: string[];
 }
 
 export const DRAFT_STATES = ["pending", "applying", "confirmed", "rejected", "expired", "stale"] as const;
@@ -55,7 +66,7 @@ export interface AdminDraftCard extends DraftView {
  * The confirm side of each draft kind. `params` is what the tool drafted; `snapshot` reads what the change depends on
  * now, so a card drafted against other values goes stale; `apply` calls the admin screen's own function.
  */
-interface Kind<P> {
+export interface Kind<P> {
   params: z.ZodType<P>;
   /** The params key the card's editable text goes into. */
   editKey?: keyof P & string;
@@ -232,6 +243,7 @@ export const KINDS = {
       return result.ok ? { ok: true, outcome: "Your reply is on the thread." } : result;
     },
   } satisfies Kind<{ threadId: string; body: string }>,
+  ...WORKFLOW_KINDS,
 } as const;
 
 export type AdminDraftKind = keyof typeof KINDS;

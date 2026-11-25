@@ -22,6 +22,7 @@ import { listRefundFailedOrders } from "../refund-resolution";
 import { listStoreRequestAreas } from "../store-requests";
 import { ROWS_MAX, type AssistantLink } from "./types";
 import { draftTools } from "./draft-tools";
+import { workflowTools } from "./workflow-tools";
 import type { PendingAdminDraft } from "./drafts";
 
 const dollars = (cents: number | bigint) => Number(cents) / 100;
@@ -77,6 +78,7 @@ export function adminAssistantTools(ctx: ToolContext) {
   const { book } = ctx;
   return {
     ...draftTools(ctx),
+    ...workflowTools(ctx),
     find_stores: tool({
       description: "Find stores by name or slug and/or status (setup is still onboarding). Each store has its plan, metro, open go-live items and each courier's registration error.",
       inputSchema: z.object({
