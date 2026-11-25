@@ -149,6 +149,14 @@ export interface CreateListingInput {
 }
 
 /** The aisle id when it names a platform category; anything else is refused. The FK guards a later delete. */
+export const DESCRIPTION_MAX = 600;
+
+function checkedDescription(text: string | null): string | null {
+  const trimmed = text?.trim() ?? "";
+  if (trimmed.length > DESCRIPTION_MAX) throw new ListingInputError(`Description must be ${DESCRIPTION_MAX} characters or fewer`);
+  return trimmed || null;
+}
+
 async function checkedAisle(categoryId: string | null): Promise<string | null> {
   if (categoryId === null) return null;
   const category = await platform.category.findUnique({ where: { id: categoryId }, select: { id: true } });
@@ -252,6 +260,8 @@ export interface UpdateListingInput {
   customName?: string | null;
   masterProductId?: string | null;
   categoryId?: string | null;
+  /** #820: trimmed; blank clears it. */
+  description?: string | null;
   price?: number;
   stockMode?: StockMode;
   qty?: number | null;
@@ -298,6 +308,7 @@ export async function updateListingInTransaction(tx: ListingTx, input: UpdateLis
   if (input.customName !== undefined) data.customName = input.customName;
   if (input.masterProductId !== undefined) data.masterProductId = input.masterProductId;
   if (input.categoryId !== undefined) data.categoryId = await checkedAisle(input.categoryId);
+  if (input.description !== undefined) data.description = checkedDescription(input.description);
   if (input.price !== undefined) data.price = input.price;
   if (input.stockMode !== undefined) data.stockMode = input.stockMode;
   if (input.frozen !== undefined) data.frozen = input.frozen;
@@ -365,6 +376,21 @@ export async function updateListingInTransaction(tx: ListingTx, input: UpdateLis
         entityId: input.listingId,
         before: { prepared: existing.prepared, prepMinutes: existing.prepMinutes, cateringLeadHours: existing.cateringLeadHours, cateringMinQty: existing.cateringMinQty, active: existing.active },
         after: { prepared: listing.prepared, prepMinutes: listing.prepMinutes, cateringLeadHours: listing.cateringLeadHours, cateringMinQty: listing.cateringMinQty, active: listing.active },
+      },
+    });
+  }
+
+  if (listing.description !== existing.description) {
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.actor.id,
+        actorEmail: input.actor.email,
+        action: "listing.description_change",
+        entityType: "listing",
+        entityId: input.listingId,
+        before: { description: existing.description },
+        after: { description: listing.description },
       },
     });
   }

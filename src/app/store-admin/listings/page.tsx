@@ -44,6 +44,7 @@ export default async function ListingsPage() {
         cateringMinQty: l.cateringMinQty,
         active: l.active,
         maxPerOrder: l.maxPerOrder,
+        description: l.description,
         variants: l.variants.map((v) => ({
           id: v.id,
           label: v.label,
