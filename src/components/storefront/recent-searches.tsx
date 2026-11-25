@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { Clock3, ArrowUpRight } from "lucide-react";
+import { recentSearches } from "./search-combobox";
 const subscribe = (listener: () => void) => {
   window.addEventListener("storage", listener);
   return () => window.removeEventListener("storage", listener);
@@ -18,16 +19,7 @@ export function RecentSearches({ storeId }: { storeId: string }) {
     },
     () => "[]",
   );
-  let terms: string[] = [];
-  try {
-    const data: unknown = JSON.parse(raw);
-    if (Array.isArray(data))
-      terms = data
-        .filter((v): v is string => typeof v === "string" && v.length < 100)
-        .slice(0, 6);
-  } catch {
-    /* Ignore invalid history. */
-  }
+  const terms = recentSearches(raw);
   return (
     <>
       {terms.length > 0 && (

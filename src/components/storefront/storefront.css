@@ -169,10 +169,10 @@ html:has(.sf-header) {
   }
   /* Once the page scrolls, the phone header drops its ZIP row so it stays near its old height. */
   /* Never while the ZIP form or search results are open: a scroll must not hide them mid-entry. */
-  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover, .sf-search-dropdown)) {
+  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover, .sf-search-dropdown:not([hidden]))) {
     clip-path: inset(0 0 54px 0);
   }
-  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover, .sf-search-dropdown)) .sf-header-window {
+  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover, .sf-search-dropdown:not([hidden]))) .sf-header-window {
     visibility: hidden;
   }
 }
@@ -400,8 +400,48 @@ html:has(.sf-header) {
   padding: 12px;
   border-radius: 8px;
 }
-.sf-search-dropdown a:hover {
+.sf-search-dropdown a:hover,
+.sf-search-dropdown a[data-active="true"] {
   background: var(--color-soft);
+}
+.sf-suggest-group + .sf-suggest-group {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-line);
+}
+.sf-suggest-label {
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.sf-search-dropdown .sf-suggest-term {
+  min-height: 44px;
+  padding-block: 8px;
+  font-size: 14px;
+}
+.sf-suggest-term > svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.sf-suggest-term small {
+  display: block;
+}
+.sf-suggest-product {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 4px;
+}
+.sf-suggest-product > a {
+  flex: 1;
+  min-width: 0;
+}
+.sf-suggest-all {
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-primary-text);
 }
 .sf-search-dropdown .sf-product-image {
   width: 48px;
