@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { isStoreOpen, nextOpening, openMinutesDeadline, weeklyHours } from "./store-hours";
+import { isStoreOpen, nextOpening, openMinutesDeadline, storeOpenAt, weeklyHours } from "./store-hours";
 
 const NY = "America/New_York";
 const CHICAGO = "America/Chicago";
@@ -316,5 +316,60 @@ describe("weeklyHours (#783)", () => {
     expect(weeklyHours(null)).toEqual([]);
     expect(weeklyHours("open late")).toEqual([]);
     expect(weeklyHours({})).toEqual([]);
+  });
+});
+
+describe("one-off day hours under hours.dates (#819)", () => {
+  const WEEK = {
+    monday: "9:00 AM - 8:00 PM", tuesday: "9:00 AM - 8:00 PM", wednesday: "9:00 AM - 8:00 PM", thursday: "9:00 AM - 8:00 PM",
+    friday: "9:00 AM - 8:00 PM", saturday: "9:00 AM - 8:00 PM", sunday: "9:00 AM - 8:00 PM",
+  };
+  // New York is UTC-5 in late November; 2026-11-25 is a Wednesday.
+  const et = (local: string) => new Date(`${local}:00-05:00`);
+
+  it("closes early on the date only, and the next day keeps its weekly hours", () => {
+    const hours = { ...WEEK, dates: { "2026-11-25": "9:00 AM - 6:00 PM" } };
+    expect(isStoreOpen(hours, NY, et("2026-11-25T17:30"))).toBe(true);
+    expect(isStoreOpen(hours, NY, et("2026-11-25T18:30"))).toBe(false);
+    expect(isStoreOpen(hours, NY, et("2026-11-26T18:30"))).toBe(true);
+    expect(isStoreOpen(WEEK, NY, et("2026-11-25T18:30"))).toBe(true);
+  });
+
+  it("is closed all of a Closed date; the same weekday a week later is open", () => {
+    const hours = { ...WEEK, dates: { "2026-11-26": "Closed" } };
+    expect(isStoreOpen(hours, NY, et("2026-11-26T12:00"))).toBe(false);
+    expect(isStoreOpen(hours, NY, et("2026-12-03T12:00"))).toBe(true);
+    expect(nextOpening(hours, NY, et("2026-11-26T08:00"))).toEqual(et("2026-11-27T09:00"));
+  });
+
+  it("keeps the previous night's overnight window running into a Closed date, then stays closed", () => {
+    const late = { ...WEEK, monday: "8:00 PM - 2:00 AM", tuesday: "8:00 PM - 2:00 AM", dates: { "2026-11-24": "Closed" } };
+    expect(isStoreOpen(late, NY, et("2026-11-24T01:00"))).toBe(true);
+    expect(isStoreOpen(late, NY, et("2026-11-24T02:00"))).toBe(false);
+    expect(isStoreOpen(late, NY, et("2026-11-24T21:00"))).toBe(false);
+  });
+
+  it("a date that replaces an overnight day carries nothing past midnight", () => {
+    const late = { ...WEEK, monday: "8:00 PM - 2:00 AM", dates: { "2026-11-23": "9:00 AM - 6:00 PM" } };
+    expect(isStoreOpen(late, NY, et("2026-11-23T10:00"))).toBe(true);
+    expect(isStoreOpen(late, NY, et("2026-11-24T01:00"))).toBe(false);
+  });
+
+  it("opens on a date even when the weekday is closed, and storeOpenAt and the deadline agree", () => {
+    const hours = { ...WEEK, sunday: "Closed", dates: { "2026-11-29": "10:00 AM - 2:00 PM" } };
+    expect(isStoreOpen(hours, NY, et("2026-11-29T11:00"))).toBe(true);
+    expect(storeOpenAt(hours, NY)(et("2026-11-29T11:00").getTime())).toBe(true);
+    expect(storeOpenAt(hours, NY)(et("2026-11-29T14:00").getTime())).toBe(false);
+    expect(openMinutesDeadline(hours, NY, et("2026-11-29T13:30"), 60)).toEqual(et("2026-11-30T09:30"));
+  });
+
+  it("ignores a dates value or key it cannot read, so the week behaves as before", () => {
+    expect(isStoreOpen({ ...WEEK, dates: "soon" }, NY, et("2026-11-25T19:00"))).toBe(true);
+    expect(isStoreOpen({ ...WEEK, dates: { tomorrow: "Closed", "2026-13-01": "Closed" } }, NY, et("2026-11-25T19:00"))).toBe(true);
+  });
+
+  it("never lists dates as a day of the week", () => {
+    expect(weeklyHours({ ...WEEK, dates: { "2026-11-26": "Closed" } })).toHaveLength(7);
+    expect(weeklyHours({ dates: { "2026-11-26": "Closed" } })).toEqual([]);
   });
 });

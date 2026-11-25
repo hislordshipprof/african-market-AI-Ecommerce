@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { platformAdmin, platformAdminTransaction } from "../db";
+import { platformAdmin, platformAdminTransaction, storeScopedTransaction, updateStoreOneOff } from "../db";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn, revalidateTag: vi.fn() }));
@@ -69,5 +69,17 @@ describe.skipIf(!hasDb)("checkout offers store delivery and Ship only when their
     const { settings } = await getFlowContext();
     expect(settings.storeDeliveryEnabled).toBe(true);
     expect(settings.shipsTo).toEqual([]);
+  });
+
+  it("hides store delivery while delivery is paused and says until when; Ship stays (#819)", async () => {
+    setup("proof-bucket", "1");
+    const pause = (until: Date | null) => storeScopedTransaction(storeId, (tx) => updateStoreOneOff(tx, storeId, { deliveryPausedUntil: until }));
+    await pause(new Date(Date.now() + 2 * 60 * 60_000));
+    const paused = (await getFlowContext()).settings;
+    expect(paused).toMatchObject({ storeDeliveryEnabled: false, courierOffered: false });
+    expect(paused.deliveryPausedUntil).toMatch(/^\d{1,2}:\d{2} [AP]M /);
+    expect(paused.shipsTo).toContain(ALLOWED);
+    await pause(new Date(Date.now() - 60_000));
+    expect((await getFlowContext()).settings).toMatchObject({ storeDeliveryEnabled: true, deliveryPausedUntil: "" });
   });
 });

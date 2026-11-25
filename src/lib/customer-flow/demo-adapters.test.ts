@@ -21,6 +21,7 @@ const store: FlowStore = {
   opensAt: "9 am",
   readyAt: "9:30 AM",
   takingOrders: true,
+  deliveryPausedUntil: "",
 };
 const catalog = [
   {

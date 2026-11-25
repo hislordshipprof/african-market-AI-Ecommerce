@@ -26,6 +26,7 @@ import { appliedCouponId, COURIER_NOT_OFFERED, computeQuote, withTax, type Couri
 import { cheapestRate, ShippingProviderError, type ShippingProvider } from "../shipping/provider";
 import { lineShips, orderWeightG, shipRefusal, type ShipLine } from "../shipping/eligibility";
 import { storeDeliveryOffered } from "../delivery/store-delivery-offered";
+import { activeDeliveryPause, DeliveryPausedError, deliveryPausedMessage, pausesWith } from "../delivery/delivery-pause";
 import { readShippingStates, shippingProvider, shippingReady } from "../shipping/settings";
 import { couponCustomerKey, CouponRefusedError, customerRefusal, readCartCoupon, removeCartCoupon } from "../coupon/checkout";
 import { buildCourierRequest, courierProviders, quoteCourier } from "../delivery/dispatch";
@@ -262,6 +263,11 @@ async function untaxedQuote(
     stockLeft: line.variant.listing.stockLeft,
     listingId: line.variant.listing.id,
   }));
+  const pausedUntil = pausesWith(fulfillment) ? activeDeliveryPause(store, new Date()) : null;
+  if (pausedUntil) {
+    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee, null, null, coupon);
+    return { ...quote, problems: [...quote.problems, { code: "ineligible", message: deliveryPausedMessage(pausedUntil, store.timezone, new Date()) }] };
+  }
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
     const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee, null, null, coupon);
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
@@ -510,6 +516,7 @@ export { SavedCardUnavailableError } from "./saved-card-payment";
 export { LiveModeBlockedError } from "./live-mode";
 export { StoreNotTakingOrdersError } from "../order/store-queue";
 export { SlotUnavailableError } from "./slots";
+export { DeliveryPausedError } from "../delivery/delivery-pause";
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
@@ -767,6 +774,9 @@ export async function recordAuthorizedOrder(
         ? storeAvailability(hours.hours, hours.timezone, now)
         : ({ kind: "unavailable" } as const);
       if (availability.kind === "unavailable") throw new StoreNotTakingOrdersError();
+      // A hold taken before the owner paused delivery (#819) is refused here, under the lock.
+      const pausedUntil = pausesWith(input.fulfillment) ? activeDeliveryPause(lockedStore, now) : null;
+      if (pausedUntil) throw new DeliveryPausedError(deliveryPausedMessage(pausedUntil, lockedStore.timezone, now));
       // Under the same lock, so two orders cannot both take a slot's last place (#565).
       await assertSlotOffered(tx, storeId, lockedStore, input.fulfillment, input.pickupSlot, now, input.cartId);
 
@@ -1508,6 +1518,7 @@ export async function placeOrder(
       error instanceof BasketChangedError
       || error instanceof StoreNotTakingOrdersError
       || error instanceof SlotUnavailableError
+      || error instanceof DeliveryPausedError
     ) {
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw error;

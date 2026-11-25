@@ -1,11 +1,12 @@
 import { Prisma } from "@prisma/client";
-import { platformAdminTransaction } from "../db";
+import { lockStoreRow, platformAdminTransaction } from "../db";
 import { readSlotForm } from "../admin/slot-form";
 import { revalidateStore } from "../get-store";
 import { VALID_US_TIMEZONES } from "../admin/timezone";
 import { MINIMUM_ORDER_MAX_CENTS, STORE_ABOUT_MAX } from "./fields";
 import { storePhone } from "./store-phone";
 import { weeklyHoursError, writeWeeklyHours, type WeekHours } from "./weekly-hours";
+import { keepOneOffDays } from "./store-change";
 
 
 export interface StoreSettingsInput {
@@ -59,6 +60,9 @@ export async function saveStoreSettings(storeId: string, input: StoreSettingsInp
   const store = await platformAdminTransaction(async (tx) => {
     const before = await tx.store.findUnique({ where: { id: storeId }, select: { id: true, slug: true, customDomain: true, ...AUDITED } });
     if (!before) return null;
+    // One-off days (#819) are kept, read under the store lock so one confirmed meanwhile is not lost; past days are dropped.
+    const locked = await lockStoreRow(tx, storeId);
+    after.hours = keepOneOffDays(after.hours, locked.hours, input.timezone, new Date());
     await tx.store.update({
       where: { id: storeId },
       data: {

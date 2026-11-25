@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { storeScoped } from "../db";
+import { platform, storeScoped, storeScopedTransaction, updateStoreOneOff } from "../db";
 
 const state = vi.hoisted(() => ({ headers: new Headers(), userId: "", revalidated: [] as string[] }));
 
@@ -32,7 +32,8 @@ vi.mock("../auth", () => ({
   },
 }));
 
-import { updateStoreSettings } from "./settings-actions";
+import { removeStoreChange, updateStoreSettings } from "./settings-actions";
+import { addDays, storeToday } from "../analytics/range";
 import { readGoLiveChecklist } from "../go-live/checklist";
 import { DEFAULT_WEEK } from "../store-settings/weekly-hours";
 
@@ -163,5 +164,22 @@ describe.skipIf(!hasDb)("updateStoreSettings (#786)", () => {
     as(ids.staff);
     await expect(updateStoreSettings({ ...VALID, minimumOrderCents: 9900 })).rejects.toThrow(/REDIRECT/);
     expect((await row()).minimumOrderCents).toBe(0);
+  });
+
+  it("the owner removes a one-off day and the delivery pause; staff cannot; a malformed ref is refused (#819)", async () => {
+    const day = addDays(storeToday("America/Chicago"), 2);
+    await storeScopedTransaction(ids.a, async (tx) => {
+      await updateStoreOneOff(tx, ids.a, { hours: { ...((await row()).hours as object), dates: { [day]: "Closed" } } });
+      await updateStoreOneOff(tx, ids.a, { deliveryPausedUntil: new Date(Date.now() + 60 * 60_000) });
+    });
+    as(ids.staff);
+    await expect(removeStoreChange({ deliveryPause: true })).rejects.toThrow(/REDIRECT/);
+    as(ids.owner);
+    expect((await removeStoreChange({ date: "soon" })).ok).toBe(false);
+    expect(await removeStoreChange({ date: day })).toEqual({ ok: true });
+    expect(await removeStoreChange({ deliveryPause: true })).toEqual({ ok: true });
+    const pause = await platform.store.findUniqueOrThrow({ where: { id: ids.a }, select: { deliveryPausedUntil: true } });
+    expect(pause.deliveryPausedUntil).toBeNull();
+    expect((await row()).hours).not.toHaveProperty("dates");
   });
 });
