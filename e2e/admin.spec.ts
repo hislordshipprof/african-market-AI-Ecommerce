@@ -937,7 +937,7 @@ test.describe("AI and onboarding settings (#561)", () => {
       await expect(page.getByTestId("last-changed")).toContainText(`Last changed by ${ADMIN_EMAIL}`);
 
       // The browser's own range check is lifted so the server's refusal is what the admin sees.
-      await page.locator("form").evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+      await page.locator("form").filter({ hasText: "Listings needed to go live" }).evaluate((form: HTMLFormElement) => { form.noValidate = true; });
       await page.getByLabel("Listings needed to go live").fill("0");
       await page.getByRole("button", { name: "Save settings" }).click();
       await expect(page.getByText("Enter whole listings from 1 to 200.")).toBeVisible();

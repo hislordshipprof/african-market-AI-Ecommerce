@@ -14,6 +14,11 @@ const THREAD_LIST_LIMIT = 100;
 /** The platform's Messages queue: escalated and not resolved. The queue and the order detail's link to it both read this. */
 export const PLATFORM_QUEUE_WHERE = { escalatedAt: { not: null }, state: { not: "resolved" } } satisfies Prisma.SupportThreadWhereInput;
 
+/** Threads in the queue that wait on the platform team: still escalated, never answered, or the customer wrote since the last reply. */
+export function platformWaitingWhere(lastReplyAt: Prisma.FieldRef<"SupportThread", "DateTime">): Prisma.SupportThreadWhereInput {
+  return { ...PLATFORM_QUEUE_WHERE, OR: [{ state: "escalated" }, { lastReplyAt: null }, { lastCustomerAt: { gt: lastReplyAt } }] };
+}
+
 export type ThreadMessage = {
   id: string;
   sender: "customer" | "store" | "platform";

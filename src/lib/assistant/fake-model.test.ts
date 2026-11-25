@@ -130,6 +130,16 @@ describe("assistant e2e fake", () => {
     expect(await call("Approve the clean products in the review queue for E2E Grains")).toMatchObject({ name: "draft_review_approve", input: { category: "e2e grains", onlyClean: false } });
   });
 
+  it("drafts a forced go-live, and reads the stuck stores from the briefing's question (#834)", async () => {
+    const { url, ...init } = basketRequest();
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    const call = async (content: string) => ((await (await scriptedAssistantFetch(url, {
+      ...init, body: JSON.stringify({ ...body, stream: undefined, messages: [{ role: "user", content }] }),
+    })).json()) as { content: Array<{ name: string; input: unknown }> }).content[0];
+    expect(await call("Force go-live for e2e-golive-834")).toMatchObject({ name: "draft_force_go_live", input: { slug: "e2e-golive-834" } });
+    expect(await call("Which stores have been in setup for more than 3 days, and what is still open for each?")).toMatchObject({ name: "find_stores", input: { status: "setup" } });
+  });
+
   it("drafts the admin assistant's store suspension, and refuses to make anyone a platform admin (#832)", async () => {
     const { url, ...init } = basketRequest();
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;

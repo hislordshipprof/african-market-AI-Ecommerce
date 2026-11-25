@@ -15,6 +15,7 @@ import {
   type SpeechState,
 } from "@/lib/assistant/ui/speech";
 import { confirmAdminAssistantDraft, rejectAdminAssistantDraft, sendAdminAssistantMessage } from "@/lib/admin/assistant/actions";
+import { briefingSummary, type AdminBriefing } from "@/lib/admin/assistant/briefing-view";
 import type { AdminDraftCard } from "@/lib/admin/assistant/drafts";
 import type { AdminAssistantMessage, AssistantLink } from "@/lib/admin/assistant/types";
 import { AdminDraftCardView, type DraftChoice } from "./draft-card";
@@ -47,10 +48,12 @@ export function AdminAssistantPanel({
   conversationId: initialConversationId,
   messages: initialMessages,
   drafts: initialDrafts,
+  briefing,
 }: {
   conversationId: string | null;
   messages: AdminAssistantMessage[];
   drafts: Record<string, AdminDraftCard[]>;
+  briefing: AdminBriefing;
 }) {
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState(initialMessages);
@@ -103,13 +106,14 @@ export function AdminAssistantPanel({
     }
   }
 
-  function send() {
+  /** Sends the box's text, or a briefing item's fixed question when one is tapped. */
+  function send(fixed?: string) {
     if (speechRef.current) {
       recognizerRef.current?.stop();
       speechRef.current = sealSpeech(speechRef.current);
       setSpeech(speechRef.current);
     }
-    const draft = text;
+    const draft = fixed ?? text;
     const messageId = crypto.randomUUID();
     startTransition(async () => {
       const result = await sendAdminAssistantMessage({ conversationId: conversationId ?? undefined, messageId, text: draft });
@@ -118,7 +122,7 @@ export function AdminAssistantPanel({
         return;
       }
       setNotice(null);
-      setText("");
+      if (fixed === undefined) setText("");
       speechRef.current = null;
       setSpeech(null);
       setConversationId(result.conversationId);
@@ -153,6 +157,7 @@ export function AdminAssistantPanel({
 
   return (
     <section aria-labelledby="assistant-chat-heading" className="mt-6 flex flex-col gap-6">
+      <Briefing briefing={briefing} disabled={pending} onAsk={(ask) => send(ask)} />
       <div className="flex min-h-11 flex-wrap items-end justify-between gap-3">
         <h2 id="assistant-chat-heading" className="text-lg font-semibold text-foreground">Chat</h2>
         <Button
@@ -252,6 +257,37 @@ export function AdminAssistantPanel({
           </div>
         </div>
       </form>
+    </section>
+  );
+}
+
+/** What needs an admin today (#834): each item opens its screen, or asks the assistant its fixed question in one tap. */
+function Briefing({ briefing, disabled, onAsk }: { briefing: AdminBriefing; disabled: boolean; onAsk: (ask: string) => void }) {
+  const { items, unread } = briefing;
+  return (
+    <section aria-labelledby="briefing-heading" className="rounded-xl border border-border bg-card px-4 py-4">
+      <h2 id="briefing-heading" className="text-lg font-semibold text-foreground">Today</h2>
+      <p className="mt-1 text-base text-muted-foreground">
+        {items.length === 0 && unread.length > 0 ? "Part of today's list could not be read. Ask the assistant instead." : briefingSummary(items)}
+      </p>
+      {items.length > 0 ? (
+        <ul className="mt-3 flex flex-col divide-y divide-border">
+          {items.map((item) => (
+            <li key={item.key} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+              <div className="min-w-0 flex-1 basis-56">
+                <Link href={item.href} className="text-base font-semibold text-foreground underline-offset-4 hover:underline focus-visible:underline">
+                  {item.label}{item.incomplete ? " or more" : ""}
+                </Link>
+                {item.names.length > 0 ? <p className="mt-0.5 break-words text-sm text-muted-foreground">{item.names.join(", ")}</p> : null}
+              </div>
+              <Button type="button" variant="outline" disabled={disabled} className="min-h-11 rounded-full px-4" onClick={() => onAsk(item.ask)}>
+                Ask the assistant
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {items.length > 0 && unread.length > 0 ? <p className="mt-2 text-sm text-muted-foreground">Part of today&rsquo;s list could not be read.</p> : null}
     </section>
   );
 }
