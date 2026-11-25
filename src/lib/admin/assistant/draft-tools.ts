@@ -7,7 +7,7 @@ import { applicationChecks } from "../../store-application/checks";
 import { REJECT_REASON_MAX } from "../../store-application/fields";
 import { listStoreApplications } from "../../store-application/service";
 import { listStores, getStoreSubscription } from "../actions";
-import { REVIEW_LABELS, REVIEW_LABEL_TEXT } from "../ai-review";
+import { conversationHref, REVIEW_LABELS, REVIEW_LABEL_TEXT } from "../ai-review";
 import { getCourierIncident } from "../courier-incidents";
 import { NOTE_MAX } from "../courier-incidents-query";
 import { listMetros } from "../metros";
@@ -324,7 +324,7 @@ export function draftTools(ctx: ToolContext) {
           : tx.copilotConversation.findUnique({ where: { id: input.conversationId }, select: { id: true, store: { select: { id: true, name: true } } } }));
         if (!conversation) return refused("That chat is no longer stored.");
         const note = input.note.trim();
-        const href = `/admin/ai/conversations/${input.kind}/${input.conversationId}`;
+        const href = conversationHref(input.kind, input.conversationId);
         link(book, `${input.kind === "shopper" ? "Shopper" : "Copilot"} chat, ${conversation.store.name}`, href);
         return addDraft(ctx, "conversation_label", conversation.store.id, { ...input, note }, {
           title: `Label ${input.kind} AI chat`,
