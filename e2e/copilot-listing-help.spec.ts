@@ -150,6 +150,7 @@ test("the store chat links each listing to fix to its form, and the owner edits 
 
   await waiting.getByLabel("Description shoppers see").fill(`${DRAFTED} From Nigeria.`);
   await waiting.getByRole("button", { name: "Save description" }).click();
+  await expect(sheet.getByLabel("Settled drafts").getByText("Done")).toBeVisible();
   await expect(sheet.getByText(`${DRAFTED} From Nigeria.`)).toBeVisible();
 
   const prisma = db();

@@ -11,6 +11,9 @@ import styles from "./dock.module.css";
 /** Bars fixed or stuck to the bottom of a page carry this attribute; the button rises above them. */
 export const DOCK_AVOID = "data-assistant-avoid";
 
+/** An open Base UI or Radix dialog from the page (both portal to <body>, outside the sheet). */
+const FOREIGN_DIALOG = ['[role="dialog"]', '[role="alertdialog"]'].flatMap((role) => [`${role}[data-open]`, `${role}[data-state="open"]`]).join(", ");
+
 /**
  * The floating assistant button and its chat sheet, for the platform admin and the store admin (#855).
  * Mounted in the area's layout, so the chat, the open state and the draft survive moving between pages.
@@ -89,14 +92,14 @@ export function AssistantDock({
   useEffect(() => {
     if (!open) return;
     const check = () => {
-      const foreign = Array.from(document.querySelectorAll('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'))
+      const foreign = Array.from(document.querySelectorAll(FOREIGN_DIALOG))
         .some((element) => !dialog.current?.contains(element));
       if (!foreign) return;
       steppedAside.current = true;
       setOpen(false);
     };
     const observer = new MutationObserver(check);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-state"] });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-open", "data-state"] });
     return () => observer.disconnect();
   }, [open]);
 
