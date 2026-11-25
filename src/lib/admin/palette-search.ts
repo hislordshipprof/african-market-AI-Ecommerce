@@ -1,7 +1,9 @@
 "use server";
 
+import { z } from "zod";
 import { platformAdminTransaction } from "../db";
-import { parsePaletteQuery } from "./palette-query";
+import { parseInput } from "../security/parse-input";
+import { PALETTE_QUERY_MAX, parsePaletteQuery } from "./palette-query";
 import { searchOrders } from "./order-search-query";
 import { requirePlatformAdmin } from "./session";
 
@@ -17,7 +19,8 @@ export type PaletteResults = {
 /** The ⌘K palette's stores and orders (#859). Read only; orders go through the order search, by store and number. */
 export async function paletteSearchAction(query: string): Promise<PaletteResults> {
   await requirePlatformAdmin();
-  const { text, number } = parsePaletteQuery(typeof query === "string" ? query : "");
+  const input = parseInput(z.string().max(PALETTE_QUERY_MAX), query);
+  const { text, number } = parsePaletteQuery(input.ok ? input.data : "");
   if (!text) return { stores: [], orders: [] };
   const stores = await platformAdminTransaction((tx) => tx.store.findMany({
     where: { OR: [{ name: { contains: text, mode: "insensitive" } }, { slug: { contains: text, mode: "insensitive" } }] },
