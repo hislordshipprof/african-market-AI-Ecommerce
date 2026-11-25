@@ -221,6 +221,10 @@ export async function loadAdminAssistantChat(userId: string): Promise<{ conversa
   if (!conversation) return { conversationId: null, messages: [] };
   return {
     conversationId: conversation.id,
-    messages: parseAdminMessages(conversation.messages).map(({ costMicros: _cost, ...message }) => message),
+    messages: parseAdminMessages(conversation.messages).map((message) => {
+      const shown = { ...message };
+      delete shown.costMicros;
+      return shown;
+    }),
   };
 }
