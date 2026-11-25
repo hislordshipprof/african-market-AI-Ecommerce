@@ -31,7 +31,7 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
 | Fulfilment | Pickup and the store's own delivery | Adds **courier delivery** (DoorDash or Uber, cheaper one picked, automatic switch-over) |
 | Notifications | Email and web push to the store; email and SMS order updates to shoppers | Same |
 | Customer chat | In-app chat with shoppers | Same |
-| Store copilot | Stock alerts, daily digest, confirm-requests and stock movement | Adds the **Store assistant (AI chat)**: the copilot chat, which drafts stock changes, coupons, price changes and one-day hours or delivery changes for the owner to confirm (#819) and answers sales questions from the store's own records (#818, owner 2026-11-24); **voice and photo stock reports**, **reorder suggestions** (#551; Pro under the rule above, owner confirmation pending), and **WhatsApp** for copilot and alerts once built |
+| Store copilot | Stock alerts, daily digest, confirm-requests and stock movement | Adds the **Store assistant (AI chat)**: the copilot chat, which drafts stock changes, coupons, price changes, one-day hours or delivery changes and product descriptions for the owner to confirm (#819, #820), lists the listings that need fixing, suggests replies to customer messages for the owner to edit and send (#820) and answers sales questions from the store's own records (#818, owner 2026-11-24); **voice and photo stock reports**, **reorder suggestions** (#551; Pro under the rule above, owner confirmation pending), and **WhatsApp** for copilot and alerts once built |
 | Staff | Owner + **2 staff** | **Unlimited staff** |
 | Analytics | Per-order payout breakdown | Adds the **analytics dashboard** (#498) |
 | Payouts | Weekly Stripe payouts, per-order breakdown | Same |
