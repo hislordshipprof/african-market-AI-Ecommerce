@@ -24,6 +24,9 @@ import { listDirectoryStores } from "@/lib/directory/stores";
 import { storefrontUrl } from "@/lib/directory/links";
 import { DirectoryHome } from "@/components/directory/directory-home";
 import { statePages } from "@/lib/directory/places";
+import { feeNote } from "@/lib/directory/fee-note";
+import { pilotOffer } from "@/lib/billing/service";
+import { readServiceFeeSettings } from "@/lib/order/service-fee-settings";
 
 export default async function StorefrontPage() {
   const headerList = await headers();
@@ -34,13 +37,15 @@ export default async function StorefrontPage() {
       const href = storefrontUrl(store.slug, host);
       return href ? [{ ...store, href }] : [];
     });
-    const states = statePages(stores).map(({ code, name, slug, stores }) => ({
+    const states = statePages(stores).map(({ code, name, slug, stores, cities }) => ({
       code,
       name,
       href: `/stores/${slug}`,
-      stores: stores.map(({ slug, name, city, href }) => ({ slug, name, city, href })),
+      count: stores.length,
+      cities: cities.map((city) => ({ name: city.name, href: `/stores/${slug}/${city.slug}`, count: city.stores.length })),
     }));
-    return <DirectoryHome stores={stores} states={states} />;
+    const [offer, fees] = await Promise.all([pilotOffer(), readServiceFeeSettings()]);
+    return <DirectoryHome stores={stores} states={states} offer={offer} feeNote={feeNote(fees)} />;
   }
   const { store, suspended } = await getStoreWithStatus();
   const checkout = checkCheckoutReady(store);

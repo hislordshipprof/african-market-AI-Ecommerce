@@ -1,17 +1,26 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { BODIJA_MARKET, POSTER_MID_MEDIA, POSTER_WIDE_MEDIA } from "@/components/story-surface/scenes";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowLeftRight, BellRing, Camera, Landmark, MapPin, Palette, Plus, Smartphone, Sparkles, Store, Truck, UserRound,
+} from "lucide-react";
+import { PlanComparison } from "@/components/billing/plan-comparison";
 import { cuisineChips } from "@/lib/directory/cuisine-filter";
-import { directoryCounts, ownerQuotes, type OwnerQuote } from "@/lib/directory/home-story";
+import { SELL_STEPS } from "@/lib/store-application/steps";
 import ordersScreen from "../../../public/images/directory/store-admin-orders.webp";
+import egusi from "../../../public/images/products/egusi-seeds-whole.webp";
+import garri from "../../../public/images/products/garri-yellow.webp";
+import palmOil from "../../../public/images/products/palm-oil-red.webp";
 import { DirectoryFooter, STATES_ANCHOR } from "./directory-footer";
 import { NearMe, type StateGroup } from "./near-me";
 import type { CardStore } from "./store-card";
 import styles from "./directory.module.css";
 
-export function DirectoryHome({ stores, states }: { stores: CardStore[]; states: StateGroup[] }) {
-  const quotes = ownerQuotes(stores);
+/**
+ * The Store directory home, design B2 (#863): the shopper's search first, then what the platform gives
+ * shoppers and store owners. Plans, the pilot offer and the fee note come from code, never this page.
+ */
+export function DirectoryHome({ stores, states, offer, feeNote }: { stores: CardStore[]; states: StateGroup[]; offer?: string; feeNote: string }) {
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
@@ -20,171 +29,249 @@ export function DirectoryHome({ stores, states }: { stores: CardStore[]; states:
       </header>
       <main>
         <NearMe
-          states={states}
           stores={stores}
           chips={cuisineChips(stores)}
-          backdrop={<HeroPhoto />}
           intro={(
             <>
-              <h1 id="directory-title" className={styles.heroTitle}>Your food, from the families who know it</h1>
+              <h1 id="directory-title" className={styles.heroTitle}>Order from the African market near you</h1>
               <p className={styles.heroLede}>
-                Independent markets across the US, run by people who stock what you grew up cooking. Find one near you, then order pickup or delivery from that market&apos;s own shop.
+                African Markets puts independent African and Caribbean grocery markets online. Each one has its own shop, with its own shelves and prices, for pickup or delivery.
               </p>
             </>
           )}
-          counts={<Counts {...directoryCounts(stores)} />}
+          owner={(
+            <div className={styles.heroOwner}>
+              <p><strong>Own a market?</strong> Get your own online store, with no commission on your sales.</p>
+              <Link href="/sell" className={styles.outlineLight}>
+                <Store aria-hidden="true" size={16} />
+                Open your store
+              </Link>
+            </div>
+          )}
+          figure={<HeroFigure />}
         />
-        {states.length > 0 ? <StoresByState states={states} /> : null}
-        <HowItWorks />
-        {quotes.length > 0 ? <OwnerStories quotes={quotes} /> : null}
-        <ForOwners />
+        <ForShoppers feeNote={feeNote} />
+        <ForOwners offer={offer} />
+        {states.length > 0 ? <ByState states={states} /> : null}
+        <section aria-labelledby="close-title" className={styles.section}>
+          <div className={styles.closing}>
+            <div>
+              <h2 id="close-title" className={styles.closingTitle}>Run an African or Caribbean market? Bring it online.</h2>
+              <p className={styles.note}>Apply in about three minutes. Our team reviews every store and replies by email.</p>
+            </div>
+            <div className={styles.actions}>
+              <Link href="/sell" className={styles.primaryButton}>Apply to sell</Link>
+              <a href="#plans" className={styles.outlineButton}>See plans</a>
+            </div>
+          </div>
+        </section>
       </main>
       <DirectoryFooter />
     </div>
   );
 }
 
-// A real market in Ibadan, credited in public/images/CREDITS.md; the caption says so, so nobody takes it for a store here.
-function HeroPhoto() {
-  const scene = BODIJA_MARKET;
+// The demo store's own products and prices (prisma/seed-demo-catalog.ts), drawn as its shop; the caption says so.
+const DEMO_SHELF = [
+  { name: "Yellow Garri (Ijebu), 1 lb", price: "$6.99", image: garri },
+  { name: "Egusi, 8 oz", price: "$10.99", image: egusi },
+  { name: "Palm Oil, 500 ml", price: "$7.99", image: palmOil },
+];
+
+/** One order, both sides: a market's own shop, and the real store-admin Orders screen on a phone. */
+function HeroFigure() {
   return (
-    <>
-      <picture className={styles.heroPhoto}>
-        <source media={POSTER_WIDE_MEDIA} srcSet={scene.posterWide.src} />
-        <source media={POSTER_MID_MEDIA} srcSet={scene.posterMid.src} />
-        <img src={scene.posterTall.src} width={scene.posterTall.width} height={scene.posterTall.height} alt="" fetchPriority="high" />
-      </picture>
-      <p className={styles.heroCredit}>Photo: a stall at {scene.place}, Nigeria, by {scene.photographer}</p>
-    </>
+    <figure className={styles.heroFigure}>
+      <div className={styles.shop} aria-hidden="true">
+        <div className={styles.shopHead}>
+          <span className={styles.shopLogo}>MN</span>
+          <span className={styles.shopName}>
+            <span>Mama Ngozi</span>
+            <span className={styles.shopOpen}><span className={styles.openDot} />Open now</span>
+          </span>
+          <span className={styles.shopToggle}><span data-on>Pickup</span><span>Delivery</span></span>
+        </div>
+        <div className={styles.shopAisles}>
+          <span data-on>Grains and flours</span><span>Spices</span><span>Oils</span><span>Vegetables</span>
+        </div>
+        <ul className={styles.shopShelf}>
+          {DEMO_SHELF.map((item) => (
+            <li key={item.name}>
+              <span className={styles.shopWell}>
+                <Image src={item.image} alt="" sizes="120px" className={styles.shopImage} />
+              </span>
+              <span className={styles.shopItem}>{item.name}</span>
+              <span className={styles.shopPrice}>
+                {item.price}
+                <span className={styles.shopAdd}><Plus size={16} /></span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className={styles.shopAsk}><Sparkles size={16} />Shop with AI: &quot;everything for egusi soup for six&quot;</div>
+      </div>
+      <div className={styles.heroPhone}>
+        <Image
+          src={ordersScreen}
+          alt="The store admin Orders screen on a phone, with demo orders marked New, Accepted, Picking and Awaiting pickup."
+          sizes="170px"
+        />
+      </div>
+      <figcaption className={styles.heroCaption}>
+        <span><strong>Shoppers</strong> order from the market&apos;s own shop. Demo store.</span>
+        <span className={styles.heroCaptionOwner}><strong>Owners</strong> run orders from a phone.</span>
+      </figcaption>
+    </figure>
   );
 }
 
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+type Benefit = { icon: LucideIcon; title: string; body: string };
 
-/** True counts of listed stores; a zero is left out, and all zeros show nothing. */
-function Counts({ markets, cities, states }: { markets: number; cities: number; states: number }) {
-  const parts = [
-    markets > 0 ? plural(markets, "market", "markets") : null,
-    cities > 0 ? plural(cities, "city", "cities") : null,
-    states > 0 ? plural(states, "state", "states") : null,
-  ].filter((part): part is string => part !== null);
-  if (parts.length === 0) return null;
-  return (
-    <ul className={styles.counts} aria-label="Listed today">
-      {parts.map((part) => <li key={part}>{part}</li>)}
-    </ul>
-  );
-}
+// Each claim is true in the product today (#863): checked against the storefront, checkout and store admin.
+const SHOPPER_BENEFITS: Benefit[] = [
+  { icon: MapPin, title: "Markets that serve your address", body: "Enter a ZIP code. See who delivers to you, and who is close enough for pickup." },
+  { icon: Store, title: "The market's own shelves and prices", body: "Search by the names you use at home: ugu, ata rodo, iru." },
+  { icon: Truck, title: "Pickup or delivery", body: "Pick a pickup time, or get it delivered by the market's driver or a courier, where the market offers it." },
+  { icon: ArrowLeftRight, title: "You set the swap rule", body: "For each item: exact item only, let the store suggest, or name your own swap. If an item runs short, you get a message to swap or refund." },
+  { icon: Sparkles, title: "Shop with AI, if you like", body: "Say what you are cooking or send a photo of your list. It fills the cart; you check it and pay." },
+  { icon: UserRound, title: "One account for every market", body: "Sign in once and use it at any market here, or check out as a guest." },
+];
 
-/** Every state with a listed store, so its page is one tap from home (#810); each state page links its cities. */
-function StoresByState({ states }: { states: StateGroup[] }) {
-  return (
-    <section aria-labelledby={STATES_ANCHOR} className={`${styles.section} ${styles.byState}`}>
-      <h2 id={STATES_ANCHOR} className={styles.sectionTitle}>Stores by state</h2>
-      <ul className={styles.placeLinks}>
-        {states.map((state) => (
-          <li key={state.code}>
-            <Link href={state.href} className={styles.placeLink}>
-              {state.name}
-              <span className={styles.placeCount}>{state.stores.length}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-const STEPS = [
-  { title: "Find your market", body: "Search by ZIP code or city, or browse by where home is." },
+const SHOPPING_STEPS = [
+  { title: "Find your market", body: "Search by ZIP code or city, or browse by state." },
   { title: "Shop on its own site", body: "Each market has its own shop, shelves and prices. Your cart stays with that market." },
   { title: "Pay that market directly", body: "The market is the seller, so its name is on your card statement. It packs your order for pickup or delivery." },
 ];
 
-function HowItWorks() {
+function ForShoppers({ feeNote }: { feeNote: string }) {
   return (
-    <section aria-labelledby="how-title" className={styles.band}>
-      <div className={styles.section}>
-        <h2 id="how-title" className={styles.sectionTitle}>How it works</h2>
-        <ol className={styles.steps}>
-          {STEPS.map(({ title, body }, index) => (
+    <section id="shoppers" aria-labelledby="shoppers-title" className={styles.section}>
+      <div className={styles.split}>
+        <div>
+          <h2 id="shoppers-title" className={styles.bigTitle}>For shoppers: the market you know, now online</h2>
+          <p className={styles.note}>You shop one market at a time, on that market&apos;s own site. The market&apos;s own staff pack your order, and your cart stays with the market you chose.</p>
+        </div>
+        <ul className={styles.benefits}>
+          {SHOPPER_BENEFITS.map(({ icon: Icon, title, body }) => (
             <li key={title}>
-              <span className={styles.stepNumber} aria-hidden="true">{index + 1}</span>
-              <h3 className={styles.stepTitle}>{title}</h3>
-              <p className={styles.stepBody}>{body}</p>
+              <span className={styles.benefitIcon}><Icon aria-hidden="true" size={20} /></span>
+              <span>
+                <span className={styles.benefitTitle}>{title}</span>
+                <span className={styles.benefitBody}>{body}</span>
+              </span>
             </li>
           ))}
-        </ol>
+        </ul>
+      </div>
+      <div className={styles.howPanel}>
+        <h3 className={styles.panelTitle}>How shopping works</h3>
+        <Steps steps={SHOPPING_STEPS} columns />
+        <p className={styles.feeNote}>{feeNote}</p>
       </div>
     </section>
   );
 }
 
-// Store photos ship as .svg placeholders until the owner adds one, as on the storefront's story strip.
-const ownerPhoto = (url: string | null) => (url && !url.endsWith(".svg") ? url : null);
-
-function OwnerStories({ quotes }: { quotes: OwnerQuote[] }) {
-  return (
-    <section aria-labelledby="stories-title" className={styles.section}>
-      <h2 id="stories-title" className={styles.sectionTitle}>In the owners&apos; words</h2>
-      <ul className={styles.quotes} data-count={quotes.length}>
-        {quotes.map((quote) => {
-          const photo = ownerPhoto(quote.ownerPhotoUrl);
-          return (
-            <li key={quote.slug}>
-              <figure className={styles.quote}>
-                <blockquote className={styles.quoteText}><p>{quote.quote}</p></blockquote>
-                <figcaption className={styles.quoteBy}>
-                  {photo ? <Image className={styles.quoteFace} src={photo} alt="" width={40} height={40} unoptimized /> : null}
-                  <span>
-                    {quote.ownerName ? <span className={styles.quoteName}>{quote.ownerName}</span> : null}
-                    <span className={styles.quoteStore}>{quote.name}</span>
-                  </span>
-                </figcaption>
-              </figure>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-const PITCH = [
-  { title: "Your own branded site", body: "Your name, logo and colors on your own shop, not a listing in someone else's." },
-  { title: "Your own customers", body: "Shoppers order from your shop, and the relationship stays yours." },
-  { title: "No commission on your sales", body: "Set your own prices and keep your sales." },
+const OWNER_BENEFITS: Benefit[] = [
+  { icon: Palette, title: "Your brand, your shop", body: "Your shop carries your name, logo and colours, with your own hours and pickup times." },
+  { icon: Smartphone, title: "Orders on your phone", body: "Accept, pick from a list, mark what is short, and tap Ready." },
+  { icon: Camera, title: "Products from shelf photos", body: "Photograph a shelf; we draft the listings and you check the prices. CSV import too." },
+  { icon: Truck, title: "Pickup and delivery", body: "Pickup and your own driver on every plan. Uber or DoorDash couriers on Pro." },
+  { icon: BellRing, title: "A copilot for your stock", body: "Stock alerts and a daily digest on every plan. Chat with the store assistant on Pro." },
+  { icon: Landmark, title: "Paid through Stripe", body: "Customers pay by card at checkout, and Stripe pays your sales into your bank." },
 ];
 
-function ForOwners() {
+function ForOwners({ offer }: { offer?: string }) {
   return (
-    <section aria-labelledby="owners-title" className={styles.owners}>
-      <div className={`${styles.section} ${styles.ownersInner}`}>
+    <section id="sell" aria-labelledby="owners-title" className={styles.section}>
+      <div className={styles.owners}>
         <div className={styles.ownersText}>
-          <h2 id="owners-title" className={styles.ownersTitle}>Run a market? Put it online under your own name.</h2>
-          <ul className={styles.pitch}>
-            {PITCH.map((point) => (
-              <li key={point.title}>
-                <span className={styles.pitchTitle}>{point.title}</span>
-                <span className={styles.pitchBody}>{point.body}</span>
+          <h2 id="owners-title" className={styles.bigTitle}>For store owners: your market, with its own online store</h2>
+          <p>Your shop goes out under your name, to your customers. You pay a flat monthly plan, and no commission on your sales.</p>
+          <ul className={styles.ownerBenefits}>
+            {OWNER_BENEFITS.map(({ icon: Icon, title, body }) => (
+              <li key={title}>
+                <Icon aria-hidden="true" size={20} />
+                <span>
+                  <span className={styles.benefitTitle}>{title}</span>
+                  <span className={styles.benefitBody}>{body}</span>
+                </span>
               </li>
             ))}
           </ul>
-          <Link className={styles.ownersButton} href="/sell">
-            Sell on African Markets
-            <ArrowRight aria-hidden="true" size={18} />
-          </Link>
+          <div className={styles.actions}>
+            <Link href="/sell" className={styles.accentButton}>Apply to sell</Link>
+            <a href="#plans" className={styles.outlineLight}>Compare plans</a>
+          </div>
         </div>
-        <figure className={styles.screen}>
-          <Image
-            className={styles.screenImage}
-            src={ordersScreen}
-            alt="The Orders screen of a store admin on a phone: five orders, each with its number, status, customer, item count and total."
-            sizes="(min-width: 900px) 300px, 70vw"
-          />
-          <figcaption className={styles.screenCaption}>The order screen in the store admin, shown with the demo store&apos;s test orders.</figcaption>
+        <figure className={styles.ownersScreen}>
+          <figcaption>The real Orders screen, demo store.</figcaption>
+          <div className={styles.ownersPhone}>
+            <Image
+              src={ordersScreen}
+              alt="The Orders screen in the store admin, on a phone, with demo orders."
+              sizes="(min-width: 768px) 290px, 240px"
+            />
+          </div>
         </figure>
       </div>
+      <div className={styles.sellGrid}>
+        <div>
+          <h3 className={styles.panelTitle}>How opening a store works</h3>
+          <Steps steps={SELL_STEPS} />
+          <p className={styles.note}>Any independent US grocery or food store can apply. Restaurants cannot join yet.</p>
+        </div>
+        <div className={styles.planTheme}>
+          <PlanComparison offer={offer} recommend />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Steps({ steps, columns }: { steps: readonly { title: string; body: string }[]; columns?: boolean }) {
+  return (
+    <ol className={styles.steps} data-columns={columns || undefined}>
+      {steps.map(({ title, body }, index) => (
+        <li key={title}>
+          <span className={styles.stepNumber} aria-hidden="true">{index + 1}</span>
+          <span>
+            <span className={styles.benefitTitle}>{title}</span>
+            <span className={styles.benefitBody}>{body}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Every state with a listed store and its cities, one tap from home (#810); footers link here. */
+function ByState({ states }: { states: StateGroup[] }) {
+  return (
+    <section aria-labelledby={STATES_ANCHOR} className={styles.section}>
+      <h2 id={STATES_ANCHOR} className={styles.sectionTitle}>Markets by state and city</h2>
+      <ul className={styles.stateCards}>
+        {states.map((state) => (
+          <li key={state.code} className={styles.stateCard}>
+            <Link href={state.href} className={styles.stateLink}>
+              {state.name}
+              <span className={styles.placeCount}>{state.count === 1 ? "1 market" : `${state.count} markets`}</span>
+            </Link>
+            {state.cities.length > 0 ? (
+              <ul className={styles.cityLinks}>
+                {state.cities.map((city) => (
+                  <li key={city.href}>
+                    <Link href={city.href}>
+                      <span>{city.name}</span>
+                      <span className={styles.placeCount}>{city.count}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

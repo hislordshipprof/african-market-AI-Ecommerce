@@ -46,8 +46,8 @@
   gap: 16px;
   border-bottom: 1px solid var(--d-line);
   background: var(--d-surface);
-  /* Lines the wordmark up with the 1080px content column. */
-  padding: 14px max(20px, calc((100% - 1080px) / 2));
+  /* Lines the wordmark up with the 1216px content column. */
+  padding: 14px max(20px, calc((100% - 1216px) / 2));
 }
 
 .wordmark {
@@ -58,6 +58,9 @@
 }
 
 .sell {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   font-size: 15px;
   font-weight: 600;
   color: var(--d-ink);
@@ -78,7 +81,7 @@
   gap: 8px 24px;
   border-top: 1px solid var(--d-line);
   background: var(--d-surface);
-  padding: 20px max(20px, calc((100% - 1080px) / 2));
+  padding: 20px max(20px, calc((100% - 1216px) / 2));
 }
 
 .footerLinks {
@@ -106,7 +109,7 @@
 }
 
 .main {
-  max-width: 1120px;
+  max-width: 1256px;
   margin: 0 auto;
   padding: 40px 20px 64px;
 }
@@ -152,20 +155,20 @@
   padding: 0;
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
 }
 
 .grid > li {
   display: flex;
 }
 
+/* The B2 card (#863): the store's photo or colour, its plate, then name, area and how to order. */
 .card {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
   min-width: 0;
-  padding: 20px;
+  overflow: hidden;
   border: 1px solid var(--d-line);
   border-radius: 16px;
   background: var(--d-surface);
@@ -179,31 +182,65 @@
   translate: 0 -2px;
 }
 
+.card:hover .name {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .card:focus-visible {
-  outline: 2px solid var(--d-primary);
+  outline: 2px solid var(--d-ink);
   outline-offset: 2px;
 }
 
-.cardHead {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  min-width: 0;
+.cardMedia {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 7;
+  background: var(--card-brand, var(--d-primary-deep));
 }
 
-.logo,
-.initials,
-.face {
-  flex: none;
-  width: 56px;
-  height: 56px;
+.cardMedia[data-photo] {
+  aspect-ratio: 16 / 9;
+  background: var(--d-raised);
 }
 
-/* The Logo Plate Rule: a white plate in both themes, so dark lettering reads. */
-.logo {
-  border-radius: 12px;
+.cardPhoto {
+  object-fit: cover;
+  object-position: center 30%;
+}
+
+.cardOpen {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--d-surface);
+  box-shadow: 0 1px 3px rgb(var(--d-scrim) / 0.2);
+}
+
+/* OpenNow is empty until the browser clock answers. */
+.cardOpen:has(> .open:empty) {
+  display: none;
+}
+
+.cardPlate {
+  position: absolute;
+  bottom: -20px;
+  left: 16px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: 8px;
   background: #ffffff;
-  border: 1px solid var(--d-line);
+  box-shadow: 0 0 0 4px var(--d-surface);
+}
+
+.logo {
+  width: 44px;
+  height: 44px;
   object-fit: contain;
   padding: 4px;
 }
@@ -211,132 +248,86 @@
 .initials {
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  background: var(--d-primary-deep);
+  width: 100%;
+  height: 100%;
+  background: var(--card-brand, var(--d-primary-deep));
   color: #ffffff;
   font-family: var(--font-display), system-ui, sans-serif;
   font-weight: 700;
-  font-size: 18px;
+  font-size: 15px;
 }
 
-.face {
-  border-radius: 999px;
-  object-fit: cover;
-  background: var(--d-raised);
+.cardBody {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 30px 16px 16px;
 }
 
-.heading {
+.cardTitle {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .name {
+  min-width: 0;
   font-family: var(--font-display), system-ui, sans-serif;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.2px;
+  line-height: 1.3;
   overflow-wrap: anywhere;
+}
+
+.distance {
+  flex: none;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .place {
-  font-size: 14px;
   color: var(--d-muted);
+  font-size: 14px;
 }
 
 .blurb {
-  font-size: 16px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.owner {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--d-line);
-}
-
-.ownerName {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.story {
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--d-muted);
-  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  line-clamp: 2;
   overflow: hidden;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .flags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 6px 14px;
+  margin-top: 2px;
 }
 
-.flag,
-.tag {
+.flag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 28px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--d-raised);
 }
 
-.tag {
-  background: var(--d-soft);
-}
-
-/* A courier is only a maybe until checkout quotes it: an outline, not a fill. */
 .flag[data-maybe] {
-  background: none;
-  border-color: var(--d-line-strong);
   color: var(--d-muted);
+  font-weight: 500;
 }
 
-/* A quiet text affordance: the whole card is the link, so no filled button repeats on every card (#728). */
-.visit {
-  margin-top: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-start;
-  color: var(--d-primary);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.25;
+.fee {
+  margin-left: 4px;
+  color: var(--d-muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
-.visit svg {
-  flex: none;
-  transition: translate 200ms cubic-bezier(0.4, 0.4, 0, 1);
-}
-
-.card:hover .visit {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.card:hover .visit svg {
-  translate: 3px 0;
-}
-
-/* Reserves the line on the server, where it stays empty: hours are read in the browser (#453). */
 .open {
   display: flex;
   align-items: center;
@@ -383,26 +374,14 @@
 
 @media (prefers-reduced-motion: reduce) {
   .card,
-  .visit,
-  .visit svg,
-  .results[data-refreshing] > .grid,
+  .results[data-refreshing] .grid,
   .chip {
     transition: none;
   }
 
-  .card:hover,
-  .card:hover .visit svg {
+  .card:hover {
     translate: none;
   }
-}
-
-.distance {
-  margin-left: auto;
-  flex: none;
-  align-self: flex-start;
-  font-size: 14px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
 .search {
@@ -564,7 +543,7 @@
 }
 
 /* The last results stay readable while a new search runs, dimmed so they read as not yet current. */
-.results[data-refreshing] > .grid {
+.results[data-refreshing] .grid {
   opacity: 0.6;
   transition: opacity 160ms ease-out;
 }
@@ -820,193 +799,581 @@ a.wordmark:focus-visible,
   outline-offset: 2px;
 }
 
-/* ---- Directory home (#690) ---- */
+/* ---- Directory home, design B2 (#863) ---- */
 
-/* The 1120px column every home section shares, lined up with the bar's wordmark. */
+/* The column every home section shares, lined up with the bar's wordmark. */
 .section {
-  max-width: 1120px;
+  max-width: 1256px;
   margin: 0 auto;
-  padding: 56px 20px;
-}
-
-/* Follows the store list's own section, so its top padding would double the gap. */
-.byState {
-  padding-top: 0;
-}
-
-.section > .results:last-child {
-  margin-bottom: 0;
+  padding: 56px 20px 0;
 }
 
 .sectionTitle {
   font-family: var(--font-display), system-ui, sans-serif;
-  font-size: clamp(24px, 3vw, 30px);
+  font-size: 24px;
   font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.4px;
+  line-height: 1.2;
+  letter-spacing: -0.3px;
   text-wrap: balance;
-  margin: 0 0 20px;
+  margin: 0;
 }
 
-/* Always a dark ground, so it takes the dark palette's action colours in both themes. */
+.bigTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: clamp(30px, 4vw, 38px);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.5px;
+  text-wrap: balance;
+  max-width: 17ch;
+  margin: 0 0 12px;
+}
+
+.panelTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.results > .resultsHead {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.count {
+  margin: 0;
+  font-size: 15px;
+}
+
+.group {
+  margin-top: 28px;
+}
+
+.group > .note {
+  margin-top: -8px;
+  margin-bottom: 16px;
+}
+
+.groupTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 16px;
+}
+
+/* Hero: always a deep green ground, so it carries its own light text and action colours in both themes. */
 .hero {
-  --h-primary: #5fd08a;
-  --h-on-primary: #0b2615;
-  position: relative;
-  isolation: isolate;
-  overflow: clip;
-  background: #0a4527;
+  background: var(--d-primary-deep);
   color: #ffffff;
+  overflow: clip;
 }
 
-.heroPhoto,
-.heroPhoto img {
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  width: 100%;
-  height: 100%;
-}
-
-.heroPhoto img {
-  object-fit: cover;
-  object-position: 42% 50%;
-}
-
-/* The Scrim Rule: never under 0.66 where text sits, so white text holds AA on any pixel of the photo. */
-.hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  /* Phones: the produce shows clear at the top; the text starts at 168px, where the scrim is already 0.78. */
-  background: linear-gradient(180deg, rgb(var(--d-scrim) / 0.12) 0, rgb(var(--d-scrim) / 0.2) 64px, rgb(var(--d-scrim) / 0.78) 168px, rgb(var(--d-scrim) / 0.86) 100%);
-}
-
-@media (min-width: 900px) {
-  .hero::before {
-    background: linear-gradient(90deg, rgb(var(--d-scrim) / 0.86) 0%, rgb(var(--d-scrim) / 0.74) 52%, rgb(var(--d-scrim) / 0.2) 82%, rgb(var(--d-scrim) / 0.1) 100%);
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .hero::before {
-    background-color: rgb(148 137 127 / 0.08);
-  }
-}
-
-.heroBody {
-  max-width: 1120px;
+.heroInner {
+  max-width: 1256px;
   margin: 0 auto;
-  padding: 168px 20px 72px;
+  padding: 32px 20px 40px;
+  display: grid;
+  gap: 40px;
 }
 
-.heroBody > * {
-  max-width: 600px;
-}
-
-@media (min-width: 900px) {
-  .heroBody {
-    min-height: min(640px, 78dvh);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 72px 20px 88px;
+@media (min-width: 1024px) {
+  .heroInner {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    padding-block: 56px 64px;
   }
+}
+
+.heroText {
+  min-width: 0;
 }
 
 .heroTitle {
   font-family: var(--font-display), system-ui, sans-serif;
-  font-size: clamp(34px, 5.6vw, 60px);
-  font-weight: 700;
-  line-height: 1.04;
-  letter-spacing: -1.2px;
+  font-size: clamp(36px, 5.2vw, 56px);
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -1px;
+  max-width: 14ch;
   text-wrap: balance;
-  margin: 0 0 16px;
+  margin: 0;
 }
 
 .heroLede {
-  font-size: 18px;
+  max-width: 46ch;
+  margin: 16px 0 0;
+  font-size: 17px;
   line-height: 1.5;
-  margin: 0 0 28px;
   color: rgb(255 255 255 / 0.9);
   text-wrap: pretty;
 }
 
-.hero .search {
-  margin-bottom: 12px;
+@media (min-width: 768px) {
+  .heroLede {
+    font-size: 18px;
+  }
 }
 
-.hero .searchLabel {
-  font-size: 15px;
+.hero .search {
+  max-width: 672px;
+  margin: 24px 0 0;
+}
+
+.hero .searchRow {
+  display: grid;
+  gap: 8px;
+}
+
+@media (min-width: 640px) {
+  .hero .searchRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+.searchField {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.searchField svg {
+  position: absolute;
+  left: 16px;
+  color: #5f5f58;
+  pointer-events: none;
+}
+
+/* White field and accent button on the deep ground in both themes: their contrast is fixed, not themed. */
+.hero .searchInput {
+  width: 100%;
+  height: 56px;
+  padding: 0 16px 0 48px;
+  border: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1a1a18;
+  font-size: 17px;
+}
+
+.hero .searchInput::placeholder {
+  color: #5f5f58;
 }
 
 .hero .searchButton {
-  background: var(--h-primary);
-  color: var(--h-on-primary);
+  height: 56px;
+  padding: 0 28px;
+  border-radius: 999px;
+  background: #a8ddb5;
+  color: #0f2a1b;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.hero .searchButton:hover:not(:disabled) {
+  background: #ffffff;
 }
 
 .hero .locate {
+  margin-top: 8px;
   color: #ffffff;
   text-decoration: underline;
-  text-decoration-color: rgb(255 255 255 / 0.5);
   text-underline-offset: 4px;
 }
 
-.hero .searchInput:focus-visible,
-.hero .searchButton:focus-visible,
-.hero .locate:focus-visible,
-.hero .choiceButton:focus-visible {
+.hero :focus-visible {
   outline-color: #ffffff;
 }
 
-.hero .note {
-  color: #ffffff;
-  font-weight: 500;
-}
-
 .hero .status {
-  margin-bottom: 16px;
+  margin: 12px 0 0;
+  max-width: 672px;
 }
 
-.counts {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
+.hero .note {
+  color: rgb(255 255 255 / 0.9);
+}
+
+.hero .choiceButton {
+  border-color: rgb(255 255 255 / 0.8);
+  background: transparent;
+  color: #ffffff;
+}
+
+.heroOwner {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 0;
+  align-items: center;
+  gap: 12px 16px;
+  max-width: 672px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid rgb(255 255 255 / 0.25);
+}
+
+.heroOwner p {
+  margin: 0;
+  min-width: 0;
   font-size: 15px;
+  color: rgb(255 255 255 / 0.9);
+}
+
+.heroOwner strong {
+  color: #ffffff;
+}
+
+.outlineLight,
+.outlineButton,
+.primaryButton,
+.accentButton,
+.lightButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: 999px;
   font-weight: 600;
+  text-decoration: none;
+}
+
+.outlineLight {
+  border: 1px solid rgb(255 255 255 / 0.8);
+  color: #ffffff;
+}
+
+.outlineLight:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.outlineButton {
+  border: 1px solid var(--d-line-strong);
+  color: var(--d-ink);
+}
+
+.outlineButton:hover {
+  background: var(--d-surface);
+}
+
+.primaryButton {
+  background: var(--d-primary);
+  color: var(--d-on-primary);
+}
+
+.accentButton {
+  background: #a8ddb5;
+  color: #0f2a1b;
+  font-weight: 700;
+}
+
+.accentButton:hover {
+  background: #ffffff;
+}
+
+.lightButton {
+  background: #ffffff;
+  color: #0a4527;
+}
+
+.outlineLight:focus-visible,
+.accentButton:focus-visible,
+.lightButton:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.outlineButton:focus-visible,
+.primaryButton:focus-visible {
+  outline: 2px solid var(--d-ink);
+  outline-offset: 2px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+/* Hero picture: a market's own shop, and the store-admin Orders screen on a phone. */
+.heroFigure {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+}
+
+.shop {
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--d-surface);
+  color: var(--d-ink);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.28);
+}
+
+.shopHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--d-line);
+}
+
+.shopLogo {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #0b6b3a;
+  color: #ffffff;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.shopName {
+  display: grid;
+  min-width: 0;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.shopOpen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--d-muted);
+}
+
+.openDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--d-success);
+}
+
+.shopToggle {
+  display: none;
+  margin-left: auto;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--d-raised);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shopToggle span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--d-muted);
+}
+
+.shopToggle span[data-on] {
+  background: var(--d-surface);
+  color: var(--d-ink);
+}
+
+.shopAisles {
+  display: flex;
+  gap: 6px;
+  overflow: hidden;
+  padding: 12px 16px 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shopAisles span {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--d-line);
+  border-radius: 999px;
+}
+
+.shopAisles span[data-on] {
+  border-color: var(--d-ink);
+  background: var(--d-ink);
+  color: var(--d-surface);
+}
+
+.shopShelf {
+  list-style: none;
+  margin: 0;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.shopShelf li {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.shopShelf li:nth-child(3) {
+  display: none;
+}
+
+.shopWell {
+  display: block;
+  padding: 8px;
+  border-radius: 12px;
+  background: #f3f3ef;
+}
+
+.shopImage {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: contain;
+}
+
+.shopItem {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.shopPrice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-.counts li + li::before {
-  content: "·";
-  margin: 0 10px;
-  color: rgb(255 255 255 / 0.7);
+.shopAdd {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--d-primary);
+  color: var(--d-on-primary);
 }
 
-.heroCredit {
-  position: absolute;
-  bottom: 16px;
-  left: max(20px, calc((100% - 1080px) / 2));
-  /* Sized to its text, so it stays over the dark left of the scrim on wide screens. */
-  max-width: min(600px, calc(100% - 40px));
-  margin: 0;
+.shopAsk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--d-line-strong);
+  border-radius: 999px;
+  color: var(--d-muted);
   font-size: 13px;
-  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.shopAsk svg {
+  flex: none;
+  color: var(--d-primary);
+}
+
+.heroPhone {
+  display: none;
+}
+
+.heroCaption {
+  display: grid;
+  gap: 4px 24px;
+  margin-top: 16px;
+  font-size: 13px;
   color: rgb(255 255 255 / 0.85);
 }
 
-/* Browse by where home is */
-.browse {
-  margin-bottom: 28px;
+.heroCaption strong {
+  color: #ffffff;
 }
 
+.heroCaptionOwner {
+  display: none;
+}
+
+/* On a phone only the shop shows; from 640px the owner's phone sits beside it. */
+@media (min-width: 640px) {
+  .shop {
+    margin-right: 150px;
+  }
+
+  .heroPhone {
+    display: block;
+    position: absolute;
+    top: 40px;
+    right: 0;
+    width: 150px;
+    padding: 7px;
+    border-radius: 26px;
+    background: #0e0e0d;
+    box-shadow: 0 18px 40px rgb(0 0 0 / 0.35);
+  }
+
+  .heroPhone img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 20px;
+  }
+
+  .heroCaption {
+    grid-template-columns: minmax(0, 1fr) 150px;
+  }
+
+  .heroCaptionOwner {
+    display: block;
+  }
+}
+
+@media (min-width: 768px) {
+  .shopToggle {
+    display: inline-flex;
+  }
+
+  .shopShelf {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .shopShelf li:nth-child(3) {
+    display: grid;
+  }
+}
+
+@media (min-width: 1024px) {
+  .heroFigure {
+    padding-left: 16px;
+  }
+
+  .shop {
+    margin-right: 170px;
+  }
+
+  .heroPhone {
+    right: 8px;
+    width: 170px;
+  }
+
+  .heroCaption {
+    grid-template-columns: minmax(0, 1fr) 170px;
+  }
+}
+
+/* Results: cuisine is a filter here only (#863). */
 .chips {
   list-style: none;
-  margin: 0;
+  margin: 0 0 8px;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
@@ -1018,254 +1385,452 @@ a.wordmark:focus-visible,
   align-items: center;
   gap: 6px;
   min-height: 44px;
-  padding: 0 18px;
+  padding: 0 16px;
   border: 1px solid var(--d-line-strong);
   border-radius: 999px;
   background: var(--d-surface);
   color: var(--d-ink);
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: border-color 160ms cubic-bezier(0.4, 0.4, 0, 1), background-color 160ms cubic-bezier(0.4, 0.4, 0, 1);
+  transition: border-color 160ms ease-out;
 }
 
 .chip:hover {
   border-color: var(--d-ink);
 }
 
-/* DESIGN.md: a selected chip is the soft tint, a 2px primary ring and a check, never colour alone. */
 .chip[aria-pressed="true"] {
-  background: var(--d-soft);
   border-color: var(--d-primary);
   box-shadow: inset 0 0 0 1px var(--d-primary);
+  background: var(--d-soft);
 }
 
 .chip:focus-visible {
-  outline: 2px solid var(--d-primary);
+  outline: 2px solid var(--d-ink);
   outline-offset: 2px;
 }
 
-/* How it works */
-.band {
-  background: var(--d-surface);
-  border-block: 1px solid var(--d-line);
-}
-
-.steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* Empty area (#455, #863). */
+.emptyHead {
   display: grid;
-  gap: 28px 40px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 8px;
+  justify-items: start;
 }
 
-.stepNumber {
-  display: block;
-  margin-bottom: 10px;
-  font-family: var(--font-display), system-ui, sans-serif;
-  font-size: 40px;
-  font-weight: 700;
-  line-height: 1;
-  color: var(--d-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.stepTitle {
-  font-family: var(--font-display), system-ui, sans-serif;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.2;
-  margin: 0 0 6px;
-}
-
-.stepBody {
-  margin: 0;
-  font-size: 16px;
-  line-height: 1.5;
-  color: var(--d-muted);
-  max-width: 36ch;
-}
-
-/* In the owners' words */
-.quotes {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.emptyIcon {
   display: grid;
-  gap: 20px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--d-raised);
 }
 
-.quotes[data-count="1"] {
-  grid-template-columns: minmax(0, 760px);
-}
-
-.quote {
-  margin: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.quoteText {
-  margin: 0;
-}
-
-.quoteText p {
-  margin: 0;
+.emptyTitle {
   font-family: var(--font-display), system-ui, sans-serif;
-  font-size: clamp(22px, 2.6vw, 30px);
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.3px;
-  text-wrap: pretty;
-  overflow-wrap: anywhere;
+  font-size: clamp(30px, 4vw, 44px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.6px;
+  text-wrap: balance;
+  margin: 0;
 }
 
-.quoteText p::before {
-  content: "\201C";
+.emptyHead .lede {
+  max-width: 60ch;
 }
 
-.quoteText p::after {
-  content: "\201D";
+.emptyGrid {
+  display: grid;
+  gap: 24px;
+  margin-top: 28px;
+  align-items: start;
 }
 
-.quoteBy {
-  display: flex;
-  align-items: center;
+@media (min-width: 1024px) {
+  .emptyGrid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+}
+
+.emptyGrid .request {
+  max-width: none;
+  margin: 0;
+}
+
+.ownerBand {
+  display: grid;
   gap: 12px;
-  margin-top: auto;
-}
-
-.quoteBy > span {
-  display: flex;
-  flex-direction: column;
-}
-
-.quoteFace {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  object-fit: cover;
-}
-
-.quoteName {
-  font-weight: 600;
-}
-
-.quoteStore {
-  font-size: 14px;
-  color: var(--d-muted);
-}
-
-/* For store owners: the page's one primary-deep band (The Neutral Grounds Rule allows it for promo bands). */
-.owners {
+  justify-items: start;
+  padding: 24px;
+  border-radius: 16px;
   background: var(--d-primary-deep);
   color: #ffffff;
 }
 
-.ownersInner {
-  display: grid;
-  gap: 40px;
-  align-items: center;
+.ownerBand p {
+  margin: 0;
+  font-size: 15px;
+  color: rgb(255 255 255 / 0.9);
 }
 
-@media (min-width: 900px) {
-  .ownersInner {
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 64px;
+.ownerBandTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+}
+
+/* For shoppers */
+.split {
+  display: grid;
+  gap: 32px;
+}
+
+@media (min-width: 1024px) {
+  .split {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr);
   }
 }
 
-.ownersTitle {
-  font-family: var(--font-display), system-ui, sans-serif;
-  font-size: clamp(28px, 3.6vw, 40px);
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.6px;
-  text-wrap: balance;
-  margin: 0 0 24px;
+.split .note {
+  max-width: 42ch;
 }
 
-.pitch {
+.benefits {
   list-style: none;
-  margin: 0 0 32px;
+  margin: 0;
   padding: 0;
   display: grid;
-  gap: 18px;
+  gap: 24px 32px;
 }
 
-.pitch li {
+@media (min-width: 640px) {
+  .benefits {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.benefits li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--d-line);
+}
+
+.benefitIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--d-soft);
+  color: var(--d-primary);
+}
+
+.benefitTitle {
+  display: block;
+  font-weight: 600;
+}
+
+.benefitBody {
+  display: block;
+  font-size: 15px;
+  color: var(--d-muted);
+}
+
+.howPanel {
+  margin-top: 48px;
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--d-raised);
+}
+
+@media (min-width: 768px) {
+  .howPanel {
+    padding: 32px;
+  }
+}
+
+.steps {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 20px 24px;
+}
+
+@media (min-width: 768px) {
+  .steps[data-columns] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.stepNumber {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--d-primary);
+  color: var(--d-on-primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.feeNote {
+  margin: 24px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--d-line);
+  font-size: 14px;
+  color: var(--d-muted);
+}
+
+/* For store owners: a deep green band with the real Orders screen. */
+.owners {
+  display: grid;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--d-primary-deep);
+  color: #ffffff;
+}
+
+@media (min-width: 1024px) {
+  .owners {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  }
+}
+
+.ownersText {
+  min-width: 0;
+  padding: 24px;
+}
+
+@media (min-width: 768px) {
+  .ownersText {
+    padding: 40px;
+  }
+}
+
+.ownersText > p {
+  max-width: 50ch;
+  margin: 0;
+  color: rgb(255 255 255 / 0.9);
+}
+
+.ownersText .bigTitle {
+  max-width: 17ch;
+  font-size: clamp(30px, 4vw, 40px);
+}
+
+.ownerBenefits {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 20px 32px;
+  font-size: 15px;
+}
+
+@media (min-width: 640px) {
+  .ownerBenefits {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ownerBenefits li {
+  display: flex;
+  gap: 12px;
+}
+
+.ownerBenefits svg {
+  flex: none;
+  margin-top: 2px;
+  color: #a8ddb5;
+}
+
+.ownerBenefits .benefitBody {
+  color: rgb(255 255 255 / 0.85);
+}
+
+.ownersScreen {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-left: 16px;
-  border-left: 1px solid rgb(255 255 255 / 0.35);
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 360px;
+  margin: 0;
+  padding: 48px 24px 0;
+  background: rgb(0 0 0 / 0.18);
 }
 
-.pitchTitle {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.pitchBody {
-  font-size: 16px;
-  line-height: 1.5;
+.ownersScreen figcaption {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  right: 16px;
+  font-size: 13px;
   color: rgb(255 255 255 / 0.85);
 }
 
-.ownersButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 48px;
-  padding: 0 24px;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #0a4527;
-  font-size: 16px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: background-color 160ms cubic-bezier(0.4, 0.4, 0, 1);
+.ownersPhone {
+  width: 240px;
+  padding: 8px 8px 0;
+  border-radius: 30px 30px 0 0;
+  background: #0e0e0d;
+  box-shadow: 0 -10px 40px rgb(0 0 0 / 0.35);
 }
 
-.ownersButton:hover {
-  background: #eaf4ec;
-}
-
-.ownersButton:focus-visible {
-  outline: 2px solid #ffffff;
-  outline-offset: 3px;
-}
-
-.screen {
-  margin: 0 auto;
-  width: min(100%, 300px);
-}
-
-.screenImage {
+.ownersPhone img {
   display: block;
   width: 100%;
-  height: auto;
-  border-radius: 16px;
-  border: 6px solid rgb(255 255 255 / 0.14);
-  background: #fafaf7;
+  height: 340px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 23px 23px 0 0;
 }
 
-.screenCaption {
-  margin-top: 12px;
+@media (min-width: 768px) {
+  .ownersPhone {
+    width: 290px;
+  }
+
+  .ownersPhone img {
+    height: 520px;
+  }
+}
+
+.sellGrid {
+  display: grid;
+  gap: 32px;
+  margin-top: 40px;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .sellGrid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+}
+
+.sellGrid .steps {
+  margin-bottom: 20px;
+}
+
+.sellGrid .note {
   font-size: 14px;
-  line-height: 1.45;
-  color: rgb(255 255 255 / 0.85);
-  text-align: center;
+}
+
+/* The shared plan table reads the app's Tailwind tokens; here they follow the directory's light or dark. */
+.planTheme {
+  --card: var(--d-surface);
+  --foreground: var(--d-ink);
+  --muted-foreground: var(--d-muted);
+  --border: var(--d-line);
+  --primary: var(--d-primary);
+  --primary-foreground: var(--d-on-primary);
+  min-width: 0;
+}
+
+/* Markets by state and city */
+.stateCards {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+}
+
+.stateCard {
+  padding: 8px 16px 12px;
+  border: 1px solid var(--d-line);
+  border-radius: 12px;
+  background: var(--d-surface);
+}
+
+.stateLink,
+.cityLinks a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.stateLink {
+  font-weight: 600;
+}
+
+.cityLinks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cityLinks a span:first-child {
+  color: var(--d-primary);
+}
+
+.stateLink:hover,
+.cityLinks a:hover span:first-child {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.stateLink:focus-visible,
+.cityLinks a:focus-visible {
+  outline: 2px solid var(--d-ink);
+  outline-offset: 2px;
+}
+
+/* Closing seller band */
+.closing {
+  display: grid;
+  gap: 24px;
+  margin-bottom: 56px;
+  padding: 24px;
+  border-radius: 16px;
+  background: var(--d-raised);
+}
+
+@media (min-width: 768px) {
+  .closing {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 40px;
+  }
+}
+
+.closingTitle {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: clamp(28px, 3.6vw, 36px);
+  font-weight: 700;
+  line-height: 1.15;
+  max-width: 22ch;
+  text-wrap: balance;
+  margin: 0 0 8px;
+}
+
+.closing .actions {
+  margin-top: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ownersButton {
+  .chip {
     transition: none;
   }
 }
