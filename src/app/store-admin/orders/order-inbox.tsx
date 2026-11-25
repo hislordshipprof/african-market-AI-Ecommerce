@@ -694,11 +694,25 @@ export function OrderInbox({
                         isOpen ? "bg-secondary" : "hover:bg-muted/40"
                       }`}
                     >
-                      <span className="col-start-1 row-start-2 text-xs text-muted-foreground md:row-start-1 md:text-sm">
-                        <span className="text-sm font-bold tabular-nums text-foreground">#{order.number}</span>
-                        <span className="block tabular-nums">
-                          {formatClockInZone(order.createdAt, timeZone)}, {order.lines.length} item{order.lines.length !== 1 ? "s" : ""}
+                      {/* On a phone the status sits beside the number (#737); from md they are separate columns. */}
+                      <span className="col-span-2 row-start-2 flex flex-wrap items-center gap-x-2 gap-y-1 md:contents">
+                        <span className="text-sm md:col-start-1 md:row-start-1">
+                          <span className="font-bold tabular-nums text-foreground">#{order.number}</span>
+                          <span className="hidden text-xs tabular-nums text-muted-foreground md:block">
+                            {formatClockInZone(order.createdAt, timeZone)}, {order.lines.length} item{order.lines.length !== 1 ? "s" : ""}
+                          </span>
                         </span>
+                        <span className="flex flex-wrap items-center gap-1.5 md:col-start-3 md:row-start-1">
+                          <Badge variant={config?.variant ?? "outline"}>
+                            <StatusIcon aria-hidden className="size-3" />
+                            {orderStatusLabel(order.status, order.fulfillment)}
+                          </Badge>
+                          {order.disputed && <DisputedBadge />}
+                          {order.hasAccount && <AccountBadge />}
+                        </span>
+                      </span>
+                      <span className="col-span-2 row-start-3 text-xs tabular-nums text-muted-foreground md:hidden">
+                        {formatClockInZone(order.createdAt, timeZone)}, {order.lines.length} item{order.lines.length !== 1 ? "s" : ""}
                       </span>
                       <span className="col-start-1 row-start-1 min-w-0 md:col-start-2">
                         <span className="block truncate font-semibold text-foreground md:font-medium">{order.customer.name}</span>
@@ -706,14 +720,7 @@ export function OrderInbox({
                           {fulfillmentHeadline(order, timeZone)}
                         </span>
                       </span>
-                      <span className="col-start-1 row-start-3 flex flex-wrap items-center gap-1.5 md:col-start-3 md:row-start-1">
-                        <Badge variant={config?.variant ?? "outline"}>
-                          <StatusIcon aria-hidden className="size-3" />
-                          {orderStatusLabel(order.status, order.fulfillment)}
-                        </Badge>
-                        {order.disputed && <DisputedBadge />}
-                        {order.hasAccount && <AccountBadge />}
-                      </span>
+
                       <span className="col-start-2 row-start-1 text-right font-semibold tabular-nums text-foreground md:col-start-4">
                         {money(order.totalCents ?? order.subtotalCents)}
                       </span>

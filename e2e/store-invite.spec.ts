@@ -127,7 +127,7 @@ test("an invited staff member sets a password, chooses Set up now, and the backu
     await expect(page.getByRole("link", { name: "Remind me later" })).toBeVisible();
     const shown = await setUpNow(page, `${SHOTS}/840-staff-setup.png`);
     await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
-    await expect(page.getByRole("heading", { level: 1, name: "Mama Ngozi African Market" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Store admin" }).getByText("Mama Ngozi African Market")).toBeVisible();
     await expect(page.getByRole("complementary", { name: REMINDER })).toHaveCount(0);
 
     const prisma = db();
@@ -148,7 +148,7 @@ test("an invited staff member sets a password, chooses Set up now, and the backu
     await page.getByLabel("Backup code").fill(shown[0]);
     await page.getByRole("button", { name: "Verify" }).click();
     await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
-    await expect(page.getByRole("heading", { level: 1, name: "Mama Ngozi African Market" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Store admin" }).getByText("Mama Ngozi African Market")).toBeVisible();
   } finally {
     await removeInvitee(email, [inviteId]);
   }
@@ -166,7 +166,7 @@ test("an invited owner chooses Remind me later, sees the reminder, and an invite
     await shotBothWidths(page, "840-setup-offer");
     await page.getByRole("link", { name: "Remind me later" }).click();
     await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
-    await expect(page.getByRole("heading", { level: 1, name: "Mama Ngozi African Market" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Store admin" }).getByText("Mama Ngozi African Market")).toBeVisible();
     const reminder = page.getByRole("complementary", { name: REMINDER });
     await expect(reminder).toBeVisible();
     await expect(reminder.getByRole("link", { name: "Set up 2FA" })).toBeVisible();

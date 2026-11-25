@@ -53,7 +53,7 @@ test("#798: the owner opens a past order, refunds one item once, and the shopper
   await storeOwnerSignIn(page);
   await page.goto(ORDERS_URL);
   await page.locator("button", { hasText: `#${NUMBER}` }).click();
-  const pick = page.getByRole("button", { name: "Pick" });
+  const pick = page.getByTestId("order-panel").getByRole("button", { name: "Pick", exact: true });
   for (let left = await pick.count(); left > 0; left -= 1) {
     await pick.first().click();
     await expect(pick).toHaveCount(left - 1);
@@ -112,7 +112,7 @@ test("#806: the refund dialog shows the coupon share taken off and the exact amo
   await storeOwnerSignIn(page);
   await page.goto(ORDERS_URL);
   await page.locator("button", { hasText: `#${number}` }).click();
-  await page.getByRole("button", { name: "Pick" }).first().click();
+  await page.getByTestId("order-panel").getByRole("button", { name: "Pick", exact: true }).first().click();
   await page.getByRole("button", { name: "Mark ready" }).click();
   await page.getByRole("button", { name: "Hand off" }).click();
   await expect
