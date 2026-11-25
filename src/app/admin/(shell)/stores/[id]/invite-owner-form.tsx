@@ -10,7 +10,7 @@ interface Props {
 export function InviteOwnerForm({ storeId }: Props) {
   const [email, setEmail] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string; link?: string } | null>(null);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,6 +23,9 @@ export function InviteOwnerForm({ storeId }: Props) {
       const result = await inviteStoreOwnerAction(formData);
       if ("error" in result && result.error) {
         setMessage({ type: "error", text: result.error });
+      } else if ("warning" in result && result.warning) {
+        setMessage({ type: "error", text: result.warning, link: result.inviteUrl });
+        setEmail("");
       } else {
         setMessage({ type: "success", text: `Owner invitation sent to ${email}` });
         setEmail("");
@@ -45,6 +48,15 @@ export function InviteOwnerForm({ storeId }: Props) {
           }`}
         >
           {message.text}
+          {message.link && (
+            <input
+              readOnly
+              aria-label="Invite link"
+              value={message.link}
+              onFocus={(e) => e.currentTarget.select()}
+              className="mt-2 block w-full rounded-md border border-input bg-card px-3 py-2 text-xs text-foreground"
+            />
+          )}
         </div>
       )}
       <form onSubmit={handleSubmit} className="flex gap-3">

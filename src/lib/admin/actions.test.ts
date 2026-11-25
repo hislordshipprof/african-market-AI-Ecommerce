@@ -42,8 +42,10 @@ vi.mock("../db", () => ({
   authPrisma: {},
 }));
 
+const mockCreateInvite = vi.fn().mockResolvedValue({ id: "inv-1", tokenHash: "hash", emailed: true, inviteUrl: "http://localhost:3000/invite/tok" });
 vi.mock("../invite/service", () => ({
-  createInvite: vi.fn().mockResolvedValue({ id: "inv-1", tokenHash: "hash" }),
+  createInvite: (...args: unknown[]) => mockCreateInvite(...args),
+  INVITE_NOT_EMAILED: "Invite saved, but the email could not be sent. Resend it or share the link.",
 }));
 
 vi.mock("../auth", () => ({
@@ -60,7 +62,7 @@ vi.mock("./session", () => ({
   }),
 }));
 
-import { createStore, updateStore, setStoreStatus } from "./actions";
+import { createStore, updateStore, setStoreStatus, inviteStoreOwnerAction } from "./actions";
 
 function formData(entries: Record<string, string>): FormData {
   const fd = new FormData();
@@ -929,5 +931,19 @@ describe("setStoreStatus", () => {
     mockAuditCreate.mockRejectedValueOnce(new Error("audit insert failed"));
 
     await expect(setStoreStatus("store-1", "suspended")).rejects.toThrow("audit insert failed");
+  });
+});
+
+describe("inviteStoreOwnerAction (#809)", () => {
+  it("says plainly when the invite email failed and hands back the link", async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", name: "Mama Ngozi" });
+    mockCreateInvite.mockResolvedValueOnce({ id: "inv-2", tokenHash: "h", emailed: false, inviteUrl: "http://localhost:3000/invite/tok2" });
+    const result = await inviteStoreOwnerAction(formData({ storeId: "store-1", email: "owner@example.com" }));
+    expect(result).toEqual({
+      success: true,
+      id: "inv-2",
+      warning: "Invite saved, but the email could not be sent. Resend it or share the link.",
+      inviteUrl: "http://localhost:3000/invite/tok2",
+    });
   });
 });

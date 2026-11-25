@@ -9,7 +9,7 @@ import { isSlugRoutable } from "../slug";
 import type { ThemePreset } from "../theme";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { createInvite } from "../invite/service";
+import { createInvite, INVITE_NOT_EMAILED } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
 import { setPilot, setPlanOverride } from "../billing/service";
@@ -775,7 +775,9 @@ export async function inviteStoreOwnerAction(formData: FormData) {
       storeSlug: store.slug,
       storeName: store.name,
     });
-    return { success: true, id: result.id };
+    return result.emailed
+      ? { success: true, id: result.id }
+      : { success: true, id: result.id, warning: INVITE_NOT_EMAILED, inviteUrl: result.inviteUrl };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to send invite";
     return { error: message };
