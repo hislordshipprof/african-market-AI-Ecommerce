@@ -34,6 +34,7 @@ import { COPILOT_SYSTEM_PROMPT } from "./prompt";
 import { databaseClock, insertProposalRows } from "./proposals";
 import { copilotTools, createDraftBook, type DraftBook, type Draft, type PendingChoice } from "./tools";
 import { estimateText } from "./inventory-report";
+import { salesText } from "./sales-summary";
 import {
   CONVERSATION_MAX,
   FIXED_ERROR,
@@ -208,6 +209,7 @@ function numbersIn(text: string): string[] {
 export function checkedText(text: string, ownerText: string, book: DraftBook): string {
   const allowed = new Set([ownerText, ...book.toolResults, String(PROPOSAL_MAX)].flatMap(numbersIn));
   if (numbersIn(text).every((n) => allowed.has(n))) return text;
+  if (book.sales.length > 0) return book.sales.map(salesText).join("\n");
   const rows = [...new Map(book.report.map((row) => [row.listingId, row])).values()].slice(0, REPLY_ROWS);
   if (rows.length === 0) return NUMBER_REFUSED;
   return rows.map((row) => (
@@ -217,7 +219,7 @@ export function checkedText(text: string, ownerText: string, book: DraftBook): s
 }
 
 /** The model's text, plus fixed lines chosen from what the turn produced. The model's text is never inspected. */
-function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean): string {
+function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean, answeredSales: boolean): string {
   const parts: string[] = [];
   const trimmed = text.trim().slice(0, 4000);
   if (trimmed) {
@@ -229,7 +231,7 @@ function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], c
     parts.push("More than one item matches. Pick one below.");
   }
   if (capped) parts.push("Send the rest in a new message.");
-  if (drafts.length === 0 && choices.length === 0) parts.push(NOTHING_DRAFTED);
+  if (drafts.length === 0 && choices.length === 0 && !answeredSales) parts.push(NOTHING_DRAFTED);
   return parts.join("\n\n");
 }
 
@@ -318,7 +320,7 @@ export async function sendCopilotTurn(input: {
     });
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = (steps >= STEP_CAP && result.finishReason === "tool-calls") || result.finishReason === "length" || book.overflow;
-    const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped);
+    const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped, book.sales.length > 0);
     const usage = turnUsage(modelId, result.steps);
     const stored = await commitTurn({
       storeId: input.storeId,

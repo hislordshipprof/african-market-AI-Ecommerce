@@ -5,6 +5,7 @@ import { listingLabel } from "./cards";
 import { storeMayUse } from "../billing/plan";
 import { MOVEMENT_DAYS, SALES_FLOOR, inventoryReport, type MovementRow } from "./inventory-report";
 import { reorderSuggestions, type ReorderSuggestions } from "./reorder";
+import { SALES_PERIODS, salesSummary, type SalesFigures } from "./sales-summary";
 import { searchListingMatches, type ListingSearch } from "./search";
 import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ProposalKind } from "./types";
 
@@ -44,6 +45,8 @@ export interface DraftBook {
   toolResults: string[];
   /** Rows `inventory_report` returned this turn, for the fixed reply when a number fails the check. */
   report: MovementRow[];
+  /** Periods `sales_summary` returned this turn, for the fixed reply when a number fails the check. */
+  sales: SalesFigures[];
   /** Listings already drafted or offered in a choice this turn; each appears in one card or choice only. */
   listingIds: Set<string>;
   run<T>(fn: () => Promise<T>): Promise<T>;
@@ -57,6 +60,7 @@ export function createDraftBook(): DraftBook {
     overflow: false,
     toolResults: [],
     report: [],
+    sales: [],
     listingIds: new Set(),
     run(fn) {
       const next = chain.then(fn, fn);
@@ -141,6 +145,12 @@ const reportSchema = z.object({
 
 /** At most this many listings go to the model; the page shows them all. */
 const REPORT_ROWS = 20;
+
+const salesSchema = z.object({
+  period: z.enum(SALES_PERIODS),
+  from: z.string().max(10).optional(),
+  to: z.string().max(10).optional(),
+});
 
 const proposeSchema = z.object({
   listingId: z.string().min(1).max(200),
@@ -254,6 +264,22 @@ export function copilotTools(storeId: string, book: DraftBook) {
           throw new Error("could not read reorder suggestions");
         }
         return recorded(book, reorderResult(result));
+      },
+    }),
+    sales_summary: tool({
+      description:
+        "This store's sales for one period in its time zone: today, this_week and last_week (Monday to Sunday), this_month, or range with from and to as YYYY-MM-DD. Returns the dates used, orders, goods sales, units sold, refunds, net to store, average order, the top 5 items by quantity and by sales, orders from the directory, and the Stripe payout arriving in the period when known. Read only.",
+      inputSchema: salesSchema,
+      execute: async (input) => {
+        let summary: Awaited<ReturnType<typeof salesSummary>>;
+        try {
+          summary = await salesSummary(storeId, input);
+        } catch {
+          throw new Error("could not read sales");
+        }
+        if (!summary.ok) throw new Error(summary.reason);
+        book.sales.push(summary.figures);
+        return recorded(book, summary.result);
       },
     }),
     propose_stock_change: tool({
