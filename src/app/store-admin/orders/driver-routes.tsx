@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Route, Send, X } from "lucide-react";
+import { Copy, Route, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,11 +17,14 @@ function SlotRow({ slot, onChange }: { slot: DriverRouteSlot; onChange: () => vo
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [isPending, startTransition] = useTransition();
+  /** A link whose text did not go out (#811). Only its hash is stored, so this is the one chance to copy it. */
+  const [handOff, setHandOff] = useState<{ driverName: string; link: string } | null>(null);
+  const [copyNote, setCopyNote] = useState("");
   const id = `route-${slot.slot}`;
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, done: string) {
+  function run<R extends { ok: boolean; error?: string }>(action: () => Promise<R>, done: (result: R) => void) {
     startTransition(async () => {
-      let result: { ok: boolean; error?: string };
+      let result: R | { ok: false; error: string };
       try {
         result = await action();
       } catch {
@@ -31,11 +34,20 @@ function SlotRow({ slot, onChange }: { slot: DriverRouteSlot; onChange: () => vo
         toast.error(result.error ?? STAFF_GENERIC_ERROR);
         return;
       }
-      toast.success(done);
+      done(result as R);
       setName("");
       setPhone("");
       onChange();
     });
+  }
+
+  async function copyLink(link: string) {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopyNote("Link copied.");
+    } catch {
+      setCopyNote("Could not copy. Select the link and copy it.");
+    }
   }
 
   return (
@@ -59,7 +71,7 @@ function SlotRow({ slot, onChange }: { slot: DriverRouteSlot; onChange: () => vo
                 variant="outline"
                 className="min-h-11 rounded-full"
                 disabled={isPending}
-                onClick={() => run(() => revokeDriverRouteAction(route.id), `${route.driverName}'s link no longer works`)}
+                onClick={() => run(() => revokeDriverRouteAction(route.id), () => toast.success(`${route.driverName}'s link no longer works`))}
               >
                 <X className="size-4" aria-hidden />
                 Revoke link
@@ -69,14 +81,47 @@ function SlotRow({ slot, onChange }: { slot: DriverRouteSlot; onChange: () => vo
         </ul>
       )}
 
+      {handOff && (
+        <div role="status" className="mt-3 grid gap-2 rounded-lg border border-border bg-muted/50 p-3">
+          <p className="text-sm text-foreground">
+            The text to {handOff.driverName} did not go out. Copy the link and send it another way. It works until midnight.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              readOnly
+              value={handOff.link}
+              aria-label={`Route link for ${handOff.driverName}`}
+              onFocus={(e) => e.currentTarget.select()}
+              className="min-w-0 flex-1 basis-56"
+            />
+            <Button type="button" className="min-h-11 rounded-full" onClick={() => copyLink(handOff.link)}>
+              <Copy className="size-4" aria-hidden />
+              Copy link
+            </Button>
+            <Button type="button" variant="ghost" className="min-h-11 rounded-full" onClick={() => setHandOff(null)}>
+              Done
+            </Button>
+          </div>
+          {copyNote && <p className="text-sm text-muted-foreground">{copyNote}</p>}
+        </div>
+      )}
+
       {slot.waiting > 0 && (
         <form
           className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
           onSubmit={(event) => {
             event.preventDefault();
+            const driverName = name.trim();
             run(
               () => assignDriverRouteAction({ slot: slot.slot, driverName: name, driverPhone: phone }),
-              `Route texted to ${name.trim()}`,
+              (result) => {
+                if ("link" in result && result.link) {
+                  setCopyNote("");
+                  setHandOff({ driverName, link: result.link });
+                } else {
+                  toast.success(`Route texted to ${driverName}`);
+                }
+              },
             );
           }}
         >
@@ -110,21 +155,23 @@ function SlotRow({ slot, onChange }: { slot: DriverRouteSlot; onChange: () => vo
 /** Own-driver routes (#566): text one slot's Ready store-delivery orders to a driver, or revoke the link. */
 export function DriverRoutes({ initialSlots }: { initialSlots: DriverRouteSlot[] }) {
   const [slots, setSlots] = useState(initialSlots);
-  const refresh = () => {
+  const refresh = useCallback(() => {
     driverRouteBoardAction().then(setSlots).catch(() => {});
-  };
+  }, []);
   // Orders turn Ready in the inbox beside this panel; the same 10s poll keeps the slots current.
+  // Opening an order unmounts the board, so it fetches again as soon as it is back (#811).
   useEffect(() => {
+    refresh();
     const interval = setInterval(refresh, 10_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [refresh]);
   if (slots.length === 0) return null;
   return (
     <Card className="mb-6" aria-labelledby="driver-routes-title">
       <CardHeader>
         <CardTitle id="driver-routes-title" className="text-lg">Your driver&rsquo;s route</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Text a driver one slot&rsquo;s Ready orders. The link shows the stops in order and works until midnight.
+          Text a driver one slot&rsquo;s Ready orders, and any sent out with no driver yet. The link shows the stops in order and works until midnight.
         </p>
       </CardHeader>
       <CardContent>
