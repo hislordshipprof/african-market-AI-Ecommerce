@@ -1,11 +1,11 @@
 import { Check, Minus } from "lucide-react";
-import { PLAN_NAMES, PLAN_PRICES_USD, PLANS, planComparisonRows, type Plan } from "@/lib/billing/plan";
+import { PLAN_NAMES, PLAN_PRICES_USD, PLANS, RECOMMENDED_PLAN, planComparisonRows, type Plan } from "@/lib/billing/plan";
 
 /**
  * Starter vs Pro, built only from the plan module (#838). /sell and the store-admin plan page both render this;
  * no other page lists plan features.
  */
-export function PlanComparison({ currentPlan, offer }: { currentPlan?: Plan; offer?: string }) {
+export function PlanComparison({ currentPlan, offer, recommend }: { currentPlan?: Plan; offer?: string; recommend?: boolean }) {
   return (
     <section id="plans" aria-labelledby="plans-title" className="scroll-mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
       <h2 id="plans-title" className="text-lg font-semibold text-foreground">
@@ -34,6 +34,11 @@ export function PlanComparison({ currentPlan, offer }: { currentPlan?: Plan; off
                   <span className="text-lg font-semibold">${PLAN_PRICES_USD[plan]}</span>
                   <span className="text-muted-foreground"> / month</span>
                 </span>
+                {recommend && plan === RECOMMENDED_PLAN && (
+                  <span className="mt-1 inline-block rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+                    Recommended
+                  </span>
+                )}
                 {plan === currentPlan && (
                   <span className="mt-1 inline-block rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
                     Your plan

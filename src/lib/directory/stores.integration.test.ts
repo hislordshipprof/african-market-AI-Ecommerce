@@ -25,6 +25,7 @@ const PUBLIC_FIELDS = [
   "ownerStory",
   "ownerPhotoUrl",
   "courierMayDeliver",
+  "storeDeliveryFeeCents",
 ].sort();
 
 describe.skipIf(!hasDb)("listDirectoryStores", () => {
@@ -58,6 +59,7 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
           phone: "+17135550449",
           uberLocationId: `uber_t449_${stamp}`,
           storeDeliveryEnabled: true,
+          storeDeliveryFeeCents: 499,
         },
         { slug: slug("noaddress"), name: "No Address Market", ...located, listed: true, uberLocationId: `uber_t453_${stamp}`, phone: "+17135550453" },
         { slug: slug("starter"), name: "Starter Plan Market", ...located, listed: true, addressLine1: "1 Main St", zip: "77002", phone: "+17135550454", doordashStoreId: `dd_t453_${stamp}` },
@@ -94,6 +96,14 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
     expect((await listed())?.storeDeliveryEnabled).toBe(true);
     vi.stubEnv("R2_PROOF_BUCKET", "");
     expect((await listed())?.storeDeliveryEnabled).toBe(false);
+  });
+
+  it("shows the store's delivery fee only while its own delivery is offered (#863)", async () => {
+    const listed = async () => (await listDirectoryStores()).find((s) => s.slug === slug("listed"));
+    vi.stubEnv("R2_PROOF_BUCKET", "proofs");
+    expect((await listed())?.storeDeliveryFeeCents).toBe(499);
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    expect((await listed())?.storeDeliveryFeeCents).toBeNull();
   });
 
   it("says a courier may deliver only where the storefront offers it: registered, full address and phone, Pro plan", async () => {
