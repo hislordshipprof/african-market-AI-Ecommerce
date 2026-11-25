@@ -196,7 +196,7 @@ export function AdminShell({ data, children }: { data: ShellData; children: Reac
               >
                 <Bell className="size-5" aria-hidden />
                 {counts.newOrders > 0 && (
-                  <span className="absolute right-1.5 top-1.5 flex min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[11px] font-bold leading-5 text-white tabular-nums">
+                  <span className="absolute right-1.5 top-1.5 flex min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[11px] font-bold leading-5 text-background tabular-nums">
                     {counts.newOrders}
                   </span>
                 )}
