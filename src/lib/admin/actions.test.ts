@@ -45,7 +45,7 @@ vi.mock("../db", () => ({
 const mockCreateInvite = vi.fn().mockResolvedValue({ id: "inv-1", tokenHash: "hash", emailed: true, inviteUrl: "http://localhost:3000/invite/tok" });
 vi.mock("../invite/service", () => ({
   createInvite: (...args: unknown[]) => mockCreateInvite(...args),
-  INVITE_NOT_EMAILED: "Invite saved, but the email could not be sent. Resend it or share the link.",
+  inviteNotEmailed: () => "Invite saved, but the email could not be sent. Resend it or share the link.",
 }));
 
 vi.mock("../auth", () => ({

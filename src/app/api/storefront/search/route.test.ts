@@ -74,20 +74,22 @@ describe.skipIf(!hasDb)("GET /api/storefront/search (DB integration)", () => {
     const body = await res.json();
     expect(body.results).toHaveLength(1);
     expect(body.results[0]).toEqual(expect.objectContaining({ id: listingAId, name: "Routetest Egusi Seeds", price: 700, badge: "in-stock" }));
+    expect(body.suggestions).toEqual([{ text: "routetest egusi seeds" }]);
+    expect(body.aisles).toEqual([]);
   });
 
-  it("returns 200 with empty results for missing or blank q", async () => {
+  it("answers a blank q with the store's popular searches and no results", async () => {
     for (const qs of ["", "?q=", "?q=%20%20"]) {
       const res = await call(slugA, qs);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ results: [] });
+      expect(await res.json()).toEqual({ results: [], suggestions: [], aisles: [], popular: [] });
     }
   });
 
   it("does not leak store A listings into store B search", async () => {
     const res = await call(slugB, "?q=routetest");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ results: [] });
+    expect(await res.json()).toEqual({ results: [], suggestions: [], aisles: [] });
   });
 
   it("over-long q is 400 with no read", async () => {
@@ -97,7 +99,7 @@ describe.skipIf(!hasDb)("GET /api/storefront/search (DB integration)", () => {
     expect(await res.json()).toEqual({ error: "Search query is too long" });
     const spaces = await call(slugA, `?q=${encodeURIComponent(" ".repeat(201))}`);
     expect(spaces.status).toBe(200);
-    expect(await spaces.json()).toEqual({ results: [] });
+    expect(await spaces.json()).toEqual({ results: [], suggestions: [], aisles: [], popular: [] });
   });
 
   it("suspended store is 404", async () => {

@@ -4,8 +4,9 @@ import { z } from "zod";
 import { requireStoreOwner } from "./session";
 import { parseInput, readFormFields } from "../security/parse-input";
 import {
+  copyInviteLink,
   createInvite,
-  INVITE_NOT_EMAILED,
+  inviteNotEmailed,
   removeStoreMember,
   resendInvite,
   revokeInvite,
@@ -21,7 +22,7 @@ const INVITE_RATE_LIMITED = "Too many invites this hour. Try again later.";
 function savedInviteResult(saved: SavedInvite) {
   return saved.emailed
     ? { success: true as const, id: saved.id }
-    : { success: true as const, id: saved.id, warning: INVITE_NOT_EMAILED, inviteUrl: saved.inviteUrl };
+    : { success: true as const, id: saved.id, warning: inviteNotEmailed(), inviteUrl: saved.inviteUrl };
 }
 
 export async function inviteMemberAction(formData: FormData) {
@@ -103,4 +104,23 @@ export async function revokeInviteAction(inviteId: string) {
   const target = parseInput(z.string().min(1).max(200), inviteId);
   if (!target.ok) return { error: "Invitation not found" };
   return revokeInvite(session.store.id, target.data, session.user.id, session.user.email);
+}
+
+/** The owner shares a staff invite by hand when the email cannot reach anyone (#839); the earlier link stops working. */
+export async function copyInviteLinkAction(inviteId: string) {
+  const session = await requireStoreOwner();
+  const target = parseInput(z.string().min(1).max(200), inviteId);
+  if (!target.ok) return { error: "Invitation not found" };
+
+  const rateCheck = await checkInviteRateLimit(session.store.id);
+  if (!rateCheck.allowed) return { error: INVITE_RATE_LIMITED };
+
+  return copyInviteLink({
+    storeId: session.store.id,
+    inviteId: target.data,
+    actorId: session.user.id,
+    actorEmail: session.user.email,
+    baseUrl: resolveAuthBaseUrl(),
+    storeSlug: session.store.slug,
+  });
 }
