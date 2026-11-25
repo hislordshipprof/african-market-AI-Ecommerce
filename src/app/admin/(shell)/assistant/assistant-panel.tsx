@@ -287,7 +287,7 @@ function Briefing({ briefing, disabled, onAsk }: { briefing: AdminBriefing; disa
           ))}
         </ul>
       ) : null}
-      {items.length > 0 && unread.length > 0 ? <p className="mt-2 text-sm text-muted-foreground">Part of today's list could not be read.</p> : null}
+      {items.length > 0 && unread.length > 0 ? <p className="mt-2 text-sm text-muted-foreground">Part of today&rsquo;s list could not be read.</p> : null}
     </section>
   );
 }

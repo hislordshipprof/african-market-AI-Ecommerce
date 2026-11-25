@@ -21,6 +21,7 @@ vi.mock("../../inngest/notify", async (original) => ({
   scheduleOrderNotification: vi.fn(),
 }));
 
+import { Prisma } from "@prisma/client";
 import { auth } from "../../auth";
 import { authPrisma, platformAdmin, platformAdminTransaction, storeScoped } from "../../db";
 import { setStripeProvider } from "../../stripe";
@@ -109,7 +110,7 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
       for (const table of ["refund_requests", "notification_logs", "order_lines", "stock_events", "orders", "customers", "listings", "audit_logs", "store_subscriptions", "stores"]) {
         await owner.$transaction(async (tx) => {
           await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-          await tx.$executeRawUnsafe(`DELETE FROM ${table} WHERE ${table === "stores" ? "id" : "store_id"} = $1`, id);
+          await tx.$executeRaw`DELETE FROM ${Prisma.raw(table)} WHERE ${Prisma.raw(table === "stores" ? "id" : "store_id")} = ${id}`;
         }).catch((error) => console.warn(`cleanup ${table}`, (error as Error).message.slice(-120)));
       }
     }
