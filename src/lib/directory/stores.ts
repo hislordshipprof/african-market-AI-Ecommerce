@@ -28,7 +28,7 @@ export const DIRECTORY_STORE_FIELDS = {
   ownerPhotoUrl: true,
 } satisfies Prisma.StoreSelect;
 
-// Read on the server only, to work out the card's delivery lines; never sent to the page.
+// Read on the server only, to work out the card's delivery lines; only the store-delivery fee reaches the page (#863).
 const DELIVERY_FIELDS = {
   id: true,
   deliveryRadiusMi: true,
@@ -39,14 +39,18 @@ const DELIVERY_FIELDS = {
   phone: true,
   uberLocationId: true,
   doordashStoreId: true,
+  storeDeliveryFeeCents: true,
 } satisfies Prisma.StoreSelect;
 
 export const DIRECTORY_QUERY_FIELDS = { ...DIRECTORY_STORE_FIELDS, ...DELIVERY_FIELDS } satisfies Prisma.StoreSelect;
 
 export type DirectoryRow = Prisma.StoreGetPayload<{ select: typeof DIRECTORY_QUERY_FIELDS }>;
 
-/** `courierMayDeliver`: the storefront offers courier delivery (registered, full address, plan). Coverage is known only from a quote (ADR-0006). */
-export type DirectoryStore = Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }> & { courierMayDeliver: boolean };
+/**
+ * `courierMayDeliver`: the storefront offers courier delivery (registered, full address, plan). Coverage is known only from a quote (ADR-0006).
+ * `storeDeliveryFeeCents`: the checkout's store-delivery price, null while the store's own delivery is not offered (#863).
+ */
+export type DirectoryStore = Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }> & { courierMayDeliver: boolean; storeDeliveryFeeCents: number | null };
 
 /** The public card fields of each row, in order; the delivery fields stay behind. */
 export async function toDirectoryStores(rows: DirectoryRow[]): Promise<DirectoryStore[]> {
@@ -54,7 +58,13 @@ export async function toDirectoryStores(rows: DirectoryRow[]): Promise<Directory
     const card = Object.fromEntries(Object.keys(DIRECTORY_STORE_FIELDS).map((key) => [key, row[key as keyof DirectoryRow]]));
     const courierMayDeliver = courierOffered(row) && (await storeMayUse(row.id, "courier-delivery"));
     // The card says "Delivery" only where checkout offers it (#775).
-    return { ...(card as Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }>), storeDeliveryEnabled: storeDeliveryOffered(row), courierMayDeliver };
+    const storeDelivery = storeDeliveryOffered(row);
+    return {
+      ...(card as Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }>),
+      storeDeliveryEnabled: storeDelivery,
+      storeDeliveryFeeCents: storeDelivery ? row.storeDeliveryFeeCents : null,
+      courierMayDeliver,
+    };
   }));
 }
 
