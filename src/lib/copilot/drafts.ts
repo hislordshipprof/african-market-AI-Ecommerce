@@ -13,6 +13,7 @@ import {
   type StoreChange,
 } from "../store-settings/store-change";
 import { readWeeklyHours, WEEK_DAYS } from "../store-settings/weekly-hours";
+import { pauseEndLabel } from "../delivery/delivery-pause";
 import { searchListingMatches } from "./search";
 import {
   DRAFT_HOURS,
@@ -262,11 +263,13 @@ function cardOf(row: DraftRow, timeZone: string, now: Date): DraftCard {
     return { ...base, kind: "price", lines: payload.lines, applied: payload.applied ?? null };
   }
   const change = row.payload as StoreChange;
+  const endsAt = storeChangeEndsAt(change, timeZone);
   return {
     ...base,
     kind: "store_change",
     text: storeChangeText(change, timeZone, now),
-    endsAt: storeChangeEndsAt(change, timeZone).toISOString(),
+    endsAt: endsAt.toISOString(),
+    ends: pauseEndLabel(endsAt, timeZone, now),
   };
 }
 

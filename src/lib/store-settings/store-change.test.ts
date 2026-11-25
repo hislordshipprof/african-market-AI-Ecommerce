@@ -53,6 +53,8 @@ describe("storeChangeEndsAt and storeChangeText (#819)", () => {
       .toBe("Delivery paused until 11:59 PM today, Tue Nov 24. Pickup stays open.");
     expect(storeChangeText({ kind: "delivery_pause", until: "2026-11-25T14:00:00Z" }, NY, NOW))
       .toBe("Delivery paused until 9:00 AM Wed Nov 25. Pickup stays open.");
+    expect(storeChangeText({ kind: "delivery_pause", until: "2026-11-25T05:00:00Z" }, NY, NOW))
+      .toBe("Delivery paused until the end of today, Tue Nov 24. Pickup stays open.");
   });
 });
 

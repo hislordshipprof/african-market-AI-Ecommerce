@@ -108,7 +108,8 @@ export type DraftCard =
   | (DraftCardBase & { kind: "coupon"; fields: CouponFields; summary: string })
   /** `applied` lists the lines the owner kept ticked, once confirmed. */
   | (DraftCardBase & { kind: "price"; lines: PriceLine[]; applied: string[] | null })
-  | (DraftCardBase & { kind: "store_change"; text: string; endsAt: string });
+  /** `ends` is when it stops applying, in the store's zone, such as "the end of today, Tue Nov 24". */
+  | (DraftCardBase & { kind: "store_change"; text: string; endsAt: string; ends: string });
 
 export type DraftConfirmResult =
   | { ok: true; draft: DraftCard }

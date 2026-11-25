@@ -278,6 +278,7 @@ describe.skipIf(!hasDb)("copilot drafts: coupons, prices and store changes (#819
     if (card.kind !== "store_change") throw new Error("expected a store change card");
     expect(card.endsAt).toBeTruthy();
     expect(card.text).toMatch(/one day only/i);
+    expect(card.ends).toBe(`the end of ${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${tomorrow}T12:00:00Z`)).replace(",", "")}`);
     expect(await confirmCopilotDraft({ draftId: card.id })).toMatchObject({ ok: true });
     const store = await platformAdmin.store.findUniqueOrThrow({ where: { id: storeId }, select: { hours: true } });
     expect((store.hours as Record<string, unknown>).monday).toBe("9:00 AM - 8:00 PM");

@@ -13,11 +13,15 @@ export function activeDeliveryPause(store: { deliveryPausedUntil: Date | string 
   return until.getTime() > now.getTime() ? until : null;
 }
 
-/** "11:59 PM today, Tue Nov 24" or "9:00 AM Wed Nov 25", in the store's zone. */
+/** "11:59 PM today, Tue Nov 24", "9:00 AM Wed Nov 25", or at midnight "the end of today, Tue Nov 24", in the store's zone. */
 export function pauseEndLabel(until: Date, timezone: string, now: Date): string {
   const time = new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit" }).format(until);
-  const day = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" }).format(until).replace(",", "");
-  return storeToday(timezone, until) === storeToday(timezone, now) ? `${time} today, ${day}` : `${time} ${day}`;
+  const midnight = time === "12:00 AM";
+  const shown = midnight ? new Date(until.getTime() - 60_000) : until;
+  const day = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" }).format(shown).replace(",", "");
+  const today = storeToday(timezone, shown) === storeToday(timezone, now);
+  if (midnight) return today ? `the end of today, ${day}` : `the end of ${day}`;
+  return today ? `${time} today, ${day}` : `${time} ${day}`;
 }
 
 /** What the shopper reads while delivery is paused. */
