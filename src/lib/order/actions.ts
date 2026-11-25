@@ -5,6 +5,7 @@ import { READ_ONLY_MESSAGE, requireStoreMember, requireStoreOwner, requireStoreW
 import {
   markNoShow,
   NO_SHOW_WRONG_STATUS,
+  previewStoreRefund,
   refundOrderAsStore,
   STORE_REFUND_ABOVE_REMAINING_PREFIX,
   STORE_REFUND_FAILED,
@@ -398,6 +399,16 @@ export async function storeRefundAction(orderId: string, input: unknown) {
   return runStaffAction("storeRefund", id.data, () =>
     refundOrderAsStore(session.store.id, id.data, parsed.data, { id: session.user.id, email: session.user.email }),
   );
+}
+
+/** Owner only (#806): what the refund would return, shown in the dialog before the owner confirms. */
+export async function storeRefundPreviewAction(orderId: string, picks: unknown) {
+  const session = await requireStoreOwner();
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: STORE_REFUND_NOT_FOUND };
+  const parsed = parseInput(storeRefundSchema.shape.picks, picks);
+  if (!parsed.ok) return { ok: false as const, error: "The form was not valid. Reload the order and try again." };
+  return runStaffAction("storeRefundPreview", id.data, () => previewStoreRefund(session.store.id, id.data, parsed.data));
 }
 
 /** Owner only (#798): a pickup the customer never collected is cancelled and refunded in full. */

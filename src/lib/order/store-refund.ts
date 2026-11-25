@@ -1,6 +1,6 @@
 import { storeScoped } from "../db";
 import { money } from "../format";
-import { refundOfGoodsCents } from "./platform-fee";
+import { refundOfGoodsCents, serviceFeeRefundCents, taxRefundCents } from "./platform-fee";
 import {
   evaluateOrderRefundStateAfterCommit,
   refundedLines,
@@ -28,6 +28,11 @@ export const STORE_REFUND_FAILED = "The refund failed at Stripe. The customer is
 export const NO_SHOW_WRONG_STATUS = "Only a pickup order that is ready for pickup can be marked as not collected.";
 
 export type StoreRefundInput = { picks: RefundLinePick[] | "whole_order"; reason: string; submissionId: string };
+/** What the owner's refund would return, shown before they confirm (#806): the same figures the refund then uses. */
+export type StoreRefundPreview =
+  | { ok: true; whole: true; amountCents: number }
+  | { ok: true; whole: false; itemsCents: number; couponShareCents: number; serviceFeeCents: number; taxCents: number; amountCents: number }
+  | { ok: false; error: string };
 export type StoreRefundResult =
   | { ok: true; amountCents: number; pending: boolean; cancelled: false }
   | { ok: true; cancelled: true }
@@ -44,10 +49,7 @@ export async function refundOrderAsStore(storeId: string, orderId: string, input
   if (reason.length < 1 || reason.length > STORE_REFUND_REASON_MAX) return { ok: false, error: STORE_REFUND_REASON_MISSING };
 
   const scoped = storeScoped(storeId);
-  const order = await scoped.order.findUnique({
-    where: { id: orderId },
-    include: { lines: true, refundRequests: { select: { state: true, providerStatus: true, taxShareCents: true, lines: true } } },
-  });
+  const order = await refundableOrder(storeId, orderId);
   if (!order) return { ok: false, error: STORE_REFUND_NOT_FOUND };
   const key = storeRefundKey(orderId, input.submissionId);
   const already = await scoped.refundRequest.findUnique({ where: { key } });
@@ -65,18 +67,12 @@ export async function refundOrderAsStore(storeId: string, orderId: string, input
   }
 
   // Read Stripe outside the store lock (ADR-0014); submitRefund re-reads it and refuses again if it moved.
-  const remaining = await remainingCaptureCents(order.paymentIntentId);
-  let amountCents = remaining;
+  const amount = refundAmount(order, input.picks, await remainingCaptureCents(order.paymentIntentId));
+  if (!amount.ok) return amount;
+  const amountCents = amount.amountCents;
   // A whole-order refund names the units left, so the receipt lists them; none left (fee rounding) stores no lines.
   let picks: RefundLinePick[] | null = input.picks === "whole_order" ? unitsLeft(order.lines, order.refundRequests) : input.picks;
   if (picks?.length === 0) picks = null;
-  if (input.picks !== "whole_order") {
-    const lines = refundedLines(order, input.picks, refundedQtyByLine(order.refundRequests));
-    if (!lines || lines.goodsCents <= 0) return { ok: false, error: STORE_REFUND_LINES_INVALID };
-    amountCents = refundOfGoodsCents(lines.goodsCents, order, taxRefundedCents(order.refundRequests), lines.lineTax);
-  }
-  if (amountCents < 1) return { ok: false, error: `${STORE_REFUND_ABOVE_REMAINING_PREFIX} (${money(remaining)}).` };
-  if (amountCents > remaining) return { ok: false, error: `${STORE_REFUND_ABOVE_REMAINING_PREFIX} (${money(remaining)}).` };
 
   try {
     await submitRefund(storeId, orderId, order.paymentIntentId, {
@@ -95,6 +91,52 @@ export async function refundOrderAsStore(storeId: string, orderId: string, input
   if (!reserved) return { ok: false, error: STORE_REFUND_NOT_STARTED };
   await evaluateOrderRefundStateAfterCommit(orderId);
   return outcome(reserved);
+}
+
+/** The owner's refund before they confirm it (#806): what the customer gets back, from the same figures as the refund. */
+export async function previewStoreRefund(storeId: string, orderId: string, picks: StoreRefundInput["picks"]): Promise<StoreRefundPreview> {
+  const order = await refundableOrder(storeId, orderId);
+  if (!order) return { ok: false, error: STORE_REFUND_NOT_FOUND };
+  if (!order.paymentIntentId || !(STORE_REFUNDABLE_FROM as readonly string[]).includes(order.status)) {
+    return { ok: false, error: STORE_REFUND_WRONG_STATUS };
+  }
+  return refundAmount(order, picks, await remainingCaptureCents(order.paymentIntentId));
+}
+
+function refundableOrder(storeId: string, orderId: string) {
+  return storeScoped(storeId).order.findUnique({
+    where: { id: orderId },
+    include: { lines: true, refundRequests: { select: { state: true, providerStatus: true, taxShareCents: true, lines: true } } },
+  });
+}
+
+/**
+ * The one calculation of a store refund: a whole order returns what is left of the capture; lines return their goods
+ * less their coupon share, with those goods' service fee share and tax. Refused above what is left.
+ */
+function refundAmount(
+  order: NonNullable<Awaited<ReturnType<typeof refundableOrder>>>,
+  picks: StoreRefundInput["picks"],
+  remaining: number,
+): StoreRefundPreview {
+  const above = { ok: false as const, error: `${STORE_REFUND_ABOVE_REMAINING_PREFIX} (${money(remaining)}).` };
+  if (picks === "whole_order") return remaining < 1 ? above : { ok: true, whole: true, amountCents: remaining };
+  const lines = refundedLines(order, picks, refundedQtyByLine(order.refundRequests));
+  if (!lines || lines.goodsCents <= 0) return { ok: false, error: STORE_REFUND_LINES_INVALID };
+  const taxBefore = taxRefundedCents(order.refundRequests);
+  const amountCents = refundOfGoodsCents(lines.goodsCents, order, taxBefore, lines.lineTax);
+  if (amountCents < 1 || amountCents > remaining) return above;
+  const unitPrice = new Map(order.lines.map((line) => [line.id, line.unitPriceCents]));
+  const itemsCents = picks.reduce((sum, pick) => sum + pick.qty * (unitPrice.get(pick.lineId) ?? 0), 0);
+  return {
+    ok: true,
+    whole: false,
+    itemsCents,
+    couponShareCents: itemsCents - lines.goodsCents,
+    serviceFeeCents: serviceFeeRefundCents(lines.goodsCents, order),
+    taxCents: taxRefundCents(lines.goodsCents, order, taxBefore, lines.lineTax),
+    amountCents,
+  };
 }
 
 /**
