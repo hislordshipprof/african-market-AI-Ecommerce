@@ -264,6 +264,17 @@ function openMinuteProbe(days: ParsedDay[], timezone: string, log: (raw: string)
   };
 }
 
+/** isStoreOpen for many UTC minute starts in one zone, logging unparseable hours once. The zone must be valid. */
+export function storeOpenAt(hours: unknown, timezone: string): (minuteStartMs: number) => boolean {
+  const schedule = parseSchedule(hours);
+  if (schedule.kind === "always") return () => true;
+  if (schedule.kind === "unparseable") {
+    logUnparseableHours(schedule.raw);
+    return () => true;
+  }
+  return openMinuteProbe(schedule.days, timezone, logOncePerCall());
+}
+
 /**
  * The earliest instant at or after `now` at which isStoreOpen is true: `now`
  * itself when open, else the start of the first open minute. null when there is
