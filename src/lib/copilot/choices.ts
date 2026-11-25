@@ -30,7 +30,12 @@ export async function choiceCards(
   messages: readonly StoredMessage[],
 ): Promise<PanelMessage[]> {
   if (!messages.some((message) => message.choices?.length)) {
-    return messages.map((message) => ({ role: message.role, text: message.text, messageId: message.messageId }));
+    return messages.map((message) => ({
+      role: message.role,
+      text: message.text,
+      messageId: message.messageId,
+      ...(message.fixes ? { fixes: message.fixes } : {}),
+    }));
   }
   const [clock] = await storeScopedRawQuery<{ now: string }>(storeId, Prisma.sql`
     SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS now
@@ -43,6 +48,7 @@ export async function choiceCards(
     role: message.role,
     text: message.text,
     messageId: message.messageId,
+    ...(message.fixes ? { fixes: message.fixes } : {}),
     ...(message.choices?.length
       ? {
         choices: message.choices.map((choice): ChoiceCard => {

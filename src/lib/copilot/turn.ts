@@ -54,6 +54,7 @@ import {
   type ChoiceCard,
   type DraftCard,
   type ListingChoice,
+  type ListingFix,
   type PanelMessage,
   type SendResult,
 } from "./types";
@@ -128,7 +129,19 @@ async function readReplay(storeId: string, userId: string, messageId: string): P
   const proposals = await loadProposalCards(storeId, { messageId });
   const choices = await turnChoices(storeId, row.conversation_id, messageId);
   const drafts = await loadDraftCards(storeId, { messageId });
-  return { ok: true, conversationId: row.conversation_id, reply: row.reply, proposals, choices, drafts };
+  const fixes = await turnFixes(storeId, row.conversation_id, messageId);
+  return { ok: true, conversationId: row.conversation_id, reply: row.reply, proposals, choices, drafts, fixes };
+}
+
+async function turnFixes(storeId: string, conversationId: string, messageId: string): Promise<ListingFix[]> {
+  const conversation = await storeScoped(storeId).copilotConversation.findUnique({
+    where: { id: conversationId },
+    select: { messages: true },
+  });
+  const turn = parseStoredMessages(conversation?.messages).find((message) => (
+    message.role === "assistant" && message.messageId === messageId
+  ));
+  return turn?.fixes ?? [];
 }
 
 async function turnChoices(storeId: string, conversationId: string, messageId: string): Promise<ChoiceCard[]> {
@@ -197,6 +210,8 @@ export const PLAN_LOCKED_MESSAGE = "Store assistant (AI chat) is on the Pro plan
 
 export const NOTHING_DRAFTED = "Nothing was drafted.";
 export const DRAFT_REPLY = "I drafted this for you to check below. Nothing changes until you confirm.";
+export const FIXES_REPLY = "These listings need fixing. Tap a listing below to edit it.";
+export const NO_FIXES_REPLY = "Every active listing has a photo, an aisle and a description, and prepared food has its allergens.";
 export const NUMBER_REFUSED =
   "I can only give numbers from your stock records, and that answer had one I could not check. See Stock movement on this page.";
 
@@ -215,6 +230,7 @@ export function checkedText(text: string, ownerText: string, book: DraftBook): s
   const allowed = new Set([ownerText, ...book.toolResults, String(PROPOSAL_MAX)].flatMap(numbersIn));
   if (numbersIn(text).every((n) => allowed.has(n))) return text;
   if (book.copilotDrafts.length > 0) return DRAFT_REPLY;
+  if (book.fixes) return book.fixes.length > 0 ? FIXES_REPLY : NO_FIXES_REPLY;
   if (book.sales.length > 0) return book.sales.map(salesText).join("\n");
   const rows = [...new Map(book.report.map((row) => [row.listingId, row])).values()].slice(0, REPLY_ROWS);
   if (rows.length === 0) return NUMBER_REFUSED;
@@ -337,7 +353,7 @@ export async function sendCopilotTurn(input: {
     });
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = (steps >= STEP_CAP && result.finishReason === "tool-calls") || result.finishReason === "length" || book.overflow;
-    const answered = book.sales.length > 0 || book.copilotDrafts.length > 0;
+    const answered = book.sales.length > 0 || book.copilotDrafts.length > 0 || book.fixes !== null;
     const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped, answered);
     const usage = turnUsage(modelId, result.steps);
     const stored = await commitTurn({
@@ -353,6 +369,7 @@ export async function sendCopilotTurn(input: {
       drafts: book.drafts,
       choices: book.choices,
       copilotDrafts: book.copilotDrafts,
+      fixes: book.fixes ?? [],
       usage,
     });
     committed = true;
@@ -414,6 +431,7 @@ async function commitTurn(input: {
   drafts: Draft[];
   choices: PendingChoice[];
   copilotDrafts: PendingDraft[];
+  fixes: ListingFix[];
   usage: TurnUsage;
 }): Promise<SendResult> {
   let proposals: Awaited<ReturnType<typeof insertProposalRows>> = [];
@@ -449,6 +467,7 @@ async function commitTurn(input: {
         text: input.reply,
         messageId: input.messageId,
         ...(choices.length > 0 ? { choices } : {}),
+        ...(input.fixes.length > 0 ? { fixes: input.fixes } : {}),
         costMicros: input.usage.costMicros,
       },
     ];
@@ -476,6 +495,7 @@ async function commitTurn(input: {
     proposals,
     choices: choices.map((choice) => ({ ...choice, chosenListingId: null, open: true })),
     drafts,
+    fixes: input.fixes,
   };
 }
 

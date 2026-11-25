@@ -54,6 +54,7 @@ const draftConfirmSchema = z.strictObject({
   draftId: z.string().min(1).max(200),
   coupon: couponFieldsSchema.optional(),
   variantIds: z.array(z.string().min(1).max(200)).min(1).max(20).optional(),
+  description: z.string().max(2000).optional(),
 });
 
 const draftSchema = z.strictObject({ draftId: z.string().min(1).max(200) });
@@ -161,7 +162,7 @@ export async function answerCopilotAlert(input: unknown): Promise<AnswerResult> 
   }
 }
 
-/** The owner confirms a coupon, price or store-change draft (#819), with the coupon terms or price lines as edited on the card. */
+/** The owner confirms a coupon, price, store-change (#819) or description (#820) draft, with the terms, price lines or text as edited on the card. */
 export async function confirmCopilotDraft(input: unknown): Promise<DraftConfirmResult> {
   const session = await requireStoreOwner();
   const parsed = parseInput(draftConfirmSchema, input);
@@ -169,7 +170,7 @@ export async function confirmCopilotDraft(input: unknown): Promise<DraftConfirmR
   const { draftId, ...edits } = parsed.data;
   try {
     const result = await confirmDraft(session.store.id, draftId, { id: session.user.id, email: session.user.email }, edits);
-    if (result.ok && result.draft.kind === "price") revalidateStorefront(session.store.id);
+    if (result.ok && (result.draft.kind === "price" || result.draft.kind === "description")) revalidateStorefront(session.store.id);
     if (result.ok && result.draft.kind === "store_change") {
       const site = await storeSite(session.store.id);
       if (site) revalidateStore(site);

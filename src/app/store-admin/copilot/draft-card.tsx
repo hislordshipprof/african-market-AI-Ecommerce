@@ -8,6 +8,7 @@ const TITLE: Record<DraftCard["kind"], string> = {
   coupon: "New coupon",
   price: "Price change",
   store_change: "Store change",
+  description: "Product description",
 };
 
 function money(cents: number): string {
@@ -46,12 +47,13 @@ export function DraftCardView({
   card: DraftCard;
   disabled: boolean;
   writing: boolean;
-  onConfirm: (edits: { coupon?: CouponFields; variantIds?: string[] }) => void;
+  onConfirm: (edits: { coupon?: CouponFields; variantIds?: string[]; description?: string }) => void;
   onDismiss: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [fields, setFields] = useState<CouponFields | null>(card.kind === "coupon" ? card.fields : null);
   const [ticked, setTicked] = useState<string[]>(card.kind === "price" ? card.lines.map((line) => line.variantId) : []);
+  const [description, setDescription] = useState(card.kind === "description" ? card.text : "");
   const open = card.state === "pending";
 
   return (
@@ -122,21 +124,45 @@ export function DraftCardView({
         </>
       ) : null}
 
+      {card.kind === "description" ? (
+        <>
+          <p className="mt-1 text-sm font-semibold text-foreground">{card.name}</p>
+          {open ? (
+            <label className="mt-3 flex flex-col gap-1 text-[0.8125rem] font-semibold text-foreground">
+              Description shoppers see
+              <textarea
+                value={description}
+                maxLength={600}
+                rows={4}
+                disabled={disabled}
+                onChange={(event) => setDescription(event.target.value)}
+                className="rounded-lg border border-border bg-background px-3 py-2 text-base leading-6 font-normal text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+            </label>
+          ) : (
+            <p className="mt-2 text-base leading-6 text-foreground">{card.text}</p>
+          )}
+        </>
+      ) : null}
+
       <p className="mt-2 text-sm text-muted-foreground">{writing ? "Saving…" : stateLine(card)}</p>
 
       {open ? (
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
             type="button"
-            disabled={disabled || (card.kind === "price" && ticked.length === 0)}
+            disabled={disabled || (card.kind === "price" && ticked.length === 0) || (card.kind === "description" && !description.trim())}
             className="min-h-12 rounded-full px-6"
             onClick={() => onConfirm(
               card.kind === "coupon"
                 ? (editing && fields ? { coupon: fields } : {})
-                : card.kind === "price" ? { variantIds: ticked } : {},
+                : card.kind === "price" ? { variantIds: ticked }
+                  : card.kind === "description" ? { description } : {},
             )}
           >
-            {card.kind === "coupon" ? "Create coupon" : card.kind === "price" ? `Change ${ticked.length} ${ticked.length === 1 ? "price" : "prices"}` : "Confirm"}
+            {card.kind === "coupon" ? "Create coupon"
+              : card.kind === "price" ? `Change ${ticked.length} ${ticked.length === 1 ? "price" : "prices"}`
+                : card.kind === "description" ? "Save description" : "Confirm"}
           </Button>
           {card.kind === "coupon" && !editing ? (
             <Button type="button" variant="outline" disabled={disabled} className="min-h-12 rounded-full px-6" onClick={() => setEditing(true)}>
