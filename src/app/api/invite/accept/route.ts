@@ -21,7 +21,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
+  // 2FA is optional for store members (#840); an account that has it must have passed it.
+  if (session.user.twoFactorEnabled && !session.session.twoFactorVerified) {
     return NextResponse.json(
       { error: "Two-factor authentication required" },
       { status: 403 },

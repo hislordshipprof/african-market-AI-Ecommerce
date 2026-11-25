@@ -88,12 +88,21 @@ describe("POST /api/stripe/connect", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 401 when 2FA not verified", async () => {
+  it("an owner without 2FA verified this session is refused with a message and a setup link back to payouts (#840)", async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(
-      makeSession({ session: { twoFactorVerified: false } }) as never,
+      makeSession({ user: { twoFactorEnabled: false }, session: { twoFactorVerified: false } }) as never,
     );
+    vi.mocked(getStore).mockResolvedValue(makeStore() as never);
+    vi.mocked(storeScoped).mockReturnValue({
+      storeMembership: { findUnique: vi.fn().mockResolvedValue({ role: "owner" }) },
+    } as never);
     const res = await callConnect();
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: expect.stringMatching(/two-factor/i),
+      setupHref: "/store-admin/two-factor?store=test-store&next=%2Fstore-admin%2Fpayouts%3Fstore%3Dtest-store",
+    });
+    expect(platformAdmin.store.update).not.toHaveBeenCalled();
   });
 
   it("returns 403 when user is not store owner", async () => {
