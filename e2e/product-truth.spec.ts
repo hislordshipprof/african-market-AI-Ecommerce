@@ -93,7 +93,7 @@ test("a catering item shows its lead time, minimum and allergens, and the first 
 
   await detail.getByRole("button", { name: `Add Chin Chin ${slug} to basket` }).click();
   await expect(detail.getByTestId("stepper-qty")).toHaveText("4");
-  await expect(page.getByText(`Chin Chin ${slug}: 4 added, the catering minimum.`)).toBeVisible();
+  await expect(page.locator("[data-sonner-toast]")).toContainText(`Chin Chin ${slug}: 4 added, the catering minimum.`);
   await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden({ timeout: 15_000 });
   await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("4");
 
