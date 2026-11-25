@@ -58,7 +58,6 @@ import { listingNeedsWeight } from "./needs-weight";
 import { loadedVariantRow, serializeVariants } from "./variant-form";
 import { displayNameOf, searchListings } from "./listing-search";
 import {
-  ArrowLeft,
   Plus,
   Pencil,
   Package,
@@ -72,6 +71,7 @@ import {
   Search,
   ImagePlus,
 } from "lucide-react";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 import { shippableRefusal } from "@/lib/shipping/eligibility";
 
 interface Variant {
@@ -945,53 +945,47 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
   );
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl flex-wrap items-center gap-3 px-4 py-3">
-          <Link href={`/store-admin?store=${storeParam}`}>
-            <Button variant="ghost" size="icon" className="size-11" aria-label="Back to dashboard">
-              <ArrowLeft className="size-4" />
-            </Button>
-          </Link>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-base font-semibold text-foreground">Products</h1>
-            <p className="text-xs text-muted-foreground">{storeName}</p>
-          </div>
-          {canManage && (
-          <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
-            <Link href={`/store-admin/listings/import?store=${storeParam}`}>
-              <Button size="sm" variant="outline">
-                <Upload className="size-4" /> Import CSV
-              </Button>
-            </Link>
-            <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
-              <Button size="sm" variant="outline">
-                <Camera className="size-4" /> From photos
-              </Button>
-            </Link>
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="size-4" /> Add listing
-            </Button>
-          </div>
-          )}
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>New listing</DialogTitle>
-                <DialogDescription>Add a product to your store</DialogDescription>
-              </DialogHeader>
-              {formContent}
-              <DialogFooter>
-                <Button onClick={handleCreate} disabled={isPending}>
-                  {isPending ? "Creating..." : "Create listing"}
+    <>
+      <PageHeader
+        title="Products"
+        description={storeName}
+        actions={
+          canManage ? (
+            <>
+              <Link href={`/store-admin/listings/import?store=${storeParam}`}>
+                <Button size="sm" variant="outline">
+                  <Upload className="size-4" /> Import CSV
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </header>
+              </Link>
+              <Link href={`/store-admin/listings/from-photos?store=${storeParam}`}>
+                <Button size="sm" variant="outline">
+                  <Camera className="size-4" /> From photos
+                </Button>
+              </Link>
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="size-4" /> Add listing
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
-      <main className="mx-auto max-w-2xl px-4 py-6">
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New listing</DialogTitle>
+            <DialogDescription>Add a product to your store</DialogDescription>
+          </DialogHeader>
+          {formContent}
+          <DialogFooter>
+            <Button onClick={handleCreate} disabled={isPending}>
+              {isPending ? "Creating..." : "Create listing"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div>
         {listings.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-12">
@@ -1102,7 +1096,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
             )}
           </div>
         )}
-      </main>
+      </div>
 
       <StockDialog listing={stockListing} onClose={() => setStockListing(null)} />
 
@@ -1127,7 +1121,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
 
