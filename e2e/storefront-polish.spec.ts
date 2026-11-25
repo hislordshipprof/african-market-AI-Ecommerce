@@ -29,7 +29,8 @@ test.describe("Storefront layout on a phone (#529)", () => {
   });
 
   test("a related product's name stays clear of its add button", async ({ page }) => {
-    await page.goto(`${BASE}/listings/mn_egusi`, { waitUntil: "networkidle" });
+    // Semovita's aisle (Fufu, Flours & Swallow) has demo listings without photos, so the rail shows illustrations.
+    await page.goto(`${BASE}/listings/mn_semovita`, { waitUntil: "networkidle" });
     const related = page.locator("section", { has: page.getByRole("heading", { name: "More from this aisle" }) });
     const photos = related.locator(".sf-product-photo", { has: page.getByTestId("designed-image-fallback") });
     const count = await photos.count();
