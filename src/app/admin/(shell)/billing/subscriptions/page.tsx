@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { filterSubscriptions, listSubscriptions, subscriptionTotals } from "@/lib/admin/subscriptions";
+import { filterOptionCounts, filterSubscriptions, listSubscriptions, subscriptionTotals } from "@/lib/admin/subscriptions";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { billingStatusLabel, effectivePlan, PLAN_NAMES, type Plan } from "@/lib/billing/plan";
+import { SubscriptionFilters } from "./filters";
 
 export const metadata = { title: "Subscriptions — Platform Admin" };
 
@@ -10,11 +11,17 @@ const STATUSES = ["active", "past_due", "trialing", "unpaid", "canceled", "incom
 const PLANS: readonly Plan[] = ["starter", "pro"];
 
 const dateFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-const FIELD = "min-h-11 rounded-lg border border-input bg-background px-3 text-base text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 function day(value: Date | null) {
   return value ? <time dateTime={value.toISOString()}>{dateFormat.format(value)}</time> : <span className="text-muted-foreground">—</span>;
+}
+
+/** Names the filters that left the list empty. */
+function emptyMessage(status: string | undefined, plan: Plan | undefined) {
+  const onPlan = plan ? ` on the ${PLAN_NAMES[plan]} plan` : "";
+  if (status) return `No stores with status “${billingStatusLabel(status)}”${onPlan}.`;
+  return plan ? `No stores${onPlan}.` : "No stores yet.";
 }
 
 export default async function SubscriptionsPage({ searchParams }: { searchParams: Promise<{ status?: string; plan?: string }> }) {
@@ -25,6 +32,7 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
   const all = await listSubscriptions();
   const totals = subscriptionTotals(all);
   const rows = filterSubscriptions(all, { status, plan });
+  const counts = filterOptionCounts(all, { status, plan }, { statuses: STATUSES, plans: PLANS });
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
@@ -61,37 +69,28 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
 
       <section aria-labelledby="list-title" className="mt-10">
         <h2 id="list-title" className="text-lg font-semibold text-foreground">Stores</h2>
-        <form method="get" className="mt-3 flex flex-wrap items-end gap-3">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="filter-status" className="text-sm font-medium text-foreground">Status</label>
-            <select id="filter-status" name="status" defaultValue={status ?? ""} className={FIELD}>
-              <option value="">All statuses</option>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>{billingStatusLabel(s)}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="filter-plan" className="text-sm font-medium text-foreground">Plan</label>
-            <select id="filter-plan" name="plan" defaultValue={plan ?? ""} className={FIELD}>
-              <option value="">All plans</option>
-              {PLANS.map((p) => (
-                <option key={p} value={p}>{PLAN_NAMES[p]}</option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" className="min-h-11 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-            Filter
-          </button>
-          {(status || plan) && (
-            <Link href="/admin/billing/subscriptions" className="flex min-h-11 items-center px-2 text-sm text-primary underline-offset-4 hover:underline">
-              Clear filters
-            </Link>
-          )}
-        </form>
+        <SubscriptionFilters
+          status={status ?? ""}
+          plan={plan ?? ""}
+          statusOptions={[
+            { value: "", label: `All statuses (${counts.status[""]})` },
+            ...STATUSES.map((s) => ({ value: s, label: `${billingStatusLabel(s)} (${counts.status[s]})` })),
+          ]}
+          planOptions={[
+            { value: "", label: `All plans (${counts.plan[""]})` },
+            ...PLANS.map((p) => ({ value: p, label: `${PLAN_NAMES[p]} (${counts.plan[p]})` })),
+          ]}
+        />
 
         {rows.length === 0 ? (
-          <p className="mt-4 rounded-xl border border-border bg-card p-6 text-muted-foreground">No stores match these filters.</p>
+          <div className="mt-4 rounded-xl border border-border bg-card p-6" data-testid="subscriptions-empty">
+            <p className="text-muted-foreground">{emptyMessage(status, plan)}</p>
+            {(status || plan) && (
+              <Link href="/admin/billing/subscriptions" className="mt-2 inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline">
+                Clear filters
+              </Link>
+            )}
+          </div>
         ) : (
           <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full min-w-[56rem] text-sm" data-testid="subscriptions-table">

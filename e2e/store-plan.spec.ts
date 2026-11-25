@@ -127,6 +127,17 @@ async function clearPastChat() {
   }
 }
 
+async function adminSignIn(page: Page) {
+  await page.goto("/admin/sign-in");
+  await page.getByLabel("Email").fill("admin@platform.test");
+  await page.getByLabel("Password").fill(process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!");
+  await page.click("button[type='submit']");
+  await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByLabel("Verification code").fill(generateTOTP(process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP"));
+  await page.click("button[type='submit']");
+  await page.waitForURL("**/admin", { timeout: 15000 });
+}
+
 async function shoot(page: Page, name: string) {
   for (const [label, size] of [["1440px", { width: 1440, height: 1000 }], ["390px", { width: 390, height: 844 }]] as const) {
     await page.setViewportSize(size);
@@ -228,14 +239,7 @@ test.describe("store subscriptions (#494)", () => {
 
   test("admin console shows each store's plan and the failed payment, and sets the pilot offer", async ({ page }) => {
     await setBilling({ plan: "starter", status: "past_due", paymentFailed: true });
-    await page.goto("/admin/sign-in");
-    await page.getByLabel("Email").fill("admin@platform.test");
-    await page.getByLabel("Password").fill(process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!");
-    await page.click("button[type='submit']");
-    await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
-    await page.getByLabel("Verification code").fill(generateTOTP(process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP"));
-    await page.click("button[type='submit']");
-    await page.waitForURL("**/admin", { timeout: 15000 });
+    await adminSignIn(page);
     await page.goto("/admin/stores");
 
     await expect(page.getByRole("alert").filter({ hasText: "Subscription payment failed" })).toBeVisible();
@@ -250,19 +254,13 @@ test.describe("store subscriptions (#494)", () => {
 
   test("admin sets a Pro override; the overview, the plan gate and the owner's plan page follow it (#547)", async ({ page, browser }) => {
     await setBilling({ plan: "starter", status: "active", paymentFailed: false });
-    await page.goto("/admin/sign-in");
-    await page.getByLabel("Email").fill("admin@platform.test");
-    await page.getByLabel("Password").fill(process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!");
-    await page.click("button[type='submit']");
-    await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
-    await page.getByLabel("Verification code").fill(generateTOTP(process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP"));
-    await page.click("button[type='submit']");
-    await page.waitForURL("**/admin", { timeout: 15000 });
+    await adminSignIn(page);
 
     await page.goto("/admin/billing/subscriptions?plan=pro");
     await expect(page.getByTestId(`subscription-${SLUG}`)).toHaveCount(0);
     await page.goto("/admin/billing/subscriptions?status=active");
     await page.getByTestId(`subscription-${SLUG}`).getByRole("link").click();
+    await page.waitForURL(/\/admin\/stores\/[^/?]+$/);
 
     const endsOn = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10);
     await page.getByLabel("Plan", { exact: true }).selectOption("pro");
@@ -285,5 +283,47 @@ test.describe("store subscriptions (#494)", () => {
     await expect(owner.getByTestId("plan-override")).toContainText("Pro, courtesy of the platform team until");
     await shoot(owner, "547-plan-override");
     await owner.close();
+  });
+
+  test("filters apply as soon as you choose them, with a count on each option (#837)", async ({ page }) => {
+    await setBilling({ plan: "starter", status: "active", paymentFailed: false });
+    await adminSignIn(page);
+
+    await page.goto("/admin/billing/subscriptions");
+    const status = page.getByLabel("Status", { exact: true });
+    const plan = page.getByLabel("Plan", { exact: true });
+    const row = page.getByTestId(`subscription-${SLUG}`);
+    await expect(page.getByRole("button", { name: "Filter" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Clear filters" })).toHaveCount(0);
+    await expect(status.locator("option", { hasText: /^Paused \(0\)$/ })).toHaveCount(1);
+    await expect(page.getByText("Counts the plan in force; an override wins.")).toBeVisible();
+
+    await plan.focus();
+    await plan.selectOption("starter");
+    await expect(page).toHaveURL(/[?&]plan=starter/);
+    await expect(row).toBeVisible();
+    await expect(plan).toBeFocused();
+    await status.selectOption("active");
+    await expect(page).toHaveURL(/[?&]status=active/);
+    await expect(page).toHaveURL(/[?&]plan=starter/);
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("Active");
+    await expect(plan.locator("option", { hasText: /^Pro \(\d+\)$/ })).toHaveCount(1);
+    await expect(page.getByRole("link", { name: "Clear filters" })).toBeVisible();
+    await shoot(page, "837-filters-on");
+
+    await status.selectOption("paused");
+    await expect(page).toHaveURL(/[?&]status=paused/);
+    const empty = page.getByTestId("subscriptions-empty");
+    await expect(empty).toContainText("No stores with status “Paused” on the Starter plan.");
+    await expect(row).toHaveCount(0);
+    await shoot(page, "837-filters-empty");
+
+    await empty.getByRole("link", { name: "Clear filters" }).click();
+    await expect(page).toHaveURL(/\/admin\/billing\/subscriptions$/);
+    await expect(status).toHaveValue("");
+    await expect(plan).toHaveValue("");
+    await expect(row).toBeVisible();
+    await expect(page.getByRole("link", { name: "Clear filters" })).toHaveCount(0);
   });
 });
