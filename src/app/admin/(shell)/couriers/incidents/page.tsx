@@ -36,7 +36,7 @@ export default async function CourierIncidentsPage(props: { searchParams: Promis
   const filtered = !!(filters.storeId || filters.provider || filters.kind || filters.from || filters.to);
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">Courier incidents</h1>
       <p className="mt-1 max-w-prose text-muted-foreground">
         Courier orders that failed over, were cancelled or returned, waited past the timeout for a courier, or were

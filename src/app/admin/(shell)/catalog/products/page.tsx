@@ -34,7 +34,7 @@ export default async function MasterProductsPage(props: { searchParams: Promise<
   const last = first + data.products.length - 1;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">Products</h1>
       <p className="mt-1 text-muted-foreground">
         The master catalog every store lists from. Archive a product to stop new listings; existing ones keep selling.

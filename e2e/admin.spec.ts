@@ -217,7 +217,7 @@ test.describe("Store management (authenticated)", () => {
     await page.waitForURL("**/admin/stores", { timeout: 10000 });
     await expect(page.locator(`text=${slug}`)).toBeVisible();
 
-    await page.locator(`tr:has-text("${slug}") a:has-text("Edit")`).click();
+    await page.locator(`tr:has-text("${slug}")`).getByRole("link", { name: "E2E Test Store" }).click();
     await page.waitForURL(/\/admin\/stores\//, { timeout: 5000 });
 
     await page.getByLabel("Store name").fill(updatedName);
@@ -767,6 +767,7 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
 
 test.describe("Admin shell (authenticated)", () => {
   const MENU = ADMIN_NAV.map((entry) => entry.label);
+  const withBadge = (label: string) => new RegExp(`^${label}(, (at least )?\\d+\\+? waiting)?$`);
 
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -778,10 +779,11 @@ test.describe("Admin shell (authenticated)", () => {
     for (const [path, current] of pages) {
       await page.goto(path);
       const menu = page.getByRole("navigation", { name: "Admin" });
-      await expect(menu.getByRole("link")).toHaveText(MENU);
-      await expect(menu.locator("[aria-current='page']")).toHaveText(current);
+      // A queue's entry may end in its live count badge (#859).
+      await expect(menu.getByRole("link")).toHaveText(MENU.map(withBadge));
+      await expect(menu.locator("[aria-current='page']")).toHaveText(withBadge(current));
       // Scoped to the shell: the settings page also names the admin in its last-changed line.
-      await expect(page.locator("header").getByText(ADMIN_EMAIL)).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "Admin menu" }).getByText(ADMIN_EMAIL)).toBeVisible();
     }
   });
 
@@ -797,7 +799,7 @@ test.describe("Admin shell (authenticated)", () => {
     for (const [testId, href] of links) {
       await expect(page.getByTestId(testId)).toHaveAttribute("href", href);
     }
-    await expect(page.getByTestId("count-stores")).toContainText(/\d+ active/);
+    await expect(page.getByTestId("count-stores")).toContainText(/\d+ of \d+/);
     await expect(page.getByTestId("count-catalog-review")).toContainText(/\d+/);
   });
 
@@ -842,7 +844,7 @@ test.describe("Admin shell (authenticated)", () => {
   test("store edit cards follow the dark theme", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/admin/stores");
-    await page.locator(`tr:has-text("tante-marie") a:has-text("Edit")`).click();
+    await page.locator(`tr:has-text("tante-marie")`).getByRole("link").first().click();
     const background = (id: string) =>
       page.locator(`section[aria-labelledby='${id}']`).evaluate((el) => getComputedStyle(el).backgroundColor);
     const billing = await background("billing");

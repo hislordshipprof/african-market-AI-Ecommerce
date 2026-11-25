@@ -17,7 +17,7 @@ export default async function AssistantActivityPage({ searchParams }: { searchPa
   const older = last ? `/admin/assistant/activity?${new URLSearchParams({ ...(adminId ? { admin: adminId } : {}), before: last.at.toISOString() })}` : null;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+    <div className="max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <p className="text-base">
         <Link href="/admin?assistant=open" className="font-semibold text-foreground underline underline-offset-4">Assistant</Link>
       </p>

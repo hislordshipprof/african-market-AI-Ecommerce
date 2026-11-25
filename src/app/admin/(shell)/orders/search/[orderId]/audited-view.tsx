@@ -32,6 +32,6 @@ export function AuditedView({ viewId, children }: { viewId: string; children: Re
     return () => window.removeEventListener("pageshow", restored);
   }, [viewId, router]);
 
-  if (replayed) return <p role="status" className="mx-auto max-w-5xl px-4 py-8 text-muted-foreground sm:px-6">Loading order…</p>;
+  if (replayed) return <p role="status" className="px-4 py-6 sm:px-6 lg:px-8 text-muted-foreground">Loading order…</p>;
   return children;
 }
