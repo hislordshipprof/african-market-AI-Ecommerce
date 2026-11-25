@@ -11,7 +11,7 @@ import { USPS_STATE_CODES } from "../customer-account/address-validation";
 import { isSlugRoutable } from "../slug";
 import { coordinatesForStore, insertStore, type NewStoreValues } from "../admin/store-create";
 import { timezoneForAddress } from "../admin/timezone";
-import { recordInvite, sendInviteEmail, type CreateInviteInput } from "../invite/service";
+import { recordInvite, trySendInviteEmail, type CreateInviteInput } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { requestCourierRegistration } from "../delivery/courier-registration";
 import { revalidateStore } from "../get-store";
@@ -317,18 +317,7 @@ export async function approveStoreApplication(id: string, rawSlug: string, actor
   }
 
   revalidateStore(created.store);
-  let inviteEmailed = true;
-  try {
-    await sendInviteEmail(created.inviteInput, created.invite);
-  } catch (err) {
-    inviteEmailed = false;
-    console.error(JSON.stringify({
-      event: "store_application_invite_email_failed",
-      applicationId: id,
-      storeId: created.store.id,
-      message: err instanceof Error ? err.message : "send failed",
-    }));
-  }
+  const inviteEmailed = await trySendInviteEmail(created.inviteInput, created.invite);
   await requestCourierRegistration(created.store.id);
   return { ok: true, storeId: created.store.id, inviteEmailed };
 }

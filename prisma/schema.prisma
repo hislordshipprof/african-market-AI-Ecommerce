@@ -454,6 +454,8 @@ model StoreInvite {
   tokenHash   String    @unique @map("token_hash")
   expiresAt   DateTime  @map("expires_at")
   usedAt      DateTime? @map("used_at")
+  /// sent | failed | copied (#839); null until the first email attempt.
+  emailStatus String?   @map("email_status")
   invitedById String    @map("invited_by_id")
   createdAt   DateTime  @default(now()) @map("created_at")
 

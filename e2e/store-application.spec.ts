@@ -40,6 +40,16 @@ async function apply(page: Page, root: string, name: string, email: string, phon
   await expect(page.getByRole("heading", { name: "Thanks, we have your application" })).toBeVisible();
 }
 
+async function adminSignIn(page: Page, root: string) {
+  await page.goto(`${root}/admin/sign-in`);
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
+  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+  await page.click("button[type='submit']");
+  await page.getByLabel("Verification code").fill(generateTOTP(TOTP_SECRET));
+  await page.click("button[type='submit']");
+  await page.waitForURL("**/admin", { timeout: 15_000 });
+}
+
 // /sell lives on the root domain, so this boots a server with PLATFORM_ROOT_DOMAIN=localhost (#554).
 test("a store applies on /sell; a platform admin approves one into a setup store and rejects another", async ({ page }) => {
   test.setTimeout(240_000);
@@ -119,13 +129,7 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await apply(page, root, rejectName, `reject-${run}@example.com`, `832555${digits.slice(-4)}`, "Not sure yet");
 
     await page.setExtraHTTPHeaders({});
-    await page.goto(`${root}/admin/sign-in`);
-    await page.getByLabel("Email").fill(ADMIN_EMAIL);
-    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-    await page.click("button[type='submit']");
-    await page.getByLabel("Verification code").fill(generateTOTP(TOTP_SECRET));
-    await page.click("button[type='submit']");
-    await page.waitForURL("**/admin", { timeout: 15_000 });
+    await adminSignIn(page, root);
     // #780: the admin home counts the applications waiting, at least the two just sent.
     const applicationsCount = page.getByTestId("count-applications");
     await expect(applicationsCount).toHaveAttribute("href", "/admin/applications");
@@ -165,6 +169,88 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     // #838: the plan the applicant wanted sits next to the plan in force.
     await expect(page.getByTestId("plan-choice")).toHaveText("Chose Pro when applying");
     await shoot(page, "838-admin-store");
+  } finally {
+    await running.stop();
+  }
+});
+
+// No email provider and no sink: the invite email fails as it does before the platform domain is set (#839).
+test("when the owner invite email fails, the admin copies a fresh link that opens the invite; the earlier link is refused", async ({ page }) => {
+  test.setTimeout(240_000);
+  const port = await reservePort(laneSmokePort());
+  const root = `http://localhost:${port}`;
+  const running = await startSpawnedServer({
+    command: `pnpm exec next start -p ${port}`,
+    shell: true,
+    cwd: process.cwd(),
+    port,
+    env: {
+      ...process.env,
+      CI: "",
+      RESEND_API_KEY: "",
+      EMAIL_FROM: "",
+      E2E_FAKE_ASSISTANT: "",
+      VERCEL: "",
+      // Lets next start run with the committed test auth secret while CI is off.
+      VERCEL_ENV: "preview",
+      E2E_STORE_OVERRIDE: "",
+      STRIPE_SECRET_KEY: "",
+      PLATFORM_ROOT_DOMAIN: "localhost",
+      BETTER_AUTH_URL: root,
+      BETTER_AUTH_TRUSTED_ORIGINS: root,
+    },
+    healthUrl: `http://127.0.0.1:${port}/api/health`,
+    healthOk: (status) => status === 200 || status === 503,
+  });
+  const run = Date.now().toString(36);
+  const digits = String(Date.now()).slice(-7);
+  const name = `E2E Unsent Market ${run}`;
+  const email = `unsent-${run}@example.com`;
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${Number(digits.slice(-2)) + 1}-${run}` });
+  try {
+    await apply(page, root, name, email, `281555${digits.slice(-4)}`, "Not sure yet");
+    await page.setExtraHTTPHeaders({});
+    await adminSignIn(page, root);
+    await page.goto(`${root}/admin/applications`);
+    const card = page.getByRole("article", { name });
+    await card.getByLabel("Store address").fill(`e2e-unsent-${run}`);
+    await card.getByRole("button", { name: "Approve" }).click();
+
+    await expect(page.getByRole("status").filter({ hasText: `${name} approved.` })).toContainText("did not send");
+    const section = page.getByRole("region", { name: "Owner invite" });
+    await expect(section.getByTestId("owner-invite-status")).toContainText("Email not sent");
+    await expect(section).toContainText("email isn't set up yet: copy the link and send it yourself");
+    await expect(section).toContainText(email);
+    await shoot(page, "839-approved-email-failed");
+
+    await section.getByRole("button", { name: "Copy invite link" }).click();
+    await expect(section.getByLabel("Invite link")).toHaveValue(/\/invite\//);
+    const first = await section.getByLabel("Invite link").inputValue();
+    await expect(section.getByTestId("owner-invite-status")).toContainText("Link copied");
+    await shoot(page, "839-link-copied");
+
+    const invitee = await page.context().newPage();
+    await invitee.goto(first);
+    await expect(invitee.getByLabel("Email")).toHaveValue(email);
+
+    // The store page copies again; the link the applicant already has stops working.
+    await page.getByRole("link", { name: "Open the store" }).click();
+    // Both pages have an "Owner invite" region, so wait for the store page before using it.
+    await page.waitForURL(`${root}/admin/stores/**`);
+    const storeSection = page.getByRole("region", { name: "Owner invite" });
+    await expect(storeSection.getByTestId("owner-invite-status")).toContainText("Link copied");
+    await storeSection.getByRole("button", { name: "Copy invite link" }).click();
+    await expect(storeSection.getByLabel("Invite link")).not.toHaveValue(first);
+    const second = await storeSection.getByLabel("Invite link").inputValue();
+    expect(second).toContain("/invite/");
+    await storeSection.scrollIntoViewIfNeeded();
+    await shoot(page, "839-store-page-copied");
+
+    await invitee.goto(first);
+    await expect(invitee.getByText("Invalid invitation link")).toBeVisible();
+    await invitee.goto(second);
+    await expect(invitee.getByLabel("Email")).toHaveValue(email);
+    await invitee.close();
   } finally {
     await running.stop();
   }

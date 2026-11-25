@@ -14,6 +14,7 @@ import { fakeAddressBackend, setAddressProvider, type AddressBackend } from "../
 import { inngest } from "../inngest/client";
 import { COURIER_REGISTRATION_REQUESTED } from "../delivery/courier-registration";
 import { withAiOnboardingSettings } from "../admin/platform-settings-test-lock";
+import { copyInviteLink, ownerInvite, validateInviteToken } from "../invite/service";
 import {
   applicantPlanChoice,
   approveStoreApplication,
@@ -296,6 +297,30 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
 
   it("a store with no application has no plan choice (#838)", async () => {
     expect(await applicantPlanChoice(`no-such-store-${run}`)).toBeNull();
+  });
+
+  it("approve with the invite email failing shows the invite as failed, and a copied link opens the invite (#839)", async () => {
+    const app = await pending();
+    setEmailSenderForTests({ send: async () => { throw new Error("provider down"); } });
+    let result;
+    try {
+      result = await approveStoreApplication(app.id, `sell-${run}-copy`, actor);
+    } finally {
+      setEmailSenderForTests(null);
+    }
+    if (!result.ok) throw new Error(result.error);
+    expect(result.inviteEmailed).toBe(false);
+    const invite = await ownerInvite(result.storeId);
+    expect(invite).toMatchObject({ email: app.email, status: "failed" });
+
+    const copied = await copyInviteLink({
+      storeId: result.storeId, inviteId: invite!.id, actorId: actor.id, actorEmail: actor.email,
+      baseUrl: "http://localhost:3000", storeSlug: `sell-${run}-copy`,
+    });
+    if ("error" in copied) throw new Error(copied.error);
+    const token = new URL(copied.inviteUrl).pathname.split("/").pop()!;
+    expect(await validateInviteToken(token)).toMatchObject({ email: app.email, role: "owner" });
+    expect(await ownerInvite(result.storeId)).toMatchObject({ status: "copied" });
   });
 
   it("approve with a taken or reserved slug changes nothing and the application stays pending", async () => {

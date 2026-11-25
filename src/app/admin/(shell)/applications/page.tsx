@@ -2,7 +2,9 @@ import Link from "next/link";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { listStoreApplications } from "@/lib/store-application/service";
 import { planChoiceLabel, storeTypeLabel, suggestSlug } from "@/lib/store-application/fields";
+import { inviteNotEmailed, ownerInvite } from "@/lib/invite/service";
 import { ApproveForm, RejectForm, ResendRejectionForm } from "./decision-forms";
+import { OwnerInviteStatus } from "../stores/[id]/owner-invite-status";
 
 export const metadata = { title: "Applications — Platform Admin" };
 export const dynamic = "force-dynamic";
@@ -25,6 +27,7 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
   // Set by the approve and reject actions; only an id from the decided list is shown.
   const just = decided.find((application) => application.id === search.decided);
   const emailFailed = search.email === "failed";
+  const invite = just?.status === "approved" && just.store ? await ownerInvite(just.store.id) : null;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
@@ -44,7 +47,7 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
           {just.status === "approved" ? (
             <>
               <span className="font-medium">{just.businessName} approved.</span> The store is in setup.{" "}
-              {emailFailed ? "The owner invite email did not send; send it again from the store page." : "The owner invite is on its way."}{" "}
+              {emailFailed ? "The owner invite email did not send: copy the invite link below and send it yourself." : "The owner invite is on its way."}{" "}
               {just.store && (
                 <Link href={`/admin/stores/${just.store.id}`} className="font-medium underline">
                   Open the store
@@ -59,6 +62,16 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
                 : "The applicant got a plain email without your reason."}
             </>
           )}
+        </div>
+      )}
+      {just?.store && invite && (
+        <div className="mt-4">
+          <OwnerInviteStatus
+            storeId={just.store.id}
+            invite={{ email: invite.email, status: invite.status, expiresAt: invite.expiresAt.toISOString() }}
+            notEmailedReason={inviteNotEmailed()}
+            renewHint="To invite the owner again, open the store and send a new invite."
+          />
         </div>
       )}
 
