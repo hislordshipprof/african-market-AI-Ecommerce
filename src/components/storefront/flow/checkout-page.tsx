@@ -54,6 +54,7 @@ import {
   type IssueSection,
 } from "@/lib/checkout/checkout-issue";
 import { settleWithTimeout } from "./settle";
+import { closedNotice } from "./closed-notice";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
 import { checkoutQuoteKey, placeOrderLabel } from "@/lib/checkout/summary";
 import { activeSection } from "@/lib/checkout/active-section";
@@ -1357,6 +1358,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     .map((problem) => problem.message);
   const courierQuoted = Boolean(quote?.courierProvider) && !quotePending;
   const shipping = fulfillment === "ship";
+  const notice = closedNotice({
+    closed: settings.closed,
+    shipping,
+    scheduled: slotRequired || (schedule && fulfillment === "pickup"),
+    slot,
+    slots,
+  });
   const shipRate = shipping && !quotePending ? quote?.shipping ?? null : null;
 
   return (
@@ -1536,16 +1544,23 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             </FlowCard>
           </div>
           <FlowCard title={shipping ? "Notes for the store" : "When works for you?"}>
-            {settings.closed && !shipping && (
+            {notice && (
               <div className={styles.queueNotice}>
                 <Clock size={18} aria-hidden />
-                <p>
-                  <strong>
-                    <span>Opens {settings.opensAt} ·</span>{" "}
-                    <span>ready about {settings.readyAt}</span>
-                  </strong>
-                  The store is closed. Order now to join the queue.
-                </p>
+                {notice.kind === "slot" ? (
+                  <p>
+                    <strong>{fulfillment === "pickup" ? "Pickup" : "Delivery"} {notice.label}</strong>
+                    The store is closed now. Your order is for the time you chose.
+                  </p>
+                ) : (
+                  <p>
+                    <strong>
+                      <span>Opens {settings.opensAt} ·</span>{" "}
+                      <span>ready about {settings.readyAt}</span>
+                    </strong>
+                    The store is closed. Order now to join the queue.
+                  </p>
+                )}
               </div>
             )}
             {!slotRequired && !shipping && (
