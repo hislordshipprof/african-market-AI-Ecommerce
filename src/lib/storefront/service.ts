@@ -1,6 +1,7 @@
 import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { orderPacks, shownPack } from "./pack-order";
+import { nameMatches } from "./search-relevance";
 import { listingAvailable, stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
@@ -782,6 +783,126 @@ export function searchListings(storeId: string, query: string) {
 export function searchCatalogHits(storeId: string, query: string, need: ShopperNeed | null = null) {
   // Attribute reviews do not revalidate store caches, so a need always reads fresh.
   return need ? readSearchListings(storeId, query, need) : loadSearch(storeId, query);
+}
+
+export interface SearchSuggestion {
+  /** A search that finds at least this listing: its display name, lower case. */
+  text: string;
+  /** The synonym, local or catalogue name the prefix matched when the store's name did not. */
+  via?: string;
+}
+
+export interface SearchSuggestions {
+  suggestions: SearchSuggestion[];
+  aisles: { name: string; slug: string }[];
+  products: SearchResult[];
+}
+
+interface RawSuggestRow {
+  display_name: string;
+  name_hit: boolean;
+  via: string | null;
+  aisle_name: string | null;
+  aisle_slug: string | null;
+  aisle_hit: boolean;
+  ordered: number;
+}
+
+/** This store's active listings whose name, catalogue name, synonym or aisle starts a word with `prefix`. */
+async function readSuggestRows(storeId: string, prefix: string) {
+  const displayName = Prisma.sql`COALESCE(NULLIF(TRIM(l.custom_name), ''), mp.name)`;
+  return storeScopedRawQuery<RawSuggestRow>(
+    storeId,
+    Prisma.sql`
+    SELECT * FROM (
+      SELECT ${displayName} AS display_name,
+        ${nameMatches(displayName, prefix)} AS name_hit,
+        (SELECT term FROM (SELECT mp.name AS term UNION ALL SELECT ps.term FROM product_synonyms ps WHERE ps.product_id = mp.id) t
+          WHERE term IS NOT NULL AND ${nameMatches(Prisma.sql`term`, prefix)} ORDER BY length(term), term LIMIT 1) AS via,
+        c.name AS aisle_name, c.slug AS aisle_slug,
+        COALESCE(${nameMatches(Prisma.sql`c.name`, prefix)} OR ${nameMatches(Prisma.sql`c.local_name`, prefix)}, false) AS aisle_hit,
+        (SELECT COALESCE(SUM(ol.qty_ordered), 0)::int FROM order_lines ol
+          JOIN listing_variants lv ON lv.id = ol.listing_variant_id WHERE lv.listing_id = l.id) AS ordered
+      FROM listings l
+      LEFT JOIN master_products mp ON l.master_product_id = mp.id
+      LEFT JOIN categories c ON c.id = CASE WHEN l.master_product_id IS NULL THEN l.category_id ELSE mp.category_id END
+      WHERE l.active = true AND ${notE2eListingSql}
+    ) rows
+    WHERE display_name IS NOT NULL AND (name_hit OR via IS NOT NULL OR aisle_hit)
+    `,
+  );
+}
+
+const SUGGESTION_LIMIT = 6;
+const AISLE_LIMIT = 3;
+const PRODUCT_LIMIT = 5;
+
+async function readSearchSuggestions(storeId: string, prefix: string): Promise<Omit<SearchSuggestions, "products">> {
+  const rows = await readSuggestRows(storeId, prefix);
+  const typed = prefix.toLowerCase();
+  const ranked = rows
+    .filter((row) => row.name_hit || row.via)
+    .map((row) => {
+      const text = row.display_name.trim().toLowerCase();
+      const rank = text.startsWith(typed) ? 0 : row.name_hit ? 1 : 2;
+      return { text, rank, ordered: row.ordered, via: rank === 2 ? row.via!.toLowerCase() : undefined };
+    })
+    .sort((a, b) => a.rank - b.rank || b.ordered - a.ordered || a.text.localeCompare(b.text));
+  const suggestions = new Map<string, SearchSuggestion>();
+  for (const { text, via } of ranked) {
+    if (!suggestions.has(text)) suggestions.set(text, via ? { text, via } : { text });
+  }
+  // Aisles named like the prefix first, then the aisles of the most matching listings.
+  const aisles = new Map<string, { name: string; slug: string; named: boolean; hits: number }>();
+  for (const row of rows) {
+    if (!row.aisle_slug || !row.aisle_name) continue;
+    const aisle = aisles.get(row.aisle_slug) ?? { name: row.aisle_name, slug: row.aisle_slug, named: row.aisle_hit, hits: 0 };
+    aisle.hits += row.name_hit || row.via ? 1 : 0;
+    aisles.set(row.aisle_slug, aisle);
+  }
+  return {
+    suggestions: [...suggestions.values()].slice(0, SUGGESTION_LIMIT),
+    aisles: [...aisles.values()]
+      .sort((a, b) => Number(b.named) - Number(a.named) || b.hits - a.hits || a.name.localeCompare(b.name))
+      .slice(0, AISLE_LIMIT)
+      .map(({ name, slug }) => ({ name, slug })),
+  };
+}
+
+/** What the search box offers as the shopper types (#835): completions, aisles and products. */
+export async function suggestSearch(storeId: string, query: string): Promise<SearchSuggestions> {
+  const prefix = query.trim();
+  if (!prefix) return { suggestions: [], aisles: [], products: [] };
+  const [groups, products] = await Promise.all([
+    cachedStorefrontRead(storeId, JSON.stringify(["searchSuggestions", prefix]), () => readSearchSuggestions(storeId, prefix)),
+    searchListings(storeId, prefix),
+  ]);
+  return { ...groups, products: products.slice(0, PRODUCT_LIMIT) };
+}
+
+const POPULAR_LIMIT = 6;
+
+/** The store's most ordered listings it still sells, as searches for an empty search box. There is no search log. */
+async function readPopularSearches(storeId: string): Promise<string[]> {
+  const rows = await storeScopedRawQuery<{ text: string }>(
+    storeId,
+    Prisma.sql`
+    SELECT LOWER(COALESCE(NULLIF(TRIM(l.custom_name), ''), mp.name)) AS text
+    FROM order_lines ol
+    JOIN listing_variants lv ON lv.id = ol.listing_variant_id
+    JOIN listings l ON l.id = lv.listing_id
+    LEFT JOIN master_products mp ON l.master_product_id = mp.id
+    WHERE l.active = true AND ${notE2eListingSql}
+    GROUP BY 1 HAVING LOWER(COALESCE(NULLIF(TRIM(l.custom_name), ''), mp.name)) IS NOT NULL
+    ORDER BY SUM(ol.qty_ordered) DESC, 1
+    LIMIT ${POPULAR_LIMIT}
+    `,
+  );
+  return rows.map((row) => row.text);
+}
+
+export function popularSearches(storeId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["popularSearches"]), () => readPopularSearches(storeId));
 }
 
 export function getActiveListings(storeId: string) {
