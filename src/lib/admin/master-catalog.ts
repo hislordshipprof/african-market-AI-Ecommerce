@@ -15,6 +15,7 @@ import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { listingRelevanceJoin, listingRelevanceWhere } from "../storefront/search-relevance";
 import { requirePlatformAdmin } from "./session";
+import { aisleChoices, productCategoryError, type AisleChoice } from "../catalog/category-tree";
 import { z } from "zod";
 import {
   CATALOG_PAGE_SIZE,
@@ -54,7 +55,7 @@ export async function listMasterCatalog(input: unknown): Promise<CatalogPage> {
 
   const where: Prisma.Sql[] = [];
   if (q) where.push(listingRelevanceWhere(q));
-  if (filters.category) where.push(Prisma.sql`mp.category_id = ${filters.category}`);
+  if (filters.category) where.push(Prisma.sql`(mp.category_id = ${filters.category} OR c.parent_id = ${filters.category})`);
   if (filters.status) where.push(Prisma.sql`mp.status = ${filters.status}`);
   if (filters.photo === "missing") where.push(Prisma.sql`mp.image_url IS NULL`);
   const allReviewed = Prisma.sql`(mp.ingredients_status = 'reviewed' AND mp.allergens_status = 'reviewed' AND mp.dietary_status = 'reviewed')`;
@@ -64,6 +65,7 @@ export async function listMasterCatalog(input: unknown): Promise<CatalogPage> {
   const from = Prisma.sql`
     FROM master_products mp
     LEFT JOIN categories c ON c.id = mp.category_id
+    LEFT JOIN categories aisle ON aisle.id = c.parent_id
     ${q ? Prisma.sql`CROSS JOIN LATERAL (SELECT NULL::text AS custom_name) l ${listingRelevanceJoin(q)}` : Prisma.empty}
     ${where.length > 0 ? Prisma.sql`WHERE ${Prisma.join(where, " AND ")}` : Prisma.empty}
   `;
@@ -84,7 +86,7 @@ export async function listMasterCatalog(input: unknown): Promise<CatalogPage> {
   };
   const [rows, counted] = await Promise.all([
     platformAdminRawQuery<Row>(Prisma.sql`
-      SELECT mp.id, mp.name, mp.status, c.name AS category_name, mp.subcategory, mp.unit, mp.weight_g, mp.image_url,
+      SELECT mp.id, mp.name, mp.status, CASE WHEN aisle.id IS NULL THEN c.name ELSE aisle.name || ' › ' || c.name END AS category_name, mp.subcategory, mp.unit, mp.weight_g, mp.image_url,
         ${allReviewed} AS attributes_reviewed
       ${from}
       ${order}
@@ -136,7 +138,7 @@ export type MasterProductEditor = {
   };
   /** Set for a merged product, which is read-only. */
   mergedInto: { id: string; name: string } | null;
-  categories: Array<{ id: string; name: string }>;
+  categories: AisleChoice[];
   storeCount: number;
   /** Each synonym with the other products its term also names. */
   synonyms: Array<{ id: string; term: string; language: string | null; region: string | null; alsoNames: string[] }>;
@@ -159,19 +161,20 @@ export async function getMasterProductEditor(productId: string): Promise<MasterP
     });
     if (!product) return null;
     const { mergedInto, ...details } = product;
-    const categories = await tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+    const categories = aisleChoices(await tx.category.findMany({ select: { id: true, name: true, parentId: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }));
     const storeCount = (await storesListingMasterProduct(tx, product.id)).length;
     const synonyms = await productSynonymsWithSharedNames(tx, product.id);
     return { product: { ...details, status: details.status as MasterStatus, version: detailsVersion(details) }, categories, storeCount, mergedInto, synonyms };
   });
 }
 
-/** Categories for the list filter. */
-export async function listCatalogCategories(): Promise<Array<{ id: string; name: string }>> {
+/** The aisles with their subcategories (#861), for the list filter and the pickers. */
+export async function listCatalogCategories(): Promise<AisleChoice[]> {
   await requirePlatformAdmin();
-  return platformAdminTransaction((tx) =>
-    tx.category.findMany({ select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }));
+  return aisleChoices(await platformAdminTransaction((tx) =>
+    tx.category.findMany({ select: { id: true, name: true, parentId: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] })));
 }
+
 
 export type SaveState = {
   ok?: boolean;
@@ -218,8 +221,8 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
     // The form holds every field as it was loaded; saving it over a newer row would undo the other admin's change.
     if (detailsVersion(product) !== version) return { ok: false, message: STALE_PRODUCT_MESSAGE };
     if (next.categoryId && next.categoryId !== product.categoryId) {
-      const category = await tx.category.findUnique({ where: { id: next.categoryId }, select: { id: true } });
-      if (!category) return { ok: false, message: "Check the highlighted fields", fieldErrors: { categoryId: "Choose a category from the list" } };
+      const categoryError = await productCategoryError(tx, next.categoryId);
+      if (categoryError) return { ok: false, message: "Check the highlighted fields", fieldErrors: { categoryId: categoryError } };
     }
 
     const before: Record<string, unknown> = {};
@@ -258,9 +261,8 @@ async function createMasterProduct(
   next: Omit<MasterProductForm, "productId" | "version">,
 ): Promise<SaveState> {
   return platformAdminTransaction(async (tx): Promise<SaveState> => {
-    if (next.categoryId && !(await tx.category.findUnique({ where: { id: next.categoryId }, select: { id: true } }))) {
-      return { ok: false, message: "Check the highlighted fields", fieldErrors: { categoryId: "Choose a category from the list" } };
-    }
+    const categoryError = next.categoryId ? await productCategoryError(tx, next.categoryId) : null;
+    if (categoryError) return { ok: false, message: "Check the highlighted fields", fieldErrors: { categoryId: categoryError } };
     const created = await tx.masterProduct.create({ data: next });
     await tx.auditLog.create({
       data: {

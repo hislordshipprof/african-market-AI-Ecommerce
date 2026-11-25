@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 /**
  * The platform's aisles (#861): 16 aisles, each with its subcategories, as the owner approved on 2026-11-25
  * (research/catalog/category-tree.md section 4). Two levels only. A product sits in one subcategory; its
@@ -237,4 +239,26 @@ const subcategoryBySlug = new Map(SUBCATEGORIES.map((sub) => [sub.slug, sub]));
 /** The subcategory id for a master-catalogue CSV `category` cell (a subcategory slug), or null. */
 export function subcategoryIdForSlug(slug: string): string | null {
   return subcategoryBySlug.get(slug.trim())?.id ?? null;
+}
+
+export type CategoryChoiceRow = { id: string; name: string; parentId: string | null };
+export type AisleChoice = { id: string; name: string; subcategories: Array<{ id: string; name: string }> };
+
+/**
+ * Categories in sibling order, as the aisles a picker shows with their subcategories under them. A product
+ * picks a subcategory, or an aisle that has none (an admin's own aisle).
+ */
+export function aisleChoices(rows: CategoryChoiceRow[]): AisleChoice[] {
+  return rows.filter((row) => !row.parentId).map((aisle) => ({
+    id: aisle.id,
+    name: aisle.name,
+    subcategories: rows.filter((row) => row.parentId === aisle.id).map(({ id, name }) => ({ id, name })),
+  }));
+}
+
+/** Why a product may not sit in this category, or null (#861): it must exist, and an aisle with subcategories takes none directly. */
+export async function productCategoryError(tx: Pick<Prisma.TransactionClient, "category">, categoryId: string): Promise<string | null> {
+  const category = await tx.category.findUnique({ where: { id: categoryId }, select: { name: true, _count: { select: { children: true } } } });
+  if (!category) return "Choose a category from the list";
+  return category._count.children > 0 ? `Choose a subcategory of ${category.name}` : null;
 }

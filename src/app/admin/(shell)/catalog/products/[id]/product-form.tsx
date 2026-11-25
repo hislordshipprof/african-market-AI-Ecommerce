@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useTransition, type FormEvent } from
 import { useRouter } from "next/navigation";
 import { saveMasterProduct, type MasterProductEditor, type SaveState } from "@/lib/admin/master-catalog";
 import { EDITABLE_STATUSES, MASTER_STATUS_LABELS, STORAGE_OPTIONS, type MasterProductField } from "@/lib/admin/master-catalog-form";
+import { CategoryOptions } from "../../category-options";
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 const FIELD = `min-h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground aria-[invalid=true]:border-destructive ${FOCUS}`;
@@ -44,15 +45,13 @@ export function ProductForm({ product, categories }: Pick<MasterProductEditor, "
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field id="categoryId" label="Category" error={error("categoryId")}>
+        <Field id="categoryId" label="Aisle and subcategory" error={error("categoryId")}>
           <select id="categoryId" name="categoryId" defaultValue={product.categoryId ?? ""} className={FIELD} {...described("categoryId")}>
             <option value="">No category</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>{category.name}</option>
-            ))}
+            <CategoryOptions aisles={categories} />
           </select>
         </Field>
-        <Field id="subcategory" label="Subcategory" error={error("subcategory")}>
+        <Field id="subcategory" label="Type" error={error("subcategory")}>
           <input id="subcategory" name="subcategory" defaultValue={product.subcategory ?? ""} maxLength={100} className={FIELD} {...described("subcategory")} />
         </Field>
       </div>
