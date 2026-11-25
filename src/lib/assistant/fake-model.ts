@@ -170,6 +170,7 @@ export function scriptStep(messages: unknown): ScriptStep {
     return { kind: "text", text: "Here is your order to review. Tap Review and pay to pay on the checkout page." };
   }
   if (last.name === "find_stores") return { kind: "text", text: "These stores are still in setup. Tap a store below to open it." };
+  if (last.name === "draft_store_status") return { kind: "text", text: "I drafted the suspension. Confirm or dismiss the card below; nothing changes until you confirm." };
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
   if (last.name === "show_products" || last.name === "add_to_cart") {
@@ -244,6 +245,12 @@ function openingStep(lower: string, raw: string, messages: unknown): ScriptStep 
   }
   // The platform admin assistant (#831) reads the stores still in setup.
   if (lower.includes("stuck in onboarding")) return { kind: "tool", name: "find_stores", input: { status: "setup" } };
+  // The platform admin assistant drafts a suspension (#832), and refuses a never-allowed request.
+  const suspend = /^suspend the store ([a-z0-9-]+)/.exec(lower.trim());
+  if (suspend) return { kind: "tool", name: "draft_store_status", input: { slug: suspend[1], status: "suspended" } };
+  if (lower.includes("platform admin") && lower.startsWith("make ")) {
+    return { kind: "text", text: "This assistant cannot create platform admins or change anyone's role." };
+  }
   if (lower.includes("cut the stream")) return { kind: "cut" };
   if (lower.includes("hold please")) return { kind: "text", text: "Finished waiting.", delayMs: 2500 };
   if (lower.includes("$1.00") || lower.includes("stray price")) return { kind: "text", text: "That is $1.00." };

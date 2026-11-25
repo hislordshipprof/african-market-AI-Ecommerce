@@ -837,6 +837,7 @@ model AdminAssistantConversation {
 
   user     User                          @relation(fields: [userId], references: [id], onDelete: Restrict)
   receipts AdminAssistantClientMessage[]
+  drafts   AdminAssistantDraft[]
 
   @@index([userId, lastMessageAt])
   @@map("admin_assistant_conversations")
@@ -857,6 +858,31 @@ model AdminAssistantClientMessage {
   @@unique([userId, clientMessageId])
   @@index([conversationId])
   @@map("admin_assistant_client_messages")
+}
+
+/// A change the platform admin assistant drafted (#832). Nothing is written until the admin confirms it within 24 hours.
+model AdminAssistantDraft {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  conversationId  String    @map("conversation_id")
+  clientMessageId String    @map("client_message_id")
+  kind            String
+  /// The store the change is for, when there is one. No foreign key: the card names it, nothing joins on it.
+  storeId         String?   @map("store_id")
+  payload         Json
+  before          Json
+  /// pending, applying, confirmed, rejected, expired or stale.
+  state           String
+  expiresAt       DateTime  @map("expires_at")
+  decidedById     String?   @map("decided_by_id")
+  decidedAt       DateTime? @map("decided_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  conversation AdminAssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([userId, clientMessageId])
+  @@map("admin_assistant_drafts")
 }
 
 /// A stock change the owner has not applied until they tap confirm. No stock-event foreign key.

@@ -1,6 +1,6 @@
 # 25. Platform admin assistant tool tiers
 
-Date: 2026-11-25 · Status: accepted (#831 builds the read tier)
+Date: 2026-11-25 · Status: accepted (#831 built the read tier, #832 the draft and confirm tier)
 
 ## Context
 
@@ -11,13 +11,17 @@ The owner wants one assistant in the platform admin console that answers anythin
 Tools are tiered by what they can change. A tier is added by its own ticket; none skips the one before.
 
 1. **Read (built in #831).** Reads only, through the same server function the admin screen uses (`src/lib/admin/*`, `src/lib/store-application/*`, `src/lib/support/platform-actions.ts`), never a second copy and never raw SQL. No confirm. Every call writes an `audit_logs` row (`admin_assistant.tool`, admin, tool, parameters) before it reads.
-2. **Draft and confirm (later tickets).** A change is a draft card the admin confirms with one tap, on the store copilot's draft and confirm pattern (`src/lib/copilot/drafts.ts`, `confirm.ts`, `draft-rows.ts`). The confirm calls the admin screen's own action, which re-checks the platform admin. The draft, the confirm and the reject each write an `audit_logs` row. A change that cannot be undone (a refund, a go-live, an email to a store) shows that on the card.
-3. **Never.** No tool exists, in any tier, to create or remove platform admins, change 2FA or security settings, change Stripe or payout settings, read or set secrets, or delete stores or users. The prompt tells the admin so; the absence of the tool is the control.
+2. **Draft and confirm (built in #832).** A change is a draft card the admin confirms with one tap, on the store copilot's draft and confirm pattern. A `draft_` tool reads the record and adds a card; nothing is written but the `admin_assistant_drafts` row. The card shows what changes, from what to what, and for which store; a change that cannot be undone (an email to an applicant, a store owner or a customer) says so on the card. The one text a card carries (a support reply, a reject reason, a note, a store slug) can be edited before Confirm; the assistant never sends anything itself. The kinds are: approve or reject a store application, suspend or reactivate a store, a plan override with end date and reason, the pilot offer, a store's metro, a courier registration retry, an owner invite, the platform courier settings, a courier incident note, a review label on an AI chat, and a reply to an escalated customer message.
+   - **Confirm** (`confirmAdminAssistantDraft`) runs `requirePlatformAdmin` first, so an admin without 2FA cannot confirm. Only the admin who drafted the card can confirm it. The draft must be pending and under 24 hours old. Each kind keeps a snapshot of what the change depends on (the store's status, the override, the pilot flag, the metro, the courier registration errors, the latest owner invite, the courier settings, the incident state, the chat's labels, the thread's state with its last customer message and last reply); if the record no longer matches, the card goes stale and nothing is applied. Then the confirm calls the admin screen's own function: `setStoreStatus`, `inviteStoreOwnerAction`, `saveCourierSettingsAction`, `addCourierIncidentNoteAction`, `labelConversationAction` and `replyAsPlatformAction` directly. The screen actions for applications, plan override, pilot, metro and courier retry end in a redirect, so the confirm calls the function each of them wraps: `approveStoreApplication`, `rejectStoreApplication`, `setPlanOverride`, `setPilot`, `setStoreMetro` and `retryCourierRegistration` (moved out of the store page's action so both call it). There is no store-request action to call: store requests are read only.
+   - **Audit.** `admin_assistant.tool` for every tool call, `admin_assistant.draft_proposed` when a card is stored, then one of `draft_confirmed`, `draft_rejected`, `draft_stale` or `draft_refused`, each naming the admin, the kind and the parameters. The admin function writes its own row as well (for example `store.suspend`).
+   - **Risk accepted.** The stale check and the apply are two steps, not one transaction, because the admin functions open their own transactions. A change in that window is caught by the admin function's own checks where it has them (status, application already decided, pilot cap); otherwise the later write wins, as it would on the screen.
+3. **Never.** No tool or draft kind exists, in any tier, to create or remove platform admins, change a user's role, change 2FA or security settings, change Stripe or payout settings, read or set secrets, or delete stores or users. The prompt tells the admin so; the absence of the tool is the control, and a confirm refuses any draft row whose kind is not in the list (`admin_assistant.draft_refused`).
 
 Every tier runs only behind `requirePlatformAdmin` (signed in, platform admin, 2FA verified), on the copilot engine's spend gate, rate limit, lease, history and step caps. Tool results are data, never instructions. The model writes no links and no numbers of its own: links are built from tool rows, and a reply with a number no tool returned is refused.
 
 ## Consequences
 
-- Each later ticket adds draft tools without changing the read tools or the engine.
+- A later ticket adds a draft kind with its snapshot and its admin function; the confirm, the card and the audit rows stay as they are.
 - Proactive suggestions (Sidekick's Pulse) are not built yet; when built they arrive as draft cards, never as changes.
+- Store creation outside an application, and product and catalogue work, are not draft kinds yet.
 - `platform_totals` is the one read with no admin screen of its own; it adds the store analytics figures (`salesRows`, `salesView`, #498) across stores rather than computing sales a second way.

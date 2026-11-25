@@ -16,6 +16,7 @@ import { parseInput, readFormField, readFormFields } from "../security/parse-inp
 import { setPilot, setPlanOverride } from "../billing/service";
 import { effectivePlan } from "../billing/plan";
 import { hasFullAddress, requestCourierRegistration } from "../delivery/courier-registration";
+import { retryCourierRegistration } from "./courier-retry";
 import { queueStoreRequestNotices } from "../directory/store-requests";
 import { FORCE_REASON_MAX, forceGoLive } from "../go-live/service";
 import { redirect } from "next/navigation";
@@ -722,23 +723,10 @@ export async function retryCourierRegistrationAction(formData: FormData): Promis
   const fields = parseInput(z.strictObject({ storeId: z.string().min(1).max(200) }), readFormFields(formData, ["storeId"]));
   if (!fields.ok) redirect("/admin/stores");
   const { storeId } = fields.data;
-  const store = await platformAdmin.store.findUnique({ where: { id: storeId }, select: { id: true } });
-  if (!store) redirect("/admin/stores");
-  await platformAdminTransaction((tx) =>
-    tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: session.user.id,
-        actorEmail: session.user.email,
-        action: "store.courier_registration_retry",
-        entityType: "store",
-        entityId: storeId,
-      },
-    }),
-  );
-  const queued = await requestCourierRegistration(storeId);
+  const outcome = await retryCourierRegistration(storeId, { id: session.user.id, email: session.user.email });
+  if (outcome === "missing") redirect("/admin/stores");
   revalidatePath(`/admin/stores/${storeId}`);
-  redirect(`/admin/stores/${storeId}?courierRetry=${queued ? "queued" : "failed"}`);
+  redirect(`/admin/stores/${storeId}?courierRetry=${outcome}`);
 }
 
 export async function getStoreById(id: string) {
