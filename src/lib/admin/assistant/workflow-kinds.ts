@@ -27,7 +27,7 @@ async function settled(run: () => Promise<Step>): Promise<Step> {
   try {
     return await run();
   } catch (error) {
-    console.error("admin assistant workflow step threw", error);
+    console.error("[admin-assistant] workflow step threw", { errorType: error instanceof Error ? error.name : "Error" });
     return { ok: false, error: "It failed unexpectedly." };
   }
 }
