@@ -272,8 +272,8 @@ export function isBillingEvent(event: Pick<WebhookEvent, "type">): boolean {
 export type BillingEventResult = "applied" | "replayed" | "stale" | "duplicate_canceled" | "unknown_store" | "ignored";
 
 /**
- * Stripe webhooks are the only writer of billing state. Idempotent by event id;
- * an older subscription event arriving after a newer one is recorded and skipped.
+ * The one writer of billing state: Stripe webhooks, and the owner's return from Checkout (#841).
+ * Idempotent by event id; an older subscription event arriving after a newer one is recorded and skipped.
  */
 export async function applyBillingEvent(event: WebhookEvent): Promise<BillingEventResult> {
   if (!isBillingEvent(event) || !event.eventId) return "ignored";
@@ -380,6 +380,41 @@ export async function applyBillingEvent(event: WebhookEvent): Promise<BillingEve
   if ("alert" in outcome && outcome.alert) await alertPaymentFailed(outcome.alert);
   if ("duplicate" in outcome && outcome.duplicate) await alertDuplicateCanceled(outcome.duplicate.storeId, outcome.duplicate.subscriptionId);
   return outcome.result;
+}
+
+const CHECKOUT_SESSION_ID = /^cs_[A-Za-z0-9_]+$/;
+
+/**
+ * The owner is back from a Checkout (`session_id` on the plan page, #841): read the session and its
+ * subscription from Stripe and apply them as the webhook would, so the plan shows without waiting for it.
+ * The id comes from the URL, so it counts only when Stripe says the session is paid and is this store's customer.
+ * True when the plan changed; anything else leaves billing as it was and the webhook catches up.
+ */
+export async function syncCheckoutReturn(storeId: string, sessionId: string): Promise<boolean> {
+  if (!CHECKOUT_SESSION_ID.test(sessionId)) return false;
+  const row = await storeScoped(storeId).storeSubscription.findUnique({ where: { storeId } });
+  const customerId = row?.stripeCustomerId;
+  if (!customerId || hasLiveSubscription(row)) return false;
+  try {
+    const provider = getBillingProvider();
+    const session = await provider.getCheckoutSession(sessionId);
+    if (session.status !== "complete" || session.paymentStatus === "unpaid") return false;
+    if (session.customerId !== customerId || !session.subscriptionId) return false;
+    const subscription = await provider.getSubscription(session.subscriptionId);
+    if (subscription.customerId !== customerId) return false;
+    const result = await applyBillingEvent({
+      type: "customer.subscription.created",
+      accountId: "",
+      eventId: `checkout_return:${sessionId}`,
+      // The moment Stripe was read: any webhook made before it carries an older state.
+      created: Math.floor(Date.now() / 1000),
+      subscription,
+    });
+    return result === "applied";
+  } catch (err) {
+    console.error(JSON.stringify({ event: "checkout_return_not_applied", storeId, error: err instanceof Error ? err.message : "unknown" }));
+    return false;
+  }
 }
 
 function billingAudit(storeId: string, action: string, before: Prisma.InputJsonValue, after: Prisma.InputJsonValue) {

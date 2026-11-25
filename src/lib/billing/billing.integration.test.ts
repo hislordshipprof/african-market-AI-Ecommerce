@@ -12,7 +12,7 @@ import { setEmailSenderForTests, type EmailMessage } from "../email/send";
 import { storePlan } from "./plan";
 import { COURIER_NOT_OFFERED, quoteCheckout } from "../checkout/service";
 import { createFakeBillingProvider, PLAN_LOOKUP_KEYS, setBillingProvider } from "./provider";
-import { getStoreBilling, PILOT_STORE_CAP, pilotPlacesLeft, setPilot, startSubscription } from "./service";
+import { getStoreBilling, PILOT_STORE_CAP, pilotPlacesLeft, setPilot, startSubscription, syncCheckoutReturn } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -353,6 +353,85 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     await deliver(subscriptionEvent("customer.subscription.created", { ...sub, status: "incomplete" }, { created: t }));
     await deliver(subscriptionEvent("customer.subscription.deleted", { ...sub, status: "canceled" }, { created: t + 2 }));
     expect(await start()).toHaveProperty("url");
+  });
+
+  it("#841: returning from a paid Checkout shows Pro with no webhook; the later webhook changes nothing", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("return");
+    await startSubscription({ storeId: id, storeName: "Sub return", plan: "pro", owner: admin, returnUrl: "http://localhost/x" });
+    const subscriptionId = fake.completeCheckout(fake.checkouts[0].id)!;
+
+    expect(await syncCheckoutReturn(id, fake.checkouts[0].id)).toBe(true);
+    const billing = await getStoreBilling(id);
+    expect(billing).toMatchObject({ plan: "pro", status: "active", subscribed: true });
+    const applied = await row(id);
+    expect(applied.checkoutSessionId).toBeNull();
+    const audits = () => platformAdmin.auditLog.count({ where: { storeId: id, action: "subscription.plan_changed" } });
+    expect(await audits()).toBe(1);
+
+    // Stripe's created event was made at payment time, before the return read.
+    const customer = applied.stripeCustomerId!;
+    await deliver(subscriptionEvent("customer.subscription.created",
+      { id: subscriptionId, customer, status: "incomplete", plan: "starter", storeId: id },
+      { created: Math.floor(Date.now() / 1000) - 30 }));
+    expect(await row(id)).toEqual(applied);
+    expect(await audits()).toBe(1);
+
+    // A refresh of the return URL is a no-op too.
+    expect(await syncCheckoutReturn(id, fake.checkouts[0].id)).toBe(false);
+    expect(await row(id)).toEqual(applied);
+  });
+
+  it("#841: a webhook that landed first is left as it was; a pilot store's return shows the free months", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("return-pilot", { pilot: true });
+    await startSubscription({ storeId: id, storeName: "Sub return pilot", plan: "starter", owner: admin, returnUrl: "http://localhost/x" });
+    const checkout = fake.checkouts[0];
+    expect(checkout.trialEnd).not.toBeNull();
+    const subscriptionId = fake.completeCheckout(checkout.id)!;
+
+    const customer = (await row(id)).stripeCustomerId!;
+    await deliver(subscriptionEvent("customer.subscription.created",
+      { id: subscriptionId, customer, status: "trialing", plan: "starter", storeId: id, trialEnd: checkout.trialEnd }));
+    const fromWebhook = await row(id);
+    expect(fromWebhook.trialEndsAt).toEqual(new Date(checkout.trialEnd! * 1000));
+
+    expect(await syncCheckoutReturn(id, checkout.id)).toBe(false);
+    expect(await row(id)).toEqual(fromWebhook);
+
+    const returning = await newStore("return-pilot-first", { pilot: true });
+    await startSubscription({ storeId: returning, storeName: "Sub return first", plan: "starter", owner: admin, returnUrl: "http://localhost/x" });
+    const second = fake.checkouts[1];
+    fake.completeCheckout(second.id);
+    expect(await syncCheckoutReturn(returning, second.id)).toBe(true);
+    expect(await getStoreBilling(returning)).toMatchObject({
+      plan: "starter", status: "trialing", trialEndsAt: new Date(second.trialEnd! * 1000), pilotTrialAvailable: false,
+    });
+  });
+
+  it("#841: another store's session id, an unpaid session or one Stripe cannot read leaves the plan unchanged", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const owner = await newStore("return-owner");
+    const other = await newStore("return-other");
+    await startSubscription({ storeId: owner, storeName: "Sub owner", plan: "pro", owner: admin, returnUrl: "http://localhost/x" });
+    await startSubscription({ storeId: other, storeName: "Sub other", plan: "pro", owner: admin, returnUrl: "http://localhost/x" });
+    const [ownerCheckout, otherCheckout] = fake.checkouts;
+    const before = { owner: await row(owner), other: await row(other) };
+
+    // Still open: the owner came back without paying.
+    expect(await syncCheckoutReturn(owner, ownerCheckout.id)).toBe(false);
+    // Paid by the owner's store, replayed on the other store's page.
+    fake.completeCheckout(ownerCheckout.id);
+    expect(await syncCheckoutReturn(other, ownerCheckout.id)).toBe(false);
+    expect(await syncCheckoutReturn(other, "cs_does_not_exist")).toBe(false);
+    expect(await syncCheckoutReturn(other, "not a session id")).toBe(false);
+    expect(await row(other)).toEqual(before.other);
+    expect(await row(owner)).toEqual(before.owner);
+    expect((await getStoreBilling(other)).subscribed).toBe(false);
+    expect(otherCheckout.status).toBe("open");
   });
 
   it("R2-B2: removing the pilot before Stripe's trialing webhook lands still ends the free months", async () => {
