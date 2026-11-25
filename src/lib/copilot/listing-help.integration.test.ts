@@ -34,10 +34,9 @@ vi.mock("../assistant/model", async (importOriginal) => {
 import { generateTOTP } from "../../../e2e/totp";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
-import { storeToday } from "../analytics/range";
 import { authPrisma, platformAdmin, storeScoped } from "../db";
 import { loadCopilotPanel } from "./turn";
-import { confirmCopilotDraft, rejectCopilotDraft, sendCopilotMessage } from "./actions";
+import { confirmCopilotDraft, sendCopilotMessage } from "./actions";
 import { authPost, testSignUp } from "../test-auth";
 
 const RUN = `t820-${Date.now()}`;
@@ -83,16 +82,6 @@ async function enableTwoFactor(email: string): Promise<string> {
 function asStore(slug: string, cookies: string): void {
   headerState.set("cookie", cookies);
   headerState.set("x-store-slug", slug);
-}
-
-/** Pro by default: the chat is a Pro feature (#818). Null removes the subscription, which is Starter. */
-async function setPlan(storeId: string, plan: "pro" | null): Promise<void> {
-  await authPrisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SET LOCAL ROLE app_user`;
-    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    await tx.storeSubscription.deleteMany({ where: { storeId } });
-    if (plan) await tx.storeSubscription.create({ data: { storeId, plan, status: "active" } });
-  });
 }
 
 function script(steps: FakeAnthropicStep[]) {

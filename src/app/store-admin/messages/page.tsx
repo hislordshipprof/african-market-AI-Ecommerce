@@ -4,6 +4,7 @@ import { requireStoreMember } from "@/lib/store-admin/session";
 import { formatListTime } from "@/lib/format";
 import { getStoreThread, listStoreThreads } from "@/lib/support/thread";
 import { Badge } from "@/components/ui/badge";
+import { storeMayUse } from "@/lib/billing/plan";
 import { ThreadReply } from "./thread-reply";
 
 export default async function MessagesPage({
@@ -13,9 +14,12 @@ export default async function MessagesPage({
 }) {
   const session = await requireStoreMember();
   const { thread: threadId } = await searchParams;
-  const [threads, thread] = await Promise.all([
+  const owner = session.membership.role === "owner";
+  const [threads, thread, assistant] = await Promise.all([
     listStoreThreads(session.store.id),
     threadId ? getStoreThread(session.store.id, threadId) : Promise.resolve(null),
+    // Owner only: staff never see the store assistant (#820).
+    owner ? storeMayUse(session.store.id, "store-assistant") : Promise.resolve(false),
   ]);
   const base = `/store-admin/messages?store=${encodeURIComponent(session.store.slug)}`;
 
@@ -89,7 +93,7 @@ export default async function MessagesPage({
                   </li>
                 ))}
               </ol>
-              <ThreadReply threadId={thread.id} />
+              <ThreadReply threadId={thread.id} canSuggest={assistant && thread.messages.some((m) => m.sender === "customer")} />
             </div>
           ) : (
             threads.length > 0 && <p className="text-sm text-muted-foreground">Choose a thread to read and reply.</p>

@@ -7,6 +7,7 @@ import { revalidateStorefront } from "../storefront/cache";
 import { chooseListing } from "./choices";
 import { answerAlert, confirmProposal, rejectProposal, type AnswerResult } from "./confirm";
 import { sendCopilotTurn } from "./turn";
+import { suggestReply, type ReplySuggestion } from "./reply-draft";
 import { DRAFT_MAKERS, confirmDraft, rejectDraft, storeSite } from "./drafts";
 import { revalidateStore } from "../get-store";
 import { PAYOUTS_SHOWN, storePayouts } from "../payouts/service";
@@ -191,5 +192,20 @@ export async function rejectCopilotDraft(input: unknown): Promise<RejectResult> 
   } catch (error) {
     console.error("[copilot] draft dismiss failed", { errorType: error instanceof Error ? error.name : "Error" });
     return { ok: false, code: "not_found" };
+  }
+}
+
+const replySchema = z.strictObject({ threadId: z.string().min(1).max(200) });
+
+/** A suggested reply to a customer thread (#820), for the owner to edit and send; it sends nothing. Owner only. */
+export async function suggestThreadReply(input: unknown): Promise<ReplySuggestion> {
+  const session = await requireStoreOwner();
+  const parsed = parseInput(replySchema, input);
+  if (!parsed.ok) return { ok: false, message: "Thread not found" };
+  try {
+    return await suggestReply(session.store.id, session.user.id, parsed.data.threadId);
+  } catch (error) {
+    console.error("[copilot] reply suggestion failed", { errorType: error instanceof Error ? error.name : "Error" });
+    return { ok: false, message: FIXED_ERROR };
   }
 }
