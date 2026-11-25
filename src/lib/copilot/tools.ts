@@ -5,7 +5,7 @@ import { listingLabel } from "./cards";
 import { storeMayUse } from "../billing/plan";
 import { MOVEMENT_DAYS, SALES_FLOOR, inventoryReport, type MovementRow } from "./inventory-report";
 import { reorderSuggestions, type ReorderSuggestions } from "./reorder";
-import { SALES_PERIODS, salesSummary, type SalesFigures } from "./sales-summary";
+import { SALES_PERIODS, salesSummary, type PayoutReader, type SalesFigures } from "./sales-summary";
 import { searchListingMatches, type ListingSearch } from "./search";
 import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ProposalKind } from "./types";
 
@@ -217,7 +217,7 @@ function recorded<T>(book: DraftBook, result: T): T {
   return result;
 }
 
-export function copilotTools(storeId: string, book: DraftBook) {
+export function copilotTools(storeId: string, book: DraftBook, payouts: PayoutReader | null = null) {
   return {
     find_listings: tool({
       description:
@@ -273,7 +273,7 @@ export function copilotTools(storeId: string, book: DraftBook) {
       execute: async (input) => {
         let summary: Awaited<ReturnType<typeof salesSummary>>;
         try {
-          summary = await salesSummary(storeId, input);
+          summary = await salesSummary(storeId, input, payouts);
         } catch {
           throw new Error("could not read sales");
         }

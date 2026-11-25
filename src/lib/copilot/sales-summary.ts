@@ -3,7 +3,6 @@ import { MAX_CUSTOM_DAYS, addDays, daySpan, storeToday, validDay, type Analytics
 import { platform } from "../db";
 import { money } from "../format";
 import { isValidTimezone } from "../order/store-hours";
-import { PAYOUTS_SHOWN, storePayouts } from "../payouts/service";
 import { storeWeek } from "./inventory-report";
 
 /**
@@ -49,11 +48,23 @@ export interface SalesFigures {
   directoryOrders: number;
 }
 
+/**
+ * Reads the store's recent Stripe payouts. The store admin page passes the payouts page's reader in; the copilot
+ * modules never import it, so the WhatsApp channel cannot reach Stripe (assistant import boundary, #559).
+ */
+export interface PayoutReader {
+  /** How many payouts `list` returns at most; a full list may not reach back to the period. */
+  shown: number;
+  list(store: { id: string; stripeAccountId: string | null }): Promise<
+    { ok: true; payouts: Array<{ amountCents: number; arrivalDate: number; status: string }> } | { ok: false }
+  >;
+}
+
 export type SalesPayout =
   | { known: true; arrivedCents: number; payouts: number }
   | { known: false; reason: string };
 
-export async function salesSummary(storeId: string, input: SalesPeriodInput, now: Date = new Date()) {
+export async function salesSummary(storeId: string, input: SalesPeriodInput, payouts: PayoutReader | null, now: Date = new Date()) {
   const store = await platform.store.findUniqueOrThrow({ where: { id: storeId }, select: { timezone: true, stripeAccountId: true } });
   const timeZone = isValidTimezone(store.timezone) ? store.timezone : "UTC";
   const period = salesPeriod(input, timeZone, now);
@@ -63,7 +74,7 @@ export async function salesSummary(storeId: string, input: SalesPeriodInput, now
     salesRows(storeId, range, timeZone).then((rows) => salesView(rows, range).totals),
     productsView(storeId, range, timeZone),
     directoryOrders(storeId, range, timeZone),
-    periodPayout({ id: storeId, stripeAccountId: store.stripeAccountId }, range),
+    periodPayout({ id: storeId, stripeAccountId: store.stripeAccountId }, range, payouts),
   ]);
   const figures: SalesFigures = {
     from: range.from,
@@ -102,14 +113,19 @@ export async function salesSummary(storeId: string, input: SalesPeriodInput, now
 }
 
 /** Stripe payouts arriving in the period, from the payouts page's list. Unknown when the list may not reach back that far. */
-async function periodPayout(store: { id: string; stripeAccountId: string | null }, range: AnalyticsRange): Promise<SalesPayout> {
+async function periodPayout(
+  store: { id: string; stripeAccountId: string | null },
+  range: AnalyticsRange,
+  payouts: PayoutReader | null,
+): Promise<SalesPayout> {
+  if (!payouts) return { known: false, reason: "payouts are not read here; they are on the Payouts page" };
   if (!store.stripeAccountId) return { known: false, reason: "Stripe payouts are not set up" };
-  const listed = await storePayouts(store);
+  const listed = await payouts.list(store);
   if (!listed.ok) return { known: false, reason: "Stripe could not be reached" };
   // Stripe gives the arrival date as midnight UTC of the bank day.
   const day = (seconds: number) => new Date(seconds * 1000).toISOString().slice(0, 10);
   const oldest = listed.payouts.at(-1);
-  if (oldest && listed.payouts.length >= PAYOUTS_SHOWN && day(oldest.arrivalDate) > range.from) {
+  if (oldest && listed.payouts.length >= payouts.shown && day(oldest.arrivalDate) > range.from) {
     return { known: false, reason: "the period is older than the payouts listed" };
   }
   const arriving = listed.payouts.filter((p) => ARRIVING.has(p.status) && day(p.arrivalDate) >= range.from && day(p.arrivalDate) <= range.to);

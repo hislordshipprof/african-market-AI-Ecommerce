@@ -35,7 +35,7 @@ import { databaseClock, insertProposalRows } from "./proposals";
 import { copilotTools, createDraftBook, type DraftBook, type Draft, type PendingChoice } from "./tools";
 import { estimateText, storeTimeZone } from "./inventory-report";
 import { storeToday } from "../analytics/range";
-import { salesText } from "./sales-summary";
+import { salesText, type PayoutReader } from "./sales-summary";
 import {
   CONVERSATION_MAX,
   FIXED_ERROR,
@@ -274,6 +274,8 @@ export async function sendCopilotTurn(input: {
   conversationId?: string;
   messageId: string;
   text: string;
+  /** The store admin page's payout reader; without it a sales answer says the payout is not known. */
+  payouts?: PayoutReader;
 }): Promise<SendResult> {
   const text = input.text.trim();
   if (!text || input.text.trim().length > MESSAGE_MAX) {
@@ -316,7 +318,7 @@ export async function sendCopilotTurn(input: {
       // Without today's date the model guesses the year of "Nov 2 to Nov 8".
       system: `${COPILOT_SYSTEM_PROMPT}\n\nToday is ${today}, a ${weekday}, in the store's time zone (${timeZone}).`,
       messages: [...modelHistory(history), { role: "user", content: text }],
-      tools: copilotTools(input.storeId, book),
+      tools: copilotTools(input.storeId, book, input.payouts ?? null),
       stopWhen: stepCountIs(STEP_CAP),
       maxRetries: 0,
       maxOutputTokens: MAX_OUTPUT_TOKENS,
