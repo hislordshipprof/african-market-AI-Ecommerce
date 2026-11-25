@@ -17,7 +17,18 @@ import {
 import { confirmAdminAssistantDraft, rejectAdminAssistantDraft, sendAdminAssistantMessage } from "@/lib/admin/assistant/actions";
 import type { AdminDraftCard } from "@/lib/admin/assistant/drafts";
 import type { AdminAssistantMessage, AssistantLink } from "@/lib/admin/assistant/types";
-import { AdminDraftCardView } from "./draft-card";
+import { AdminDraftCardView, type DraftChoice } from "./draft-card";
+
+/** A card with a photo goes as a form, so the photo reaches the server; the rest as plain fields. */
+function confirmInput(draftId: string, { text, keep, image }: DraftChoice): FormData | Record<string, unknown> {
+  if (!image) return { draftId, ...(text !== undefined ? { text } : {}), ...(keep ? { keep } : {}) };
+  const form = new FormData();
+  form.set("draftId", draftId);
+  if (text !== undefined) form.set("text", text);
+  for (const key of keep ?? []) form.append("keep", key);
+  form.set("image", image);
+  return form;
+}
 
 type SpeechHost = Window & {
   SpeechRecognition?: new () => BrowserSpeech;
@@ -124,10 +135,10 @@ export function AdminAssistantPanel({
     setDrafts((current) => Object.fromEntries(Object.entries(current).map(([key, cards]) => [key, cards.map((item) => (item.id === card.id ? card : item))])));
   }
 
-  function decide(card: AdminDraftCard, confirm: boolean, text?: string) {
+  function decide(card: AdminDraftCard, confirm: boolean, choice: DraftChoice = {}) {
     startTransition(async () => {
       const result = confirm
-        ? await confirmAdminAssistantDraft({ draftId: card.id, ...(text !== undefined ? { text } : {}) })
+        ? await confirmAdminAssistantDraft(confirmInput(card.id, choice))
         : await rejectAdminAssistantDraft({ draftId: card.id });
       if (result.ok) {
         setNotice(null);
@@ -183,7 +194,7 @@ export function AdminAssistantPanel({
                     key={`${card.id}-${card.state}`}
                     card={card}
                     disabled={pending}
-                    onConfirm={(text) => decide(card, true, text)}
+                    onConfirm={(choice) => decide(card, true, choice)}
                     onDismiss={() => decide(card, false)}
                   />
                 ))

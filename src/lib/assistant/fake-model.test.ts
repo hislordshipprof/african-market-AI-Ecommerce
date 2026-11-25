@@ -118,6 +118,17 @@ describe("assistant e2e fake", () => {
     expect(answer.content[0]?.text).toMatch(/still in setup/);
   });
 
+  it("drafts the admin assistant's store workflow from the fields given, and its review-queue batch by category (#833)", async () => {
+    const { url, ...init } = basketRequest();
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    const call = async (content: string) => ((await (await scriptedAssistantFetch(url, {
+      ...init, body: JSON.stringify({ ...body, stream: undefined, messages: [{ role: "user", content }] }),
+    })).json()) as { content: Array<{ name: string; input: unknown }> }).content[0];
+    expect(await call("Create a store for Ade's Market in Houston")).toMatchObject({ name: "draft_store_create", input: { name: "Ade's Market", city: "Houston" } });
+    expect(await call("Create a store: name=Ade's Market; slug=ade; city=Houston")).toMatchObject({ name: "draft_store_create", input: { name: "Ade's Market", slug: "ade", city: "Houston" } });
+    expect(await call("Approve the clean products in the review queue for E2E Grains")).toMatchObject({ name: "draft_review_approve", input: { category: "e2e grains", onlyClean: false } });
+  });
+
   it("drafts the admin assistant's store suspension, and refuses to make anyone a platform admin (#832)", async () => {
     const { url, ...init } = basketRequest();
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;

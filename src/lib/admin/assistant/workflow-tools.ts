@@ -370,7 +370,7 @@ export function workflowTools(ctx: ToolContext) {
           name,
           aliases: input.aliases ?? [],
           servings: input.servings ?? null,
-          ingredients: ingredients.map(({ productName: _, ...row }) => row),
+          ingredients: ingredients.map((row) => ({ name: row.name, masterProductId: row.masterProductId, qty: row.qty, unit: row.unit })),
         }, {
           title: "Add a recipe",
           storeName: null,
