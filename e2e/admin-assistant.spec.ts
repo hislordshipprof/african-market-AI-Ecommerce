@@ -54,9 +54,11 @@ async function cleanUp() {
 
 test.beforeEach(async () => {
   await cleanUp();
+  // Prisma writes these naive timestamps in UTC; the column default uses the session time zone and would sort this store hours old.
   await asPlatformAdmin((tx) => tx.$executeRaw`
-    INSERT INTO stores (id, name, slug, status, doordash_registration_error, updated_at)
-    VALUES (${STORE_ID}, ${STORE_NAME}, 'e2e-stuck-market-831', 'setup', 'Pickup address not accepted', now())`);
+    INSERT INTO stores (id, name, slug, status, doordash_registration_error, created_at, updated_at)
+    VALUES (${STORE_ID}, ${STORE_NAME}, 'e2e-stuck-market-831', 'setup', 'Pickup address not accepted',
+      now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC')`);
 });
 
 test.afterEach(cleanUp);
