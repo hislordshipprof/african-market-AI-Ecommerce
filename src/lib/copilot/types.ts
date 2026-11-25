@@ -69,6 +69,51 @@ export interface PanelMessage {
   choices?: ChoiceCard[];
 }
 
+export const DRAFT_KINDS = ["coupon", "price", "store_change"] as const;
+export type DraftKind = (typeof DRAFT_KINDS)[number];
+/** Coupon, price and store-change drafts wait this long for the owner (#819); stock proposals keep 60 minutes. */
+export const DRAFT_HOURS = 24;
+export const PRICE_LINES_MAX = 20;
+
+/** The promotions form's fields, as text, so the card can edit them and the confirm parses them the same way. */
+export interface CouponFields {
+  code: string;
+  kind: "percent" | "fixed";
+  percentOff: string;
+  amountOff: string;
+  minGoods: string;
+  startsAt: string;
+  endsAt: string;
+  totalUses: string;
+  usesPerCustomer: string;
+  firstOrderOnly: string;
+}
+
+export interface PriceLine {
+  listingId: string;
+  variantId: string;
+  name: string;
+  beforeCents: number;
+  afterCents: number;
+}
+
+interface DraftCardBase {
+  id: string;
+  state: ProposalDisplayState;
+  /** Database clock, UTC. */
+  expiresAt: string;
+}
+
+export type DraftCard =
+  | (DraftCardBase & { kind: "coupon"; fields: CouponFields; summary: string })
+  /** `applied` lists the lines the owner kept ticked, once confirmed. */
+  | (DraftCardBase & { kind: "price"; lines: PriceLine[]; applied: string[] | null })
+  | (DraftCardBase & { kind: "store_change"; text: string; endsAt: string });
+
+export type DraftConfirmResult =
+  | { ok: true; draft: DraftCard }
+  | { ok: false; code: "not_found" | "expired" | "stale" | "invalid"; message: string };
+
 export type SendCode =
   | "not_found"
   | "busy"
@@ -85,6 +130,7 @@ export type SendResult =
     reply: string;
     proposals: StockProposalCard[];
     choices: ChoiceCard[];
+    drafts: DraftCard[];
   }
   | { ok: false; code: SendCode; message: string; retryAfter?: number };
 

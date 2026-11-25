@@ -7,6 +7,8 @@ import { revalidateStorefront } from "../storefront/cache";
 import { chooseListing } from "./choices";
 import { answerAlert, confirmProposal, rejectProposal, type AnswerResult } from "./confirm";
 import { sendCopilotTurn } from "./turn";
+import { confirmDraft, rejectDraft, storeSite } from "./drafts";
+import { revalidateStore } from "../get-store";
 import { PAYOUTS_SHOWN, storePayouts } from "../payouts/service";
 import {
   FIXED_ERROR,
@@ -14,6 +16,7 @@ import {
   QUANTITY_MAX,
   type ChooseResult,
   type ConfirmResult,
+  type DraftConfirmResult,
   type RejectResult,
   type SendResult,
 } from "./types";
@@ -33,6 +36,29 @@ const chooseSchema = z.strictObject({
   messageId: z.string().min(1).max(200),
   listingId: z.string().min(1).max(200),
 });
+
+const couponFieldsSchema = z.strictObject({
+  code: z.string().max(40),
+  kind: z.enum(["percent", "fixed"]),
+  percentOff: z.string().max(40),
+  amountOff: z.string().max(40),
+  minGoods: z.string().max(40),
+  startsAt: z.string().max(40),
+  endsAt: z.string().max(40),
+  totalUses: z.string().max(40),
+  usesPerCustomer: z.string().max(40),
+  firstOrderOnly: z.string().max(40),
+});
+
+const draftConfirmSchema = z.strictObject({
+  draftId: z.string().min(1).max(200),
+  coupon: couponFieldsSchema.optional(),
+  variantIds: z.array(z.string().min(1).max(200)).min(1).max(20).optional(),
+});
+
+const draftSchema = z.strictObject({ draftId: z.string().min(1).max(200) });
+
+const DRAFT_FAILED: DraftConfirmResult = { ok: false, code: "not_found", message: FIXED_ERROR };
 
 const answerSchema = z.discriminatedUnion("answer", [
   z.strictObject({
@@ -63,6 +89,7 @@ export async function sendCopilotMessage(input: unknown): Promise<SendResult> {
       messageId: parsed.data.messageId,
       text: parsed.data.text,
       payouts: { shown: PAYOUTS_SHOWN, list: storePayouts },
+      drafts: true,
     });
   } catch (error) {
     console.error("[copilot] send failed", { errorType: error instanceof Error ? error.name : "Error" });
@@ -130,6 +157,38 @@ export async function answerCopilotAlert(input: unknown): Promise<AnswerResult> 
     return result;
   } catch (error) {
     console.error("[copilot] answer failed", { errorType: error instanceof Error ? error.name : "Error" });
+    return { ok: false, code: "not_found" };
+  }
+}
+
+/** The owner confirms a coupon, price or store-change draft (#819), with the coupon terms or price lines as edited on the card. */
+export async function confirmCopilotDraft(input: unknown): Promise<DraftConfirmResult> {
+  const session = await requireStoreOwner();
+  const parsed = parseInput(draftConfirmSchema, input);
+  if (!parsed.ok) return DRAFT_FAILED;
+  const { draftId, ...edits } = parsed.data;
+  try {
+    const result = await confirmDraft(session.store.id, draftId, { id: session.user.id, email: session.user.email }, edits);
+    if (result.ok && result.draft.kind === "price") revalidateStorefront(session.store.id);
+    if (result.ok && result.draft.kind === "store_change") {
+      const site = await storeSite(session.store.id);
+      if (site) revalidateStore(site);
+    }
+    return result;
+  } catch (error) {
+    console.error("[copilot] draft confirm failed", { errorType: error instanceof Error ? error.name : "Error" });
+    return DRAFT_FAILED;
+  }
+}
+
+export async function rejectCopilotDraft(input: unknown): Promise<RejectResult> {
+  const session = await requireStoreOwner();
+  const parsed = parseInput(draftSchema, input);
+  if (!parsed.ok) return { ok: false, code: "not_found" };
+  try {
+    return await rejectDraft(session.store.id, parsed.data.draftId, { id: session.user.id, email: session.user.email });
+  } catch (error) {
+    console.error("[copilot] draft dismiss failed", { errorType: error instanceof Error ? error.name : "Error" });
     return { ok: false, code: "not_found" };
   }
 }

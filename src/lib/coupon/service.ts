@@ -65,29 +65,42 @@ export async function listCoupons(storeId: string) {
   });
 }
 
+type CouponTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
+
 export async function createCoupon(actor: CouponActor, input: CouponInput): Promise<CouponResult> {
   try {
-    return await storeScopedTransaction(actor.storeId, async (tx) => {
-      const coupon = await tx.storeCoupon.create({
-        data: { ...input, storeId: actor.storeId, createdById: actor.actorId },
-      });
-      await tx.auditLog.create({
-        data: {
-          storeId: actor.storeId,
-          actorId: actor.actorId,
-          actorEmail: actor.actorEmail,
-          action: "coupon.create",
-          entityType: "store_coupon",
-          entityId: coupon.id,
-          after: { ...snapshot(input), active: true },
-        },
-      });
-      return { ok: true as const };
-    });
+    return await storeScopedTransaction(actor.storeId, (tx) => insertCoupon(tx, actor, input));
   } catch (err) {
     if (isUniqueViolation(err)) return duplicateCode(input.code);
     throw err;
   }
+}
+
+/**
+ * The coupon row and its audit inside the caller's transaction; the store chat's confirm uses it (#819).
+ * A duplicate code throws; `couponError` turns that into the promotions page's message.
+ */
+export async function insertCoupon(tx: CouponTx, actor: CouponActor, input: CouponInput): Promise<{ ok: true }> {
+  const coupon = await tx.storeCoupon.create({
+    data: { ...input, storeId: actor.storeId, createdById: actor.actorId },
+  });
+  await tx.auditLog.create({
+    data: {
+      storeId: actor.storeId,
+      actorId: actor.actorId,
+      actorEmail: actor.actorEmail,
+      action: "coupon.create",
+      entityType: "store_coupon",
+      entityId: coupon.id,
+      after: { ...snapshot(input), active: true },
+    },
+  });
+  return { ok: true as const };
+}
+
+/** The promotions page's message for a failed coupon write, or null when the error is not a duplicate code. */
+export function couponError(err: unknown, code: string): string | null {
+  return isUniqueViolation(err) ? `Your store already has the code ${code}.` : null;
 }
 
 export async function updateCoupon(actor: CouponActor, couponId: string, input: CouponInput): Promise<CouponResult> {

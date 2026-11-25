@@ -34,12 +34,12 @@ interface SearchRow {
 const NONE: ListingSearch = { outcome: "none", nearOnly: false, listings: [] };
 
 /**
- * Active listings only, uncached, at most five. The storefront E2E name filter does not apply.
+ * Active listings only, uncached, at most `limit` (five by default; a price draft reads up to 20). The storefront E2E name filter does not apply.
  * A listing matches every query word when its relevance rank is exact, prefix or full text (rank < 3).
  * Trigram look-alikes (rank 3) are returned when no listing matches every word, or when the single match
  * came only through its master product's name or synonyms rather than its own listing name.
  */
-export async function searchListingMatches(storeId: string, rawQuery: string): Promise<ListingSearch> {
+export async function searchListingMatches(storeId: string, rawQuery: string, limit = 5): Promise<ListingSearch> {
   const { query, tooLong } = normalizedSearchQuery(rawQuery);
   if (!query || tooLong) return NONE;
   const rows = await storeScopedRawQuery<SearchRow>(
@@ -72,7 +72,7 @@ export async function searchListingMatches(storeId: string, rawQuery: string): P
       FROM named m CROSS JOIN strong s CROSS JOIN near nr
       WHERE m.rank < 3 OR s.n = 0 OR (s.n = 1 AND NOT s.by_name)
       ORDER BY m.rank, m.fuzzy DESC, m.sort_name, m.id
-      LIMIT 5
+      LIMIT ${limit}
     `,
   );
   const listings = rows.map((row) => ({

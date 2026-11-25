@@ -277,194 +277,197 @@ export interface UpdateListingInput {
 const LISTING_WRITE_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
 
 export async function updateListing(input: UpdateListingInput) {
-  return storeScopedTransaction(input.storeId, async (tx) => {
-    await lockStoreRow(tx, input.storeId);
-    await lockListingRow(tx, input.listingId);
+  return storeScopedTransaction(input.storeId, (tx) => updateListingInTransaction(tx, input), LISTING_WRITE_TRANSACTION);
+}
 
-    const existing = await tx.listing.findUnique({
-      where: { id: input.listingId },
-    });
-    if (!existing) throw new ListingInputError("Listing not found");
+/** updateListing inside the caller's store-scoped transaction; the store chat's price confirm uses it (#819). */
+export async function updateListingInTransaction(tx: ListingTx, input: UpdateListingInput) {
+  await lockStoreRow(tx, input.storeId);
+  await lockListingRow(tx, input.listingId);
 
-    const modeChanged = input.stockMode !== undefined && input.stockMode !== existing.stockMode;
-    // The number this form loaded coming back is not a count: an order may have moved qty since.
-    const requestedQty = !modeChanged && input.qty === input.qtyLoaded ? undefined : input.qty;
+  const existing = await tx.listing.findUnique({
+    where: { id: input.listingId },
+  });
+  if (!existing) throw new ListingInputError("Listing not found");
 
-    const data: Record<string, unknown> = {};
-    if (input.customName !== undefined) data.customName = input.customName;
-    if (input.masterProductId !== undefined) data.masterProductId = input.masterProductId;
-    if (input.categoryId !== undefined) data.categoryId = await checkedAisle(input.categoryId);
-    if (input.price !== undefined) data.price = input.price;
-    if (input.stockMode !== undefined) data.stockMode = input.stockMode;
-    if (input.frozen !== undefined) data.frozen = input.frozen;
-    if (input.perishable !== undefined) data.perishable = input.perishable;
-    if (input.maxPerOrder !== undefined) data.maxPerOrder = input.maxPerOrder;
-    let heldForAllergens = false;
-    if (input.prepared !== undefined) {
-      const prepared = preparedFields(input.prepared, input.prepMinutes ?? null);
-      Object.assign(data, prepared);
-      const own = await tx.listingAttributes.findUnique({ where: { listingId: input.listingId }, select: { allergensStatus: true } });
-      heldForAllergens = existing.active && preparedSaleBlocked(prepared, own?.allergensStatus);
-      if (heldForAllergens) data.active = false;
-    }
-    if (input.cateringLeadHours !== undefined || input.prepared === null) {
-      const prepared = input.prepared !== undefined ? input.prepared : existing.prepared;
-      Object.assign(data, prepared == null
-        ? { cateringLeadHours: null, cateringMinQty: null }
-        : cateringFields(prepared, input.cateringLeadHours ?? null, input.cateringMinQty ?? null));
-    }
+  const modeChanged = input.stockMode !== undefined && input.stockMode !== existing.stockMode;
+  // The number this form loaded coming back is not a count: an order may have moved qty since.
+  const requestedQty = !modeChanged && input.qty === input.qtyLoaded ? undefined : input.qty;
 
-    const resolvedStockMode = input.stockMode ?? existing.stockMode;
+  const data: Record<string, unknown> = {};
+  if (input.customName !== undefined) data.customName = input.customName;
+  if (input.masterProductId !== undefined) data.masterProductId = input.masterProductId;
+  if (input.categoryId !== undefined) data.categoryId = await checkedAisle(input.categoryId);
+  if (input.price !== undefined) data.price = input.price;
+  if (input.stockMode !== undefined) data.stockMode = input.stockMode;
+  if (input.frozen !== undefined) data.frozen = input.frozen;
+  if (input.perishable !== undefined) data.perishable = input.perishable;
+  if (input.maxPerOrder !== undefined) data.maxPerOrder = input.maxPerOrder;
+  let heldForAllergens = false;
+  if (input.prepared !== undefined) {
+    const prepared = preparedFields(input.prepared, input.prepMinutes ?? null);
+    Object.assign(data, prepared);
+    const own = await tx.listingAttributes.findUnique({ where: { listingId: input.listingId }, select: { allergensStatus: true } });
+    heldForAllergens = existing.active && preparedSaleBlocked(prepared, own?.allergensStatus);
+    if (heldForAllergens) data.active = false;
+  }
+  if (input.cateringLeadHours !== undefined || input.prepared === null) {
+    const prepared = input.prepared !== undefined ? input.prepared : existing.prepared;
+    Object.assign(data, prepared == null
+      ? { cateringLeadHours: null, cateringMinQty: null }
+      : cateringFields(prepared, input.cateringLeadHours ?? null, input.cateringMinQty ?? null));
+  }
 
-    if (resolvedStockMode === "counted") {
-      if (requestedQty !== undefined) data.qty = requestedQty;
-      if (modeChanged) data.status = null;
-    }
-    if (resolvedStockMode === "status") {
-      if (input.status !== undefined) data.status = input.status;
-      if (modeChanged) data.qty = null;
-    }
+  const resolvedStockMode = input.stockMode ?? existing.stockMode;
 
-    const stockChanged =
-      (resolvedStockMode === "counted" && requestedQty !== undefined && requestedQty !== existing.qty) ||
-      (resolvedStockMode === "status" && input.status !== undefined && input.status !== existing.status);
+  if (resolvedStockMode === "counted") {
+    if (requestedQty !== undefined) data.qty = requestedQty;
+    if (modeChanged) data.status = null;
+  }
+  if (resolvedStockMode === "status") {
+    if (input.status !== undefined) data.status = input.status;
+    if (modeChanged) data.qty = null;
+  }
 
-    // Read after the store lock, so a count taken while an order waits is newer than that order's reservation.
-    const now = new Date();
-    if (stockChanged) {
-      data.confidence = 1.0;
-      data.confidenceUpdatedAt = now;
-    }
+  const stockChanged =
+    (resolvedStockMode === "counted" && requestedQty !== undefined && requestedQty !== existing.qty) ||
+    (resolvedStockMode === "status" && input.status !== undefined && input.status !== existing.status);
 
-    const listing = await tx.listing.update({
-      where: { id: input.listingId },
-      data,
-    });
-    // Orders moved the count after the form loaded it. The owner is told, whichever number won.
-    const stockMoved = resolvedStockMode === "counted" && !modeChanged && input.qtyLoaded !== undefined
-      && existing.qty !== null && existing.qty !== input.qtyLoaded
-      ? { from: input.qtyLoaded, to: existing.qty }
-      : null;
-    const updated = { ...listing, stockMoved, heldForAllergens };
+  // Read after the store lock, so a count taken while an order waits is newer than that order's reservation.
+  const now = new Date();
+  if (stockChanged) {
+    data.confidence = 1.0;
+    data.confidenceUpdatedAt = now;
+  }
 
-    if (
-      existing.prepared !== listing.prepared || existing.prepMinutes !== listing.prepMinutes
-      || existing.cateringLeadHours !== listing.cateringLeadHours || existing.cateringMinQty !== listing.cateringMinQty
-    ) {
-      await tx.auditLog.create({
-        data: {
-          storeId: input.storeId,
-          actorId: input.actor.id,
-          actorEmail: input.actor.email,
-          action: "listing.prepared_change",
-          entityType: "listing",
-          entityId: input.listingId,
-          before: { prepared: existing.prepared, prepMinutes: existing.prepMinutes, cateringLeadHours: existing.cateringLeadHours, cateringMinQty: existing.cateringMinQty, active: existing.active },
-          after: { prepared: listing.prepared, prepMinutes: listing.prepMinutes, cateringLeadHours: listing.cateringLeadHours, cateringMinQty: listing.cateringMinQty, active: listing.active },
-        },
-      });
-    }
+  const listing = await tx.listing.update({
+    where: { id: input.listingId },
+    data,
+  });
+  // Orders moved the count after the form loaded it. The owner is told, whichever number won.
+  const stockMoved = resolvedStockMode === "counted" && !modeChanged && input.qtyLoaded !== undefined
+    && existing.qty !== null && existing.qty !== input.qtyLoaded
+    ? { from: input.qtyLoaded, to: existing.qty }
+    : null;
+  const updated = { ...listing, stockMoved, heldForAllergens };
 
-    if (input.price !== undefined && input.price !== existing.price) {
-      await tx.auditLog.create({
-        data: {
-          storeId: input.storeId,
-          actorId: input.actor.id,
-          actorEmail: input.actor.email,
-          action: "listing.price_change",
-          entityType: "listing",
-          entityId: input.listingId,
-          before: { price: existing.price },
-          after: { price: input.price },
-        },
-      });
-    }
-
-    if (stockChanged) {
-      const beforeStock = existing.stockMode === "counted"
-        ? { qty: existing.qty }
-        : { status: existing.status };
-      const afterStock = resolvedStockMode === "counted"
-        ? { qty: updated.qty }
-        : { status: updated.status };
-
-      await tx.auditLog.create({
-        data: {
-          storeId: input.storeId,
-          actorId: input.actor.id,
-          actorEmail: input.actor.email,
-          action: "listing.stock_change",
-          entityType: "listing",
-          entityId: input.listingId,
-          before: beforeStock,
-          after: afterStock,
-        },
-      });
-
-      if (resolvedStockMode === "counted" && requestedQty !== undefined) {
-        const delta = (requestedQty ?? 0) - (existing.qty ?? 0);
-        await tx.stockEvent.create({
-          data: {
-            storeId: input.storeId,
-            listingId: input.listingId,
-            type: "adjust",
-            delta,
-            actorId: input.actor.id,
-            createdAt: now,
-          },
-        });
-      }
-
-      if (resolvedStockMode === "status") {
-        await tx.stockEvent.create({
-          data: {
-            storeId: input.storeId,
-            listingId: input.listingId,
-            type: "adjust",
-            delta: 0,
-            actorId: input.actor.id,
-            createdAt: now,
-          },
-        });
-      }
-    }
-
-    if (input.variants !== undefined) {
-      await saveVariantsInPlace(tx, {
+  if (
+    existing.prepared !== listing.prepared || existing.prepMinutes !== listing.prepMinutes
+    || existing.cateringLeadHours !== listing.cateringLeadHours || existing.cateringMinQty !== listing.cateringMinQty
+  ) {
+    await tx.auditLog.create({
+      data: {
         storeId: input.storeId,
-        listingId: input.listingId,
-        variants: input.variants,
-        actor: input.actor,
-      });
-    }
+        actorId: input.actor.id,
+        actorEmail: input.actor.email,
+        action: "listing.prepared_change",
+        entityType: "listing",
+        entityId: input.listingId,
+        before: { prepared: existing.prepared, prepMinutes: existing.prepMinutes, cateringLeadHours: existing.cateringLeadHours, cateringMinQty: existing.cateringMinQty, active: existing.active },
+        after: { prepared: listing.prepared, prepMinutes: listing.prepMinutes, cateringLeadHours: listing.cateringLeadHours, cateringMinQty: listing.cateringMinQty, active: listing.active },
+      },
+    });
+  }
 
-    // After the variants, so their weights are the ones checked. An edit that disqualifies a shipped listing stops it shipping.
-    let shippable = false;
-    if (input.shippable ?? existing.shippable) {
-      const variants = await tx.listingVariant.findMany({ where: { listingId: input.listingId }, select: { weightG: true, weightPlaceholder: true } });
-      const refusal = shippableRefusal(listing, variants);
-      if (refusal && input.shippable === true) throw new ListingInputError(refusal);
-      shippable = refusal === null;
-    }
-    if (shippable !== existing.shippable) {
-      await tx.listing.update({ where: { id: input.listingId }, data: { shippable } });
-      await tx.auditLog.create({
+  if (input.price !== undefined && input.price !== existing.price) {
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.actor.id,
+        actorEmail: input.actor.email,
+        action: "listing.price_change",
+        entityType: "listing",
+        entityId: input.listingId,
+        before: { price: existing.price },
+        after: { price: input.price },
+      },
+    });
+  }
+
+  if (stockChanged) {
+    const beforeStock = existing.stockMode === "counted"
+      ? { qty: existing.qty }
+      : { status: existing.status };
+    const afterStock = resolvedStockMode === "counted"
+      ? { qty: updated.qty }
+      : { status: updated.status };
+
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.actor.id,
+        actorEmail: input.actor.email,
+        action: "listing.stock_change",
+        entityType: "listing",
+        entityId: input.listingId,
+        before: beforeStock,
+        after: afterStock,
+      },
+    });
+
+    if (resolvedStockMode === "counted" && requestedQty !== undefined) {
+      const delta = (requestedQty ?? 0) - (existing.qty ?? 0);
+      await tx.stockEvent.create({
         data: {
           storeId: input.storeId,
+          listingId: input.listingId,
+          type: "adjust",
+          delta,
           actorId: input.actor.id,
-          actorEmail: input.actor.email,
-          action: "listing.shipping_change",
-          entityType: "listing",
-          entityId: input.listingId,
-          before: { shippable: existing.shippable },
-          after: { shippable },
+          createdAt: now,
         },
       });
-      return { ...updated, shippable };
     }
 
-    return updated;
-  }, LISTING_WRITE_TRANSACTION);
+    if (resolvedStockMode === "status") {
+      await tx.stockEvent.create({
+        data: {
+          storeId: input.storeId,
+          listingId: input.listingId,
+          type: "adjust",
+          delta: 0,
+          actorId: input.actor.id,
+          createdAt: now,
+        },
+      });
+    }
+  }
+
+  if (input.variants !== undefined) {
+    await saveVariantsInPlace(tx, {
+      storeId: input.storeId,
+      listingId: input.listingId,
+      variants: input.variants,
+      actor: input.actor,
+    });
+  }
+
+  // After the variants, so their weights are the ones checked. An edit that disqualifies a shipped listing stops it shipping.
+  let shippable = false;
+  if (input.shippable ?? existing.shippable) {
+    const variants = await tx.listingVariant.findMany({ where: { listingId: input.listingId }, select: { weightG: true, weightPlaceholder: true } });
+    const refusal = shippableRefusal(listing, variants);
+    if (refusal && input.shippable === true) throw new ListingInputError(refusal);
+    shippable = refusal === null;
+  }
+  if (shippable !== existing.shippable) {
+    await tx.listing.update({ where: { id: input.listingId }, data: { shippable } });
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.actor.id,
+        actorEmail: input.actor.email,
+        action: "listing.shipping_change",
+        entityType: "listing",
+        entityId: input.listingId,
+        before: { shippable: existing.shippable },
+        after: { shippable },
+      },
+    });
+    return { ...updated, shippable };
+  }
+
+  return updated;
 }
 
 async function setListingActive(
@@ -677,7 +680,7 @@ async function saveVariantsInPlace(
         label: variant.label,
         price: variant.price,
         weightG: variant.weightG,
-        weightPlaceholder: false,
+        weightPlaceholder: variant.weightPlaceholder ?? false,
         sku: variant.sku ?? null,
         barcode: variant.barcode ?? null,
       },
