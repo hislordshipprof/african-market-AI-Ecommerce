@@ -574,7 +574,8 @@ export function OrderInbox({
   const shown = filterOrders(orders, { tab, fulfillment: fulfillmentFilter, query });
 
   return (
-    <div>
+    // At desktop width the open order is a fixed column on the right, as in the design; the page makes room for it.
+    <div className={selectedOrder ? "lg:pr-[23.5rem] xl:pr-[27.5rem]" : undefined}>
       <PageHeader
         title="Orders"
         description={`${newCount} new`}
@@ -616,8 +617,8 @@ export function OrderInbox({
           retrying={isPending}
           onRetry={pollOrders}
         />
-        <div className={selectedOrder ? "lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6 xl:grid-cols-[minmax(0,1fr)_28rem]" : undefined}>
-        <div className={selectedOrder ? "hidden min-w-0 lg:block" : "min-w-0"}>
+        <div>
+        <div className={`@container ${selectedOrder ? "hidden min-w-0 lg:block" : "min-w-0"}`}>
           <BatchPicking orders={orders} storeParam={storeParam} />
           <div role="tablist" aria-label="Order stages" className="-mx-1 mb-3 flex gap-1 overflow-x-auto border-b border-border px-1">
             {tabs.map((t) => (
@@ -674,7 +675,7 @@ export function OrderInbox({
               <p className="rounded-xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">No orders match. Try another stage or clear the search.</p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-border bg-card">
-                <div aria-hidden className="hidden grid-cols-[7rem_minmax(0,1fr)_11rem_6rem] gap-4 border-b border-border bg-muted/40 px-4 py-2.5 text-xs font-semibold text-muted-foreground md:grid">
+                <div aria-hidden className="hidden grid-cols-[7rem_minmax(0,1fr)_11rem_6rem] gap-4 border-b border-border bg-muted/40 px-4 py-2.5 text-xs font-semibold text-muted-foreground @2xl:grid">
                   <span>Order</span>
                   <span>Customer</span>
                   <span>Status</span>
@@ -690,19 +691,19 @@ export function OrderInbox({
                     <button
                       onClick={() => selectOrder(order.id)}
                       aria-current={isOpen ? "true" : undefined}
-                      className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 md:grid-cols-[7rem_minmax(0,1fr)_11rem_6rem] ${
+                      className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 @2xl:grid-cols-[7rem_minmax(0,1fr)_11rem_6rem] ${
                         isOpen ? "bg-secondary" : "hover:bg-muted/40"
                       }`}
                     >
                       {/* On a phone the status sits beside the number (#737); from md they are separate columns. */}
-                      <span className="col-span-2 row-start-2 flex flex-wrap items-center gap-x-2 gap-y-1 md:contents">
-                        <span className="text-sm md:col-start-1 md:row-start-1">
+                      <span className="col-span-2 row-start-2 flex flex-wrap items-center gap-x-2 gap-y-1 @2xl:contents">
+                        <span className="text-sm @2xl:col-start-1 @2xl:row-start-1">
                           <span className="font-bold tabular-nums text-foreground">#{order.number}</span>
-                          <span className="hidden text-xs tabular-nums text-muted-foreground md:block">
+                          <span className="hidden text-xs tabular-nums text-muted-foreground @2xl:block">
                             {formatClockInZone(order.createdAt, timeZone)}, {order.lines.length} item{order.lines.length !== 1 ? "s" : ""}
                           </span>
                         </span>
-                        <span className="flex flex-wrap items-center gap-1.5 md:col-start-3 md:row-start-1">
+                        <span className="flex flex-wrap items-center gap-1.5 @2xl:col-start-3 @2xl:row-start-1">
                           <Badge variant={config?.variant ?? "outline"}>
                             <StatusIcon aria-hidden className="size-3" />
                             {orderStatusLabel(order.status, order.fulfillment)}
@@ -711,17 +712,17 @@ export function OrderInbox({
                           {order.hasAccount && <AccountBadge />}
                         </span>
                       </span>
-                      <span className="col-span-2 row-start-3 text-xs tabular-nums text-muted-foreground md:hidden">
+                      <span className="col-span-2 row-start-3 text-xs tabular-nums text-muted-foreground @2xl:hidden">
                         {formatClockInZone(order.createdAt, timeZone)}, {order.lines.length} item{order.lines.length !== 1 ? "s" : ""}
                       </span>
-                      <span className="col-start-1 row-start-1 min-w-0 md:col-start-2">
-                        <span className="block truncate font-semibold text-foreground md:font-medium">{order.customer.name}</span>
+                      <span className="col-start-1 row-start-1 min-w-0 @2xl:col-start-2">
+                        <span className="block truncate font-semibold text-foreground @2xl:font-medium">{order.customer.name}</span>
                         <span className="mt-0.5 block text-xs font-medium text-foreground" data-testid="order-card-fulfillment">
                           {fulfillmentHeadline(order, timeZone)}
                         </span>
                       </span>
 
-                      <span className="col-start-2 row-start-1 text-right font-semibold tabular-nums text-foreground md:col-start-4">
+                      <span className="col-start-2 row-start-1 text-right font-semibold tabular-nums text-foreground @2xl:col-start-4">
                         {money(order.totalCents ?? order.subtotalCents)}
                       </span>
                     </button>
@@ -735,7 +736,7 @@ export function OrderInbox({
         {selectedOrder && (
           <section
             aria-label={`Order #${selectedOrder.number}`}
-            className="flex flex-col rounded-xl border border-border bg-card lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)]"
+            className="flex flex-col rounded-xl border border-border bg-card lg:fixed lg:bottom-0 lg:right-0 lg:top-16 lg:z-10 lg:w-[24rem] lg:rounded-none lg:border-y-0 lg:border-r-0 xl:w-[28rem]"
             data-testid="order-panel"
           >
             <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
@@ -1086,7 +1087,7 @@ export function OrderInbox({
             </Card>
             </div>
             {(selectedOrder.status === "AUTHORIZED" || STORE_CANCELLABLE.includes(selectedOrder.status)) && (
-              <div className="sticky bottom-0 flex flex-wrap gap-2 rounded-b-xl border-t border-border bg-card p-3" data-assistant-avoid="">
+              <div className="fixed inset-x-0 bottom-0 z-10 flex flex-wrap gap-2 border-t border-border bg-card p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:static lg:z-auto" data-assistant-avoid="">
                 {selectedOrder.status === "AUTHORIZED" && (
                   <Button
                     className="min-h-12 flex-1 rounded-full"

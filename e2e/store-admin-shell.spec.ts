@@ -142,15 +142,17 @@ test.describe("Store admin shell (#860)", () => {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
         if (width === 1280) await storeOwnerSignIn(page);
         await page.goto(`/store-admin/orders/${await inboxOrderId(number)}${STORE}`);
-        const accept = page.getByTestId("order-panel").getByRole("button", { name: "Accept order" });
-        await expect(accept).toBeVisible();
         const launcher = page.getByTestId("assistant-launcher");
         await expect(launcher).toBeVisible();
-        await expect.poll(async () => {
-          const a = (await accept.boundingBox())!;
-          const l = (await launcher.boundingBox())!;
-          return l.y + l.height <= a.y || l.x >= a.x + a.width || l.x + l.width <= a.x || l.y >= a.y + a.height;
-        }).toBe(true);
+        for (const name of ["Accept order", "Cancel order"]) {
+          const action = page.getByTestId("order-panel").getByRole("button", { name });
+          await expect(action).toBeInViewport();
+          await expect.poll(async () => {
+            const a = (await action.boundingBox())!;
+            const l = (await launcher.boundingBox())!;
+            return l.y + l.height <= a.y || l.x >= a.x + a.width || l.x + l.width <= a.x || l.y >= a.y + a.height;
+          }).toBe(true);
+        }
       }
     } finally {
       await deleteInboxOrder(number);
