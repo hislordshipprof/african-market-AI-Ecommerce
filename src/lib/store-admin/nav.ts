@@ -107,3 +107,10 @@ export function storeAdminAddress(slug: string, requestHost: string, env: Env = 
   url.pathname = "/store-admin";
   return url.toString();
 }
+
+/** Pages that stay bare: sign-in and 2FA set-up come before the shell, and the reorder sheet is for printing. */
+const BARE_PATHS = ["/store-admin/sign-in", "/store-admin/two-factor", "/store-admin/copilot/reorder/print"];
+
+export function isBarePath(pathname: string): boolean {
+  return BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}

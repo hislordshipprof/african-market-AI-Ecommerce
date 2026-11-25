@@ -4,14 +4,7 @@ import { platformAdmin, storeScoped } from "@/lib/db";
 import { findStoreForHeaders } from "@/lib/get-store";
 import { storeWebAddress } from "@/lib/directory/links";
 import { storeUnreadCount } from "@/lib/support/thread";
-import { payoutsAlert, storeAdminAddress } from "@/lib/store-admin/nav";
-
-/** Pages that stay bare: sign-in and 2FA set-up come before the shell, and the reorder sheet is for printing. */
-export const BARE_PATHS = ["/store-admin/sign-in", "/store-admin/two-factor", "/store-admin/copilot/reorder/print"];
-
-export function isBarePath(pathname: string): boolean {
-  return BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
-}
+import { isBarePath, payoutsAlert, storeAdminAddress } from "@/lib/store-admin/nav";
 
 export interface ShellCounts {
   newOrders: number;

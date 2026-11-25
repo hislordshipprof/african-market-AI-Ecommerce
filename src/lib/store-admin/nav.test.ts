@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { payoutsAlert, storeAdminAddress, storeAdminNav } from "./nav";
+import { isBarePath, payoutsAlert, storeAdminAddress, storeAdminNav } from "./nav";
 
 const counts = { newOrders: 2, unreadMessages: 3, payoutsAlert: "Needs info" };
 
@@ -63,5 +63,15 @@ describe("payoutsAlert (#860)", () => {
     expect(payoutsAlert("pending")).toBe("Pending");
     expect(payoutsAlert("not_started")).toBe("Not set up");
     expect(payoutsAlert("complete")).toBeNull();
+  });
+});
+
+describe("isBarePath (#860)", () => {
+  it("keeps sign-in, 2FA set-up and the printed reorder sheet out of the shell", () => {
+    expect(isBarePath("/store-admin/sign-in")).toBe(true);
+    expect(isBarePath("/store-admin/two-factor")).toBe(true);
+    expect(isBarePath("/store-admin/copilot/reorder/print")).toBe(true);
+    expect(isBarePath("/store-admin/copilot")).toBe(false);
+    expect(isBarePath("/store-admin/sign-inx")).toBe(false);
   });
 });
