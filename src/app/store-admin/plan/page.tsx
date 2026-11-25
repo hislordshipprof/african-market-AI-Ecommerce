@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AlertCircle, MessageCircle, Store } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
-import { getStoreBilling, PILOT_FREE_MONTHS } from "@/lib/billing/service";
+import { getStoreBilling, PILOT_FREE_MONTHS, syncCheckoutReturn } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
 import { PLAN_NAMES, PLAN_PRICES_USD, PLANS, RECOMMENDED_PLAN, supportLevel, billingStatusLabel } from "@/lib/billing/plan";
 import { applicantPlanChoice } from "@/lib/store-application/service";
@@ -14,10 +14,19 @@ const dateFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numer
 /** An override ends at the start of its UTC date, the date the admin picked. */
 const overrideFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-export default async function PlanPage({ searchParams }: { searchParams: Promise<{ pending?: string }> }) {
-  const { pending } = await searchParams;
+export default async function PlanPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ pending?: string; session_id?: string | string[] }>;
+}) {
+  const { pending, session_id: sessionId } = await searchParams;
   const session = await requireStoreOwner();
-  const billing = await getStoreBilling(session.store.id);
+  let billing = await getStoreBilling(session.store.id);
+  // Back from Stripe Checkout: show the plan now instead of waiting for the webhook (#841).
+  const returned = typeof sessionId === "string";
+  if (returned && !billing.subscribed && (await syncCheckoutReturn(session.store.id, sessionId))) {
+    billing = await getStoreBilling(session.store.id);
+  }
   const [usage, applied] = await Promise.all([
     assistantChatUsage(session.store.id, billing.plan),
     applicantPlanChoice(session.store.id),
@@ -57,7 +66,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
           </div>
         )}
 
-        {pending === "1" && !billing.subscribed && (
+        {(pending === "1" || returned) && !billing.subscribed && (
           <div role="status" className="rounded-xl border border-border bg-card p-4 text-sm text-foreground">
             Your payment went through. Your plan shows here within a minute; refresh to see it.
           </div>
