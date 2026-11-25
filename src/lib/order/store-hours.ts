@@ -35,40 +35,43 @@ type DaySchedule =
   | { kind: "closed" }
   | { kind: "unparseable"; raw: string };
 
+function readDaySchedule(val: unknown): DaySchedule | null {
+  if (!val) return null;
+
+  if (typeof val === "object") {
+    const obj = val as Record<string, unknown>;
+    if (obj.closed === true) return { kind: "closed" };
+    if (typeof obj.open === "string" && typeof obj.close === "string") {
+      return { kind: "range", open: obj.open, close: obj.close };
+    }
+    return { kind: "unparseable", raw: JSON.stringify(val) };
+  }
+
+  if (typeof val === "string") {
+    if (/^\s*closed\s*$/i.test(val)) return { kind: "closed" };
+    const parts = val.split(/\s*[-–—]\s*/);
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      return { kind: "range", open: parts[0], close: parts[1] };
+    }
+    return { kind: "unparseable", raw: val };
+  }
+
+  return { kind: "unparseable", raw: String(val) };
+}
+
 function findDaySchedule(
   hours: Record<string, unknown>,
   dayOfWeek: number,
 ): DaySchedule | null {
   const keys = DAY_KEYS[dayOfWeek];
   if (!keys) return null;
-
   for (const key of keys) {
-    const val = hours[key];
-    if (!val) continue;
-
-    if (typeof val === "object" && val !== null) {
-      const obj = val as Record<string, unknown>;
-      if (obj.closed === true) return { kind: "closed" };
-      if (typeof obj.open === "string" && typeof obj.close === "string") {
-        return { kind: "range", open: obj.open, close: obj.close };
-      }
-      return { kind: "unparseable", raw: JSON.stringify(val) };
-    }
-
-    if (typeof val === "string") {
-      if (/^\s*closed\s*$/i.test(val)) return { kind: "closed" };
-      const parts = val.split(/\s*[-–—]\s*/);
-      if (parts.length === 2 && parts[0] && parts[1]) {
-        return { kind: "range", open: parts[0], close: parts[1] };
-      }
-      return { kind: "unparseable", raw: val };
-    }
-
-    return { kind: "unparseable", raw: String(val) };
+    const day = readDaySchedule(hours[key]);
+    if (day) return day;
   }
-
   return null;
 }
+
 function logUnparseableHours(raw: string): void {
   console.error(
     "[store-hours] unparseable hours; treating the store as open",
@@ -86,7 +89,7 @@ type ParsedDay =
 type Schedule =
   | { kind: "always" }
   | { kind: "unparseable"; raw: string }
-  | { kind: "weekly"; days: ParsedDay[] };
+  | { kind: "weekly"; days: ParsedDay[]; dates: Map<string, ParsedDay> };
 
 function describeRaw(value: unknown): string {
   try {
@@ -111,20 +114,44 @@ function parseSchedule(hours: unknown): Schedule {
     return { kind: "unparseable", raw: describeRaw(hours) };
   }
   const h = hours as Record<string, unknown>;
-  return { kind: "weekly", days: [0, 1, 2, 3, 4, 5, 6].map((dow) => parseDay(findDaySchedule(h, dow))) };
+  return {
+    kind: "weekly",
+    days: [0, 1, 2, 3, 4, 5, 6].map((dow) => parseDay(findDaySchedule(h, dow))),
+    dates: parseDates(h.dates),
+  };
+}
+
+/** One-off days (#819): store-local "YYYY-MM-DD" keys whose value replaces that date's weekly hours. */
+function parseDates(raw: unknown): Map<string, ParsedDay> {
+  const dates = new Map<string, ParsedDay>();
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return dates;
+  for (const [date, value] of Object.entries(raw)) {
+    const day = parseDay(readDaySchedule(value));
+    if (day.kind !== "none") dates.set(date, day);
+  }
+  return dates;
+}
+
+type WeeklySchedule = Extract<Schedule, { kind: "weekly" }>;
+const DAY_MS = 24 * 60 * 60_000;
+
+/** The schedule for the local date of `wall` (a local wall clock read as UTC): its one-off day, else its weekday. */
+function dayAt(schedule: WeeklySchedule, wall: Date): ParsedDay | undefined {
+  return schedule.dates.get(wall.toISOString().slice(0, 10)) ?? schedule.days[wall.getUTCDay()];
 }
 
 /**
  * The one open rule: today's range (close exclusive), an unparseable today
  * counts as open, and yesterday's overnight window still counts after midnight.
+ * A one-off date replaces its weekday, for that date's own range and its spill-over.
  */
 function openAtLocal(
-  days: ParsedDay[],
-  dayOfWeek: number,
-  minuteOfDay: number,
+  schedule: WeeklySchedule,
+  wall: Date,
   log: (raw: string) => void,
 ): boolean {
-  const today = days[dayOfWeek];
+  const minuteOfDay = wall.getUTCHours() * 60 + wall.getUTCMinutes();
+  const today = dayAt(schedule, wall);
   if (today?.kind === "unparseable") {
     log(today.raw);
     return true;
@@ -139,7 +166,7 @@ function openAtLocal(
       return true;
     }
   }
-  const yesterday = days[(dayOfWeek + 6) % 7];
+  const yesterday = dayAt(schedule, new Date(wall.getTime() - DAY_MS));
   if (yesterday?.kind === "range" && yesterday.close < yesterday.open && minuteOfDay < yesterday.close) {
     return true;
   }
@@ -221,7 +248,7 @@ export function isStoreOpen(hours: unknown, timezone: string, now?: Date): boole
     logUnparseableHours(schedule.raw);
     return true;
   }
-  return openAtLocal(schedule.days, local.dayOfWeek, local.minuteOfDay, logUnparseableHours);
+  return openAtLocal(schedule, new Date(local.wallMs), logUnparseableHours);
 }
 
 const MINUTE_MS = 60_000;
@@ -244,7 +271,7 @@ function logOncePerCall(): (raw: string) => void {
  * read at both ends of each UTC hour; when they differ, that hour asks the
  * formatter for each minute. The answer is always the one isStoreOpen gives.
  */
-function openMinuteProbe(days: ParsedDay[], timezone: string, log: (raw: string) => void) {
+function openMinuteProbe(schedule: WeeklySchedule, timezone: string, log: (raw: string) => void) {
   const offsetByHour = new Map<number, number | null>();
   const offsetAt = (ms: number) => getStoreLocalTime(timezone, new Date(ms)).wallMs - ms;
   return (minuteStartMs: number): boolean => {
@@ -256,11 +283,9 @@ function openMinuteProbe(days: ParsedDay[], timezone: string, log: (raw: string)
       offsetByHour.set(hourStart, offset);
     }
     if (offset === null) {
-      const local = getStoreLocalTime(timezone, new Date(minuteStartMs));
-      return openAtLocal(days, local.dayOfWeek, local.minuteOfDay, log);
+      return openAtLocal(schedule, new Date(getStoreLocalTime(timezone, new Date(minuteStartMs)).wallMs), log);
     }
-    const wall = new Date(minuteStartMs + offset);
-    return openAtLocal(days, wall.getUTCDay(), wall.getUTCHours() * 60 + wall.getUTCMinutes(), log);
+    return openAtLocal(schedule, new Date(minuteStartMs + offset), log);
   };
 }
 
@@ -272,7 +297,7 @@ export function storeOpenAt(hours: unknown, timezone: string): (minuteStartMs: n
     logUnparseableHours(schedule.raw);
     return () => true;
   }
-  return openMinuteProbe(schedule.days, timezone, logOncePerCall());
+  return openMinuteProbe(schedule, timezone, logOncePerCall());
 }
 
 /**
@@ -288,7 +313,7 @@ export function nextOpening(hours: unknown, timezone: string, now: Date): Date |
     logUnparseableHours(schedule.raw);
     return now;
   }
-  const open = openMinuteProbe(schedule.days, timezone, logOncePerCall());
+  const open = openMinuteProbe(schedule, timezone, logOncePerCall());
   const t0 = now.getTime();
   const first = Math.floor(t0 / MINUTE_MS) * MINUTE_MS;
   if (open(first)) return now;
@@ -319,7 +344,7 @@ export function openMinutesDeadline(
   }
   let need = minutes * MINUTE_MS;
   if (need <= 0) return start;
-  const open = openMinuteProbe(schedule.days, timezone, logOncePerCall());
+  const open = openMinuteProbe(schedule, timezone, logOncePerCall());
   let m = Math.floor(s / MINUTE_MS) * MINUTE_MS;
   if (open(m)) {
     const available = m + MINUTE_MS - s;

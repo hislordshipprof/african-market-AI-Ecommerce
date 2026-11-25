@@ -8,6 +8,8 @@ export interface ListingMatch {
   stockMode: string;
   qty: number | null;
   status: string | null;
+  /** A trigram look-alike: it does not match every word of the query. */
+  near: boolean;
 }
 
 /**
@@ -29,17 +31,18 @@ interface SearchRow {
   qty: number | null;
   status: string | null;
   tier: "one" | "several" | "near";
+  near: boolean;
 }
 
 const NONE: ListingSearch = { outcome: "none", nearOnly: false, listings: [] };
 
 /**
- * Active listings only, uncached, at most five. The storefront E2E name filter does not apply.
+ * Active listings only, uncached, at most `limit` (five by default; a price draft reads up to 20). The storefront E2E name filter does not apply.
  * A listing matches every query word when its relevance rank is exact, prefix or full text (rank < 3).
  * Trigram look-alikes (rank 3) are returned when no listing matches every word, or when the single match
  * came only through its master product's name or synonyms rather than its own listing name.
  */
-export async function searchListingMatches(storeId: string, rawQuery: string): Promise<ListingSearch> {
+export async function searchListingMatches(storeId: string, rawQuery: string, limit = 5): Promise<ListingSearch> {
   const { query, tooLong } = normalizedSearchQuery(rawQuery);
   if (!query || tooLong) return NONE;
   const rows = await storeScopedRawQuery<SearchRow>(
@@ -63,7 +66,7 @@ export async function searchListingMatches(storeId: string, rawQuery: string): P
         SELECT COUNT(*) AS n, COALESCE(BOOL_AND(by_name), false) AS by_name FROM named WHERE rank < 3
       ),
       near AS (SELECT COUNT(*) AS n FROM named WHERE rank >= 3)
-      SELECT m.id, m.name, m.stock_mode, m.qty, m.status,
+      SELECT m.id, m.name, m.stock_mode, m.qty, m.status, m.rank >= 3 AS near,
         CASE
           WHEN s.n = 1 AND (s.by_name OR nr.n = 0) THEN 'one'
           WHEN s.n >= 1 THEN 'several'
@@ -72,7 +75,7 @@ export async function searchListingMatches(storeId: string, rawQuery: string): P
       FROM named m CROSS JOIN strong s CROSS JOIN near nr
       WHERE m.rank < 3 OR s.n = 0 OR (s.n = 1 AND NOT s.by_name)
       ORDER BY m.rank, m.fuzzy DESC, m.sort_name, m.id
-      LIMIT 5
+      LIMIT ${limit}
     `,
   );
   const listings = rows.map((row) => ({
@@ -81,6 +84,7 @@ export async function searchListingMatches(storeId: string, rawQuery: string): P
     stockMode: row.stock_mode,
     qty: row.qty,
     status: row.status,
+    near: row.near,
   }));
   const first = listings[0];
   if (!first) return NONE;

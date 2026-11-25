@@ -228,7 +228,7 @@ An outside AI agent's checkout at one store over the Agentic Commerce Protocol (
 _Avoid_: agent order, ACP order
 
 **Store copilot**:
-The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp. Its chat, which drafts stock changes and answers sales questions from the store's own records, is a Pro feature sold as **Store assistant (AI chat)** on the plan page (#818); alerts, the daily digest, confirm-requests and stock movement stay on every plan.
+The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp. Its chat, which drafts stock changes, coupons, price changes and one-day store changes (#819) and answers sales questions from the store's own records, is a Pro feature sold as **Store assistant (AI chat)** on the plan page (#818); alerts, the daily digest, confirm-requests and stock movement stay on every plan.
 _Avoid_: Store AI; "store assistant" outside the plan page's feature label
 
 **Daily digest**:

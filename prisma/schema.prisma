@@ -25,6 +25,8 @@ model Store {
   deliveryRadiusMi          Decimal  @default(8) @map("delivery_radius_mi")
   storeDeliveryEnabled      Boolean  @default(false) @map("store_delivery_enabled")
   storeDeliveryFeeCents     Int      @default(0) @map("store_delivery_fee_cents")
+  /// Local delivery is paused until this instant (#819): checkout offers pickup or shipping only.
+  deliveryPausedUntil       DateTime? @map("delivery_paused_until") @db.Timestamptz(6)
   /// Scheduled slot settings per fulfillment (#565); shape in src/lib/order/slot-schedule.ts.
   pickupSlotSettings        Json?    @map("pickup_slot_settings")
   storeDeliverySlotSettings Json?    @map("store_delivery_slot_settings")
@@ -107,6 +109,7 @@ model Store {
   aiReviewFlags          AiReviewFlag[]
   copilotClientMessages  CopilotClientMessage[]
   stockProposals         StockProposal[]
+  copilotDrafts          CopilotDraft[]
   copilotAlerts          CopilotAlert[]
   copilotDigests         CopilotDigest[]
   copilotWeeklyReports   CopilotWeeklyReport[]
@@ -227,6 +230,7 @@ model User {
   copilotConversations    CopilotConversation[]
   aiReviewFlags           AiReviewFlag[]
   stockProposalDecisions  StockProposal[]          @relation("StockProposalDecision")
+  copilotDraftDecisions   CopilotDraft[]           @relation("CopilotDraftDecision")
   copilotAlertResolutions CopilotAlert[]           @relation("CopilotAlertResolution")
   ownerReports            OwnerReport[]            @relation("OwnerReportActor")
   ownerReportDecisions    OwnerReport[]            @relation("OwnerReportDecision")
@@ -782,6 +786,7 @@ model CopilotConversation {
   store     Store                  @relation(fields: [storeId], references: [id], onDelete: Restrict)
   user      User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   proposals StockProposal[]
+  drafts    CopilotDraft[]
   receipts  CopilotClientMessage[]
   flags     AiReviewFlag[]
 
@@ -840,6 +845,33 @@ model StockProposal {
   @@index([listingId])
   @@index([decidedById])
   @@map("stock_proposals")
+}
+
+/// A coupon, price or store-change draft from the store chat (#819). Nothing is written until the owner confirms;
+/// `payload` holds the terms, `before` what the confirm checks is unchanged. Shapes in src/lib/copilot/drafts.ts.
+model CopilotDraft {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  conversationId  String    @map("conversation_id")
+  clientMessageId String    @map("client_message_id")
+  kind            String
+  payload         Json
+  before          Json
+  state           String
+  expiresAt       DateTime  @map("expires_at")
+  decidedById     String?   @map("decided_by_id")
+  decidedAt       DateTime? @map("decided_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  store        Store               @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conversation CopilotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  decidedBy    User?               @relation("CopilotDraftDecision", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([storeId, clientMessageId])
+  @@index([conversationId])
+  @@index([decidedById])
+  @@map("copilot_drafts")
 }
 
 /// A stock alert or confirm-request for the owner. No foreign key to listings or orders: RLS checks them.

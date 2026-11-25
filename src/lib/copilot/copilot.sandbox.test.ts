@@ -4,6 +4,7 @@ import { setSpendClock } from "../assistant/spend";
 import sharp from "sharp";
 import { extractReportItems } from "./owner-report";
 import { sendCopilotTurn } from "./turn";
+import { DRAFT_MAKERS } from "./drafts";
 import { liveSandbox, providerSandbox } from "../test-live-provider";
 
 const DAY = "2099-11-08";
@@ -13,6 +14,9 @@ const live = process.env.ASSISTANT_LIVE_TESTS === "1"
   && process.env.ANTHROPIC_API_KEY.trim() !== "";
 
 const sandbox = providerSandbox("Anthropic");
+const WEEK = Object.fromEntries(
+  ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((day) => [day, "9:00 AM - 8:00 PM"]),
+);
 
 // sendCopilotTurn logs a refused model call instead of throwing it, so a logged 429 is rethrown for the sandbox.
 async function turn(input: Parameters<typeof sendCopilotTurn>[0]) {
@@ -59,7 +63,7 @@ describe.skipIf(!liveSandbox || !live)("copilot live sandbox", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, ${"Live " + slug}, ${slug}, 'active', now())`;
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, hours, updated_at) VALUES (${storeId}, ${"Live " + slug}, ${slug}, 'active', ${JSON.stringify(WEEK)}::jsonb, now())`;
       // The chat is Pro (#818).
       await tx.storeSubscription.create({ data: { storeId, plan: "pro", status: "active" } });
     });
@@ -72,6 +76,7 @@ describe.skipIf(!liveSandbox || !live)("copilot live sandbox", () => {
     setSpendClock(null);
     if (!userId) return;
     await storeScoped(storeId).stockProposal.deleteMany({});
+    await storeScoped(storeId).copilotDraft.deleteMany({});
     await storeScoped(storeId).copilotClientMessage.deleteMany({});
     await storeScoped(storeId).copilotConversation.deleteMany({});
     await storeScoped(storeId).order.deleteMany({});
@@ -161,6 +166,33 @@ describe.skipIf(!liveSandbox || !live)("copilot live sandbox", () => {
     expect(sent.reply).toMatch(/egusi/i);
     expect(sent.proposals).toEqual([]);
   }), 60_000);
+
+  it("live Haiku drafts a coupon, a price change and a one-day closure, and writes none of them (#819)", sandbox.test(async () => {
+    const db = storeScoped(storeId);
+    const yam = await db.listing.create({
+      data: { storeId, customName: "Yam", price: 300, stockMode: "counted", qty: 10, variants: { create: [{ label: "1 lb", price: 300, weightG: 450 }, { label: "5 lb", price: 1200, weightG: 2250 }] } },
+    });
+    const ask = async (text: string) => {
+      const sent = await turn({ storeId, userId, email: "live@example.com", messageId: crypto.randomUUID(), text, drafts: DRAFT_MAKERS });
+      expect(sent.ok, JSON.stringify(sent)).toBe(true);
+      if (!sent.ok) throw new Error("turn failed");
+      expect(sent.drafts, sent.reply).toHaveLength(1);
+      return sent.drafts[0]!;
+    };
+    const coupon = await ask("10% off over $30 this weekend");
+    expect(coupon.kind).toBe("coupon");
+    if (coupon.kind === "coupon") expect(coupon.fields).toMatchObject({ kind: "percent", percentOff: "10", minGoods: "30.00" });
+    const price = await ask("raise all yams by 50 cents");
+    expect(price.kind).toBe("price");
+    if (price.kind === "price") {
+      expect(price.lines.map((line) => [line.listingId, line.beforeCents, line.afterCents]).sort()).toEqual([[yam.id, 1200, 1250], [yam.id, 300, 350]]);
+    }
+    const closed = await ask("we're closed tomorrow");
+    expect(closed.kind).toBe("store_change");
+    if (closed.kind === "store_change") expect(closed.text).toMatch(/^Closed all day/);
+    expect(await db.storeCoupon.count()).toBe(0);
+    expect((await db.listingVariant.findMany({ where: { listingId: yam.id } })).map((v) => v.price).sort()).toEqual([1200, 300]);
+  }), 120_000);
 
   it("live vision reads an invoice photo into named lines with whole quantities", sandbox.test(async () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240"><rect width="100%" height="100%" fill="white"/>

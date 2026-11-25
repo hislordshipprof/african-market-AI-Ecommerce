@@ -45,6 +45,8 @@ export interface FlowStore {
   readyAt: string;
   /** False when no opening is close enough to hold a card for: checkout refuses. */
   takingOrders: boolean;
+  /** "6:00 PM today, Tue Nov 24" while the owner has paused delivery (#819), else empty. Store and courier delivery are off meanwhile. */
+  deliveryPausedUntil: string;
 }
 export interface FlowCatalogItem extends CartItem {
   categoryId: string;

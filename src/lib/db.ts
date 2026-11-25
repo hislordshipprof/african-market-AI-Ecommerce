@@ -167,6 +167,7 @@ const STORE_SCOPED_MODELS = [
   "rlsTestFixture",
   "stockEvent",
   "stockProposal",
+  "copilotDraft",
   "storeBanner",
   "storeCollection",
   "storeCollectionListing",
@@ -367,6 +368,7 @@ const PLATFORM_ADMIN_TX_MODELS = [
   "recipeIngredient",
   "refundRequest",
   "stockProposal",
+  "copilotDraft",
   "store",
   "storeApplication",
   "storeInvite",
@@ -444,6 +446,7 @@ const STORE_SCOPED_TX_MODELS = [
   "reorderListItem",
   "stockEvent",
   "stockProposal",
+  "copilotDraft",
   "storeCoupon",
   "storeSubscription",
   "substitutionRequest",
@@ -526,6 +529,8 @@ export interface LockedStoreRow {
   pickupSlotSettings: unknown;
   storeDeliverySlotSettings: unknown;
   shippingHandlingDays: number | null;
+  /** Store and courier delivery are refused until then (#819). */
+  deliveryPausedUntil: Date | null;
 }
 
 export interface GeocodeCacheRow {
@@ -704,10 +709,11 @@ export async function lockStoreRow(
     pickup_slot_settings: unknown;
     store_delivery_slot_settings: unknown;
     shipping_handling_days: number | null;
+    delivery_paused_until: Date | null;
   }>>`
     SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng,
       hours, timezone, prep_time_minutes, pickup_enabled, pickup_slot_settings, store_delivery_slot_settings,
-      shipping_handling_days
+      shipping_handling_days, delivery_paused_until
     FROM stores
     WHERE id = ${storeId}
     FOR UPDATE
@@ -727,7 +733,20 @@ export async function lockStoreRow(
     pickupSlotSettings: row.pickup_slot_settings,
     storeDeliverySlotSettings: row.store_delivery_slot_settings,
     shippingHandlingDays: row.shipping_handling_days,
+    deliveryPausedUntil: row.delivery_paused_until,
   };
+}
+
+/** A one-off change to the store's own row (#819): its hours (with `dates`) or its delivery pause. The caller holds lockStoreRow. */
+export async function updateStoreOneOff(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  storeId: string,
+  change: { hours: object } | { deliveryPausedUntil: Date | null },
+): Promise<void> {
+  const updated = "hours" in change
+    ? await tx.$executeRaw`UPDATE stores SET hours = ${JSON.stringify(change.hours)}::jsonb, updated_at = now() WHERE id = ${storeId}`
+    : await tx.$executeRaw`UPDATE stores SET delivery_paused_until = ${change.deliveryPausedUntil?.toISOString() ?? null}::timestamptz, updated_at = now() WHERE id = ${storeId}`;
+  if (updated !== 1) throw new Error("Store not found");
 }
 
 /** A read on an open transaction. Callers outside this file cannot call $queryRaw; writes get a named helper below. */

@@ -2,6 +2,7 @@
 
 import { revalidateStore } from "../get-store";
 import { platformAdmin, platformAdminTransaction, lockStoreAddress, readStorePlanRows } from "../db";
+import { keepOneOffDays } from "../store-settings/store-change";
 import { requirePlatformAdmin } from "./session";
 import { addressStamp, coordinatesForStore, insertStore } from "./store-create";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
@@ -450,6 +451,9 @@ export async function updateStore(
     if (addressStamp(lockedAddress) !== addressStamp(before)) {
       throw new StoreAddressChanged();
     }
+    // The form posts weekly hours only; the store's one-off days (#819) from today on are kept, read under the lock above.
+    const locked = await tx.store.findUnique({ where: { id: storeId }, select: { hours: true } });
+    const hours = keepOneOffDays(values.hours, locked?.hours, values.timezone, new Date());
     const s = await tx.store.update({
       where: { id: storeId },
       data: {
@@ -458,7 +462,7 @@ export async function updateStore(
         logoUrl: values.logoUrl,
         brandColor: finalBrandColor,
         themePreset: values.themePreset,
-        hours: values.hours !== null ? values.hours : Prisma.JsonNull,
+        hours: hours !== null ? hours : Prisma.JsonNull,
         prepTimeMinutes: values.prepTimeMinutes,
         deliveryRadiusMi: values.deliveryRadiusMi,
         minimumOrderCents: values.minimumOrderCents,

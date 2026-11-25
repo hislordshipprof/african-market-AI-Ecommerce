@@ -23,7 +23,7 @@ export function parseCheckoutDraft(value: unknown): CheckoutDraft | null {
 export async function readPickupStore(storeId: string) {
   return platform.store.findUnique({
     where: { id: storeId },
-    select: { hours: true, timezone: true, prepTimeMinutes: true, pickupEnabled: true, minimumOrderCents: true, pickupSlotSettings: true, storeDeliverySlotSettings: true },
+    select: { hours: true, timezone: true, prepTimeMinutes: true, pickupEnabled: true, minimumOrderCents: true, pickupSlotSettings: true, storeDeliverySlotSettings: true, deliveryPausedUntil: true },
   });
 }
 

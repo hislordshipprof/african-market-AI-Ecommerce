@@ -196,6 +196,15 @@ describe.skipIf(!hasDb)("Store copilot on WhatsApp (lane database, recording fak
     expect(await storeScoped(storeB).copilotConversation.count()).toBe(0);
   });
 
+  it("WhatsApp gets no coupon, price or store-change draft tools: it cannot show the cards (#819)", async () => {
+    const fake = script([{ kind: "text", text: "You can ask on the copilot page." }]);
+    expect((await text(ownerA.waId, "10% off over $30 this weekend")).status).toBe(200);
+    await repliesTo(ownerA.waId, 1);
+    const names = ((fake.requests[0]?.body?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name);
+    expect(names).toContain("find_listings");
+    expect(names.filter((name) => name.startsWith("draft_"))).toEqual([]);
+  });
+
   it("a voice note asks for text with no model call", async () => {
     const fake = script([]);
     expect((await deliver(ownerA.waId, { type: "audio", audio: { id: "media-1", mime_type: "audio/ogg" } })).status).toBe(200);

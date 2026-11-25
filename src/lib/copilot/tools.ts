@@ -1,12 +1,13 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { storeScoped } from "../db";
+import { platform, storeScoped } from "../db";
 import { listingLabel } from "./cards";
 import { storeMayUse } from "../billing/plan";
 import { MOVEMENT_DAYS, SALES_FLOOR, inventoryReport, type MovementRow } from "./inventory-report";
 import { reorderSuggestions, type ReorderSuggestions } from "./reorder";
 import { SALES_PERIODS, salesSummary, type PayoutReader, type SalesFigures } from "./sales-summary";
 import { searchListingMatches, type ListingSearch } from "./search";
+import { DraftError, draftToolResult, type DraftMakers, type PendingDraft } from "./draft-rows";
 import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ProposalKind } from "./types";
 
 const CHECK_FAILED = "could not check that listing";
@@ -47,6 +48,8 @@ export interface DraftBook {
   report: MovementRow[];
   /** Periods `sales_summary` returned this turn, for the fixed reply when a number fails the check. */
   sales: SalesFigures[];
+  /** Coupon, price and store-change drafts this turn (#819). */
+  copilotDrafts: PendingDraft[];
   /** Listings already drafted or offered in a choice this turn; each appears in one card or choice only. */
   listingIds: Set<string>;
   run<T>(fn: () => Promise<T>): Promise<T>;
@@ -61,6 +64,7 @@ export function createDraftBook(): DraftBook {
     toolResults: [],
     report: [],
     sales: [],
+    copilotDrafts: [],
     listingIds: new Set(),
     run(fn) {
       const next = chain.then(fn, fn);
@@ -152,6 +156,33 @@ const salesSchema = z.object({
   to: z.string().max(10).optional(),
 });
 
+const couponSchema = z.object({
+  code: z.string().max(40),
+  percentOff: z.number().int().optional(),
+  amountOff: z.number().optional(),
+  minGoods: z.number().optional(),
+  startsAt: z.string().max(16),
+  endsAt: z.string().max(16).optional(),
+  totalUses: z.number().int().optional(),
+  usesPerCustomer: z.number().int().optional(),
+  firstOrderOnly: z.boolean().optional(),
+});
+
+const priceSchema = z.object({
+  query: z.string().max(200),
+  variant: z.string().max(40).optional(),
+  change: z.enum(["add", "set"]),
+  cents: z.number().int().min(-1_000_000).max(1_000_000),
+});
+
+const storeChangeSchema = z.object({
+  change: z.enum(["closed", "hours", "pause_delivery"]),
+  date: z.string().max(10).optional(),
+  open: z.string().max(5).optional(),
+  close: z.string().max(5).optional(),
+  until: z.string().max(16).optional(),
+});
+
 const proposeSchema = z.object({
   listingId: z.string().min(1).max(200),
   kind: z.enum(["restock", "counter_sale", "recount", "set_status"]),
@@ -217,8 +248,17 @@ function recorded<T>(book: DraftBook, result: T): T {
   return result;
 }
 
-export function copilotTools(storeId: string, book: DraftBook, payouts: PayoutReader | null = null) {
+/** Where the turn came from: the page shows draft cards; WhatsApp does not, so it gets no draft tools. */
+export interface ToolOptions {
+  payouts?: PayoutReader | null;
+  /** The page's draft makers, and the owner's message for the price draft's check that the owner named the item. */
+  drafts?: { ownerText: string; make: DraftMakers };
+}
+
+export function copilotTools(storeId: string, book: DraftBook, options: ToolOptions = {}) {
+  const payouts = options.payouts ?? null;
   return {
+    ...(options.drafts ? draftTools(storeId, book, options.drafts.ownerText, options.drafts.make) : {}),
     find_listings: tool({
       description:
         "Search this store's active listings by item name. Returns outcome one, several, did_you_mean or none, and at most 5 listings. Does not change stock.",
@@ -362,5 +402,58 @@ function offerChoice(
     drafted: false,
     ownerPicks: open.map((listing) => listing.name),
     note: "Nothing is drafted yet. The owner taps the right item on screen.",
+  };
+}
+
+/** Turns a refusal into the tool error the model reads; anything else stays a failure. */
+async function drafting(book: DraftBook, timeZone: string, make: () => Promise<PendingDraft> | PendingDraft) {
+  if (book.drafts.length + book.choices.length + book.copilotDrafts.length >= PROPOSAL_MAX) {
+    book.overflow = true;
+    throw new Error(LIMIT);
+  }
+  let draft: PendingDraft;
+  try {
+    draft = await make();
+  } catch (error) {
+    if (error instanceof DraftError) throw new Error(error.message);
+    throw new Error("could not draft that");
+  }
+  book.copilotDrafts.push(draft);
+  return recorded(book, draftToolResult(draft, timeZone, new Date()));
+}
+
+function draftTools(storeId: string, book: DraftBook, ownerText: string, make: DraftMakers) {
+  const store = () => platform.store.findUniqueOrThrow({
+    where: { id: storeId },
+    select: { hours: true, timezone: true, deliveryPausedUntil: true },
+  });
+  return {
+    draft_coupon: tool({
+      description:
+        "Draft a store coupon for the owner to confirm on screen: code (3 to 20 letters, numbers or dashes), percentOff (1 to 90) or amountOff in dollars (1 to 100), minGoods in dollars, startsAt and endsAt as store-local YYYY-MM-DDTHH:MM, and optional totalUses, usesPerCustomer, firstOrderOnly. Creates nothing.",
+      inputSchema: couponSchema,
+      execute: (input) => book.run(async () => {
+        const { timezone } = await store();
+        return drafting(book, timezone, () => make.coupon(input, timezone));
+      }),
+    }),
+    draft_price_change: tool({
+      description:
+        "Draft price changes for the listings matching query (the item as the owner named it), optionally one size (variant, e.g. \"5 lb\"): change add adds cents (negative lowers), change set sets the price to cents. Returns each line's before and after, at most 20. Changes no price.",
+      inputSchema: priceSchema,
+      execute: (input) => book.run(async () => {
+        const { timezone } = await store();
+        return drafting(book, timezone, () => make.prices(storeId, input, ownerText));
+      }),
+    }),
+    draft_store_change: tool({
+      description:
+        "Draft a one-day store change for the owner to confirm: change closed with date (closed all that day); change hours with date and open and/or close as HH:MM 24-hour (the other time stays as usual); change pause_delivery with until as YYYY-MM-DD (to the end of that day) or YYYY-MM-DDTHH:MM. Dates are store-local. Never changes the weekly hours.",
+      inputSchema: storeChangeSchema,
+      execute: (input) => book.run(async () => {
+        const row = await store();
+        return drafting(book, row.timezone, () => make.storeChange(input, row, new Date()));
+      }),
+    }),
   };
 }

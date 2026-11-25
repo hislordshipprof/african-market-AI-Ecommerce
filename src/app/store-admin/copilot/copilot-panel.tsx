@@ -5,11 +5,14 @@ import { CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   chooseProposalListing,
+  confirmCopilotDraft,
   confirmStockProposal,
+  rejectCopilotDraft,
   rejectStockProposal,
   sendCopilotMessage,
 } from "@/lib/copilot/actions";
-import type { ChoiceCard, PanelMessage, StockProposalCard } from "@/lib/copilot/types";
+import type { ChoiceCard, CouponFields, DraftCard, PanelMessage, StockProposalCard } from "@/lib/copilot/types";
+import { DraftCardView } from "./draft-card";
 
 const KIND: Record<StockProposalCard["kind"], string> = {
   restock: "Restock",
@@ -49,6 +52,7 @@ export function CopilotPanel({
   conversationId: initialConversationId,
   messages: initialMessages,
   proposals: initialProposals,
+  drafts: initialDrafts = [],
   voiceAndPhoto,
   voiceAndPhotoWaiting = 0,
   chatLocked,
@@ -56,6 +60,8 @@ export function CopilotPanel({
   conversationId: string | null;
   messages: PanelMessage[];
   proposals: StockProposalCard[];
+  /** Coupon, price and store-change drafts (#819). */
+  drafts?: DraftCard[];
   /** The voice-and-photo report panel, shown as the second tab of this one Report stock card. */
   voiceAndPhoto?: ReactNode;
   voiceAndPhotoWaiting?: number;
@@ -66,6 +72,7 @@ export function CopilotPanel({
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState(initialMessages);
   const [proposals, setProposals] = useState(initialProposals);
+  const [drafts, setDrafts] = useState(initialDrafts);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<
@@ -75,6 +82,8 @@ export function CopilotPanel({
   const trimmed = text.trim();
   const waiting = proposals.filter((card) => card.state === "pending");
   const settled = proposals.filter((card) => card.state !== "pending");
+  const waitingDrafts = drafts.filter((card) => card.state === "pending");
+  const settledDrafts = drafts.filter((card) => card.state !== "pending");
 
   function send() {
     const draft = text;
@@ -100,6 +109,7 @@ export function CopilotPanel({
         { role: "assistant", text: result.reply, messageId, choices: result.choices },
       ]);
       setProposals((current) => [...result.proposals, ...current]);
+      setDrafts((current) => [...result.drafts, ...current]);
       setBusy(null);
     });
   }
@@ -178,6 +188,35 @@ export function CopilotPanel({
     });
   }
 
+  function decideDraft(draftId: string, action: "confirm" | "dismiss", edits: { coupon?: CouponFields; variantIds?: string[] } = {}) {
+    setBusy({ kind: action, id: draftId });
+    startTransition(async () => {
+      if (action === "dismiss") {
+        const result = await rejectCopilotDraft({ draftId });
+        if (result.ok) {
+          setNotice(null);
+          setDrafts((current) => current.map((card) => (card.id === draftId ? { ...card, state: "rejected" } : card)));
+        } else {
+          setNotice("That draft is no longer waiting. Refresh the page if it already moved.");
+        }
+        setBusy(null);
+        return;
+      }
+      const result = await confirmCopilotDraft({ draftId, ...edits });
+      if (!result.ok) {
+        setNotice(result.message);
+        if (result.code === "expired" || result.code === "stale") {
+          setDrafts((current) => current.map((card) => (card.id === draftId ? { ...card, state: "expired" } : card)));
+        }
+        setBusy(null);
+        return;
+      }
+      setNotice(null);
+      setDrafts((current) => current.map((card) => (card.id === draftId ? result.draft : card)));
+      setBusy(null);
+    });
+  }
+
   function confirmLabel(card: StockProposalCard): string {
     if (card.kind === "set_status") {
       const status = (card.afterStatus ?? "updated").replaceAll("_", " ");
@@ -216,6 +255,7 @@ export function CopilotPanel({
               setMessages([]);
               setNotice(null);
               setProposals((current) => current.filter((card) => card.state === "pending"));
+              setDrafts((current) => current.filter((card) => card.state === "pending"));
             }}
           >
             New chat
@@ -261,11 +301,11 @@ export function CopilotPanel({
         <div className="flex flex-col gap-6">
           {chatLocked ? null : (
             <p className="max-w-[65ch] text-base leading-6 text-muted-foreground">
-              Say what came in, what you sold at the counter, or what you counted, or ask how sales went. The shelf stays put until you tap Confirm.
+              Say what came in, what you sold at the counter, or what you counted, or ask how sales went. Ask for a coupon, a price change, or a one-day change to your hours or delivery. Nothing changes until you tap Confirm.
             </p>
           )}
 
-          {proposals.length === 0 && messages.length === 0 && !chatLocked ? (
+          {proposals.length === 0 && drafts.length === 0 && messages.length === 0 && !chatLocked ? (
             <p className="rounded-xl border border-border bg-card px-4 py-5 text-base text-muted-foreground">
               Nothing waiting. Tell the copilot what came in or what you counted.
             </p>
@@ -282,6 +322,13 @@ export function CopilotPanel({
               </article>
             ))}
           </section>
+          ) : null}
+          {settledDrafts.length > 0 ? (
+            <section aria-label="Settled drafts" className="flex flex-col gap-3">
+              {settledDrafts.map((card) => (
+                <DraftCardView key={card.id} card={card} disabled writing={false} onConfirm={() => {}} onDismiss={() => {}} />
+              ))}
+            </section>
           ) : null}
 
           {messages.length > 0 ? (
@@ -348,6 +395,20 @@ export function CopilotPanel({
             if (!pending && trimmed) send();
           }}
         >
+          {waitingDrafts.length > 0 ? (
+            <div className="mb-4 flex flex-col gap-3" aria-label="Drafts waiting for you">
+              {waitingDrafts.map((card) => (
+                <DraftCardView
+                  key={card.id}
+                  card={card}
+                  disabled={pending}
+                  writing={busy?.kind === "confirm" && busy.id === card.id}
+                  onConfirm={(edits) => decideDraft(card.id, "confirm", edits)}
+                  onDismiss={() => decideDraft(card.id, "dismiss")}
+                />
+              ))}
+            </div>
+          ) : null}
           {waiting.length > 0 ? (
             <div className="mb-4 flex flex-col gap-3" aria-label="Waiting for you">
               {waiting.map((card) => {

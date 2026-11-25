@@ -1442,6 +1442,9 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   ? `${shipsToLabel(settings.shipsTo)}. Order weight: ${(weightG / 453.592).toFixed(1)} lb. Shipped orders can weigh up to 50 lb.`
                   : `Order weight: ${(weightG / 453.592).toFixed(1)} lb. Delivery radius: ${settings.deliveryRadiusMi} miles.`}
               </p>
+              {settings.deliveryPausedUntil && (
+                <p className={styles.notice}>Delivery is paused until {settings.deliveryPausedUntil}.</p>
+              )}
               {!isRealPayment && !courierEligible && (
                 <p className={styles.error}>
                   Courier is unavailable: orders and individual items must be 50

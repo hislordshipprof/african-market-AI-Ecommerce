@@ -25,7 +25,8 @@ vi.mock("next/navigation", () => ({
 
 import { forceGoLiveAction, retryCourierRegistrationAction, updateStore } from "./actions";
 import { fakeAddressBackend, setAddressProvider } from "../address/provider";
-import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
+import { authPrisma, platformAdmin, storeScopedTransaction, updateStoreOneOff } from "../db";
+import { addDays, storeToday } from "../analytics/range";
 import { inngest } from "../inngest/client";
 import { STORE_LISTED } from "../directory/store-requests";
 import { authPost, testSignUp, collectCookies } from "../test-auth";
@@ -130,6 +131,18 @@ describe("store hours schema", () => {
     const storedResult = await updateStore({}, storeForm(storeId, storedShape));
     expect(storedResult).toMatchObject({ success: true, storeId });
     expect(await readHours(storeId)).toEqual(storedShape);
+  });
+
+  it("a platform admin's hours save keeps the store's one-off days from today on (#819)", async () => {
+    const today = storeToday("America/Chicago");
+    const dates = { [addDays(today, -1)]: "Closed", [addDays(today, 2)]: "9:00 AM - 1:00 PM" };
+    await storeScopedTransaction(storeId, (tx) => updateStoreOneOff(tx, storeId, { hours: { ...storedShape, dates } }));
+    expect(await updateStore({}, storeForm(storeId, { ...storedShape, monday: "Closed" }))).toMatchObject({ success: true, storeId });
+    expect(await readHours(storeId)).toEqual({ ...storedShape, monday: "Closed", dates: { [addDays(today, 2)]: "9:00 AM - 1:00 PM" } });
+    // No hours means always open; a one-off day is not carried onto it.
+    expect(await updateStore({}, storeForm(storeId, null))).toMatchObject({ success: true, storeId });
+    expect(await readHours(storeId)).toBeNull();
+    expect(await updateStore({}, storeForm(storeId, storedShape))).toMatchObject({ success: true, storeId });
   });
 
   it("platform admin overrides the directory listing from the store form, with an audit row (#450)", async () => {

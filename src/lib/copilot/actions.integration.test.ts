@@ -242,7 +242,7 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: egusiId } })).toBe(0);
 
     const names = ((fake.requests[0]?.body?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name).sort();
-    expect(names).toEqual(["find_listings", "inventory_report", "propose_stock_change", "reorder_suggestions", "sales_summary"]);
+    expect(names).toEqual(["draft_coupon", "draft_price_change", "draft_store_change", "find_listings", "inventory_report", "propose_stock_change", "reorder_suggestions", "sales_summary"]);
     const choice = fake.requests[0]?.body?.tool_choice;
     expect(choice == null || choice === "auto" || (typeof choice === "object" && (choice as { type?: string }).type === "auto")).toBe(true);
 

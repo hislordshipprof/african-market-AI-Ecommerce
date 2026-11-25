@@ -30,8 +30,9 @@ import { storeMayUse } from "../billing/plan";
 import { loadProposalCards } from "./cards";
 import { choiceCards } from "./choices";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
-import { COPILOT_SYSTEM_PROMPT } from "./prompt";
+import { COPILOT_SYSTEM_PROMPT, NO_DRAFTS_HERE } from "./prompt";
 import { databaseClock, insertProposalRows } from "./proposals";
+import { insertDraftRows, loadDraftCards, type DraftMakers, type PendingDraft } from "./draft-rows";
 import { copilotTools, createDraftBook, type DraftBook, type Draft, type PendingChoice } from "./tools";
 import { estimateText, storeTimeZone } from "./inventory-report";
 import { storeToday } from "../analytics/range";
@@ -51,6 +52,7 @@ import {
   UNAVAILABLE_MESSAGE,
   WRITE_TRANSACTION,
   type ChoiceCard,
+  type DraftCard,
   type ListingChoice,
   type PanelMessage,
   type SendResult,
@@ -125,7 +127,8 @@ async function readReplay(storeId: string, userId: string, messageId: string): P
   if (!row?.reply || !row.conversation_id) return null;
   const proposals = await loadProposalCards(storeId, { messageId });
   const choices = await turnChoices(storeId, row.conversation_id, messageId);
-  return { ok: true, conversationId: row.conversation_id, reply: row.reply, proposals, choices };
+  const drafts = await loadDraftCards(storeId, { messageId });
+  return { ok: true, conversationId: row.conversation_id, reply: row.reply, proposals, choices, drafts };
 }
 
 async function turnChoices(storeId: string, conversationId: string, messageId: string): Promise<ChoiceCard[]> {
@@ -193,6 +196,7 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
 export const PLAN_LOCKED_MESSAGE = "Store assistant (AI chat) is on the Pro plan. Upgrade on the Plan page to send messages.";
 
 export const NOTHING_DRAFTED = "Nothing was drafted.";
+export const DRAFT_REPLY = "I drafted this for you to check below. Nothing changes until you confirm.";
 export const NUMBER_REFUSED =
   "I can only give numbers from your stock records, and that answer had one I could not check. See Stock movement on this page.";
 
@@ -210,6 +214,7 @@ function numbersIn(text: string): string[] {
 export function checkedText(text: string, ownerText: string, book: DraftBook): string {
   const allowed = new Set([ownerText, ...book.toolResults, String(PROPOSAL_MAX)].flatMap(numbersIn));
   if (numbersIn(text).every((n) => allowed.has(n))) return text;
+  if (book.copilotDrafts.length > 0) return DRAFT_REPLY;
   if (book.sales.length > 0) return book.sales.map(salesText).join("\n");
   const rows = [...new Map(book.report.map((row) => [row.listingId, row])).values()].slice(0, REPLY_ROWS);
   if (rows.length === 0) return NUMBER_REFUSED;
@@ -220,7 +225,7 @@ export function checkedText(text: string, ownerText: string, book: DraftBook): s
 }
 
 /** The model's text, plus fixed lines chosen from what the turn produced. The model's text is never inspected. */
-function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean, answeredSales: boolean): string {
+function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean, answered: boolean): string {
   const parts: string[] = [];
   const trimmed = text.trim().slice(0, 4000);
   if (trimmed) {
@@ -232,7 +237,7 @@ function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], c
     parts.push("More than one item matches. Pick one below.");
   }
   if (capped) parts.push("Send the rest in a new message.");
-  if (drafts.length === 0 && choices.length === 0 && !answeredSales) parts.push(NOTHING_DRAFTED);
+  if (drafts.length === 0 && choices.length === 0 && !answered) parts.push(NOTHING_DRAFTED);
   return parts.join("\n\n");
 }
 
@@ -276,6 +281,8 @@ export async function sendCopilotTurn(input: {
   text: string;
   /** The store admin page's payout reader; without it a sales answer says the payout is not known. */
   payouts?: PayoutReader;
+  /** The page's coupon, price and store-change draft makers (#819); WhatsApp shows no cards, so it passes none. */
+  drafts?: DraftMakers;
 }): Promise<SendResult> {
   const text = input.text.trim();
   if (!text || input.text.trim().length > MESSAGE_MAX) {
@@ -316,9 +323,12 @@ export async function sendCopilotTurn(input: {
     const result = await generateText({
       model: createAssistantModel(),
       // Without today's date the model guesses the year of "Nov 2 to Nov 8".
-      system: `${COPILOT_SYSTEM_PROMPT}\n\nToday is ${today}, a ${weekday}, in the store's time zone (${timeZone}).`,
+      system: `${COPILOT_SYSTEM_PROMPT}${input.drafts ? "" : `\n\n${NO_DRAFTS_HERE}`}\n\nToday is ${today}, a ${weekday}, in the store's time zone (${timeZone}).`,
       messages: [...modelHistory(history), { role: "user", content: text }],
-      tools: copilotTools(input.storeId, book, input.payouts ?? null),
+      tools: copilotTools(input.storeId, book, {
+        payouts: input.payouts ?? null,
+        ...(input.drafts ? { drafts: { ownerText: text, make: input.drafts } } : {}),
+      }),
       stopWhen: stepCountIs(STEP_CAP),
       maxRetries: 0,
       maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -327,7 +337,8 @@ export async function sendCopilotTurn(input: {
     });
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = (steps >= STEP_CAP && result.finishReason === "tool-calls") || result.finishReason === "length" || book.overflow;
-    const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped, book.sales.length > 0);
+    const answered = book.sales.length > 0 || book.copilotDrafts.length > 0;
+    const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped, answered);
     const usage = turnUsage(modelId, result.steps);
     const stored = await commitTurn({
       storeId: input.storeId,
@@ -341,6 +352,7 @@ export async function sendCopilotTurn(input: {
       existing: conversation.messages,
       drafts: book.drafts,
       choices: book.choices,
+      copilotDrafts: book.copilotDrafts,
       usage,
     });
     committed = true;
@@ -401,9 +413,11 @@ async function commitTurn(input: {
   existing: StoredMessage[];
   drafts: Draft[];
   choices: PendingChoice[];
+  copilotDrafts: PendingDraft[];
   usage: TurnUsage;
 }): Promise<SendResult> {
   let proposals: Awaited<ReturnType<typeof insertProposalRows>> = [];
+  let drafts: DraftCard[] = [];
   let choices: ListingChoice[] = [];
 
   await storeScopedTransaction(input.storeId, async (tx) => {
@@ -419,6 +433,13 @@ async function commitTurn(input: {
       userId: input.userId,
       email: input.email,
     }, input.drafts);
+    drafts = await insertDraftRows(tx, {
+      storeId: input.storeId,
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      userId: input.userId,
+      email: input.email,
+    }, input.copilotDrafts);
 
     const nextMessages: StoredMessage[] = [
       ...input.existing,
@@ -454,6 +475,7 @@ async function commitTurn(input: {
     reply: input.reply,
     proposals,
     choices: choices.map((choice) => ({ ...choice, chosenListingId: null, open: true })),
+    drafts,
   };
 }
 
@@ -461,16 +483,19 @@ export async function loadCopilotPanel(storeId: string, userId: string): Promise
   conversationId: string | null;
   messages: PanelMessage[];
   proposals: Awaited<ReturnType<typeof loadProposalCards>>;
+  drafts: DraftCard[];
 }> {
   const conversation = await storeScoped(storeId).copilotConversation.findFirst({
     where: { userId },
     orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
   });
-  if (!conversation) return { conversationId: null, messages: [], proposals: [] };
+  if (!conversation) return { conversationId: null, messages: [], proposals: [], drafts: [] };
   const proposals = await loadProposalCards(storeId, { conversationId: conversation.id });
+  const drafts = await loadDraftCards(storeId, { conversationId: conversation.id });
   return {
     conversationId: conversation.id,
     messages: await choiceCards(storeId, conversation.id, parseStoredMessages(conversation.messages)),
     proposals,
+    drafts,
   };
 }

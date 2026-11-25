@@ -55,7 +55,7 @@ export function readWeeklyHours(hours: unknown): { week: WeekHours; unreadable: 
   return { week, unreadable };
 }
 
-function twelveHour(time: string): string {
+export function twelveHour(time: string): string {
   const minutes = parseTimeMinutes(time) ?? 0;
   const h = Math.floor(minutes / 60);
   return `${h % 12 === 0 ? 12 : h % 12}:${String(minutes % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;

@@ -4,9 +4,11 @@ import { ASAP_SLOT, type PickupSlot } from "../order/pickup-slots";
 import { MAX_DAYS_AHEAD, pickupSlotsFor, readSlotSchedule, scheduledSlots, type SlotStore } from "../order/slot-schedule";
 import { orderPrepMinutes } from "../listing/prepared";
 import { cateringLeadMinutes } from "../listing/catering";
+import { activeDeliveryPause } from "../delivery/delivery-pause";
 
 export interface SlotStoreRow extends SlotStore {
   storeDeliverySlotSettings: unknown;
+  deliveryPausedUntil: Date | string | null;
 }
 
 /** `required`: ASAP is not offered, the order must take one of `slots`. */
@@ -77,6 +79,8 @@ export async function slotOptions(
   now: Date,
   cartId: string | null,
 ): Promise<SlotOptions> {
+  // While delivery is paused (#819) no store delivery time is offered.
+  if (fulfillment === "store-delivery" && activeDeliveryPause(store, now)) return { required: true, slots: [] };
   const basket = await cartBasket(client, cartId, store.prepTimeMinutes);
   if (basket.leadMinutes > 0) return cateringSlotOptions(client, storeId, store, fulfillment, now, basket);
   if (fulfillment === "pickup") {

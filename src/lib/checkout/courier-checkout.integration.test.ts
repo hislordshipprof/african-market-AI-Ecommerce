@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { platformAdminTransaction, storeScoped } from "../db";
+import { platform, platformAdminTransaction, storeScoped, storeScopedTransaction, updateStoreOneOff } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 import type { CreatedDelivery, DeliveryProvider, DeliveryProviderName, DeliveryQuote, DeliveryRequest, DeliveryWebhookEvent } from "../delivery/provider";
 
@@ -27,7 +27,7 @@ vi.mock("../inngest/send", () => ({ sendOrderAuthorized: vi.fn().mockResolvedVal
 import { writeGeocodeCache } from "../address/cache";
 import { dispatchReadyOrder } from "../delivery/dispatch";
 import { readCourierSettings } from "../delivery/courier-settings";
-import { placeOrder, quoteCheckout, type DeliveryRequest as CheckoutAddress } from "./service";
+import { DeliveryPausedError, placeOrder, quoteCheckout, type DeliveryRequest as CheckoutAddress } from "./service";
 import { slotOptions } from "./slots";
 import type { SlotSchedule } from "../order/slot-schedule";
 
@@ -353,5 +353,39 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     const slotted = await placeOrder(store.id, 0, second.id, CONTACT, "store-delivery", null, slot, await authorize(store, second.id, deliveryQuote.holdCents));
     expect(await scoped.order.findUniqueOrThrow({ where: { id: slotted.token } }))
       .toMatchObject({ fulfillment: "store-delivery", pickupSlot: slot, deliveryFeeCents: 500 });
+  });
+
+  it("a delivery pause (#819) refuses courier and store delivery at quote and at placement and releases the hold; pickup stays; it ends on its own", async () => {
+    const allDay = [{ start: 0, end: 1440 }];
+    const slots: SlotSchedule = { slotMinutes: 60, leadMinutes: 120, capacity: 5, daysAhead: 2, closedDates: [], windows: Array.from({ length: 7 }, () => allDay) };
+    const { store, cart } = await seed({ slots });
+    const uber = new StubCourier("uber", 749);
+    const pause = (until: Date | null) => storeScopedTransaction(store.id, (tx) => updateStoreOneOff(tx, store.id, { deliveryPausedUntil: until }));
+    const quote = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [uber] });
+    expect(quote.problems).toEqual([]);
+    await saveAddress(store.id, cart.id);
+    const heldBeforePause = await authorize(store, cart.id, quote.holdCents);
+
+    await pause(new Date(Date.now() + 60 * 60_000));
+    const calls = uber.quoteCalls;
+    for (const fulfillment of ["courier", "store-delivery"] as const) {
+      const paused = await quoteCheckout(store.id, 0, cart.id, CONTACT, fulfillment, ADDRESS, { couriers: [uber] });
+      expect(paused.problems).toEqual([expect.objectContaining({ code: "ineligible", message: expect.stringMatching(/^Delivery is paused until .+\. Choose pickup\.$/) })]);
+    }
+    expect(uber.quoteCalls).toBe(calls);
+    expect((await quoteCheckout(store.id, 0, cart.id, CONTACT, "pickup")).problems).toEqual([]);
+    const row = await platform.store.findUniqueOrThrow({ where: { id: store.id } });
+    expect((await slotOptions(storeScoped(store.id), store.id, row, "store-delivery", new Date(), null)).slots).toEqual([]);
+    expect((await slotOptions(storeScoped(store.id), store.id, row, "pickup", new Date(), null)).slots.length).toBeGreaterThan(0);
+
+    await expect(placeOrder(store.id, 0, cart.id, CONTACT, "courier", null, null, heldBeforePause)).rejects.toBeInstanceOf(DeliveryPausedError);
+    expect(cancel.mock.calls.map(([id]) => id)).toContain(heldBeforePause);
+    expect(await storeScoped(store.id).order.count()).toBe(0);
+
+    await pause(new Date(Date.now() - 60_000));
+    const after = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [uber] });
+    expect(after.problems).toEqual([]);
+    const placed = await placeOrder(store.id, 0, cart.id, CONTACT, "courier", null, null, await authorize(store, cart.id, after.holdCents));
+    expect(await storeScoped(store.id).order.findUniqueOrThrow({ where: { id: placed.token } })).toMatchObject({ fulfillment: "courier" });
   });
 });

@@ -50,6 +50,7 @@ const settings = {
   opensAt: "",
   readyAt: "",
   takingOrders: true,
+  deliveryPausedUntil: "",
 };
 const catalog = [{ listingId: "l1", name: "Egusi", price: 899, available: true, maxPerOrder: 10 }];
 

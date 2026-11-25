@@ -10,13 +10,17 @@ import { anyCourierEnabled, readStoreCourierSettings } from "@/lib/delivery/cour
 import { storeShipsTo } from "@/lib/shipping/eligibility";
 import { readShippingStates, shippingReady } from "@/lib/shipping/settings";
 import { storeDeliveryOffered } from "@/lib/delivery/store-delivery-offered";
+import { activeDeliveryPause, pauseEndLabel } from "@/lib/delivery/delivery-pause";
 import type { FlowStore } from "./contracts";
 
 export const getFlowContext = cache(async () => {
   const store = await getStore();
   const enabled = demoFlowsEnabled(process.env);
   // Computed per request, never baked into a page cached by store tag (ADR-0012).
-  const availability = storeAvailability(store.hours, store.timezone, new Date());
+  const now = new Date();
+  const availability = storeAvailability(store.hours, store.timezone, now);
+  // The owner's delivery pause (#819) hides store and courier delivery; checkout refuses them server-side too.
+  const pausedUntil = activeDeliveryPause(store, now);
   const queue =
     availability.kind === "queued"
       ? describeQueue(availability.clockStartsAt, store.prepTimeMinutes, store.timezone)
@@ -33,13 +37,14 @@ export const getFlowContext = cache(async () => {
     minimumOrderCents: store.minimumOrderCents,
     pickupEnabled: store.pickupEnabled,
     // Store delivery and Ship are offered only when their orders can be completed (#765).
-    storeDeliveryEnabled: storeDeliveryOffered(store),
+    storeDeliveryEnabled: !pausedUntil && storeDeliveryOffered(store),
     deliveryRadiusMi: Number(store.deliveryRadiusMi),
     prepTimeMinutes: store.prepTimeMinutes,
     storeDeliveryFeeCents: store.storeDeliveryFeeCents,
     autoRefundLimitCents: store.autoRefundLimitCents,
     insulatedPackaging: store.slug === "mama-ngozi",
-    courierOffered: courierOffered(store)
+    courierOffered: !pausedUntil
+      && courierOffered(store)
       && (await storeMayUse(store.id, "courier-delivery"))
       && anyCourierEnabled(await readStoreCourierSettings(store.id), store.id),
     shipsTo: shippingReady() ? storeShipsTo(store.shippingHandlingDays, await readShippingStates()) : [],
@@ -47,6 +52,7 @@ export const getFlowContext = cache(async () => {
     opensAt: queue?.opensAt ?? "",
     readyAt: queue?.readyAt ?? "",
     takingOrders: availability.kind !== "unavailable",
+    deliveryPausedUntil: pausedUntil ? pauseEndLabel(pausedUntil, store.timezone, now) : "",
   };
   return {
     store,

@@ -17,6 +17,8 @@ import { weeklyHoursError, type WeekDay, type WeekHours } from "@/lib/store-sett
 import { STORE_ABOUT_MAX } from "@/lib/store-settings/fields";
 import { updateStoreSettings } from "@/lib/store-admin/settings-actions";
 import { SlotSettings } from "./slot-settings";
+import { OneOffChanges } from "./one-off-changes";
+import type { StoreChangeRef } from "@/lib/store-settings/store-change";
 
 const ZONE_NAMES: Record<string, string> = {
   "America/New_York": "Eastern",
@@ -48,6 +50,8 @@ interface Props {
   hoursSaved: boolean;
   timezoneConfirmed: boolean;
   storeDeliveryEnabled: boolean;
+  /** Active one-day changes from the store chat (#819). */
+  oneOffChanges: { which: StoreChangeRef; text: string }[];
 }
 
 function dollars(cents: number): string {
@@ -55,7 +59,7 @@ function dollars(cents: number): string {
 }
 
 /** The owner's store settings (#786). Delivery stays with the platform team; one minimum covers every order. */
-export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, hoursSaved, timezoneConfirmed, storeDeliveryEnabled }: Props) {
+export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, hoursSaved, timezoneConfirmed, storeDeliveryEnabled, oneOffChanges }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [values, setValues] = useState(initial);
@@ -138,6 +142,8 @@ export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, ho
               </div>
             </CardContent>
           </Card>
+
+          <OneOffChanges changes={oneOffChanges} />
 
           <Card>
             <CardHeader>
