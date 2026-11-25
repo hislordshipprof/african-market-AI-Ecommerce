@@ -66,6 +66,42 @@ async function clearBilling() {
   }
 }
 
+const CHAT_ID = "e2e-818-chat";
+
+/** A past chat the owner had while on Pro (#818), so a Starter store has history to read. */
+async function seedPastChat() {
+  const prisma = db();
+  try {
+    const store = await prisma.store.findUniqueOrThrow({ where: { slug: SLUG } });
+    const messages = [
+      { role: "owner", text: "how were sales last week?" },
+      { role: "assistant", text: "Nov 16 to Nov 22: 14 orders, $612.40 in goods sales and $548.10 net to store.", messageId: "e2e-818-m1" },
+    ];
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      const owner = await tx.storeMembership.findFirstOrThrow({ where: { storeId: store.id, role: "owner", user: { email: "owner@mama-ngozi.test" } } });
+      await tx.copilotConversation.deleteMany({ where: { id: CHAT_ID } });
+      await tx.copilotConversation.create({ data: { id: CHAT_ID, storeId: store.id, userId: owner.userId, model: "e2e", messages, lastMessageAt: new Date() } });
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+async function clearPastChat() {
+  const prisma = db();
+  try {
+    await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      prisma.copilotConversation.deleteMany({ where: { id: CHAT_ID } }),
+    ]);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function shoot(page: Page, name: string) {
   for (const [label, size] of [["1440px", { width: 1440, height: 1000 }], ["390px", { width: 390, height: 844 }]] as const) {
     await page.setViewportSize(size);
@@ -77,7 +113,10 @@ async function shoot(page: Page, name: string) {
 test.describe.configure({ mode: "serial" });
 
 test.describe("store subscriptions (#494)", () => {
-  test.afterAll(clearBilling);
+  test.afterAll(async () => {
+    await clearBilling();
+    await clearPastChat();
+  });
 
   test("Starter owner: plan page, failed-payment banner, 80% warning, Pro features locked with an upgrade link", async ({ page }) => {
     await setBilling({ plan: "starter", status: "past_due", paymentFailed: true, pilot: true, chats: 850 });
@@ -95,7 +134,13 @@ test.describe("store subscriptions (#494)", () => {
     await expect(page.getByText("Your last subscription payment failed.")).toBeVisible();
     await shoot(page, "494-plan-starter");
 
+    // The chat is Pro (#818): past chats stay readable, the composer is the locked card.
+    await seedPastChat();
     await page.goto(`/store-admin/copilot?store=${SLUG}`);
+    await expect(page.getByText("how were sales last week?")).toBeVisible();
+    await expect(page.getByText(/^Store assistant \(AI chat\)\s*Pro$/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Stock movement" })).toBeVisible();
     await shoot(page, "494-copilot-starter");
 
     await page.goto(`/store-admin/team?store=${SLUG}`);
@@ -119,6 +164,8 @@ test.describe("store subscriptions (#494)", () => {
       await expect(proCard.getByText(`${label} (coming soon)`, { exact: true })).toBeVisible();
       await expect(featureList.getByText(`${label} (coming soon)`, { exact: true })).toBeVisible();
     }
+    await expect(proCard.getByText("Store assistant (AI chat)", { exact: true })).toBeVisible();
+    await expect(featureList.getByText("Store assistant (AI chat)", { exact: true })).toBeVisible();
     await expect(proCard.getByText("Courier delivery", { exact: true })).toBeVisible();
     await shoot(page, "494-plan-choose");
   });
@@ -132,6 +179,9 @@ test.describe("store subscriptions (#494)", () => {
     await shoot(page, "494-plan-pro");
     await page.goto(`/store-admin?store=${SLUG}`);
     await expect(page.getByRole("link", { name: "Upgrade to Pro" })).toHaveCount(0);
+    await page.goto(`/store-admin/copilot?store=${SLUG}`);
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
   });
 
   test("admin console shows each store's plan and the failed payment, and sets the pilot offer", async ({ page }) => {

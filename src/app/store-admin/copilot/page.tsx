@@ -17,11 +17,11 @@ import { ReorderPanel } from "./reorder-panel";
 import { reorderSuggestions } from "@/lib/copilot/reorder";
 import { loadReorderList, reorderText } from "@/lib/copilot/reorder-list";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
-import { storeMayUse } from "@/lib/billing/plan";
+import { FEATURE_LABELS, storeMayUse } from "@/lib/billing/plan";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
-  const [panel, alerts, digestHour, reports, reportsAllowed, movement, reorderAllowed, weekly] = await Promise.all([
+  const [panel, alerts, digestHour, reports, reportsAllowed, movement, reorderAllowed, weekly, chatAllowed] = await Promise.all([
     loadCopilotPanel(session.store.id, session.user.id),
     listOpenAlerts(session.store.id),
     loadDigestHour(session.store.id),
@@ -30,6 +30,7 @@ export default async function CopilotPage() {
     inventoryReport(session.store.id),
     storeMayUse(session.store.id, "reorder-suggestions"),
     listWeeklyReports(session.store.id),
+    storeMayUse(session.store.id, "store-assistant"),
   ]);
   const [reorder, savedList] = reorderAllowed
     ? await Promise.all([reorderSuggestions(session.store.id), loadReorderList(session.store.id)])
@@ -70,6 +71,15 @@ export default async function CopilotPage() {
             )
           }
           voiceAndPhotoWaiting={reports.length}
+          chatLocked={
+            chatAllowed ? undefined : (
+              <PlanLocked
+                title={FEATURE_LABELS["store-assistant"]}
+                description="Ask how sales went this week or what sold most, and tell it what came in or sold at the counter. It answers from your own orders and drafts stock changes for you to confirm. Your past chats stay here to read."
+                storeSlug={session.store.slug}
+              />
+            )
+          }
         />
         <StockMovement rows={movement.rows} totals={movement.totals} />
         <section aria-labelledby="reorder-title" className="mt-8 flex flex-col gap-3">

@@ -51,6 +51,7 @@ export function CopilotPanel({
   proposals: initialProposals,
   voiceAndPhoto,
   voiceAndPhotoWaiting = 0,
+  chatLocked,
 }: {
   conversationId: string | null;
   messages: PanelMessage[];
@@ -58,6 +59,8 @@ export function CopilotPanel({
   /** The voice-and-photo report panel, shown as the second tab of this one Report stock card. */
   voiceAndPhoto?: ReactNode;
   voiceAndPhotoWaiting?: number;
+  /** On Starter the chat is locked (#818): history and waiting changes stay, this replaces the composer. */
+  chatLocked?: ReactNode;
 }) {
   const [tab, setTab] = useState<"chat" | "media">("chat");
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -202,7 +205,7 @@ export function CopilotPanel({
         <h2 id="report-stock-heading" className="font-display text-[1.375rem] leading-tight font-bold text-balance text-foreground">
           Report stock
         </h2>
-        {tab === "chat" ? (
+        {tab === "chat" && !chatLocked ? (
           <Button
             type="button"
             variant="outline"
@@ -256,11 +259,13 @@ export function CopilotPanel({
         className="flex flex-col gap-6"
       >
         <div className="flex flex-col gap-6">
-          <p className="max-w-[65ch] text-base leading-6 text-muted-foreground">
-            Say what came in, what you sold at the counter, or what you counted. The shelf stays put until you tap Confirm.
-          </p>
+          {chatLocked ? null : (
+            <p className="max-w-[65ch] text-base leading-6 text-muted-foreground">
+              Say what came in, what you sold at the counter, or what you counted, or ask how sales went. The shelf stays put until you tap Confirm.
+            </p>
+          )}
 
-          {proposals.length === 0 && messages.length === 0 ? (
+          {proposals.length === 0 && messages.length === 0 && !chatLocked ? (
             <p className="rounded-xl border border-border bg-card px-4 py-5 text-base text-muted-foreground">
               Nothing waiting. Tell the copilot what came in or what you counted.
             </p>
@@ -386,29 +391,33 @@ export function CopilotPanel({
               <span>{notice}</span>
             </p>
           ) : null}
-          <label htmlFor="copilot-report" className="text-[0.8125rem] font-semibold text-foreground">
-            Stock report
-          </label>
-          <textarea
-            id="copilot-report"
-            name="report"
-            value={text}
-            maxLength={1000}
-            rows={2}
-            disabled={pending}
-            autoComplete="off"
-            onChange={(event) => setText(event.target.value)}
-            placeholder="Got 20 bags of gari"
-            className="mt-2 min-h-16 w-full resize-none rounded-xl border border-border bg-card px-3 py-3 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          />
-          <div className="mt-3 flex items-center justify-between gap-3">
-            <p className="text-[0.8125rem] text-muted-foreground tabular-nums" aria-live="polite">
-              {text.length > 0 ? `${text.length} / 1000` : "Up to 1,000 characters"}
-            </p>
-            <Button type="submit" disabled={pending || trimmed.length === 0} className="min-h-12 rounded-full px-6">
-              {busy?.kind === "send" ? "Sending" : "Send"}
-            </Button>
-          </div>
+          {chatLocked ?? (
+            <>
+              <label htmlFor="copilot-report" className="text-[0.8125rem] font-semibold text-foreground">
+                Message
+              </label>
+              <textarea
+                id="copilot-report"
+                name="report"
+                value={text}
+                maxLength={1000}
+                rows={2}
+                disabled={pending}
+                autoComplete="off"
+                onChange={(event) => setText(event.target.value)}
+                placeholder="Got 20 bags of gari"
+                className="mt-2 min-h-16 w-full resize-none rounded-xl border border-border bg-card px-3 py-3 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-[0.8125rem] text-muted-foreground tabular-nums" aria-live="polite">
+                  {text.length > 0 ? `${text.length} / 1000` : "Up to 1,000 characters"}
+                </p>
+                <Button type="submit" disabled={pending || trimmed.length === 0} className="min-h-12 rounded-full px-6">
+                  {busy?.kind === "send" ? "Sending" : "Send"}
+                </Button>
+              </div>
+            </>
+          )}
         </form>
       </div>
     </section>

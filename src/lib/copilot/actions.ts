@@ -46,7 +46,7 @@ const answerSchema = z.discriminatedUnion("answer", [
 const invalidRequest: SendResult = {
   ok: false,
   code: "invalid_request",
-  message: "Write a stock report of 1,000 characters or less.",
+  message: "Write a message of 1,000 characters or less.",
 };
 
 export async function sendCopilotMessage(input: unknown): Promise<SendResult> {

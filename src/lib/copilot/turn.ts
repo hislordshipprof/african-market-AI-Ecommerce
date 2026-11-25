@@ -276,7 +276,7 @@ export async function sendCopilotTurn(input: {
 }): Promise<SendResult> {
   const text = input.text.trim();
   if (!text || input.text.trim().length > MESSAGE_MAX) {
-    return { ok: false, code: "invalid_request", message: "Write a stock report of 1,000 characters or less." };
+    return { ok: false, code: "invalid_request", message: "Write a message of 1,000 characters or less." };
   }
   const replay = await readReplay(input.storeId, input.userId, input.messageId);
   if (replay) return replay;
