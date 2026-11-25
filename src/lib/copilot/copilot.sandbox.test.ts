@@ -60,6 +60,8 @@ describe.skipIf(!liveSandbox || !live)("copilot live sandbox", () => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, ${"Live " + slug}, ${slug}, 'active', now())`;
+      // The chat is Pro (#818).
+      await tx.storeSubscription.create({ data: { storeId, plan: "pro", status: "active" } });
     });
     gariId = await counted("Gari", 12);
     palmId = await counted("Palm oil", 7);
@@ -72,7 +74,15 @@ describe.skipIf(!liveSandbox || !live)("copilot live sandbox", () => {
     await storeScoped(storeId).stockProposal.deleteMany({});
     await storeScoped(storeId).copilotClientMessage.deleteMany({});
     await storeScoped(storeId).copilotConversation.deleteMany({});
+    await storeScoped(storeId).order.deleteMany({});
+    await storeScoped(storeId).customer.deleteMany({});
+    await storeScoped(storeId).listingVariant.deleteMany({});
     await storeScoped(storeId).listing.deleteMany({});
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.storeSubscription.deleteMany({ where: { storeId } });
+    });
     await authPrisma.user.delete({ where: { id: userId } }).catch(() => undefined);
     await authPrisma.store.delete({ where: { id: storeId } }).catch(() => undefined);
   }));
@@ -129,6 +139,28 @@ describe.skipIf(!liveSandbox || !live)("copilot live sandbox", () => {
     const after = await dayCost();
     expect(after - before).toBeLessThan(BigInt(50_000));
   }), 120_000);
+
+  it("live Haiku answers a sales question with the tool's figures and drafts nothing (#818)", sandbox.test(async () => {
+    // Two pickup orders a minute ago: 3 × $12.50 egusi and 2 × $12.50 egusi. Goods $62.50, average $31.25.
+    const db = storeScoped(storeId);
+    const listing = await db.listing.create({ data: { storeId, customName: "Egusi", price: 1250, stockMode: "always" } });
+    const variant = await db.listingVariant.create({ data: { listingId: listing.id, label: "1 lb", price: 1250, weightG: 450 } });
+    const customer = await db.customer.create({ data: { storeId, name: "Live shopper" } });
+    for (const [number, qty] of [[1, 3], [2, 2]] as const) {
+      const cents = 1250 * qty;
+      const order = await db.order.create({ data: {
+        storeId, customerId: customer.id, number, fulfillment: "pickup", status: "COMPLETED", subtotalCents: cents, bufferCents: 0,
+        totalAuthorizedCents: cents, capturedAmountCents: cents, platformFeeCents: 100, createdAt: new Date(Date.now() - 60_000),
+      } });
+      await db.orderLine.create({ data: { storeId, orderId: order.id, listingVariantId: variant.id, qtyOrdered: qty, qtyPicked: qty, unitPriceCents: 1250, status: "picked" } });
+    }
+    const sent = await turn({ storeId, userId, email: "live@example.com", messageId: crypto.randomUUID(), text: "how were sales today? what sold most?" });
+    expect(sent.ok, JSON.stringify(sent)).toBe(true);
+    if (!sent.ok) return;
+    expect(sent.reply).toContain("62.50");
+    expect(sent.reply).toMatch(/egusi/i);
+    expect(sent.proposals).toEqual([]);
+  }), 60_000);
 
   it("live vision reads an invoice photo into named lines with whole quantities", sandbox.test(async () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240"><rect width="100%" height="100%" fill="white"/>
