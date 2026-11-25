@@ -113,6 +113,15 @@ describe.skipIf(!hasDb)("csv aisle column (lane DB)", () => {
     });
   });
 
+  it("finds an aisle for every row of the template the import page offers", async () => {
+    const { LISTINGS_CSV_TEMPLATE } = await import("./csv-template");
+    const preview = await generatePreview(storeId, LISTINGS_CSV_TEMPLATE, userId);
+    expect(preview.errors).toEqual([]);
+    expect(preview.newItems.map((item) => item.aisle)).toEqual([
+      "Oils, Sauces & Condiments > Palm Oil", "Soup Ingredients > Egusi & Melon Seeds", "Fish & Meat > Stockfish",
+    ]);
+  });
+
   it("accepts a category column as the same thing as aisle", async () => {
     const preview = await generatePreview(storeId, `name,price,weight,category\nFufu ${RUN},4.00,1 lb,Tubers & Roots\n`, userId);
     expect(preview.unknownColumns).toEqual([]);
