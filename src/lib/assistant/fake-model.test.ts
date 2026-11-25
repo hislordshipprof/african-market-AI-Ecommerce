@@ -96,4 +96,25 @@ describe("assistant e2e fake", () => {
     expect(message).toMatchObject({ type: "message", stop_reason: "end_turn" });
     expect(message.content[0]?.text).toMatch(/checking your order/);
   });
+
+  it("drives the admin assistant's find_stores call on a non-streamed request, then answers from its result (#831)", async () => {
+    const { url, ...init } = basketRequest();
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    const ask = { role: "user", content: "Which stores are stuck in onboarding?" };
+    const first = await scriptedAssistantFetch(url, { ...init, body: JSON.stringify({ ...body, stream: undefined, messages: [ask] }) });
+    const call = (await first.json()) as { stop_reason: string; content: Array<{ type: string; id: string; name: string; input: unknown }> };
+    expect(call.stop_reason).toBe("tool_use");
+    expect(call.content[0]).toMatchObject({ type: "tool_use", name: "find_stores", input: { status: "setup" } });
+    expect(call.content[0]?.id).toMatch(ID_SHAPE);
+
+    const messages = [
+      ask,
+      { role: "assistant", content: [call.content[0]] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: call.content[0]?.id, content: "{\"stores\":[]}" }] },
+    ];
+    const second = await scriptedAssistantFetch(url, { ...init, body: JSON.stringify({ ...body, stream: undefined, messages }) });
+    const answer = (await second.json()) as { stop_reason: string; content: Array<{ type: string; text: string }> };
+    expect(answer.stop_reason).toBe("end_turn");
+    expect(answer.content[0]?.text).toMatch(/still in setup/);
+  });
 });
