@@ -109,3 +109,12 @@ test("a forced go-live card needs a typed reason, which lands in the activity vi
   await expect(confirmed.getByText(reason, { exact: false })).toBeVisible();
   await proof(page, "activity", false);
 });
+
+test("the daily admin email is on by default, with its switch in AI and onboarding settings (#834)", async ({ page }) => {
+  await adminSignIn(page);
+  await page.goto("/admin/settings/ai-onboarding");
+  const form = page.locator("form").filter({ hasText: "Admin daily email" });
+  await expect(form.getByRole("checkbox", { name: /Email every platform admin/ })).toBeChecked();
+  await form.scrollIntoViewIfNeeded();
+  await proof(page, "digest-setting");
+});
