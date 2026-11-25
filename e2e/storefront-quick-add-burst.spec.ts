@@ -597,11 +597,11 @@ test.describe("quick add limits and recovery", () => {
     const lines = await readCartLines("mama-ngozi", await cartCookie(page));
     const cents = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
     expect(cents).toBe(2 * 699 + 2 * 2999);
-    await expect(page.locator(".flow-fee", { hasText: "Subtotal" }).getByLabel("$73.96")).toBeVisible();
+    await expect(page.locator(".flow-fee", { hasText: "Subtotal" }).locator(".flow-money")).toHaveText("$73.96");
     await page.reload();
     await expect(bag.getByTestId("stepper-qty")).toHaveText("2");
     await expect(pound.getByTestId("stepper-qty")).toHaveText("2");
-    await expect(page.locator(".flow-fee", { hasText: "Subtotal" }).getByLabel("$73.96")).toBeVisible();
+    await expect(page.locator(".flow-fee", { hasText: "Subtotal" }).locator(".flow-money")).toHaveText("$73.96");
   });
 
   test("overlapping first adds and pack changes preserve both intents", async ({ page }) => {
@@ -644,7 +644,7 @@ test.describe("quick add limits and recovery", () => {
     expect(lines).toHaveLength(2);
     const cents = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
     await page.goto(`${base}/cart`);
-    await expect(page.locator(".flow-fee", { hasText: "Subtotal" }).getByLabel(`$${(cents / 100).toFixed(2)}`)).toBeVisible();
+    await expect(page.locator(".flow-fee", { hasText: "Subtotal" }).locator(".flow-money")).toHaveText(`$${(cents / 100).toFixed(2)}`);
   });
 
   test("failed first add and failed add readback recover for the next click", async ({ page }) => {
