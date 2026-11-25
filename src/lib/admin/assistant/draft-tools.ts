@@ -29,7 +29,7 @@ async function storeBySlug(slug: string) {
 }
 
 /** Adds the card to the turn and tells the model what it says. */
-async function addDraft<K extends AdminDraftKind>(
+export async function addDraft<K extends AdminDraftKind>(
   ctx: ToolContext,
   kind: K,
   storeId: string | null,
@@ -43,11 +43,13 @@ async function addDraft<K extends AdminDraftKind>(
     store: view.storeName,
     changes: view.changes.map((change) => `${change.field}: ${change.from} to ${change.to}`),
     ...(view.warning ? { warning: view.warning } : {}),
+    ...(view.steps ? { steps: view.steps } : {}),
+    ...(view.items ? { items: view.items.map((item) => item.label) } : {}),
     note: NOTE,
   };
 }
 
-const refused = (reason: string) => ({ drafted: false, reason });
+export const refused = (reason: string) => ({ drafted: false, reason });
 
 function threadStatus(thread: { state: string; lastCustomerAt: Date | null; lastReplyAt: Date | null }): string {
   if (thread.state === "resolved") return "Resolved";

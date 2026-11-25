@@ -35,14 +35,32 @@ export async function loadAdminAssistant(): ReturnType<typeof loadAdminAssistant
 const confirmSchema = z.strictObject({
   draftId: z.string().min(1).max(200),
   text: z.string().max(1000).optional(),
+  keep: z.array(z.string().min(1).max(200)).max(20).optional(),
 });
 
 /** The admin's one tap on a draft card. 2FA is checked here, before the admin's own function runs. */
 export async function confirmAdminAssistantDraft(input: unknown): Promise<AdminDraftResult> {
   const session = await requirePlatformAdmin();
-  const parsed = parseInput(confirmSchema, input);
+  // A card with a photo is sent as a form; the photo itself is checked by the photo upload it goes to.
+  const image = input instanceof FormData ? input.get("image") : null;
+  const fields = input instanceof FormData ? formFields(input) : input;
+  const parsed = parseInput(confirmSchema, fields);
   if (!parsed.ok) return { ok: false, code: "invalid", message: "Check the text on the card and try again." };
-  return confirmAdminDraft(parsed.data.draftId, { id: session.user.id, email: session.user.email }, { text: parsed.data.text });
+  return confirmAdminDraft(parsed.data.draftId, { id: session.user.id, email: session.user.email }, {
+    text: parsed.data.text,
+    keep: parsed.data.keep,
+    ...(image instanceof File && image.size > 0 ? { image } : {}),
+  });
+}
+
+function formFields(form: FormData): Record<string, unknown> {
+  const text = (key: string) => (typeof form.get(key) === "string" ? (form.get(key) as string) : undefined);
+  const keep = form.getAll("keep").filter((value): value is string => typeof value === "string");
+  return {
+    draftId: text("draftId"),
+    ...(text("text") !== undefined ? { text: text("text") } : {}),
+    ...(form.has("keep") ? { keep } : {}),
+  };
 }
 
 export async function rejectAdminAssistantDraft(input: unknown): Promise<{ ok: true; draft: AdminDraftCard } | { ok: false; code: "not_found"; message: string }> {

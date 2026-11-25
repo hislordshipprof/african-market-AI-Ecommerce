@@ -170,6 +170,15 @@ export function scriptStep(messages: unknown): ScriptStep {
     return { kind: "text", text: "Here is your order to review. Tap Review and pay to pay on the checkout page." };
   }
   if (last.name === "find_stores") return { kind: "text", text: "These stores are still in setup. Tap a store below to open it." };
+  if (last.name === "draft_store_create" && isRecord(last.output) && Array.isArray(last.output.missing)) {
+    return { kind: "text", text: `To create the store I still need the ${last.output.missing.join(", ")}.` };
+  }
+  if (["draft_store_create", "draft_review_approve", "draft_product"].includes(last.name) && isRecord(last.output) && last.output.drafted === false) {
+    return { kind: "text", text: `Nothing drafted: ${String(last.output.reason)}` };
+  }
+  if (last.name === "draft_store_create" || last.name === "draft_review_approve" || last.name === "draft_product") {
+    return { kind: "text", text: "I drafted it on one card below. Confirm or dismiss it; nothing changes until you confirm." };
+  }
   if (last.name === "draft_store_status") return { kind: "text", text: "I drafted the suspension. Confirm or dismiss the card below; nothing changes until you confirm." };
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
@@ -248,6 +257,21 @@ function openingStep(lower: string, raw: string, messages: unknown): ScriptStep 
   // The platform admin assistant drafts a suspension (#832), and refuses a never-allowed request.
   const suspend = /^suspend the store ([a-z0-9-]+)/.exec(lower.trim());
   if (suspend) return { kind: "tool", name: "draft_store_status", input: { slug: suspend[1], status: "suspended" } };
+  // The platform admin assistant runs a store's creation and a review-queue batch as one card each (#833).
+  const storeFields = /^create a store: (.+)$/i.exec(raw.trim());
+  if (storeFields) {
+    const input = Object.fromEntries(storeFields[1]!.split(";").map((pair) => pair.split("=").map((part) => part.trim())).filter((pair) => pair.length === 2 && pair[0]));
+    return { kind: "tool", name: "draft_store_create", input };
+  }
+  const productFields = /^create a product: (.+)$/i.exec(raw.trim());
+  if (productFields) {
+    const input = Object.fromEntries(productFields[1]!.split(";").map((pair) => pair.split("=").map((part) => part.trim())).filter((pair) => pair.length === 2 && pair[0]));
+    return { kind: "tool", name: "draft_product", input: { ...input, notDuplicate: true } };
+  }
+  const storeFor = /^create a store for (.+) in (.+)$/i.exec(raw.trim());
+  if (storeFor) return { kind: "tool", name: "draft_store_create", input: { name: storeFor[1], city: storeFor[2] } };
+  const review = /^approve the clean products in the review queue for (.+)$/.exec(lower.trim());
+  if (review) return { kind: "tool", name: "draft_review_approve", input: { category: review[1], onlyClean: false } };
   if (lower.includes("platform admin") && lower.startsWith("make ")) {
     return { kind: "text", text: "This assistant cannot create platform admins or change anyone's role." };
   }

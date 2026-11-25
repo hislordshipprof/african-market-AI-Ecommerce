@@ -171,6 +171,8 @@ export type RecipeSaveState = {
   /** Keyed by field: name, aliases, servings, ingredients, or ingredients.<row>.<field>. */
   fieldErrors?: Record<string, string>;
   version?: string;
+  /** The dish a save without a dish id added. */
+  recipeId?: string;
 };
 
 type Session = Awaited<ReturnType<typeof requirePlatformAdmin>>;
@@ -213,21 +215,21 @@ export async function saveRecipe(_prev: RecipeSaveState, form: FormData): Promis
 
   const saved = await platformAdminTransaction(async (tx): Promise<RecipeSaveState> => {
     await lockRecipeNames(tx);
-    await lockRecipeRow(tx, recipeId);
-    const recipe = await tx.recipe.findUnique({ where: { id: recipeId }, include: recipeWithRows });
-    if (!recipe) return { ok: false, message: "Dish not found" };
-    const before = snapshot(recipe);
+    if (recipeId) await lockRecipeRow(tx, recipeId);
+    const recipe = recipeId ? await tx.recipe.findUnique({ where: { id: recipeId }, include: recipeWithRows }) : null;
+    if (recipeId && !recipe) return { ok: false, message: "Dish not found" };
+    const before = recipe ? snapshot(recipe) : null;
     // The form holds every field as it was loaded; saving it over a newer row would undo the other admin's change.
-    if (version(before) !== loaded) return { ok: false, message: STALE_RECIPE_MESSAGE };
+    if (before && version(before) !== loaded) return { ok: false, message: STALE_RECIPE_MESSAGE };
 
     // A looked-up dish is keyed by the term the shopper asked for, not its folded name, so only a rename moves the key.
-    const renamed = dishKey(name) !== dishKey(recipe.name);
+    const renamed = !recipe || dishKey(name) !== dishKey(recipe.name);
     const key = renamed ? dishKey(name) : recipe.key;
-    const aliases = foldAliases(renamed ? `${parsed.data.aliases}\n${recipe.key}` : parsed.data.aliases, key);
+    const aliases = foldAliases(renamed && recipe ? `${parsed.data.aliases}\n${recipe.key}` : parsed.data.aliases, key);
 
     const terms = [key, ...aliases];
     const others = await tx.recipe.findMany({
-      where: { id: { not: recipeId }, OR: [{ key: { in: terms } }, { aliases: { hasSome: terms } }] },
+      where: { ...(recipeId ? { id: { not: recipeId } } : {}), OR: [{ key: { in: terms } }, { aliases: { hasSome: terms } }] },
       select: { key: true, name: true, aliases: true },
     });
     const owner = (term: string) => others.find((row) => row.key === term || row.aliases.includes(term));
@@ -238,7 +240,7 @@ export async function saveRecipe(_prev: RecipeSaveState, form: FormData): Promis
     if (takenAlias) fieldErrors.aliases = `“${takenAlias}” already answers to ${owner(takenAlias)?.name}`;
 
     // A row keeps an archived product it already had; a new mapping must be a product that is not archived.
-    const kept = new Set(recipe.ingredients.flatMap((row) => row.masterProductId ?? []));
+    const kept = new Set(recipe?.ingredients.flatMap((row) => row.masterProductId ?? []) ?? []);
     const ids = [...new Set(ingredients.flatMap((row) => row.masterProductId ?? []))];
     const found = await tx.masterProduct.findMany({ where: { id: { in: ids } }, select: { id: true, status: true } });
     const status = new Map(found.map((row) => [row.id, row.status]));
@@ -256,14 +258,21 @@ export async function saveRecipe(_prev: RecipeSaveState, form: FormData): Promis
       servings,
       ingredients: ingredients.map((row) => ({ ...row, qty: row.qty === null ? null : new Prisma.Decimal(row.qty).toString() })),
     };
+    if (!recipe) {
+      // Not curated until an admin marks it, like a looked-up dish.
+      const created = await tx.recipe.create({ data: { key, name, aliases, servings, origin: "drafted" } });
+      await tx.recipeIngredient.createMany({ data: after.ingredients.map((row, position) => ({ recipeId: created.id, position, ...row })) });
+      await audit(tx, session, "catalog.recipe_create", created.id, null, { key, origin: "drafted", ...after });
+      return { ok: true, message: "Saved", version: version(after), recipeId: created.id };
+    }
     if (version(after) === loaded) return { ok: true, message: "No changes to save", version: loaded };
 
-    await tx.recipe.update({ where: { id: recipeId }, data: { key, name, aliases, servings } });
-    await tx.recipeIngredient.deleteMany({ where: { recipeId } });
+    await tx.recipe.update({ where: { id: recipe.id }, data: { key, name, aliases, servings } });
+    await tx.recipeIngredient.deleteMany({ where: { recipeId: recipe.id } });
     await tx.recipeIngredient.createMany({
-      data: after.ingredients.map((row, position) => ({ recipeId, position, ...row })),
+      data: after.ingredients.map((row, position) => ({ recipeId: recipe.id, position, ...row })),
     });
-    await audit(tx, session, "catalog.recipe_edit", recipeId, { key: recipe.key, ...before }, { key, ...after });
+    await audit(tx, session, "catalog.recipe_edit", recipe.id, { key: recipe.key, ...before }, { key, ...after });
     return { ok: true, message: "Saved", version: version(after) };
   }).catch((error: unknown) => {
     // A shopper's lookup can save a dish under the new name after the check above; it then owns the name.
@@ -298,7 +307,7 @@ export async function markRecipeCurated(_prev: RecipeActionState, form: FormData
 }
 
 /**
- * Deletes a looked-up dish; the audit row keeps everything it held. The next request for it is looked up online
+ * Deletes a dish that is not curated (looked up or drafted); the audit row keeps everything it held. The next request for it is looked up online
  * again. A curated dish is never deleted: the seed would bring it back, and the #146 eval reads it.
  */
 export async function deleteRecipe(_prev: RecipeActionState, form: FormData): Promise<RecipeActionState> {
@@ -312,7 +321,7 @@ export async function deleteRecipe(_prev: RecipeActionState, form: FormData): Pr
     if (!recipe) return { ok: false, message: "Dish not found" };
     // Deleting a dish someone fixed since this page loaded would throw their fix away unseen.
     if (version(snapshot(recipe)) !== loaded) return { ok: false, message: STALE_RECIPE_MESSAGE };
-    if (recipe.origin !== "lookup") return { ok: false, message: "Only a looked-up dish can be deleted. Edit a curated dish instead." };
+    if (recipe.origin === "curated") return { ok: false, message: "Only a dish that is not curated can be deleted. Edit a curated dish instead." };
     await tx.recipe.delete({ where: { id: recipeId } });
     await audit(tx, session, "catalog.recipe_delete", recipeId, {
       key: recipe.key,

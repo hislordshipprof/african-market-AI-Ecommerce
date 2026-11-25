@@ -24,6 +24,7 @@ import {
   readMasterProductForm,
   STALE_PRODUCT_MESSAGE,
   type MasterProductField,
+  type MasterProductForm,
   type MasterStatus,
 } from "./master-catalog-form";
 
@@ -123,6 +124,7 @@ export type MasterProductEditor = {
     frozen: boolean;
     perishable: boolean;
     storage: string | null;
+    originCountries: string | null;
     status: MasterStatus;
     imageUrl: string | null;
     ingredientsStatus: string;
@@ -150,7 +152,7 @@ export async function getMasterProductEditor(productId: string): Promise<MasterP
       where: { id: id.data },
       select: {
         id: true, name: true, categoryId: true, subcategory: true, description: true, unit: true, weightG: true,
-        frozen: true, perishable: true, storage: true, status: true, imageUrl: true,
+        frozen: true, perishable: true, storage: true, status: true, imageUrl: true, originCountries: true,
         ingredientsStatus: true, allergensStatus: true, dietaryStatus: true, updatedAt: true,
         mergedInto: { select: { id: true, name: true } },
       },
@@ -177,6 +179,8 @@ export type SaveState = {
   fieldErrors?: Partial<Record<MasterProductField, string>>;
   /** The details' version after a successful save, for the editor's next save. */
   version?: string;
+  /** The product a save without a product id created. */
+  productId?: string;
 };
 
 const EDITED_FIELDS = [
@@ -203,6 +207,8 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
     return { ok: false, message: "Check the highlighted fields", fieldErrors };
   }
   const { productId, version, ...next } = parsed.data;
+  if (!productId) return createMasterProduct(session, next);
+  if (!version) return { ok: false, message: STALE_PRODUCT_MESSAGE };
 
   const result = await platformAdminTransaction(async (tx): Promise<SaveState & { storeIds?: string[] }> => {
     await lockMasterProductRow(tx, productId);
@@ -244,6 +250,30 @@ export async function saveMasterProduct(_prev: SaveState, form: FormData): Promi
   const { storeIds, ...state } = result;
   for (const storeId of storeIds ?? []) revalidateStorefront(storeId);
   return state;
+}
+
+/** A new master product from the form's fields, with its audit row. */
+async function createMasterProduct(
+  session: Awaited<ReturnType<typeof requirePlatformAdmin>>,
+  next: Omit<MasterProductForm, "productId" | "version">,
+): Promise<SaveState> {
+  return platformAdminTransaction(async (tx): Promise<SaveState> => {
+    if (next.categoryId && !(await tx.category.findUnique({ where: { id: next.categoryId }, select: { id: true } }))) {
+      return { ok: false, message: "Check the highlighted fields", fieldErrors: { categoryId: "Choose a category from the list" } };
+    }
+    const created = await tx.masterProduct.create({ data: next });
+    await tx.auditLog.create({
+      data: {
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "catalog.product_create",
+        entityType: "master_product",
+        entityId: created.id,
+        after: next as Prisma.InputJsonObject,
+      },
+    });
+    return { ok: true, message: "Saved", productId: created.id, version: detailsVersion(next) };
+  });
 }
 
 export type ImageState = { ok?: boolean; message?: string };
