@@ -32,9 +32,11 @@ export function StoreFilters({ filters, options }: { filters: Filters; options: 
   const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(typing.current), []);
 
-  function apply(event: ChangeEvent<HTMLSelectElement>) {
-    const { name, value } = event.currentTarget;
-    setChosen((current) => ({ ...current, [name]: value }));
+  // An empty control has no name, so the URL carries only the filters in use.
+  function apply(chip: Chip, event: ChangeEvent<HTMLSelectElement>) {
+    const { value } = event.currentTarget;
+    event.currentTarget.name = value ? chip : "";
+    setChosen((current) => ({ ...current, [chip]: value }));
     event.currentTarget.form?.requestSubmit();
   }
 
@@ -48,13 +50,14 @@ export function StoreFilters({ filters, options }: { filters: Filters; options: 
         <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
-          name="q"
+          name={chosen.q ? "q" : undefined}
           value={chosen.q}
           maxLength={100}
           autoComplete="off"
           placeholder="Name or slug…"
           onChange={(event) => {
             const value = event.currentTarget.value;
+            event.currentTarget.name = value ? "q" : "";
             setChosen((current) => ({ ...current, q: value }));
             clearTimeout(typing.current);
             typing.current = setTimeout(() => form.current?.requestSubmit(), SEARCH_DELAY_MS);
@@ -74,10 +77,10 @@ export function StoreFilters({ filters, options }: { filters: Filters; options: 
             {!set && <Plus aria-hidden className="size-4 text-muted-foreground" />}
             <span className={set ? "text-muted-foreground" : ""}>{CHIP_LABELS[chip]}{set ? ":" : ""}</span>
             <select
-              name={chip}
+              name={chosen[chip] ? chip : undefined}
               aria-label={CHIP_LABELS[chip]}
               value={chosen[chip]}
-              onChange={apply}
+              onChange={(event) => apply(chip, event)}
               className={`${set ? "" : "absolute inset-0 opacity-0"} cursor-pointer appearance-none bg-transparent pr-1 outline-none`}
             >
               <option value="">Any {CHIP_LABELS[chip].toLowerCase()}</option>

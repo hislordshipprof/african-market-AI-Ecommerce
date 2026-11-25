@@ -3,7 +3,7 @@
 import { Suspense, use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, Menu, Search, X } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import type { AdminHomeCounts } from "@/lib/admin/home-counts";
 import { ADMIN_NAV_GROUPS, currentNavHref, type AdminNavCount } from "./admin-nav";
@@ -19,7 +19,6 @@ const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visi
 export function AdminShell({ email, counts, children }: { email: string; counts: Promise<AdminHomeCounts>; children: React.ReactNode }) {
   const current = currentNavHref(usePathname());
   const [open, setOpen] = useState(false);
-  const [searching, setSearching] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutFailed, setSignOutFailed] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -85,8 +84,13 @@ export function AdminShell({ email, counts, children }: { email: string; counts:
 
         <nav aria-label="Admin" className="px-2 pb-4">
           {ADMIN_NAV_GROUPS.map((group) => (
-            <div key={group.label ?? "home"} className={group.label ? "mt-4" : ""}>
-              {group.label && <p className="px-2.5 pb-1 text-[13px] font-semibold text-muted-foreground">{group.label}</p>}
+            <div
+              key={group.label ?? "home"}
+              role={group.label ? "group" : undefined}
+              aria-labelledby={group.label ? groupId(group.label) : undefined}
+              className={group.label ? "mt-4" : ""}
+            >
+              {group.label && <p id={groupId(group.label)} className="px-2.5 pb-1 text-[13px] font-semibold text-muted-foreground">{group.label}</p>}
               <ul>
                 {group.items.map((item) => {
                   const isCurrent = item.href === current;
@@ -152,32 +156,25 @@ export function AdminShell({ email, counts, children }: { email: string; counts:
           >
             <Menu aria-hidden className="size-5" />
           </button>
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            onClick={() => setSearching(true)}
-            className={`flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-background px-3 text-left text-muted-foreground hover:border-input lg:max-w-[560px] ${FOCUS}`}
-          >
-            <Search aria-hidden className="size-4 shrink-0" />
-            <span className="truncate">Search pages, stores, orders…</span>
-            <kbd className="ml-auto hidden rounded border border-border px-1.5 font-sans text-xs sm:inline">⌘ K</kbd>
-          </button>
+          <CommandPalette />
         </header>
         <main id="admin-main" tabIndex={-1} className="min-w-0 flex-1 pb-24 focus:outline-none">
           {children}
         </main>
       </div>
 
-      <CommandPalette open={searching} onOpenChange={setSearching} />
     </>
   );
 }
+
+const groupId = (label: string) => `admin-nav-${label.toLowerCase().replace(/\W+/g, "-")}`;
 
 function NavBadge({ counts, name }: { counts: Promise<AdminHomeCounts>; name: AdminNavCount }) {
   const counted = use(counts)[name];
   if (!counted || counted.count === 0) return null;
   return (
     <span className="ml-auto rounded-full bg-muted px-1.5 text-xs font-semibold tabular-nums text-foreground">
+      <span className="sr-only">, </span>
       {counted.incomplete && <span className="sr-only">at least </span>}
       {counted.count}
       {counted.incomplete && <span aria-hidden>+</span>}
