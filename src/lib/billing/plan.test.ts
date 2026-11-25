@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectivePlan } from "./plan";
+import { effectivePlan, featureLive, PRO_FEATURES } from "./plan";
 
 describe("effectivePlan with a plan override (#547)", () => {
   it("a running Pro override wins over a Stripe Starter plan, a cancelled subscription and no subscription", () => {
@@ -17,5 +17,11 @@ describe("effectivePlan with a plan override (#547)", () => {
 
   it("an unknown override value is ignored", () => {
     expect(effectivePlan({ plan: "starter", status: "active", overridePlan: "enterprise" })).toBe("starter");
+  });
+});
+
+describe("featureLive (#809)", () => {
+  it("names the Pro features that are not built yet", () => {
+    expect(PRO_FEATURES.filter((f) => !featureLive(f))).toEqual(["own-domain", "whatsapp", "analytics-dashboard"]);
   });
 });

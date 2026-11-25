@@ -5,11 +5,24 @@ import { requireStoreOwner } from "./session";
 import { parseInput, readFormFields } from "../security/parse-input";
 import {
   createInvite,
+  INVITE_NOT_EMAILED,
   removeStoreMember,
+  resendInvite,
+  revokeInvite,
+  type SavedInvite,
   type StoreRole,
 } from "../invite/service";
 import { checkInviteRateLimit } from "../invite/rate-limit";
 import { resolveAuthBaseUrl } from "../auth";
+
+const INVITE_RATE_LIMITED = "Too many invites this hour. Try again later.";
+
+/** The link goes back only when the email did not, so the owner can share it by hand. */
+function savedInviteResult(saved: SavedInvite) {
+  return saved.emailed
+    ? { success: true as const, id: saved.id }
+    : { success: true as const, id: saved.id, warning: INVITE_NOT_EMAILED, inviteUrl: saved.inviteUrl };
+}
 
 export async function inviteMemberAction(formData: FormData) {
   const session = await requireStoreOwner();
@@ -26,7 +39,7 @@ export async function inviteMemberAction(formData: FormData) {
 
   const rateCheck = await checkInviteRateLimit(session.store.id);
   if (!rateCheck.allowed) {
-    return { error: "rate_limit_exceeded" };
+    return { error: INVITE_RATE_LIMITED };
   }
 
   try {
@@ -40,7 +53,7 @@ export async function inviteMemberAction(formData: FormData) {
       storeSlug: session.store.slug,
       storeName: session.store.name,
     });
-    return { success: true, id: result.id };
+    return savedInviteResult(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to send invite";
     return { error: message };
@@ -63,4 +76,31 @@ export async function removeMemberAction(targetUserId: string) {
     const message = err instanceof Error ? err.message : "Failed to remove member";
     return { error: message };
   }
+}
+
+export async function resendInviteAction(inviteId: string) {
+  const session = await requireStoreOwner();
+  const target = parseInput(z.string().min(1).max(200), inviteId);
+  if (!target.ok) return { error: "Invitation not found" };
+
+  const rateCheck = await checkInviteRateLimit(session.store.id);
+  if (!rateCheck.allowed) return { error: INVITE_RATE_LIMITED };
+
+  const result = await resendInvite({
+    storeId: session.store.id,
+    inviteId: target.data,
+    actorId: session.user.id,
+    actorEmail: session.user.email,
+    baseUrl: resolveAuthBaseUrl(),
+    storeSlug: session.store.slug,
+    storeName: session.store.name,
+  });
+  return "error" in result ? result : savedInviteResult(result);
+}
+
+export async function revokeInviteAction(inviteId: string) {
+  const session = await requireStoreOwner();
+  const target = parseInput(z.string().min(1).max(200), inviteId);
+  if (!target.ok) return { error: "Invitation not found" };
+  return revokeInvite(session.store.id, target.data, session.user.id, session.user.email);
 }

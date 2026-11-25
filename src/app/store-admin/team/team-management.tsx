@@ -18,6 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import {
   inviteMemberAction,
   removeMemberAction,
+  resendInviteAction,
+  revokeInviteAction,
 } from "@/lib/store-admin/actions";
 import {
   ArrowLeft,
@@ -25,6 +27,8 @@ import {
   Mail,
   Trash2,
   Clock,
+  AlertTriangle,
+  Copy,
 } from "lucide-react";
 
 interface Member {
@@ -67,7 +71,51 @@ export function TeamManagement({
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [isPending, startTransition] = useTransition();
   const [inviteEmail, setInviteEmail] = useState("");
+  const [unsent, setUnsent] = useState<{ email: string; warning: string; inviteUrl: string } | null>(null);
   const inviteRole = "staff" as const;
+
+  function afterSave(email: string, result: { warning?: string; inviteUrl?: string }, sent: string) {
+    if (result.warning && result.inviteUrl) {
+      setUnsent({ email, warning: result.warning, inviteUrl: result.inviteUrl });
+    } else {
+      setUnsent(null);
+      toast.success(sent);
+    }
+    router.refresh();
+  }
+
+  function handleResend(invite: Invite) {
+    startTransition(async () => {
+      const result = await resendInviteAction(invite.id);
+      if ("error" in result) {
+        toast.error(result.error);
+      } else {
+        afterSave(invite.email, result, `Invitation sent again to ${invite.email}`);
+      }
+    });
+  }
+
+  function handleRevoke(invite: Invite) {
+    startTransition(async () => {
+      const result = await revokeInviteAction(invite.id);
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+      } else {
+        if (unsent?.email === invite.email) setUnsent(null);
+        toast.success(`Invitation to ${invite.email} revoked`);
+        router.refresh();
+      }
+    });
+  }
+
+  async function copyLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied");
+    } catch {
+      toast.error("Could not copy. Select the link and copy it.");
+    }
+  }
 
   function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -77,12 +125,11 @@ export function TeamManagement({
 
     startTransition(async () => {
       const result = await inviteMemberAction(formData);
-      if ("error" in result && result.error) {
+      if ("error" in result) {
         toast.error(result.error);
       } else {
-        toast.success(`Invitation sent to ${inviteEmail}`);
+        afterSave(inviteEmail, result, `Invitation sent to ${inviteEmail}`);
         setInviteEmail("");
-        router.refresh();
       }
     });
   }
@@ -161,6 +208,30 @@ export function TeamManagement({
                 </Button>
               </form>
               )}
+              {unsent && (
+                <div role="status" className="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-muted/50 p-3">
+                  <p className="flex items-start gap-2 text-sm text-foreground">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span>
+                      {unsent.warning}{" "}
+                      <span className="text-muted-foreground">Invite for {unsent.email}.</span>
+                    </span>
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      aria-label={`Invite link for ${unsent.email}`}
+                      value={unsent.inviteUrl}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="min-w-0 flex-1 text-xs"
+                    />
+                    <Button type="button" variant="outline" onClick={() => copyLink(unsent.inviteUrl)}>
+                      <Copy className="size-4" data-icon="inline-start" />
+                      Copy link
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -229,7 +300,7 @@ export function TeamManagement({
                   {invites.map((invite) => (
                     <div
                       key={invite.id}
-                      className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+                      className="flex flex-wrap items-center justify-between gap-2 py-3 first:pt-0 last:pb-0"
                     >
                       <div className="flex flex-col gap-0.5">
                         <span className="text-sm font-medium text-foreground">
@@ -241,7 +312,28 @@ export function TeamManagement({
                           {new Date(invite.expiresAt).toLocaleDateString()}
                         </span>
                       </div>
-                      <Badge variant="outline">{invite.role}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{invite.role}</Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Resend invite to ${invite.email}`}
+                          onClick={() => handleResend(invite)}
+                          disabled={isPending}
+                        >
+                          Resend
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Revoke invite to ${invite.email}`}
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => handleRevoke(invite)}
+                          disabled={isPending}
+                        >
+                          Revoke
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>

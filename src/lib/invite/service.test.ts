@@ -7,10 +7,19 @@ import {
   validateInviteToken,
   acceptInvite,
   removeStoreMember,
+  resendInvite,
+  revokeInvite,
   _hashTokenForTesting,
   STAFF_LIMIT_MESSAGE,
 } from "./service";
-import { clearTestSentEmails, getTestSentEmails } from "../email/send";
+import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests } from "../email/send";
+import { ProviderSendError } from "../notifications/provider-error";
+
+const failingSender = { send: async () => { throw new ProviderSendError(422, "validation_error"); } };
+
+function tokenOf(inviteUrl: string): string {
+  return new URL(inviteUrl).pathname.split("/").pop()!;
+}
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -212,6 +221,78 @@ describe.skipIf(!hasDb)("Invite service", () => {
         where: { id: result.id },
       });
       expect(invite!.email).toBe("upper.case@example.com");
+    });
+  });
+
+  describe("invite email fails (#809)", () => {
+    it("keeps the invite and hands back a link the owner can share", async () => {
+      setEmailSenderForTests(failingSender);
+      try {
+        const result = await createInvite(baseInput());
+        expect(result.emailed).toBe(false);
+        const invite = await validateInviteToken(tokenOf(result.inviteUrl));
+        expect(invite).toMatchObject({ id: result.id, email: "new-staff@example.com" });
+      } finally {
+        setEmailSenderForTests(null);
+      }
+    });
+
+    it("reports emailed when the email goes out", async () => {
+      const result = await createInvite(baseInput());
+      expect(result.emailed).toBe(true);
+    });
+  });
+
+  describe("resendInvite (#809)", () => {
+    const actor = () => ({ storeId: storeAId, actorId: inviterUserId, actorEmail: "invite-svc-inviter@example.com", baseUrl: "http://localhost:3000", storeSlug: "invite-svc-a", storeName: "Invite Svc Store A" });
+
+    it("mails a fresh link, retires the old one and audits it", async () => {
+      const first = await createInvite(baseInput());
+      clearTestSentEmails();
+      const resent = await resendInvite({ ...actor(), inviteId: first.id });
+      if ("error" in resent) throw new Error(resent.error);
+      expect(resent.emailed).toBe(true);
+      expect(getTestSentEmails()).toHaveLength(1);
+      expect(getTestSentEmails()[0].html).toContain(tokenOf(resent.inviteUrl));
+      expect(await validateInviteToken(tokenOf(first.inviteUrl))).toMatchObject({ error: expect.any(String) });
+      expect(await validateInviteToken(tokenOf(resent.inviteUrl))).toMatchObject({ id: first.id });
+      const logs = await platformAdmin.auditLog.findMany({ where: { storeId: storeAId, action: "invite.resend" } });
+      expect(logs).toHaveLength(1);
+      expect(logs[0].entityId).toBe(first.id);
+    });
+
+    it("refuses another store's invite", async () => {
+      const other = await createInvite(baseInput({ storeId: storeBId, storeSlug: "invite-svc-b" }));
+      const result = await resendInvite({ ...actor(), inviteId: other.id });
+      expect(result).toEqual({ error: "Invitation not found" });
+      expect(await validateInviteToken(tokenOf(other.inviteUrl))).toMatchObject({ id: other.id });
+    });
+  });
+
+  describe("revokeInvite (#809)", () => {
+    it("stops the link working and audits it", async () => {
+      const created = await createInvite(baseInput());
+      const result = await revokeInvite(storeAId, created.id, inviterUserId, "invite-svc-inviter@example.com");
+      expect(result).toEqual({ success: true });
+      expect(await validateInviteToken(tokenOf(created.inviteUrl))).toEqual({ error: "Invalid invitation link" });
+      const logs = await platformAdmin.auditLog.findMany({ where: { storeId: storeAId, action: "invite.revoke" } });
+      expect(logs).toHaveLength(1);
+      expect(logs[0].entityId).toBe(created.id);
+      expect(logs[0].before).toEqual({ email: "new-staff@example.com", role: "staff" });
+    });
+
+    it("frees the staff seat", async () => {
+      await createInvite(baseInput({ email: "staff-1@example.com" }));
+      const second = await createInvite(baseInput({ email: "staff-2@example.com" }));
+      await revokeInvite(storeAId, second.id, inviterUserId, "invite-svc-inviter@example.com");
+      await expect(createInvite(baseInput({ email: "staff-3@example.com" }))).resolves.toBeTruthy();
+    });
+
+    it("refuses another store's invite", async () => {
+      const other = await createInvite(baseInput({ storeId: storeBId, storeSlug: "invite-svc-b" }));
+      const result = await revokeInvite(storeAId, other.id, inviterUserId, "invite-svc-inviter@example.com");
+      expect(result).toEqual({ error: "Invitation not found" });
+      expect(await validateInviteToken(tokenOf(other.inviteUrl))).toMatchObject({ id: other.id });
     });
   });
 
