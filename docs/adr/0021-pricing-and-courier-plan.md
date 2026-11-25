@@ -31,7 +31,7 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
 | Fulfilment | Pickup and the store's own delivery | Adds **courier delivery** (DoorDash or Uber, cheaper one picked, automatic switch-over) |
 | Notifications | Email and web push to the store; email and SMS order updates to shoppers | Same |
 | Customer chat | In-app chat with shoppers | Same |
-| Store copilot | Stock alerts and daily digest | Adds **voice and photo stock reports**, **reorder suggestions** (#551; Pro under the rule above, owner confirmation pending), and **WhatsApp** for copilot and alerts once built |
+| Store copilot | Stock alerts, daily digest, confirm-requests and stock movement | Adds the **Store assistant (AI chat)**: the copilot chat, which drafts stock changes for the owner to confirm and answers sales questions from the store's own records (#818, owner 2026-11-24); **voice and photo stock reports**, **reorder suggestions** (#551; Pro under the rule above, owner confirmation pending), and **WhatsApp** for copilot and alerts once built |
 | Staff | Owner + **2 staff** | **Unlimited staff** |
 | Analytics | Per-order payout breakdown | Adds the **analytics dashboard** (#498) |
 | Payouts | Weekly Stripe payouts, per-order breakdown | Same |
@@ -39,7 +39,7 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
 | Support | Email, next business day | **Priority**, same day |
 
 - **Locked features:** a Starter store sees each Pro feature locked, with an upgrade link.
-- **Downgrade:** a downgrade never breaks an order in flight. New orders follow the new plan. Staff over the limit keep read-only access until the owner removes them.
+- **Downgrade:** a downgrade never breaks an order in flight. New orders follow the new plan. Staff over the limit keep read-only access until the owner removes them. The owner keeps reading past copilot chats and can still confirm or dismiss changes already drafted, but cannot send (#818).
 - **Assistant cap:** past the monthly cap, the assistant tells the shopper it is unavailable and the store keeps selling by browsing. The owner is warned at 80%.
 - **Rules as built (#494):**
   - A store with no subscription counts as Starter.

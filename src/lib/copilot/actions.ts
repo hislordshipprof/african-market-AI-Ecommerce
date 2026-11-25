@@ -7,6 +7,7 @@ import { revalidateStorefront } from "../storefront/cache";
 import { chooseListing } from "./choices";
 import { answerAlert, confirmProposal, rejectProposal, type AnswerResult } from "./confirm";
 import { sendCopilotTurn } from "./turn";
+import { PAYOUTS_SHOWN, storePayouts } from "../payouts/service";
 import {
   FIXED_ERROR,
   MESSAGE_MAX,
@@ -46,7 +47,7 @@ const answerSchema = z.discriminatedUnion("answer", [
 const invalidRequest: SendResult = {
   ok: false,
   code: "invalid_request",
-  message: "Write a stock report of 1,000 characters or less.",
+  message: "Write a message of 1,000 characters or less.",
 };
 
 export async function sendCopilotMessage(input: unknown): Promise<SendResult> {
@@ -61,6 +62,7 @@ export async function sendCopilotMessage(input: unknown): Promise<SendResult> {
       conversationId: parsed.data.conversationId,
       messageId: parsed.data.messageId,
       text: parsed.data.text,
+      payouts: { shown: PAYOUTS_SHOWN, list: storePayouts },
     });
   } catch (error) {
     console.error("[copilot] send failed", { errorType: error instanceof Error ? error.name : "Error" });

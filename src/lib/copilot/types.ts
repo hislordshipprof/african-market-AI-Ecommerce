@@ -75,7 +75,8 @@ export type SendCode =
   | "rate_limited"
   | "copilot_resting"
   | "copilot_unavailable"
-  | "invalid_request";
+  | "invalid_request"
+  | "plan_locked";
 
 export type SendResult =
   | {

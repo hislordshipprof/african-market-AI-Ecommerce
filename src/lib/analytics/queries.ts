@@ -372,6 +372,17 @@ export async function customersView(storeId: string, range: AnalyticsRange, time
   };
 }
 
+/** Captured orders in the range that the Store directory sent (#454); the dashboard's count is all-time. */
+export async function directoryOrders(storeId: string, range: AnalyticsRange, timeZone: string): Promise<number> {
+  const [row] = await storeScopedRawQuery<{ orders: number }>(storeId, Prisma.sql`
+    WITH b AS (${bounds(range, timeZone)})
+    SELECT COUNT(*)::int AS orders
+    FROM orders o, b
+    WHERE o.store_id = ${storeId} AND o.created_at >= b.lo AND o.created_at < b.hi AND o.captured_amount_cents > 0
+      AND o.acquisition_source = 'directory'`);
+  return row.orders;
+}
+
 /** Cancel reasons as owners read them: the store's chosen reason, or what cancelled it. */
 export const CANCEL_REASON_LABELS: Record<string, string> = {
   out_of_stock: "Out of stock",

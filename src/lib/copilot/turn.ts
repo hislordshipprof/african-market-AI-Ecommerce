@@ -26,13 +26,16 @@ import {
   takeCopilotLease,
 } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
+import { storeMayUse } from "../billing/plan";
 import { loadProposalCards } from "./cards";
 import { choiceCards } from "./choices";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
 import { COPILOT_SYSTEM_PROMPT } from "./prompt";
 import { databaseClock, insertProposalRows } from "./proposals";
 import { copilotTools, createDraftBook, type DraftBook, type Draft, type PendingChoice } from "./tools";
-import { estimateText } from "./inventory-report";
+import { estimateText, storeTimeZone } from "./inventory-report";
+import { storeToday } from "../analytics/range";
+import { salesText, type PayoutReader } from "./sales-summary";
 import {
   CONVERSATION_MAX,
   FIXED_ERROR,
@@ -186,6 +189,9 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
   await storeScopedTransaction(storeId, (tx) => deleteEmptyCopilotConversation(tx, conversationId));
 }
 
+/** A Starter store, or a Pro store that dropped to Starter, keeps its chat history but cannot send (#818). */
+export const PLAN_LOCKED_MESSAGE = "Store assistant (AI chat) is on the Pro plan. Upgrade on the Plan page to send messages.";
+
 export const NOTHING_DRAFTED = "Nothing was drafted.";
 export const NUMBER_REFUSED =
   "I can only give numbers from your stock records, and that answer had one I could not check. See Stock movement on this page.";
@@ -204,6 +210,7 @@ function numbersIn(text: string): string[] {
 export function checkedText(text: string, ownerText: string, book: DraftBook): string {
   const allowed = new Set([ownerText, ...book.toolResults, String(PROPOSAL_MAX)].flatMap(numbersIn));
   if (numbersIn(text).every((n) => allowed.has(n))) return text;
+  if (book.sales.length > 0) return book.sales.map(salesText).join("\n");
   const rows = [...new Map(book.report.map((row) => [row.listingId, row])).values()].slice(0, REPLY_ROWS);
   if (rows.length === 0) return NUMBER_REFUSED;
   return rows.map((row) => (
@@ -213,7 +220,7 @@ export function checkedText(text: string, ownerText: string, book: DraftBook): s
 }
 
 /** The model's text, plus fixed lines chosen from what the turn produced. The model's text is never inspected. */
-function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean): string {
+function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean, answeredSales: boolean): string {
   const parts: string[] = [];
   const trimmed = text.trim().slice(0, 4000);
   if (trimmed) {
@@ -225,7 +232,7 @@ function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], c
     parts.push("More than one item matches. Pick one below.");
   }
   if (capped) parts.push("Send the rest in a new message.");
-  if (drafts.length === 0 && choices.length === 0) parts.push(NOTHING_DRAFTED);
+  if (drafts.length === 0 && choices.length === 0 && !answeredSales) parts.push(NOTHING_DRAFTED);
   return parts.join("\n\n");
 }
 
@@ -267,13 +274,18 @@ export async function sendCopilotTurn(input: {
   conversationId?: string;
   messageId: string;
   text: string;
+  /** The store admin page's payout reader; without it a sales answer says the payout is not known. */
+  payouts?: PayoutReader;
 }): Promise<SendResult> {
   const text = input.text.trim();
   if (!text || input.text.trim().length > MESSAGE_MAX) {
-    return { ok: false, code: "invalid_request", message: "Write a stock report of 1,000 characters or less." };
+    return { ok: false, code: "invalid_request", message: "Write a message of 1,000 characters or less." };
   }
   const replay = await readReplay(input.storeId, input.userId, input.messageId);
   if (replay) return replay;
+  if (!(await storeMayUse(input.storeId, "store-assistant"))) {
+    return { ok: false, code: "plan_locked", message: PLAN_LOCKED_MESSAGE };
+  }
   const refused = await copilotGate(`copilot:${input.storeId}:${input.userId}`);
   if (refused) return refused;
 
@@ -297,12 +309,16 @@ export async function sendCopilotTurn(input: {
     lease = { id: conversation.id, token };
 
     const history = conversation.messages.slice(-HISTORY_MAX);
+    const timeZone = await storeTimeZone(input.storeId);
+    const today = storeToday(timeZone);
+    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone }).format(new Date());
     const book = createDraftBook();
     const result = await generateText({
       model: createAssistantModel(),
-      system: COPILOT_SYSTEM_PROMPT,
+      // Without today's date the model guesses the year of "Nov 2 to Nov 8".
+      system: `${COPILOT_SYSTEM_PROMPT}\n\nToday is ${today}, a ${weekday}, in the store's time zone (${timeZone}).`,
       messages: [...modelHistory(history), { role: "user", content: text }],
-      tools: copilotTools(input.storeId, book),
+      tools: copilotTools(input.storeId, book, input.payouts ?? null),
       stopWhen: stepCountIs(STEP_CAP),
       maxRetries: 0,
       maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -311,7 +327,7 @@ export async function sendCopilotTurn(input: {
     });
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = (steps >= STEP_CAP && result.finishReason === "tool-calls") || result.finishReason === "length" || book.overflow;
-    const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped);
+    const reply = visibleReply(checkedText(result.text, text, book), book.drafts, book.choices, capped, book.sales.length > 0);
     const usage = turnUsage(modelId, result.steps);
     const stored = await commitTurn({
       storeId: input.storeId,

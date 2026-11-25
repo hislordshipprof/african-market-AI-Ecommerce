@@ -1,7 +1,7 @@
 /** Store-day date ranges for the analytics dashboard (#498). Days are YYYY-MM-DD in the store's time zone, inclusive. */
 export const RANGE_PRESETS = [7, 30, 90] as const;
 export type RangePreset = (typeof RANGE_PRESETS)[number];
-const MAX_CUSTOM_DAYS = 366;
+export const MAX_CUSTOM_DAYS = 366;
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface AnalyticsRange {
@@ -15,13 +15,13 @@ export function storeToday(timeZone: string, now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
-function addDays(day: string, days: number): string {
+export function addDays(day: string, days: number): string {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
-function validDay(day: string | undefined): day is string {
+export function validDay(day: string | undefined): day is string {
   if (!day || !DAY_PATTERN.test(day)) return false;
   return new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day;
 }

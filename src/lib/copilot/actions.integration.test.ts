@@ -35,12 +35,16 @@ import { generateTOTP } from "../../../e2e/totp";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
 import * as dbModule from "../db";
-import { authPrisma, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
+import type { Prisma } from "@prisma/client";
+import { setStripeProvider } from "../stripe";
+import { storeToday } from "../analytics/range";
+import { fakeStripeProvider } from "../stripe/fake";
+import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
 import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
 import { makeFakeStep } from "../inngest/fake-step";
 import { runConfirmRequestSteps } from "./alert-functions";
 import { FIXED_ERROR } from "./types";
-import { NOTHING_DRAFTED, NUMBER_REFUSED } from "./turn";
+import { NOTHING_DRAFTED, NUMBER_REFUSED, loadCopilotPanel } from "./turn";
 import { saveReorder, updateReorderDays } from "./reorder-actions";
 import { loadReorderList } from "./reorder-list";
 import { authPost, testSignUp } from "../test-auth";
@@ -88,6 +92,16 @@ async function enableTwoFactor(email: string): Promise<string> {
 function asStore(slug: string, cookies: string): void {
   headerState.set("cookie", cookies);
   headerState.set("x-store-slug", slug);
+}
+
+/** Pro by default: the chat is a Pro feature (#818). Null removes the subscription, which is Starter. */
+async function setPlan(storeId: string, plan: "pro" | null): Promise<void> {
+  await authPrisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    await tx.storeSubscription.deleteMany({ where: { storeId } });
+    if (plan) await tx.storeSubscription.create({ data: { storeId, plan, status: "active" } });
+  });
 }
 
 function script(steps: FakeAnthropicStep[]) {
@@ -141,6 +155,9 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeBId}, ${ownerBId}, 'owner', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeAId}, ${staffId}, 'staff', now())`;
     });
+
+    await setPlan(storeAId, "pro");
+    await setPlan(storeBId, "pro");
 
     const old = new Date("2020-01-01T00:00:00.000Z");
     const counted = async (name: string, qty: number) => {
@@ -225,7 +242,7 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: egusiId } })).toBe(0);
 
     const names = ((fake.requests[0]?.body?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name).sort();
-    expect(names).toEqual(["find_listings", "inventory_report", "propose_stock_change", "reorder_suggestions"]);
+    expect(names).toEqual(["find_listings", "inventory_report", "propose_stock_change", "reorder_suggestions", "sales_summary"]);
     const choice = fake.requests[0]?.body?.tool_choice;
     expect(choice == null || choice === "auto" || (typeof choice === "object" && (choice as { type?: string }).type === "auto")).toBe(true);
 
@@ -278,6 +295,118 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       where: { action: "listing.stock_change", entityId: gariId },
     })).toBe(1);
   }, 60_000);
+
+  it("the chat is Pro: a Starter store keeps its history and pending changes but cannot send (#818)", async () => {
+    const cassavaId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Cassava", price: 500, stockMode: "counted", qty: 5, confidence: 1 },
+    })).id;
+    let fake = script([
+      { kind: "tool", toolName: "find_listings", toolInput: { query: "cassava" } },
+      { kind: "tool", toolName: "propose_stock_change", toolInput: { listingId: cassavaId, kind: "restock", quantity: 3 } },
+      { kind: "text", text: "Cassava can go up by 3." },
+    ]);
+    const sent = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "got 3 cassava" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+
+    await setPlan(storeAId, null);
+    try {
+      fake = script([{ kind: "text", text: "Should not run." }]);
+      const refused = await sendCopilotMessage({ conversationId: sent.conversationId, messageId: crypto.randomUUID(), text: "got 2 cassava" });
+      expect(refused).toMatchObject({ ok: false, code: "plan_locked" });
+      expect(fake.requests).toHaveLength(0);
+
+      const panel = await loadCopilotPanel(storeAId, ownerAId);
+      expect(panel.messages.map((message) => message.text)).toContain("got 3 cassava");
+      expect(panel.messages.map((message) => message.text)).not.toContain("got 2 cassava");
+      expect(await confirmStockProposal({ proposalId: sent.proposals[0].id })).toMatchObject({ ok: true, listing: { qty: 8 } });
+    } finally {
+      await setPlan(storeAId, "pro");
+      await storeScoped(storeAId).listing.update({ where: { id: cassavaId }, data: { active: false } });
+    }
+  });
+
+  it("sales_summary answers from the store's own orders for a period; a number it did not return is replaced (#818)", async () => {
+    // Store B, New York. Hand-computed: O1 egusi 4×$5.00, tip $3.00, card fee 97¢, from the directory.
+    // O2 palm oil 3×$15.00, card fee $1.60, refunded $10.00 two days later, no fee back.
+    // Goods 2000 + 4500 = 6500, average 3250. Net 2300 − 97 + 4500 − 160 − 1000 = 5543.
+    // An order the day after the range and a cancelled, uncaptured one in it are left out.
+    const b = storeScoped(storeBId);
+    const listing = async (name: string, price: number) => {
+      const row = await b.listing.create({ data: { storeId: storeBId, customName: name, price, stockMode: "always" } });
+      return (await b.listingVariant.create({ data: { listingId: row.id, label: "each", price, weightG: 500 } })).id;
+    };
+    const egusi = await listing("Egusi", 500);
+    const palm = await listing("Palm oil", 1500);
+    const customer = (await b.customer.create({ data: { storeId: storeBId, name: "Ada" } })).id;
+    let number = 9000;
+    const order = (data: Partial<Prisma.OrderUncheckedCreateInput> & { createdAt: Date }) =>
+      b.order.create({ data: { storeId: storeBId, customerId: customer, number: ++number, subtotalCents: 0, bufferCents: 0, totalAuthorizedCents: 0, ...data } });
+    const o1 = await order({ fulfillment: "pickup", status: "COMPLETED", tipCents: 300, capturedAmountCents: 2300, platformFeeCents: 97, acquisitionSource: "directory", createdAt: new Date("2026-10-06T16:00:00Z") });
+    await b.orderLine.create({ data: { storeId: storeBId, orderId: o1.id, listingVariantId: egusi, qtyOrdered: 4, qtyPicked: 4, unitPriceCents: 500, status: "picked" } });
+    const o2 = await order({ fulfillment: "pickup", status: "COMPLETED", capturedAmountCents: 4500, platformFeeCents: 160, createdAt: new Date("2026-10-07T16:00:00Z") });
+    await b.orderLine.create({ data: { storeId: storeBId, orderId: o2.id, listingVariantId: palm, qtyOrdered: 3, qtyPicked: 3, unitPriceCents: 1500, status: "picked" } });
+    await b.refundRequest.create({ data: { storeId: storeBId, orderId: o2.id, paymentIntentId: `pi_${RUN}_b2`, key: `${RUN}-b2`, amountCents: 1000, refundApplicationFee: false, state: "CREATED", providerStatus: "succeeded", createdAt: new Date("2026-10-09T16:00:00Z") } });
+    await order({ fulfillment: "pickup", status: "COMPLETED", capturedAmountCents: 9900, platformFeeCents: 300, createdAt: new Date("2026-10-12T16:00:00Z") });
+    await order({ fulfillment: "pickup", status: "CANCELLED", createdAt: new Date("2026-10-08T16:00:00Z") });
+
+    asStore(storeBSlug, cookiesB);
+    const period = { period: "range", from: "2026-10-05", to: "2026-10-11" };
+    let fake = script([
+      { kind: "tool", toolName: "sales_summary", toolInput: period },
+      { kind: "text", text: "October 5 to 11: 2 orders, $65.00 in goods sales and $55.43 net to store after $10.00 in refunds. Average order $32.50." },
+    ]);
+    const answered = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "how were sales from oct 5 to oct 11?" });
+    // The model is told today's date in the store's zone, so "Nov 2 to Nov 8" gets the right year.
+    expect(JSON.stringify(fake.requests[0]?.body?.system)).toContain(`Today is ${storeToday("America/New_York")}`);
+    expect(answered).toMatchObject({
+      ok: true,
+      reply: "October 5 to 11: 2 orders, $65.00 in goods sales and $55.43 net to store after $10.00 in refunds. Average order $32.50.",
+      proposals: [],
+    });
+    const result = JSON.parse(String((fake.requests.at(-1)?.body?.messages as Array<{ content: Array<{ type: string; content?: string }> }>)
+      .flatMap((message) => message.content).find((part) => part.type === "tool_result")?.content));
+    expect(result).toMatchObject({
+      from: "2026-10-05",
+      to: "2026-10-11",
+      timeZone: "America/New_York",
+      orders: 2,
+      goodsSales: 65,
+      unitsSold: 7,
+      refunds: 10,
+      netToStore: 55.43,
+      averageOrder: 32.5,
+      ordersFromDirectory: 1,
+      topByQuantity: [{ name: "Egusi", units: 4, sales: 20 }, { name: "Palm oil", units: 3, sales: 45 }],
+      topBySales: [{ name: "Palm oil", units: 3, sales: 45 }, { name: "Egusi", units: 4, sales: 20 }],
+      payout: { known: false },
+    });
+
+    // With Stripe set up, the payout is the payouts arriving in the period (the fake has $58.84 on Nov 6 and $34.68 on Nov 13).
+    await platformAdmin.store.update({ where: { id: storeBId }, data: { stripeAccountId: `acct_${RUN}` } });
+    setStripeProvider(fakeStripeProvider);
+    try {
+      fake = script([
+        { kind: "tool", toolName: "sales_summary", toolInput: { period: "range", from: "2026-11-01", to: "2026-11-10" } },
+        { kind: "text", text: "Stripe paid out $58.84." },
+      ]);
+      expect(await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "what was my payout nov 1 to 10?" }))
+        .toMatchObject({ ok: true, reply: "Stripe paid out $58.84." });
+    } finally {
+      setStripeProvider(null);
+      await platformAdmin.store.update({ where: { id: storeBId }, data: { stripeAccountId: null } });
+    }
+
+    fake = script([
+      { kind: "tool", toolName: "sales_summary", toolInput: period },
+      { kind: "text", text: "You made about $70.00 in goods sales." },
+    ]);
+    const corrected = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "how were sales from oct 5 to oct 11?" });
+    expect(corrected).toMatchObject({
+      ok: true,
+      reply: "Oct 5 to Oct 11: 2 orders, $65.00 goods sales, $10.00 refunded, $55.43 net to store, average order $32.50.",
+    });
+  });
 
   it("a repeated message id returns the stored turn without a second model call", async () => {
     const messageId = crypto.randomUUID();
@@ -721,21 +850,12 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     });
     const before = await stock();
 
-    // Starter: the tool says locked and the actions refuse.
-    let fake = script([
-      { kind: "tool", toolName: "reorder_suggestions", toolInput: {} },
-      { kind: "text", text: "Reorder suggestions are on the Pro plan." },
-    ]);
-    await ask();
-    expect(toolResult(fake)).toContain(String.raw`{\"locked\":true`);
+    // Starter: the actions refuse. The chat itself is Pro (#818), so the tool's locked answer is not reachable from it.
+    await setPlan(storeAId, null);
     expect(await saveReorder({ lines: [{ listingId: beansId, quantity: 5 }] })).toEqual({ ok: false, message: "Reorder suggestions are on the Pro plan." });
     expect(await updateReorderDays({ leadDays: 3, coverDays: 7 })).toEqual({ ok: false, message: "Reorder suggestions are on the Pro plan." });
-
-    await authPrisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.storeSubscription.create({ data: { storeId: storeAId, plan: "pro", status: "active" } });
-    });
+    await setPlan(storeAId, "pro");
+    let fake: ReturnType<typeof script>;
     try {
       // Staff are refused even on Pro.
       asStore(storeASlug, cookiesStaff);
@@ -766,11 +886,6 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
 
       expect(await stock()).toEqual(before);
     } finally {
-      await authPrisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        await tx.storeSubscription.delete({ where: { storeId: storeAId } });
-      });
       await storeScoped(storeAId).listing.update({ where: { id: beansId }, data: { active: false } });
     }
   });

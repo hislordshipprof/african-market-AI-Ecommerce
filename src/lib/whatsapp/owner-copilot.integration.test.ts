@@ -19,7 +19,7 @@ import { POST } from "@/app/api/webhooks/whatsapp/route";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
-import { storeScoped } from "../db";
+import { platformAdmin, storeScoped } from "../db";
 import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "./fake";
 import { setWhatsAppProvider } from "./index";
 import { setOwnerNotices } from "./owner-link";
@@ -104,6 +104,8 @@ describe.skipIf(!hasDb)("Store copilot on WhatsApp (lane database, recording fak
     raw = testPrismaClient();
     storeA = (await raw.store.create({ data: { slug: `wa-cp-a-${RUN}`, name: "Ada Market" } })).id;
     storeB = (await raw.store.create({ data: { slug: `wa-cp-b-${RUN}`, name: "Bisi Foods" } })).id;
+    // The chat is Pro (#818); WhatsApp runs the same chat.
+    await platformAdmin.storeSubscription.createMany({ data: [storeA, storeB].map((storeId) => ({ storeId, plan: "pro", status: "active" })) });
     await raw.user.createMany({ data: [ownerA, ownerB].map((o) => ({ id: o.id, name: o.id, email: `${o.id}@example.com` })) });
     for (const [storeId, owner] of [[storeA, ownerA], [storeB, ownerB]] as const) {
       await storeScoped(storeId).storeMembership.create({ data: { storeId, userId: owner.id, role: "owner" } });
