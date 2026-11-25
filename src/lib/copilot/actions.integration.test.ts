@@ -37,6 +37,7 @@ import { setSpendClock } from "../assistant/spend";
 import * as dbModule from "../db";
 import type { Prisma } from "@prisma/client";
 import { setStripeProvider } from "../stripe";
+import { storeToday } from "../analytics/range";
 import { fakeStripeProvider } from "../stripe/fake";
 import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
 import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
@@ -356,6 +357,8 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       { kind: "text", text: "October 5 to 11: 2 orders, $65.00 in goods sales and $55.43 net to store after $10.00 in refunds. Average order $32.50." },
     ]);
     const answered = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "how were sales from oct 5 to oct 11?" });
+    // The model is told today's date in the store's zone, so "Nov 2 to Nov 8" gets the right year.
+    expect(JSON.stringify(fake.requests[0]?.body?.system)).toContain(`Today is ${storeToday("America/New_York")}`);
     expect(answered).toMatchObject({
       ok: true,
       reply: "October 5 to 11: 2 orders, $65.00 in goods sales and $55.43 net to store after $10.00 in refunds. Average order $32.50.",

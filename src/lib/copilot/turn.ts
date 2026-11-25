@@ -33,7 +33,8 @@ import { modelHistory, parseStoredMessages, type StoredMessage } from "./message
 import { COPILOT_SYSTEM_PROMPT } from "./prompt";
 import { databaseClock, insertProposalRows } from "./proposals";
 import { copilotTools, createDraftBook, type DraftBook, type Draft, type PendingChoice } from "./tools";
-import { estimateText } from "./inventory-report";
+import { estimateText, storeTimeZone } from "./inventory-report";
+import { storeToday } from "../analytics/range";
 import { salesText } from "./sales-summary";
 import {
   CONVERSATION_MAX,
@@ -306,10 +307,14 @@ export async function sendCopilotTurn(input: {
     lease = { id: conversation.id, token };
 
     const history = conversation.messages.slice(-HISTORY_MAX);
+    const timeZone = await storeTimeZone(input.storeId);
+    const today = storeToday(timeZone);
+    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone }).format(new Date());
     const book = createDraftBook();
     const result = await generateText({
       model: createAssistantModel(),
-      system: COPILOT_SYSTEM_PROMPT,
+      // Without today's date the model guesses the year of "Nov 2 to Nov 8".
+      system: `${COPILOT_SYSTEM_PROMPT}\n\nToday is ${today}, a ${weekday}, in the store's time zone (${timeZone}).`,
       messages: [...modelHistory(history), { role: "user", content: text }],
       tools: copilotTools(input.storeId, book),
       stopWhen: stepCountIs(STEP_CAP),
