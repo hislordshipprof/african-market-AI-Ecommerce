@@ -7,7 +7,8 @@ import { applicantPlanChoice, listStoreApplications } from "../../store-applicat
 import { listEscalatedThreads } from "../../support/platform-actions";
 import { getStoreSubscription, listStores } from "../actions";
 import { getReviewStats, listAttributeProposals } from "../catalog-actions";
-import { listConversationSample } from "../ai-oversight";
+import { listReviewInbox, todayUtc } from "../ai-oversight";
+import { conversationHref } from "../ai-review";
 import { loadAiEvalSpend } from "../ai-eval-spend";
 import { listDuplicatePairs } from "../catalog-duplicates";
 import { listCourierIncidents } from "../courier-incidents";
@@ -326,11 +327,12 @@ export function adminAssistantTools(ctx: ToolContext) {
       description: "AI spend against the daily cap (last 30 days), stores near their chat cap this month, and today's flagged AI chats.",
       inputSchema: z.object({}),
       execute: () => audited(ctx, "ai_spend_and_flags", {}, async () => {
-        const [spend, sample] = await Promise.all([loadAiEvalSpend(ctx.now), listConversationSample({})]);
+        const [spend, sample] = await Promise.all([loadAiEvalSpend(ctx.now), listReviewInbox({ day: todayUtc(ctx.now), flagged: true })]);
         link(book, "AI eval and spend", "/admin/ai/eval-spend");
         link(book, "AI conversations", "/admin/ai/conversations");
-        const flagged = [...sample.shopper, ...sample.copilot].filter((row) => row.reasons.length > 0).slice(0, ROWS_MAX);
-        for (const row of flagged) link(book, `Flagged ${row.kind} chat, ${row.storeName}`, `/admin/ai/conversations/${row.kind}/${row.id}`);
+        // draft_conversation_label takes store chats only, so the assistant's own chats stay on the review page.
+        const flagged = sample.rows.filter((row) => row.kind !== "admin").slice(0, ROWS_MAX);
+        for (const row of flagged) link(book, `Flagged ${row.kind} chat, ${row.storeName}`, conversationHref(row.kind, row.id));
         return {
           spentTodayDollars: dollars(spend.spend.spentMicros / BigInt(10_000)),
           capDollars: dollars(spend.spend.capMicros / BigInt(10_000)),

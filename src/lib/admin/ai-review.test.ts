@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { actionFlagReasons, copilotTranscript, shopperTranscript } from "./ai-review";
+import {
+  actionFlagReasons,
+  chatKey,
+  copilotTranscript,
+  filterInbox,
+  inboxCounts,
+  nextUnlabelled,
+  orderInbox,
+  parseChatKey,
+  shopperTranscript,
+  type InboxRow,
+} from "./ai-review";
 
 /** The default threshold: 2 cents. */
 const T = 20_000;
@@ -110,5 +121,77 @@ describe("copilotTranscript", () => {
       { id: "0", role: "owner", parts: [{ kind: "text", text: "sold 3 gari" }] },
       { id: "1", role: "assistant", parts: [{ kind: "text", text: "Which gari?" }, { kind: "choices", names: ["Gari white"] }] },
     ]);
+  });
+});
+
+describe("copilotTranscript for the platform admin assistant", () => {
+  it("reads admin turns and drops what the reply cost", () => {
+    expect(copilotTranscript([
+      { role: "admin", text: "Which stores are past due?" },
+      { role: "assistant", text: "Two stores.", messageId: "m1", costMicros: 900, links: [{ label: "Store", href: "/admin/stores/s1" }] },
+      { role: "owner", text: "not an admin turn" },
+    ], "admin")).toEqual([
+      { id: "0", role: "admin", parts: [{ kind: "text", text: "Which stores are past due?" }] },
+      { id: "1", role: "assistant", parts: [{ kind: "text", text: "Two stores." }] },
+    ]);
+  });
+});
+
+function row(over: Partial<InboxRow> & Pick<InboxRow, "id">): InboxRow {
+  return {
+    kind: "shopper",
+    storeId: "s1",
+    storeName: "Store 1",
+    lastMessageAt: "2026-11-20T10:00:00.000Z",
+    messageCount: 2,
+    sampled: true,
+    reasons: [],
+    labels: [],
+    firstQuestion: "hi",
+    ...over,
+  };
+}
+
+const NONE = { kind: null, storeId: null, flagged: false, unlabelled: false } as const;
+
+describe("review inbox", () => {
+  const rows = orderInbox([
+    row({ id: "old-quiet", lastMessageAt: "2026-11-19T10:00:00.000Z" }),
+    row({ id: "new-quiet", lastMessageAt: "2026-11-21T10:00:00.000Z", labels: ["tone"] }),
+    row({ id: "old-flagged", lastMessageAt: "2026-11-18T10:00:00.000Z", reasons: ["costly_turn"], kind: "copilot", storeId: "s2", storeName: "Store 2" }),
+    row({ id: "admin", kind: "admin", storeId: null, storeName: null, lastMessageAt: "2026-11-20T12:00:00.000Z" }),
+  ]);
+
+  it("puts flagged chats first, then the sample, newest first", () => {
+    expect(rows.map((r) => r.id)).toEqual(["old-flagged", "new-quiet", "admin", "old-quiet"]);
+  });
+
+  it("filters by assistant, store, flagged and unlabelled together", () => {
+    expect(filterInbox(rows, { ...NONE, kind: "shopper" }).map((r) => r.id)).toEqual(["new-quiet", "old-quiet"]);
+    expect(filterInbox(rows, { ...NONE, storeId: "s1", unlabelled: true }).map((r) => r.id)).toEqual(["old-quiet"]);
+    expect(filterInbox(rows, { ...NONE, flagged: true }).map((r) => r.id)).toEqual(["old-flagged"]);
+    expect(filterInbox(rows, { ...NONE, kind: "admin", storeId: "s1" })).toEqual([]);
+  });
+
+  it("counts each option against the other filters, as the subscription filters do", () => {
+    const counts = inboxCounts(rows, { ...NONE, kind: "shopper", unlabelled: true });
+    expect(counts.kind).toEqual({ all: 3, shopper: 1, copilot: 1, admin: 1 });
+    expect(counts.store).toEqual({ all: 1, s1: 1 });
+    expect(counts.flagged).toBe(0);
+    expect(counts.unlabelled).toBe(1);
+  });
+
+  it("moves to the next unlabelled chat after the current one, wrapping, never the current one", () => {
+    expect(nextUnlabelled(rows, "copilot:old-flagged")?.id).toBe("admin");
+    expect(nextUnlabelled(rows, "shopper:old-quiet")?.id).toBe("old-flagged");
+    expect(nextUnlabelled([rows[0]!], chatKey(rows[0]!))).toBeNull();
+    expect(nextUnlabelled(rows, "shopper:gone")?.id).toBe("old-flagged");
+  });
+
+  it("reads a chat key only for a known assistant", () => {
+    expect(parseChatKey("admin:abc")).toEqual({ kind: "admin", id: "abc" });
+    expect(parseChatKey("robot:abc")).toBeNull();
+    expect(parseChatKey("shopper:")).toBeNull();
+    expect(parseChatKey(undefined)).toBeNull();
   });
 });

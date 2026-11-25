@@ -24,7 +24,7 @@ async function asAdmin<T>(run: (tx: Tx) => Promise<T>): Promise<T> {
   }
 }
 
-test("a platform admin reviews a flagged shopper chat, sees no file content, and labels it", async ({ page }) => {
+test("a platform admin reviews AI chats in a two-pane inbox, filters them, moves with J and K, and labels in one click", async ({ page }) => {
   const fixture = await asAdmin(async (tx) => {
     const store = await tx.store.findUniqueOrThrow({ where: { slug: "mama-ngozi" } });
     const cart = await tx.cart.create({ data: { storeId: store.id, source: "manual" } });
@@ -59,8 +59,21 @@ test("a platform admin reviews a flagged shopper chat, sees no file content, and
     await tx.aiAction.create({
       data: { storeId: store.id, conversationId: conversation.id, tool: "grounding_strip", input: { amount: "$4.00" }, output: {}, ok: true, createdAt: at },
     });
-    return { storeId: store.id, cartId: cart.id, conversationId: conversation.id };
+    // A quiet chat earlier that day: in the sample, listed after the flagged one.
+    const quietCart = await tx.cart.create({ data: { storeId: store.id, source: "manual" } });
+    const quiet = await tx.aiConversation.create({
+      data: {
+        storeId: store.id,
+        cartId: quietCart.id,
+        model: "claude-haiku-5-5",
+        createdAt: new Date(`${DAY}T09:00:00.000Z`),
+        lastMessageAt: new Date(`${DAY}T09:00:00.000Z`),
+        messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Do you deliver on Sunday?" }] }],
+      },
+    });
+    return { storeId: store.id, cartIds: [cart.id, quietCart.id], conversationId: conversation.id, quietId: quiet.id };
   });
+  const chatParam = (id: string) => new RegExp(`chat=shopper%3A${id}`);
 
   try {
     await page.goto("/admin/sign-in");
@@ -74,14 +87,34 @@ test("a platform admin reviews a flagged shopper chat, sees no file content, and
 
     await page.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "AI conversations" }).first().click();
     await expect(page.locator("h1")).toHaveText("AI conversations");
+    await expect(page.getByText("Check what the AI told shoppers and stores, and label its mistakes so they get fixed.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show" })).toHaveCount(0);
+
+    // A day with nothing to review says so and links to the sample size.
+    await page.goto("/admin/ai/conversations?day=2001-01-01");
+    await expect(page.getByTestId("inbox-empty")).toContainText("Nothing to review");
+    await expect(page.getByTestId("inbox-empty").getByRole("link", { name: "Change the sample size" })).toHaveAttribute("href", "/admin/settings/ai-onboarding");
 
     await page.goto(`/admin/ai/conversations?day=${DAY}&store=${fixture.storeId}`);
     const row = page.getByTestId(`conversation-${fixture.conversationId}`);
+    const quietRow = page.getByTestId(`conversation-${fixture.quietId}`);
     await expect(row).toContainText("Price removed");
-    await expect(row).toContainText("In sample");
-    await row.click();
+    await expect(row).toContainText("How much is the egusi?");
+    await expect(row).toContainText("Mama Ngozi");
+    await expect(row).toContainText("Shopper");
+    await expect(quietRow).toContainText("Do you deliver on Sunday?");
 
-    await expect(page.locator("h1")).toContainText("Shopper chat");
+    // Filters apply on change, with counts.
+    await page.getByText(/^Flagged only/).click();
+    await expect(page).toHaveURL(/flagged=1/);
+    await expect(quietRow).toHaveCount(0);
+    await page.getByText(/^Flagged only/).click();
+    await expect(quietRow).toBeVisible();
+
+    await row.click();
+    await expect(page).toHaveURL(chatParam(fixture.conversationId));
+    await expect(row).toHaveAttribute("aria-current", "true");
+    await expect(page.locator("#chat-title")).toContainText("Shopper chat");
     const transcript = page.getByTestId("transcript");
     await expect(transcript).toContainText("How much is the egusi? Here is my list.");
     await expect(transcript).toContainText("my-list.jpg");
@@ -90,23 +123,42 @@ test("a platform admin reviews a flagged shopper chat, sees no file content, and
     await expect(page.getByTestId("tool-calls")).toContainText("Price removed");
     expect(await page.locator("img[src^='data:'], img[src*='my-list']").count()).toBe(0);
 
-    await page.getByRole("radio", { name: "Wrong price" }).check();
+    await page.keyboard.press("j");
+    await expect(page).toHaveURL(chatParam(fixture.quietId));
+    await page.keyboard.press("k");
+    await expect(page).toHaveURL(chatParam(fixture.conversationId));
+
+    // One click labels, with the note, then the next unlabelled chat opens.
     await page.getByLabel(/Note/).fill("Stated a price before search.");
-    await page.getByRole("button", { name: "Save label" }).click();
-    await expect(page.getByTestId("review-labels")).toContainText("Wrong price");
+    await page.getByRole("group", { name: "Label this chat" }).getByRole("button", { name: "Wrong price" }).click();
+    await expect(page).toHaveURL(chatParam(fixture.quietId));
+    await expect(row).toContainText("Labelled: Wrong price");
+    await row.click();
     await expect(page.getByTestId("review-labels")).toContainText("Stated a price before search.");
+
+    // On a phone the list opens the chat full screen, with a Back button.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator("h1")).toBeHidden();
+    await page.getByRole("link", { name: "Back to the list" }).click();
+    await expect(quietRow).toBeVisible();
+    await expect(page.getByTestId("transcript")).toBeHidden();
+
+    // Old links to one chat open it in the inbox.
+    await page.goto(`/admin/ai/conversations/shopper/${fixture.conversationId}`);
+    await expect(page).toHaveURL(chatParam(fixture.conversationId));
 
     const recorded = await asAdmin(async (tx) => ({
       views: await tx.auditLog.count({ where: { action: "ai_conversation.view", entityId: fixture.conversationId } }),
       flags: await tx.aiReviewFlag.findMany({ where: { aiConversationId: fixture.conversationId } }),
     }));
     expect(recorded.views).toBeGreaterThanOrEqual(1);
-    expect(recorded.flags.map((flag) => [flag.storeId, flag.label])).toEqual([[fixture.storeId, "wrong_price"]]);
+    expect(recorded.flags.map((flag) => [flag.storeId, flag.label, flag.note])).toEqual([[fixture.storeId, "wrong_price", "Stated a price before search."]]);
   } finally {
+    const ids = [fixture.conversationId, fixture.quietId];
     await asAdmin(async (tx) => {
-      await tx.auditLog.deleteMany({ where: { entityId: fixture.conversationId } });
-      await tx.aiReviewFlag.deleteMany({ where: { aiConversationId: fixture.conversationId } });
+      await tx.auditLog.deleteMany({ where: { entityId: { in: ids } } });
+      await tx.aiReviewFlag.deleteMany({ where: { aiConversationId: { in: ids } } });
     });
-    await asAdmin((tx) => tx.$executeRaw`DELETE FROM carts WHERE id = ${fixture.cartId}`);
+    await asAdmin((tx) => tx.$executeRaw`DELETE FROM carts WHERE id = ANY(${fixture.cartIds})`);
   }
 });

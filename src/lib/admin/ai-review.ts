@@ -80,7 +80,7 @@ export type TranscriptPart =
 
 export interface TranscriptMessage {
   id: string;
-  role: "shopper" | "owner" | "assistant";
+  role: "shopper" | "owner" | "admin" | "assistant";
   parts: TranscriptPart[];
 }
 
@@ -132,15 +132,15 @@ export function shopperTranscript(messages: unknown): TranscriptMessage[] {
   return out;
 }
 
-/** The stored copilot transcript as reviewable parts. */
-export function copilotTranscript(messages: unknown): TranscriptMessage[] {
+/** The stored copilot or platform admin assistant transcript as reviewable parts; both store { role, text } turns. */
+export function copilotTranscript(messages: unknown, asker: "owner" | "admin" = "owner"): TranscriptMessage[] {
   if (!Array.isArray(messages)) return [];
   const out: TranscriptMessage[] = [];
   messages.forEach((raw, index) => {
     const message = record(raw);
     const role = message?.role;
     const text = str(message?.text);
-    if (!message || (role !== "owner" && role !== "assistant") || text === null) return;
+    if (!message || (role !== asker && role !== "assistant") || text === null) return;
     const parts: TranscriptPart[] = [{ kind: "text", text }];
     if (Array.isArray(message.choices)) {
       for (const choice of message.choices) {
@@ -151,7 +151,99 @@ export function copilotTranscript(messages: unknown): TranscriptMessage[] {
         if (names.length > 0) parts.push({ kind: "choices", names });
       }
     }
-    out.push({ id: String(index), role, parts });
+    out.push({ id: String(index), role: role === "assistant" ? "assistant" : asker, parts });
   });
   return out;
+}
+
+/** The three assistants whose chats are reviewed: shopper, store copilot and platform admin (#856). */
+export const CONVERSATION_KINDS = ["shopper", "copilot", "admin"] as const;
+export type ConversationKind = (typeof CONVERSATION_KINDS)[number];
+
+export const KIND_TEXT: Record<ConversationKind, string> = { shopper: "Shopper", copilot: "Store", admin: "Platform admin" };
+
+export interface InboxRow {
+  kind: ConversationKind;
+  id: string;
+  /** Null for a platform admin assistant chat, which belongs to no store. */
+  storeId: string | null;
+  storeName: string | null;
+  lastMessageAt: string;
+  messageCount: number;
+  sampled: boolean;
+  reasons: FlagReason[];
+  labels: ReviewLabel[];
+  /** The first thing the shopper, owner or admin asked, cut to 200 characters. */
+  firstQuestion: string;
+}
+
+export interface InboxFilters {
+  kind: ConversationKind | null;
+  storeId: string | null;
+  flagged: boolean;
+  unlabelled: boolean;
+}
+
+export function chatKey(row: Pick<InboxRow, "kind" | "id">): string {
+  return `${row.kind}:${row.id}`;
+}
+
+export function parseChatKey(value: string | undefined): { kind: ConversationKind; id: string } | null {
+  const at = value?.indexOf(":") ?? -1;
+  if (!value || at < 0) return null;
+  const kind = CONVERSATION_KINDS.find((known) => known === value.slice(0, at));
+  const id = value.slice(at + 1);
+  return kind && id ? { kind, id } : null;
+}
+
+/** Flagged chats first, then the sample, newest first. */
+export function orderInbox(rows: InboxRow[]): InboxRow[] {
+  return rows.sort((a, b) =>
+    Number(b.reasons.length > 0) - Number(a.reasons.length > 0)
+    || b.lastMessageAt.localeCompare(a.lastMessageAt)
+    || chatKey(a).localeCompare(chatKey(b)));
+}
+
+function matches(row: InboxRow, filters: InboxFilters, skip?: keyof InboxFilters): boolean {
+  return (skip === "kind" || !filters.kind || row.kind === filters.kind)
+    && (skip === "storeId" || !filters.storeId || row.storeId === filters.storeId)
+    && (skip === "flagged" || !filters.flagged || row.reasons.length > 0)
+    && (skip === "unlabelled" || !filters.unlabelled || row.labels.length === 0);
+}
+
+export function filterInbox(rows: InboxRow[], filters: InboxFilters): InboxRow[] {
+  return rows.filter((row) => matches(row, filters));
+}
+
+/** Each option's count under the other active filters, so a count is what choosing it would show (#837). */
+export function inboxCounts(rows: InboxRow[], filters: InboxFilters) {
+  const kind: Record<"all" | ConversationKind, number> = { all: 0, shopper: 0, copilot: 0, admin: 0 };
+  const store: Record<string, number> = { all: 0 };
+  let flagged = 0;
+  let unlabelled = 0;
+  for (const row of rows) {
+    if (matches(row, filters, "kind")) {
+      kind.all += 1;
+      kind[row.kind] += 1;
+    }
+    if (matches(row, filters, "storeId")) {
+      store.all += 1;
+      if (row.storeId) store[row.storeId] = (store[row.storeId] ?? 0) + 1;
+    }
+    if (matches(row, filters, "flagged") && row.reasons.length > 0) flagged += 1;
+    if (matches(row, filters, "unlabelled") && row.labels.length === 0) unlabelled += 1;
+  }
+  return { kind, store, flagged, unlabelled };
+}
+
+/** The first unlabelled chat after the current one in list order, wrapping round; never the current one. */
+export function nextUnlabelled(rows: InboxRow[], current: string): InboxRow | null {
+  const at = rows.findIndex((row) => chatKey(row) === current);
+  const rotated = [...rows.slice(at + 1), ...rows.slice(0, Math.max(at, 0))];
+  return rotated.find((row) => row.labels.length === 0 && chatKey(row) !== current) ?? null;
+}
+
+/** Where a chat opens in the review inbox. */
+export function conversationHref(kind: ConversationKind, id: string): string {
+  return `/admin/ai/conversations?chat=${encodeURIComponent(`${kind}:${id}`)}`;
 }
