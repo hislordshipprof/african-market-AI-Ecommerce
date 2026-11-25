@@ -25,7 +25,7 @@ export function deliveryLine(store: Delivering): "Delivers to you" | "Delivery" 
 export function deliveryFee(store: Delivering & { storeDeliveryFeeCents: number | null }): string | null {
   const line = deliveryLine(store);
   if (line !== "Delivers to you" && line !== "Delivery") return null;
-  return store.storeDeliveryFeeCents ? `${money(store.storeDeliveryFeeCents)} delivery` : null;
+  return store.storeDeliveryFeeCents ? money(store.storeDeliveryFeeCents) : null;
 }
 
 type Nearby = { deliversToYou?: boolean; pickupEnabled: boolean };

@@ -27,7 +27,7 @@ const store: CardStore = {
 };
 
 const card = (over: Partial<CardStore> = {}) => renderToStaticMarkup(createElement(StoreCard, { store: { ...store, ...over } }));
-const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
 
 function nearMe(stores: CardStore[]) {
   return renderToStaticMarkup(createElement(NearMe, { stores, chips: [], intro: null, owner: null, figure: null }));
@@ -37,7 +37,7 @@ describe("store card (#863 AC3)", () => {
   it("names the area and cuisines, and the store's own delivery fee next to its delivery", () => {
     const html = text(card());
     expect(html).toContain("Parkside, West African");
-    expect(html).toContain("Delivery $4.99 delivery");
+    expect(html).toContain("Delivery · $4.99");
     expect(html).toContain("Pickup");
   });
 

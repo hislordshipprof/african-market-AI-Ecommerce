@@ -28,7 +28,7 @@ export const DIRECTORY_STORE_FIELDS = {
   ownerPhotoUrl: true,
 } satisfies Prisma.StoreSelect;
 
-// Read on the server only, to work out the card's delivery lines; never sent to the page.
+// Read on the server only, to work out the card's delivery lines; only the store-delivery fee reaches the page (#863).
 const DELIVERY_FIELDS = {
   id: true,
   deliveryRadiusMi: true,

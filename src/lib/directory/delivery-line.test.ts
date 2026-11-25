@@ -31,8 +31,8 @@ describe("deliveryLine", () => {
 
 describe("deliveryFee (#863: a fee only where the store has a real one)", () => {
   it("prices the store's own delivery where it reaches the shopper or no point was given", () => {
-    expect(deliveryFee({ courierMayDeliver: false, storeDeliveryEnabled: true, storeDeliveryFeeCents: 499 })).toBe("$4.99 delivery");
-    expect(deliveryFee({ courierMayDeliver: false, storeDeliveryEnabled: true, deliversToYou: true, storeDeliveryFeeCents: 1250 })).toBe("$12.50 delivery");
+    expect(deliveryFee({ courierMayDeliver: false, storeDeliveryEnabled: true, storeDeliveryFeeCents: 499 })).toBe("$4.99");
+    expect(deliveryFee({ courierMayDeliver: false, storeDeliveryEnabled: true, deliversToYou: true, storeDeliveryFeeCents: 1250 })).toBe("$12.50");
   });
 
   it("shows no fee for a zero or unknown fee, outside the radius, or for a courier (its fee is a quote)", () => {

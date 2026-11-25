@@ -521,7 +521,7 @@ test("store cards: open now or opens at from the browser clock, distance, pickup
     await expect(card).toContainText("Pickup");
     await expect(card).toContainText("Delivery");
     await expect(card).not.toContainText("Delivers to you");
-    await expect(card).toContainText("$4.99 delivery");
+    await expect(card).toContainText("Delivery · $4.99");
     await expect(card).toContainText("West African");
 
     await page.getByLabel("ZIP code or city").fill("77002");
@@ -675,7 +675,7 @@ test("directory home B2 (#863): hero search, the owner link, delivery or pickup,
     await page.getByRole("button", { name: "Find stores" }).click();
     const door = page.getByRole("region", { name: "Delivers to your door" });
     const pickup = page.getByRole("region", { name: "Pickup nearby" });
-    await expect(door.getByRole("link", { name: /Mama Ngozi African Market/ })).toContainText("$4.99 delivery");
+    await expect(door.getByRole("link", { name: /Mama Ngozi African Market/ })).toContainText("Delivers to you · $4.99");
     await expect(door.getByRole("link")).toHaveCount(1);
     await expect(pickup.getByRole("link", { name: /Pickup Only Market/ })).toContainText("Pickup");
     await expect(pickup.getByRole("link", { name: /Pickup Only Market/ })).not.toContainText("$");

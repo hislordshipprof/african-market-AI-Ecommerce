@@ -61,7 +61,7 @@ export function StoreCard({ store }: { store: CardStore }) {
               <span className={styles.flag}>
                 {delivery === "Delivers to you" ? <Check aria-hidden="true" size={16} /> : <Truck aria-hidden="true" size={16} />}
                 {delivery}
-                {fee ? <span className={styles.fee}>{fee}</span> : null}
+                {fee ? <span className={styles.fee}>{` · ${fee}`}</span> : null}
               </span>
             ) : null}
             {store.pickupEnabled ? (

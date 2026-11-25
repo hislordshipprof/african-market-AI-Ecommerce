@@ -322,7 +322,7 @@
 }
 
 .fee {
-  margin-left: 4px;
+  white-space: pre;
   color: var(--d-muted);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
