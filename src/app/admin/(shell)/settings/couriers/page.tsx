@@ -11,7 +11,7 @@ export default async function CourierSettingsPage() {
   const settings = await readCourierSettings();
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <div className="max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 className="text-2xl font-bold text-foreground">Courier settings</h1>
       <p className="mt-2 max-w-prose text-sm text-muted-foreground">
         These apply to every store, except where a store&apos;s <Link href="/admin/metros" className="font-medium text-primary underline-offset-4 hover:underline">metro</Link> sets

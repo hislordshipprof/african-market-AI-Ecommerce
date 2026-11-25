@@ -44,7 +44,7 @@ export default async function MetroPage({ params }: { params: Promise<{ id: stri
   const totals = report.quotes.reduce((acc, q) => ({ attempts: acc.attempts + q.attempts, successes: acc.successes + q.successes }), { attempts: 0, successes: 0 });
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:py-12">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       <p className="text-sm">
         <Link href="/admin/metros" className="font-medium text-primary underline-offset-4 hover:underline">Metros</Link>
       </p>

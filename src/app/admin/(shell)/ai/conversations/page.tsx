@@ -69,7 +69,7 @@ export default async function AiConversationsPage({ searchParams }: { searchPara
   const range = inbox.day ? `${fullDayFormat.format(new Date(`${inbox.day}T00:00:00.000Z`))} (UTC)` : `Last 7 days, ${dayText(inbox.from)} to ${dayText(inbox.to)} (UTC)`;
 
   return (
-    <div className="mx-auto max-w-[90rem] px-4 py-8 sm:px-6 lg:py-10">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       <InboxKeys
         nextHref={next ? inboxHref(state, chatKey(next)) : null}
         prevHref={prev ? inboxHref(state, chatKey(prev)) : null}

@@ -28,7 +28,7 @@ export default async function CourierIncidentPage(props: { params: Promise<{ ord
   const { incident, events, notes, checkedAt } = detail;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
+    <div className="max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <Link href="/admin/couriers/incidents" className={`inline-flex min-h-11 items-center gap-1 rounded-full text-sm font-medium text-primary underline-offset-4 hover:underline ${FOCUS}`}>
         <ChevronLeft aria-hidden className="size-4" /> Courier incidents
       </Link>

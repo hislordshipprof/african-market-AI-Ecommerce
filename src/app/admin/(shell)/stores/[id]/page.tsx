@@ -46,7 +46,7 @@ export default async function EditStorePage({
   const plan = PLAN_NAMES[subscription?.plan ?? "starter"];
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-8">
+    <div className="max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 className="mb-6 text-2xl font-bold text-foreground">
         Edit: {store.name}
       </h1>
