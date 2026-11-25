@@ -1,4 +1,4 @@
-import { editorial } from "../src/lib/storefront/editorial";
+import { editorial, heroPhotos } from "../src/lib/storefront/editorial";
 import { categoryPhotos } from "../src/lib/storefront/catalog";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -203,7 +203,7 @@ async function seedStoreBanners() {
       subtitle: "The ingredients you grew up with. From your neighborhood store to your kitchen.",
       ctaText: "Shop your favorites",
       ctaHref: "/collections/jollof-night",
-      imageUrl: editorial.jollof,
+      imageUrl: heroPhotos.mamaNgoziYams.src,
       sortOrder: 0,
     },
     {
@@ -213,7 +213,7 @@ async function seedStoreBanners() {
       subtitle: "Everything for egusi, ogbono and ewedu",
       ctaText: "Build your pot",
       ctaHref: "/collections/soup-essentials",
-      imageUrl: editorial.spices,
+      imageUrl: heroPhotos.mamaNgoziSpices.src,
       sortOrder: 1,
     },
     {
@@ -223,7 +223,7 @@ async function seedStoreBanners() {
       subtitle: "Same-day to your door in Houston",
       ctaText: "Start shopping",
       ctaHref: "/",
-      imageUrl: editorial.market,
+      imageUrl: heroPhotos.mamaNgoziPeppers.src,
       sortOrder: 2,
     },
     // tante-marie banners
@@ -234,7 +234,7 @@ async function seedStoreBanners() {
       subtitle: "Scotch bonnet · Plantain · Callaloo",
       ctaText: "Browse all",
       ctaHref: "/",
-      imageUrl: editorial.market,
+      imageUrl: heroPhotos.tanteMarieMarket.src,
       sortOrder: 0,
     },
     {
@@ -244,7 +244,7 @@ async function seedStoreBanners() {
       subtitle: "$12.99/lb this Saturday only",
       ctaText: "See deal",
       ctaHref: "/categories/fish-and-meat",
-      imageUrl: editorial.fish,
+      imageUrl: heroPhotos.tanteMariePlantains.src,
       sortOrder: 1,
     },
     {
@@ -254,7 +254,7 @@ async function seedStoreBanners() {
       subtitle: "Ackee, saltfish, plantain, bammy — feeds 4",
       ctaText: "Order now",
       ctaHref: "/collections/caribbean-breakfast",
-      imageUrl: editorial.jollof,
+      imageUrl: heroPhotos.tanteMarieAckee.src,
       sortOrder: 2,
     },
   ];

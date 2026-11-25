@@ -67,6 +67,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - **Tenant = one market** (may have multiple locations later; v1 = one location per tenant).
 - **Routing:** `{slug}.platform.com` by default; optional custom domain (e.g. `shop.marketa.com`) via CNAME + automatic TLS. Until `PLATFORM_ROOT_DOMAIN` is set, the production vercel.app alias serves the platform root and stores by `?store=<slug>`, noindex ([ADR-0007](../adr/0007-store-directory-instead-of-marketplace.md), #766).
 - **Branding per tenant:** name, logo, colors, hero banner, about/hours/contact, policies, WhatsApp number.
+  - Hero photos (#836): a banner without a usable photo shows a real photograph of African or Caribbean groceries from `public/images/hero/` (yams, spices, peppers), never a plated dish; the demo stores' banners use that set. Each photo is credited in `public/images/CREDITS.md`, is framed on its own focal point (`heroPhotos` in `src/lib/storefront/editorial.ts`) and keeps the heading and subtitle at WCAG AA under the existing scrim at 390, 768 and 1280px.
 - **Isolation:** every tenant-owned row carries `tenant_id`; enforced with Postgres Row-Level Security plus a tenant-scoped data access layer. No query may run without a resolved tenant (except platform-admin and shared-catalog tables).
 - **Shared vs tenant data:**
   - Shared: master product catalog (canonical African products, synonyms, images, recipes), customer identity.
