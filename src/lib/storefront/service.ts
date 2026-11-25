@@ -7,7 +7,7 @@ import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
 import { countedStockLeft, effectiveMaxPerOrder } from "../cart/limits";
 import { listingAttributes } from "../catalog/listing-attributes";
-import type { Allergen, DietaryClaim } from "../catalog/attributes";
+import { ALLERGENS, DIETARY_CLAIMS, type Allergen, type DietaryClaim } from "../catalog/attributes";
 import type { ShopperNeed } from "../catalog/attributes";
 import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
@@ -386,9 +386,10 @@ export async function getListingFacts(storeId: string, listingId: string): Promi
     listingAttributes(storeId, listingId),
   ]);
   if (!listing || !attributes) return null;
-  const stated = <T>(group: { status: string; values: T[] }) =>
-    listing.prepared != null && group.status !== "unknown" ? group.values : null;
-  return { stockLeft: countedStockLeft(listing), allergens: stated(attributes.allergens), dietary: stated(attributes.dietary) };
+  // In the listed order (milk before wheat), however the owner ticked them.
+  const stated = <T extends string>(group: { status: string; values: T[] }, order: readonly T[]) =>
+    listing.prepared != null && group.status !== "unknown" ? order.filter((value) => group.values.includes(value)) : null;
+  return { stockLeft: countedStockLeft(listing), allergens: stated(attributes.allergens, ALLERGENS), dietary: stated(attributes.dietary, DIETARY_CLAIMS) };
 }
 
 export interface SearchResult {
