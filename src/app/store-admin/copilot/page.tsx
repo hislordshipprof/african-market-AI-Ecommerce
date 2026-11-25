@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { Store } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { listOpenAlerts } from "@/lib/copilot/alerts";
 import { loadDigestHour } from "@/lib/copilot/digest";
@@ -16,6 +14,7 @@ import { reorderSuggestions } from "@/lib/copilot/reorder";
 import { loadReorderList, reorderText } from "@/lib/copilot/reorder-list";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
 import { storeMayUse } from "@/lib/billing/plan";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
@@ -33,23 +32,9 @@ export default async function CopilotPage() {
     : [null, null];
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <Link
-            href={`/store-admin?store=${session.store.slug}`}
-            className="flex min-h-11 items-center gap-2 rounded-lg bg-primary px-3 text-primary-foreground"
-          >
-            <Store className="size-5" />
-            <span className="text-sm font-semibold">Dashboard</span>
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">{session.store.name}</h1>
-            <p className="text-xs text-muted-foreground">Stock copilot</p>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto max-w-2xl px-4 py-6">
+    <>
+      <PageHeader title="Stock copilot" description={session.store.name} />
+      <div className="max-w-3xl">
         <AlertsPanel alerts={alerts} />
         {/* The chat is the Store assistant button on every store-admin page (#855). */}
         {reportsAllowed ? (
@@ -95,7 +80,7 @@ export default async function CopilotPage() {
         </section>
         <WeeklyReports reports={weekly} />
         <DigestSetting hour={digestHour} />
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
