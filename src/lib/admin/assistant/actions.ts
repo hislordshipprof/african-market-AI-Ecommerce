@@ -35,6 +35,7 @@ export async function loadAdminAssistant(): ReturnType<typeof loadAdminAssistant
 const confirmSchema = z.strictObject({
   draftId: z.string().min(1).max(200),
   text: z.string().max(1000).optional(),
+  keep: z.array(z.string().min(1).max(200)).max(20).optional(),
 });
 
 /** The admin's one tap on a draft card. 2FA is checked here, before the admin's own function runs. */
@@ -42,7 +43,7 @@ export async function confirmAdminAssistantDraft(input: unknown): Promise<AdminD
   const session = await requirePlatformAdmin();
   const parsed = parseInput(confirmSchema, input);
   if (!parsed.ok) return { ok: false, code: "invalid", message: "Check the text on the card and try again." };
-  return confirmAdminDraft(parsed.data.draftId, { id: session.user.id, email: session.user.email }, { text: parsed.data.text });
+  return confirmAdminDraft(parsed.data.draftId, { id: session.user.id, email: session.user.email }, { text: parsed.data.text, keep: parsed.data.keep });
 }
 
 export async function rejectAdminAssistantDraft(input: unknown): Promise<{ ok: true; draft: AdminDraftCard } | { ok: false; code: "not_found"; message: string }> {

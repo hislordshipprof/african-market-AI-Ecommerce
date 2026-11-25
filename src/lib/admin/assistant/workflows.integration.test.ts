@@ -46,6 +46,10 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
   const metroId = crypto.randomUUID();
   const metroName = `Houston ${RUN}`;
   const slugs: string[] = [];
+  const cat = { parent: "", child: "" };
+  const product = { clean1: "", clean2: "", noPhoto: "", dupA: "", dupB: "" };
+  let pairId = "";
+  let proposalId = "";
   let conversationId = "";
   const owner = testPrismaClient();
 
@@ -82,6 +86,21 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.adminAssistantConversation.create({ data: { id: conversationId, userId: admin.id, model: "test" } });
       await tx.metro.create({ data: { id: metroId, name: metroName, states: ["TX"], centerLat: 29.76, centerLng: -95.37, radiusMi: 40 } });
+      cat.parent = (await tx.category.create({ data: { name: `Grains ${RUN}`, slug: `grains-${RUN}`, sortOrder: 900 } })).id;
+      cat.child = (await tx.category.create({ data: { name: `Rice ${RUN}`, slug: `rice-${RUN}`, sortOrder: 901 } })).id;
+      const make = (name: string, data: Record<string, unknown> = {}) => tx.masterProduct.create({
+        data: { name: `${name} ${RUN}`, categoryId: cat.child, status: "needs_review", description: `${name}, 5 lb bag.`, unit: "5 lb", confidence: "high", imageUrl: "https://example.com/p.webp", ...data },
+      }).then((row) => row.id);
+      product.clean1 = await make("Ofada rice");
+      product.clean2 = await make("Jollof rice mix");
+      product.noPhoto = await make("Basmati rice", { imageUrl: null });
+      const [a, b] = [await make("Garri white", { status: "active" }), await make("White garri", { status: "active" })].sort();
+      product.dupA = a!;
+      product.dupB = b!;
+      pairId = (await tx.catalogDuplicatePair.create({ data: { productAId: a!, productBId: b!, nameSimilarity: 0.8, sharedTerms: 1, score: 0.9, verdict: "same" } })).id;
+      proposalId = (await tx.attributeProposal.create({
+        data: { productId: product.clean1, ingredientsRead: true, ingredients: ["rice"], allergensRead: true, allergens: [], dietaryRead: false },
+      })).id;
     });
   }, 60_000);
 
@@ -103,6 +122,13 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
         await tx.$executeRaw`DELETE FROM stores WHERE id = ${id}`;
       }
       await tx.metro.deleteMany({ where: { id: metroId } });
+      const ids = Object.values(product);
+      await tx.masterProduct.updateMany({ where: { id: { in: ids } }, data: { mergedIntoId: null, status: "archived" } });
+      await tx.$executeRaw`DELETE FROM master_product_ingredients WHERE product_id = ANY(${ids})`;
+      await tx.masterProduct.deleteMany({ where: { id: { in: ids } } });
+      await tx.masterProduct.deleteMany({ where: { name: { contains: RUN } } });
+      await tx.category.deleteMany({ where: { name: { contains: RUN }, parentId: { not: null } } });
+      await tx.category.deleteMany({ where: { name: { contains: RUN } } });
     });
     await owner.$disconnect();
   });
@@ -160,6 +186,80 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       const store = await platformAdmin.store.findUniqueOrThrow({ where: { slug } });
       expect(store.metroId).toBeNull();
       expect(await platformAdmin.storeInvite.count({ where: { storeId: store.id } })).toBe(0);
+    });
+  });
+
+  describe("batches", () => {
+    it("lists each product in the review queue with its problems, and approves only the ones left ticked", async () => {
+      signInAs(admin);
+      const ids = [product.clean1, product.clean2, product.noPhoto];
+      const all = await draft("draft_review_approve", { onlyClean: false, productIds: ids });
+      expect(all.cards[0]!.items).toEqual(expect.arrayContaining([
+        { key: product.noPhoto, label: `Basmati rice ${RUN}`, problems: ["no photo"] },
+        { key: product.clean1, label: `Ofada rice ${RUN}`, problems: [] },
+      ]));
+
+      const { cards } = await draft("draft_review_approve", { productIds: ids });
+      expect(cards).toHaveLength(1);
+      expect(cards[0]!.items!.map((item) => item.key).sort()).toEqual([product.clean1, product.clean2].sort());
+
+      const result = await confirmAdminAssistantDraft({ draftId: cards[0]!.id, keep: [product.clean1] });
+      expect(result).toMatchObject({ ok: true, draft: { state: "confirmed" } });
+      const statuses = await platformAdmin.masterProduct.findMany({ where: { id: { in: ids } }, select: { id: true, status: true } });
+      expect(Object.fromEntries(statuses.map((row) => [row.id, row.status]))).toEqual({
+        [product.clean1]: "active", [product.clean2]: "needs_review", [product.noPhoto]: "needs_review",
+      });
+      expect(await platformAdmin.auditLog.count({ where: { entityId: product.clean1, action: "catalog.approve", actorId: admin.id } })).toBe(1);
+    });
+
+    it("refuses a confirm with every item unticked", async () => {
+      signInAs(admin);
+      const { cards } = await draft("draft_review_approve", { productIds: [product.clean2] });
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id, keep: [] })).toMatchObject({ ok: false, code: "invalid" });
+      expect((await platformAdmin.masterProduct.findUniqueOrThrow({ where: { id: product.clean2 } })).status).toBe("needs_review");
+    });
+
+    it("approves attribute proposals through the review screen's function", async () => {
+      signInAs(admin);
+      const { cards } = await draft("draft_attribute_approve", { productIds: [product.clean1] });
+      expect(cards[0]!.items).toEqual([{ key: proposalId, label: `Ofada rice ${RUN}`, problems: [] }]);
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true });
+      expect((await platformAdmin.attributeProposal.findUniqueOrThrow({ where: { id: proposalId } })).status).toBe("approved");
+    });
+
+    it("adds synonyms, and reports the one the product already has", async () => {
+      signInAs(admin);
+      const { cards } = await draft("draft_synonyms", { synonyms: [
+        { product: `Ofada rice ${RUN}`, term: "ofada", language: "yo" },
+        { product: `Ofada rice ${RUN}`, term: "local rice" },
+      ] });
+      expect(cards[0]!.items!.map((item) => item.label)).toEqual([`"ofada" in Yoruba (yo) for Ofada rice ${RUN}`, `"local rice" for Ofada rice ${RUN}`]);
+      await sql((tx) => tx.productSynonym.create({ data: { productId: product.clean1, term: "local rice" } }));
+      const result = await confirmAdminAssistantDraft({ draftId: cards[0]!.id });
+      expect(result).toMatchObject({ ok: true, draft: { outcome: expect.stringContaining("local rice") } });
+      expect(await platformAdmin.productSynonym.count({ where: { productId: product.clean1, term: "ofada", language: "yo" } })).toBe(1);
+    });
+
+    it("merges a duplicate pair into the product the admin keeps", async () => {
+      signInAs(admin);
+      const { cards } = await draft("draft_duplicate_merge", { merges: [{ pairId, keepProductId: product.dupA }] });
+      expect(cards[0]!.items).toEqual([{ key: pairId, label: `Keep Garri white ${RUN}, merge White garri ${RUN} into it`, problems: [] }]);
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true });
+      expect(await platformAdmin.masterProduct.findUniqueOrThrow({ where: { id: product.dupB } })).toMatchObject({ status: "merged", mergedIntoId: product.dupA });
+    });
+
+    it("creates, renames and moves categories", async () => {
+      signInAs(admin);
+      const { cards } = await draft("draft_category_changes", { changes: [
+        { action: "create", name: `Flours ${RUN}`, parent: `Grains ${RUN}` },
+        { action: "rename", category: `Rice ${RUN}`, name: `Rice and grains ${RUN}` },
+        { action: "move", category: `Rice ${RUN}`, parent: `Grains ${RUN}` },
+      ] });
+      expect(cards[0]!.items).toHaveLength(3);
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true });
+      const child = await platformAdmin.category.findUniqueOrThrow({ where: { id: cat.child } });
+      expect(child).toMatchObject({ name: `Rice and grains ${RUN}`, parentId: cat.parent });
+      expect(await platformAdmin.category.findFirst({ where: { name: `Flours ${RUN}`, parentId: cat.parent } })).not.toBeNull();
     });
   });
 });

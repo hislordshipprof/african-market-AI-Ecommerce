@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { platformAdminTransaction } from "../../db";
 import { createStore, inviteStoreOwnerAction } from "../actions";
+import { approveAttributeProposal, approveProduct } from "../catalog-actions";
+import { createCategory, updateCategory } from "../catalog-categories";
+import { mergeDuplicatePair } from "../catalog-duplicates";
+import { addProductSynonym } from "../product-synonyms";
 import { setStoreMetro } from "../metros";
 import { VALID_US_TIMEZONES } from "../timezone";
 import type { Kind } from "./drafts";
@@ -32,6 +36,38 @@ async function runSteps(steps: Array<{ done: string; run: () => Promise<Step> }>
   }
   return { ok: true, outcome: `Done: ${done.join(", ")}.` };
 }
+
+/** At most this many items on one batch card. */
+export const BATCH_MAX = 20;
+
+/** Runs each ticked item through the admin's own function; one that fails does not stop the rest. */
+async function runBatch<T extends { key: string; label: string }>(items: T[], run: (item: T) => Promise<Step>): Promise<{ ok: true; outcome: string } | { ok: false; error: string }> {
+  const failed: string[] = [];
+  for (const item of items) {
+    const result = await run(item);
+    if (!result.ok) failed.push(`${item.label}: ${result.error}`);
+  }
+  if (failed.length === items.length) return { ok: false, error: `Nothing was done. ${failed.join("; ")}` };
+  const done = `Done ${items.length - failed.length} of ${items.length}.`;
+  return { ok: true, outcome: failed.length ? `${done} Not done: ${failed.join("; ")}.` : done };
+}
+
+const item = <S extends z.ZodRawShape>(shape: S) => z.strictObject({ key: id, label: z.string().max(300), ...shape });
+const batch = <S extends z.ZodRawShape>(shape: S) => z.strictObject({ items: z.array(item(shape)).min(1).max(BATCH_MAX) });
+const step = (result: { success?: boolean; error?: string }): Step => (result.error ? { ok: false, error: result.error } : { ok: true });
+const stateStep = (result: { ok?: boolean; message?: string; fieldErrors?: Record<string, string | undefined> }): Step =>
+  result.ok ? { ok: true } : { ok: false, error: Object.values(result.fieldErrors ?? {}).find(Boolean) ?? result.message ?? "It could not be saved." };
+
+const reviewParams = batch({});
+const attributeParams = batch({});
+const synonymParams = batch({ productId: id, term: z.string().max(100), language: z.string().max(10) });
+const mergeParams = batch({ survivorId: id });
+const categoryParams = batch({
+  action: z.enum(["create", "rename", "move"]),
+  categoryId: id.nullable(),
+  name: z.string().max(60).nullable(),
+  parentId: id.nullable(),
+});
 
 const storeCreateParams = z.strictObject({
   name: z.string().min(1).max(200),
@@ -83,4 +119,44 @@ export const WORKFLOW_KINDS = {
       ]);
     },
   } satisfies Kind<z.infer<typeof storeCreateParams>>,
+  // Each batch kind's admin function re-checks its item under a lock (status, pending, open pair, category exists), so
+  // the card keeps no snapshot of its own and a changed item is reported as not done.
+  review_approve: {
+    params: reviewParams,
+    snapshot: async () => ({}),
+    apply: (p) => runBatch(p.items, async (row) => step(await approveProduct(row.key, "needs_review"))),
+  } satisfies Kind<z.infer<typeof reviewParams>>,
+  attribute_approve: {
+    params: attributeParams,
+    snapshot: async () => ({}),
+    apply: (p) => runBatch(p.items, async (row) => step(await approveAttributeProposal(row.key))),
+  } satisfies Kind<z.infer<typeof attributeParams>>,
+  synonym_add: {
+    params: synonymParams,
+    snapshot: async () => ({}),
+    apply: (p) => runBatch(p.items, async (row) => stateStep(await addProductSynonym({}, form({
+      productId: row.productId, term: row.term, language: row.language, languageOther: "", region: "",
+    })))),
+  } satisfies Kind<z.infer<typeof synonymParams>>,
+  duplicate_merge: {
+    params: mergeParams,
+    snapshot: async () => ({}),
+    apply: (p) => runBatch(p.items, async (row) => stateStep(await mergeDuplicatePair({}, form({ pairId: row.key, survivorId: row.survivorId })))),
+  } satisfies Kind<z.infer<typeof mergeParams>>,
+  category_change: {
+    params: categoryParams,
+    snapshot: async () => ({}),
+    apply: (p) => runBatch(p.items, async (row) => {
+      if (row.action === "create") return stateStep(await createCategory({}, form({ name: row.name ?? "", localName: "", parentId: row.parentId ?? "" })));
+      // Read at confirm, so a rename and a move of one category on the same card both keep the other's change.
+      const current = await platformAdminTransaction((tx) => tx.category.findUnique({ where: { id: row.categoryId ?? "" } }));
+      if (!current) return { ok: false, error: "Category not found" };
+      return stateStep(await updateCategory({}, form({
+        categoryId: current.id,
+        name: row.action === "rename" ? row.name ?? "" : current.name,
+        localName: current.localName ?? "",
+        parentId: row.action === "move" ? row.parentId ?? "" : current.parentId ?? "",
+      })));
+    }),
+  } satisfies Kind<z.infer<typeof categoryParams>>,
 } as const;

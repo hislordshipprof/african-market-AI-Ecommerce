@@ -306,6 +306,13 @@ function canonical(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
+/** A batch's params with only the items the admin left ticked; null when none is left. Other kinds pass through. */
+function keptItems(params: Record<string, unknown>, keep: string[] | undefined): Record<string, unknown> | null {
+  if (keep === undefined || !Array.isArray(params.items)) return params;
+  const items = (params.items as Array<{ key: string }>).filter((item) => keep.includes(item.key));
+  return items.length > 0 ? { ...params, items } : null;
+}
+
 type Tx = Parameters<Parameters<typeof platformAdminTransaction>[0]>[0];
 
 function audit(tx: Tx, actor: Actor, action: string, draft: { id: string; kind: string; storeId: string | null }, after: Record<string, unknown>) {
@@ -375,7 +382,7 @@ const BUSY = { ok: false, code: "busy", message: "This draft is being applied." 
  * 24 hours, of a kind the assistant cannot make, or drafted against values that have changed since (it goes stale).
  * The caller has checked the platform admin session, 2FA included.
  */
-export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { text?: string } = {}): Promise<AdminDraftResult> {
+export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { text?: string; keep?: string[] } = {}): Promise<AdminDraftResult> {
   const now = new Date();
   const checked = await platformAdminTransaction(async (tx): Promise<AdminDraftResult | { row: Row & { storeId: string | null; before: unknown }; params: Record<string, unknown>; kind: Kind<Record<string, unknown>> }> => {
     const row = await tx.adminAssistantDraft.findUnique({ where: { id: draftId } });
@@ -390,7 +397,9 @@ export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { 
     }
     const kind = kindOf(row.kind);
     const payload = payloadOf(row.payload);
-    const edited = kind?.editKey && edits.text !== undefined ? { ...payload.params, [kind.editKey]: edits.text.trim() } : payload.params;
+    const texted = kind?.editKey && edits.text !== undefined ? { ...payload.params, [kind.editKey]: edits.text.trim() } : payload.params;
+    const edited = keptItems(texted, edits.keep);
+    if (!edited) return { ok: false, code: "invalid", message: "Tick at least one item, or dismiss the card." };
     const params = kind?.params.safeParse(edited);
     if (!kind || !params?.success) {
       if (!kind) {
@@ -433,7 +442,9 @@ export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { 
 
   const view = payloadOf(row.payload).view;
   const editKey = kind.editKey;
-  const shownView = editKey && view.editable ? { ...view, editable: { ...view.editable, text: String(params[editKey]) } } : view;
+  const texted = editKey && view.editable ? { ...view, editable: { ...view.editable, text: String(params[editKey]) } } : view;
+  const kept = Array.isArray(params.items) ? new Set((params.items as Array<{ key: string }>).map((item) => item.key)) : null;
+  const shownView = kept && texted.items ? { ...texted, items: texted.items.filter((item) => kept.has(item.key)) } : texted;
   const confirmed = await platformAdminTransaction(async (tx) => {
     const updated = await tx.adminAssistantDraft.update({
       where: { id: draftId },
