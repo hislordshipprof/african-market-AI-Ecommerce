@@ -1,8 +1,8 @@
 "use client";
 import { useId } from "react";
 import { Plus, Minus } from "lucide-react";
-import { cartItemKey, type CartItem } from "@/lib/storefront/cart-store";
-import { stepperLimit, type StepperLimit } from "@/lib/storefront/cart-quantity";
+import { cartItemKey, otherPacksQuantity, type CartItem } from "@/lib/storefront/cart-store";
+import { lineMax, stepperLimit, stockRoom, type StepperLimit } from "@/lib/storefront/cart-quantity";
 import { useCart } from "./cart-provider";
 import styles from "./cart.module.css";
 
@@ -99,9 +99,11 @@ export function QuickAddStepper({
   const qty = line?.quantity ?? 0;
   // The cart line carries the server's fresh limit and availability; the page's copy can be stale.
   const max = line?.maxPerOrder ?? maxQuantity ?? item.maxPerOrder;
+  const stockLeft = line ? line.stockLeft : item.stockLeft;
+  const otherPacksQty = otherPacksQuantity(lines, item);
   const limit: StepperLimit = blockedReason
     ? { canAdd: false, canIncrease: false, reason: blockedReason }
-    : stepperLimit({ qty, max, available: line?.available ?? item.available, variantId: item.variantId });
+    : stepperLimit({ qty, max, stockLeft, otherPacksQty, minQty: line?.cateringMinQty ?? item.cateringMinQty, available: line?.available ?? item.available, variantId: item.variantId });
   return (
     <QuickAddStepperView
       item={item}
@@ -109,7 +111,7 @@ export function QuickAddStepper({
       limit={limit}
       disabled={disabled}
       reasonId={reasonId}
-      onStep={(delta) => store.adjust(item, delta, max)}
+      onStep={(delta) => store.adjust(item, delta, lineMax(max, stockRoom(stockLeft, otherPacksQty)))}
     />
   );
 }

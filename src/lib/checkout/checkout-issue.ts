@@ -1,6 +1,6 @@
 import type { FlowErrorCode, FlowProblem } from "@/lib/customer-flow/contracts";
 import { validPhone } from "@/lib/customer-account/phone";
-import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
+import { cartItemKey, otherPacksQuantity, type CartLine } from "@/lib/storefront/cart-store";
 
 /**
  * Where a checkout failure is shown, so the message sits beside the control it
@@ -51,10 +51,11 @@ export function issueFromProblems(problems: readonly FlowProblem[]): CheckoutIss
   return null;
 }
 
-/** Lines the shopper must change before paying: over the per-order limit, or no longer sold (#717 AC2). */
+/** Lines the shopper must change before paying: over the per-order limit or the stock left (#808), or no longer sold (#717 AC2). */
 export function flaggedLineKeys(lines: readonly CartLine[]): string[] {
   return lines
-    .filter((line) => line.available === false || (line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder))
+    .filter((line) => line.available === false || (line.maxPerOrder !== undefined && line.quantity > line.maxPerOrder)
+      || (line.stockLeft !== undefined && line.quantity + otherPacksQuantity(lines, line) > line.stockLeft))
     .map((line) => cartItemKey(line));
 }
 

@@ -176,4 +176,11 @@ describe("cart limit decisions", () => {
       substituteVariantId: "sub-1",
     });
   });
+
+  it("caps at whichever is lower, the counted stock or the max (#808)", () => {
+    const byStock = decideAddQty({ existingQty: 0, addQty: 6, maxPerOrder: 10, stockLeft: 4, clampToMax: false });
+    expect(byStock).toEqual({ ok: false, code: "max_per_order", maxPerOrder: 4, stockLeft: 4 });
+    const byMax = decideLineQty(6, 3, 4);
+    expect(byMax).toEqual({ ok: false, code: "max_per_order", maxPerOrder: 3 });
+  });
 });

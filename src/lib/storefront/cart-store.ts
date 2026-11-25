@@ -16,6 +16,10 @@ export interface CartItem {
   maxPerOrder?: number;
   /** False when the server says the listing is no longer sold or is out of stock (#717 AC2). */
   available?: boolean;
+  /** Units left on a counted listing; steppers stop there and the page says "Only N left" (#808). */
+  stockLeft?: number;
+  /** A catering item's minimum: the first add puts this many in (#808). */
+  cateringMinQty?: number;
 }
 export interface CartLine extends CartItem {
   quantity: number;
@@ -35,6 +39,11 @@ export interface CartStore {
 }
 export const cartItemKey = (item: Pick<CartItem, "listingId" | "variantId">) =>
   JSON.stringify([item.listingId, item.variantId ?? null]);
+/** Units the item's listing holds in the basket through its other packs; one counted stock backs them all (#808). */
+export function otherPacksQuantity(lines: readonly CartLine[], item: Pick<CartItem, "listingId" | "variantId">): number {
+  const key = cartItemKey(item);
+  return lines.reduce((sum, line) => (line.listingId === item.listingId && cartItemKey(line) !== key ? sum + line.quantity : sum), 0);
+}
 export const EMPTY_CART: readonly CartLine[] = Object.freeze([]);
 function validItem(value: unknown): value is CartItem {
   if (!value || typeof value !== "object") return false;

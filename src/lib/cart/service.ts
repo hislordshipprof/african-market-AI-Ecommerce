@@ -16,9 +16,11 @@ import { PREPARED_EXACT_ONLY } from "../listing/prepared";
 import { cateringMinMessage } from "../listing/catering";
 import { shareFirstCart } from "./bootstrap";
 import {
+  countedStockLeft,
   decideAddQty,
   decideLineQty,
   decideNamedSubstitute,
+  overCapMessage,
   isCartSwapRule,
   substituteIdForSwap,
   UNSET_MAX_PER_ORDER,
@@ -66,6 +68,8 @@ export interface CartLineView {
       id: string;
       customName: string | null;
       maxPerOrder: number | null;
+      /** Units left on a counted listing (#808); absent for other stock modes. */
+      stockLeft?: number;
       /** The storefront still sells it (listingAvailable): switched on and in stock (#717 AC2). */
       available: boolean;
       frozen: boolean;
@@ -264,7 +268,7 @@ export interface AppliedAddLine {
 
 export type ApplyAddLineResult =
   | AppliedAddLine
-  | { ok: false; code: "variant_not_found" | "unavailable" | "max_per_order"; maxPerOrder?: number };
+  | { ok: false; code: "variant_not_found" | "unavailable" | "max_per_order"; maxPerOrder?: number; stockLeft?: number };
 
 /** Lock the cart, then run the write. Callers that need one audit row share this transaction. */
 export async function runCartMutation<T>(
@@ -277,6 +281,15 @@ export async function runCartMutation<T>(
     await requireCartActor(tx, cartId, actorUserId);
     return fn(tx);
   });
+}
+
+/** Units the listing's other pack lines in this cart hold; one counted stock backs them all (#808). */
+export async function otherPacksQty(tx: CartWriteTx, cartId: string, listingId: string, variantId: string): Promise<number> {
+  const others = await tx.cartLine.aggregate({
+    where: { cartId, variantId: { not: variantId }, variant: { listingId } },
+    _sum: { qty: true },
+  });
+  return others._sum.qty ?? 0;
 }
 
 export async function applyAddLine(
@@ -307,14 +320,17 @@ export async function applyAddLine(
   const existing = await lockCartLineByVariant(tx, cartId, variantId);
   // #571: a catering item goes in at its minimum quantity.
   const minQty = variant.listing.cateringMinQty ?? 1;
+  const stockLeft = countedStockLeft(variant.listing);
   const decision = decideAddQty({
     existingQty: existing?.qty ?? 0,
     addQty: Math.max(qty, minQty - (existing?.qty ?? 0)),
     maxPerOrder: variant.listing.maxPerOrder,
+    stockLeft,
+    otherPacksQty: stockLeft === undefined ? 0 : await otherPacksQty(tx, cartId, variant.listing.id, variantId),
     clampToMax: options?.clampToMax === true,
   });
   if (!decision.ok) {
-    return { ok: false, code: "max_per_order", maxPerOrder: decision.maxPerOrder };
+    return { ok: false, code: "max_per_order", maxPerOrder: decision.maxPerOrder, stockLeft: decision.stockLeft };
   }
   const { nextQty, added, limitedTo } = decision;
 
@@ -399,7 +415,7 @@ export async function addLine(
     }
     if (!result.ok) {
       throw new CartError(
-        `Maximum ${result.maxPerOrder ?? UNSET_MAX_PER_ORDER} per order for this item`,
+        overCapMessage({ maxPerOrder: result.maxPerOrder ?? UNSET_MAX_PER_ORDER, stockLeft: result.stockLeft }),
         "MAX_PER_ORDER",
       );
     }
@@ -430,13 +446,10 @@ export async function updateLineQty(
 
     const minQty = line.variant.listing.cateringMinQty;
     if (minQty != null && qty < minQty) throw new CartError(cateringMinMessage(minQty), "MIN_QTY");
-    const decision = decideLineQty(qty, line.variant.listing.maxPerOrder);
-    if (!decision.ok) {
-      throw new CartError(
-        `Maximum ${decision.maxPerOrder} per order for this item`,
-        "MAX_PER_ORDER",
-      );
-    }
+    const stockLeft = countedStockLeft(line.variant.listing);
+    const others = stockLeft === undefined ? 0 : await otherPacksQty(tx, cartId, line.variant.listingId, line.variantId);
+    const decision = decideLineQty(qty, line.variant.listing.maxPerOrder, stockLeft, others);
+    if (!decision.ok) throw new CartError(overCapMessage(decision), "MAX_PER_ORDER");
 
     await tx.cartLine.update({
       where: { id: lineId },
@@ -640,6 +653,7 @@ export async function getCartWithLines(
           id: line.variant.listing.id,
           customName: line.variant.listing.customName,
           maxPerOrder: line.variant.listing.maxPerOrder,
+          stockLeft: countedStockLeft(line.variant.listing),
           available: listingAvailable(line.variant.listing),
           frozen: line.variant.listing.frozen,
           perishable: line.variant.listing.perishable,

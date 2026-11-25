@@ -73,7 +73,7 @@ export function withTax(quote: CheckoutQuote, taxCents: number): CheckoutQuote {
 
 export function computeQuote(
   minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean; hot?: boolean; minQty?: number | null }>,
+  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean; hot?: boolean; minQty?: number | null; stockLeft?: number; listingId?: string }>,
   contact: Contact,
   fulfillment: Fulfillment,
   serviceFee: ServiceFeeSettings,
@@ -85,6 +85,11 @@ export function computeQuote(
 ): CheckoutQuote {
   const problems: FlowProblem[] = [];
   let subtotalCents = 0;
+  // Pack variants of one listing draw on one counted stock (#808).
+  const listingQty = new Map<string, number>();
+  for (const line of cartLines) {
+    if (line.listingId) listingQty.set(line.listingId, (listingQty.get(line.listingId) ?? 0) + line.qty);
+  }
 
   for (const line of cartLines) {
     if (
@@ -99,6 +104,10 @@ export function computeQuote(
         code: "max-quantity",
         message: `Maximum ${line.maxPerOrder} per order for this item.`,
       });
+    }
+    // Placement reserves only what is left (#808), so the quote stops a line above it before the card is held.
+    if (line.stockLeft !== undefined && (line.listingId ? listingQty.get(line.listingId)! : line.qty) > line.stockLeft) {
+      problems.push({ code: "max-quantity", message: `Only ${line.stockLeft} left of this item.` });
     }
     if (line.minQty != null && line.qty < line.minQty) {
       problems.push({ code: "max-quantity", message: cateringMinMessage(line.minQty) });

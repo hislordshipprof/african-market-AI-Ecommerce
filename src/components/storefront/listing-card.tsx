@@ -42,6 +42,8 @@ export function ListingCard({
               categorySlug: listing.categorySlug,
               packLabel: listing.packLabel,
               maxPerOrder: listing.maxPerOrder,
+              stockLeft: listing.stockLeft,
+              cateringMinQty: listing.cateringMinQty,
             }}
             blockedReason={listing.badge === "ask-store" ? "Ask store first" : undefined}
           />

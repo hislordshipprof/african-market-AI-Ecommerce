@@ -50,7 +50,9 @@ export async function createAgentCheckoutLink(
       for (const item of items) {
         const applied = await applyAddLine(tx, storeId, cart.id, item.variant_id, item.qty, { requireActive: true });
         if (!applied.ok && applied.code === "max_per_order") {
-          throw new Refused(`At most ${applied.maxPerOrder} of variant ${item.variant_id} per order.`);
+          throw new Refused(applied.stockLeft !== undefined
+            ? `Only ${applied.stockLeft} of variant ${item.variant_id} left.`
+            : `At most ${applied.maxPerOrder} of variant ${item.variant_id} per order.`);
         }
         if (!applied.ok) {
           throw new Refused(`No product variant ${item.variant_id} in this store. Use a variant id that get_product returned.`);

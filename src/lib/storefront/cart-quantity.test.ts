@@ -65,3 +65,38 @@ describe("stepperLimit: what the stepper allows, and why (#708 P1, #717 AC1)", (
     });
   });
 });
+
+describe("catering minimum and counted stock on the stepper (#808)", () => {
+  it("first plus on a catering item jumps to its minimum, and minus at the minimum removes it", () => {
+    expect(stepCartQuantity(0, 1, 99, 4)).toBe(4);
+    expect(stepCartQuantity(4, 1, 99, 4)).toBe(5);
+    expect(stepCartQuantity(5, -1, 99, 4)).toBe(4);
+    expect(stepCartQuantity(4, -1, 99, 4)).toBe(0);
+  });
+
+  it("stops at the counted stock with how many are left as the reason", () => {
+    expect(stepperLimit({ qty: 4, max: 10, stockLeft: 4, available: true, variantId: "v1" })).toEqual({
+      canAdd: false,
+      canIncrease: false,
+      reason: "Only 4 left",
+    });
+  });
+
+  it("counts the listing's other packs in the basket against the stock left", () => {
+    expect(stepperLimit({ qty: 0, max: 10, stockLeft: 4, otherPacksQty: 4, available: true, variantId: "v2" })).toEqual({
+      canAdd: false,
+      canIncrease: false,
+      reason: "Only 4 left",
+    });
+  });
+});
+
+describe("a catering minimum above the stock left (#808)", () => {
+  it("cannot be added, and says how many are left", () => {
+    expect(stepperLimit({ qty: 0, max: 99, stockLeft: 3, minQty: 4, available: true, variantId: "v1" })).toEqual({
+      canAdd: false,
+      canIncrease: false,
+      reason: "Only 3 left",
+    });
+  });
+});

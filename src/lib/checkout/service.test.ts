@@ -44,6 +44,22 @@ describe("computeQuote", () => {
     expect(q.problems).toHaveLength(0);
   });
 
+  it("blocks a line above the counted stock left, so an order never reserves less than it charges for (#808)", () => {
+    const q = computeQuote(0, [{ price: 1899, qty: 6, maxPerOrder: null, stockLeft: 4 }], validContact, "pickup", NO_SERVICE_FEE);
+    expect(q.problems).toContainEqual({ code: "max-quantity", message: "Only 4 left of this item." });
+    const ok = computeQuote(0, [{ price: 1899, qty: 4, maxPerOrder: null, stockLeft: 4 }], validContact, "pickup", NO_SERVICE_FEE);
+    expect(ok.problems).toHaveLength(0);
+  });
+
+  it("adds up pack variants of one listing before comparing with the stock left (#808)", () => {
+    const lines = [
+      { price: 1899, qty: 3, maxPerOrder: null, stockLeft: 4, listingId: "plantain" },
+      { price: 99, qty: 2, maxPerOrder: null, stockLeft: 4, listingId: "plantain" },
+    ];
+    const q = computeQuote(0, lines, validContact, "pickup", NO_SERVICE_FEE);
+    expect(q.problems).toContainEqual({ code: "max-quantity", message: "Only 4 left of this item." });
+  });
+
   it("caps buffer at $20 (2000 cents)", () => {
     const q = computeQuote(
       0,

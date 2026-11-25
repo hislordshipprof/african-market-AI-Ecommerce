@@ -1,7 +1,9 @@
 "use client";
 import { useState, ViewTransition } from "react";
-import type { StorefrontListingDetail } from "@/lib/storefront/service";
+import type { ListingFacts, StorefrontListingDetail } from "@/lib/storefront/service";
 import { formatWeight, money } from "@/lib/format";
+import { attributeLabel } from "@/lib/catalog/attributes";
+import { cateringLeadText } from "@/lib/listing/catering";
 import { ProductImage } from "./product-image";
 import { PriceDisplay } from "./price-display";
 import { StockBadgeChip } from "./stock-badge";
@@ -9,11 +11,16 @@ import { QuickAddStepper } from "./quick-add-stepper";
 import { AssistantSlot } from "./assistant/assistant-slot";
 export function ProductDetail({
   listing,
+  facts,
   servingSuggestion,
 }: {
   listing: StorefrontListingDetail;
+  /** Read fresh, outside the storefront cache (#808). */
+  facts: ListingFacts | null;
   servingSuggestion: boolean;
 }) {
+  const stockLeft = facts?.stockLeft;
+  const minQty = listing.catering?.minQty;
   const [variantId, setVariantId] = useState(listing.variants[0]?.id);
   const variant = listing.variants.find((v) => v.id === variantId);
   const price = variant?.price ?? listing.price;
@@ -28,6 +35,8 @@ export function ProductDetail({
     categorySlug: listing.categorySlug,
     packLabel: variant?.label ?? "Each",
     maxPerOrder: listing.maxPerOrder,
+    stockLeft,
+    cateringMinQty: minQty,
   };
   return (
     <div className="sf-detail" data-testid="product-detail">
@@ -46,7 +55,7 @@ export function ProductDetail({
         </p>
       </div>
       <div className="sf-detail-copy">
-        <StockBadgeChip badge={listing.badge} />
+        <StockBadgeChip badge={listing.badge} stockLeft={stockLeft} />
         <h2 className="sf-page-title">{listing.displayName}</h2>
         {listing.altName && <p>{listing.altName}</p>}
         <PriceDisplay
@@ -86,7 +95,7 @@ export function ProductDetail({
             <span>Ask the store about availability</span>
           ) : (
             <>
-              <span>Add to your basket</span>
+              <span>{minQty && minQty > 1 ? `Adds ${minQty}, the minimum` : "Add to your basket"}</span>
               <QuickAddStepper item={item} />
             </>
           )}
@@ -106,6 +115,30 @@ export function ProductDetail({
                   : "Ambient"}
             </dd>
           </div>
+          {listing.catering && (
+            <div>
+              <dt>Catering</dt>
+              <dd data-testid="catering-terms">
+                Order {cateringLeadText(listing.catering.leadHours)} ahead · minimum {listing.catering.minQty}
+              </dd>
+            </div>
+          )}
+          {facts?.allergens && (
+            <div>
+              <dt>Allergens</dt>
+              <dd data-testid="allergens">
+                {facts.allergens.length
+                  ? `Contains ${facts.allergens.map((value) => attributeLabel(value).toLowerCase()).join(", ")}`
+                  : "None of the 9 major allergens"}
+              </dd>
+            </div>
+          )}
+          {facts?.dietary && facts.dietary.length > 0 && (
+            <div>
+              <dt>Dietary</dt>
+              <dd data-testid="dietary-claims">{facts.dietary.map(attributeLabel).join(", ")}</dd>
+            </div>
+          )}
         </dl>
         <section className="sf-detail-description">
           <h3>About this product</h3>

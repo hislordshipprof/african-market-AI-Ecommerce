@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ALLERGENS, DIETARY_CLAIMS, type Allergen, type DietaryClaim } from "@/lib/catalog/attributes";
+import { ALLERGENS, attributeLabel, DIETARY_CLAIMS, type Allergen, type DietaryClaim } from "@/lib/catalog/attributes";
 import type { OwnerAttributeGroup, OwnerListingAttributes } from "@/lib/catalog/listing-attributes";
 import { correctListingAttributesAction, getListingAttributesAction } from "@/lib/listing/attribute-actions";
 
@@ -39,11 +39,6 @@ function draftOf(group: OwnerAttributeGroup<string>): Draft {
     ingredientsText: known ? group.values.join("\n") : "",
     touched: false,
   };
-}
-
-function label(value: string) {
-  const text = value.replaceAll("_", " ");
-  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function StatusBadge({ group }: { group: OwnerAttributeGroup<string> }) {
@@ -78,7 +73,7 @@ function ValueChips({
             aria-pressed={on}
             onClick={() => onToggle(option)}
           >
-            {label(option)}
+            {attributeLabel(option)}
           </Button>
         );
       })}

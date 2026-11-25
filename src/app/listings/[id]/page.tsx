@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStore } from "@/lib/get-store";
-import { getListingDetail, listingsByCategory } from "@/lib/storefront/service";
+import { getListingDetail, getListingFacts, listingsByCategory } from "@/lib/storefront/service";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { ProductDetail } from "@/components/storefront/product-detail";
 import { ProductRail } from "@/components/storefront/product-rail";
@@ -13,9 +13,10 @@ export default async function ListingDetailPage({
   const [{ id }, store] = await Promise.all([params, getStore()]);
   const listing = await getListingDetail(store.id, id);
   if (!listing) notFound();
-  const related = listing.categorySlug
-    ? await listingsByCategory(store.id, listing.categorySlug)
-    : null;
+  const [related, facts] = await Promise.all([
+    listing.categorySlug ? listingsByCategory(store.id, listing.categorySlug) : null,
+    getListingFacts(store.id, id),
+  ]);
   return (
     <StorefrontShell store={store}>
       <div className="sf-container sf-detail-page">
@@ -36,6 +37,7 @@ export default async function ListingDetailPage({
         </nav>
         <ProductDetail
           listing={listing}
+          facts={facts}
           servingSuggestion={/soup|Swallow|puff-puff|Suya_with/i.test(
             listing.imageUrl ?? "",
           )}

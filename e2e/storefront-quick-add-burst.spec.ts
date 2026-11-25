@@ -338,6 +338,19 @@ test.describe("quick add limits and recovery", () => {
   });
 
   test("a burst at 99 stops at 99 and never sends 100", async ({ page }) => {
+    // Seeded garri is counted at 18, which caps the line first (#808); this test is about the 99 ceiling.
+    const garriStock = await readListingStock("mama-ngozi", "mn_garri_yellow");
+    await writeListingStock("mama-ngozi", "mn_garri_yellow", { ...garriStock, stockMode: "status", status: "in_stock", qty: null });
+    await revalidateMama(page);
+    try {
+      await burstToNinetyNine(page);
+    } finally {
+      await writeListingStock("mama-ngozi", "mn_garri_yellow", garriStock);
+      await revalidateMama(page);
+    }
+  });
+
+  async function burstToNinetyNine(page: Page) {
     await openGrains(page);
     await addGarri(page);
     let shown = 1;
@@ -370,7 +383,7 @@ test.describe("quick add limits and recovery", () => {
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("99");
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("99");
-  });
+  }
 
   test("zero and upper-limit no-ops dispatch no extra mutations", async ({ page }) => {
     await openGrains(page);

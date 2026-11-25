@@ -1097,6 +1097,15 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } }))?.qty).toBe(2);
   });
 
+  it("update_cart above the counted stock leaves the line unchanged (#808)", async () => {
+    const item = await makeListing(storeA, { name: "Counted Oxtail", price: 1899, stockMode: "counted", qty: 4 });
+    await addLine(storeA, cartA, item.variantId, 2, null);
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await updateCart(ctx(), { line_id: line!.id, qty: 6 });
+    expect(result).toMatchObject({ ok: false, code: "max_per_order" });
+    expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } }))?.qty).toBe(2);
+  });
+
   it("ignores store and cart fields on the tool input", async () => {
     const item = await makeListing(storeA, { name: "Stripped Keys", price: 60 });
     const result = await addToCart(ctx(), {

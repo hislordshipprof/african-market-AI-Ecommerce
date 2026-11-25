@@ -19,37 +19,64 @@ export function effectiveMaxPerOrder(maxPerOrder: number | null | undefined): nu
   return maxPerOrder ?? UNSET_MAX_PER_ORDER;
 }
 
-export type LineQtyDecision =
-  | { ok: true }
-  | { ok: false; code: "max_per_order"; maxPerOrder: number };
+/**
+ * Units a counted listing has left (#808), which caps a cart line. Undefined for other stock modes, and at
+ * zero, which is the out-of-stock path instead: unavailable on the storefront, a flagged swap for the assistant.
+ */
+export function countedStockLeft(listing: { stockMode: string; qty: number | null }): number | undefined {
+  return listing.stockMode === "counted" && listing.qty != null && listing.qty > 0 ? listing.qty : undefined;
+}
+
+/** `stockLeft` is set when the counted stock, not the per-order max, is what stops the line (#808). */
+type OverCap = { ok: false; code: "max_per_order"; maxPerOrder: number; stockLeft?: number };
+
+/** `otherPacksQty` is what the listing's other pack lines in the cart already take of `stockLeft`. */
+function lineCap(maxPerOrder: number | null | undefined, stockLeft: number | undefined, otherPacksQty = 0) {
+  const max = effectiveMaxPerOrder(maxPerOrder);
+  const room = stockLeft === undefined ? undefined : Math.max(0, stockLeft - otherPacksQty);
+  const over: OverCap = room !== undefined && room < max
+    ? { ok: false, code: "max_per_order", maxPerOrder: room, stockLeft }
+    : { ok: false, code: "max_per_order", maxPerOrder: max };
+  return { cap: over.maxPerOrder, over };
+}
+
+export type LineQtyDecision = { ok: true } | OverCap;
 
 /** Absolute quantity. Callers treat zero and below as removal before this runs. */
 export function decideLineQty(
   qty: number,
   maxPerOrder: number | null | undefined,
+  stockLeft?: number,
+  otherPacksQty?: number,
 ): LineQtyDecision {
-  const max = effectiveMaxPerOrder(maxPerOrder);
-  if (qty > max) return { ok: false, code: "max_per_order", maxPerOrder: max };
-  return { ok: true };
+  const { cap, over } = lineCap(maxPerOrder, stockLeft, otherPacksQty);
+  return qty > cap ? over : { ok: true };
 }
 
 export type AddQtyDecision =
   | { ok: true; nextQty: number; added: number; limitedTo?: number }
-  | { ok: false; code: "max_per_order"; maxPerOrder: number };
+  | OverCap;
 
 export function decideAddQty(input: {
   existingQty: number;
   addQty: number;
   maxPerOrder: number | null | undefined;
+  stockLeft?: number;
+  otherPacksQty?: number;
   clampToMax: boolean;
 }): AddQtyDecision {
-  const max = effectiveMaxPerOrder(input.maxPerOrder);
+  const { cap, over } = lineCap(input.maxPerOrder, input.stockLeft, input.otherPacksQty);
   const total = input.existingQty + input.addQty;
-  if (total <= max) return { ok: true, nextQty: total, added: input.addQty };
-  if (!input.clampToMax) return { ok: false, code: "max_per_order", maxPerOrder: max };
-  const room = max - input.existingQty;
-  if (room <= 0) return { ok: false, code: "max_per_order", maxPerOrder: max };
-  return { ok: true, nextQty: max, added: room, limitedTo: max };
+  if (total <= cap) return { ok: true, nextQty: total, added: input.addQty };
+  if (!input.clampToMax) return over;
+  const room = cap - input.existingQty;
+  if (room <= 0) return over;
+  return { ok: true, nextQty: cap, added: room, limitedTo: cap };
+}
+
+/** The shopper-facing reason a line stops: the stock left, else the per-order max. */
+export function overCapMessage(over: Pick<OverCap, "maxPerOrder" | "stockLeft">): string {
+  return over.stockLeft !== undefined ? `Only ${over.stockLeft} left` : `Maximum ${over.maxPerOrder} per order for this item`;
 }
 
 export interface SubstituteListing {

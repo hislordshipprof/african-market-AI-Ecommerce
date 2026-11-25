@@ -6,11 +6,9 @@ import { COPILOT_TEMPLATES } from "../whatsapp/templates";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
 import { isValidTimezone } from "../order/store-hours";
-import { ASK_STORE_BELOW, stockBadge } from "../storefront/stock-badge";
+import { ASK_STORE_BELOW, LOW_STOCK_THRESHOLD, stockBadge } from "../storefront/stock-badge";
 import { RUNNING_OUT_DAYS, inventoryReport, storeWeek } from "./inventory-report";
 
-/** Owner decision 2026-11-10: one store-wide threshold for counted listings. */
-export const LOW_STOCK_THRESHOLD = 5;
 
 export type AlertKind = "sold_out" | "running_low" | "running_out_soon" | "order_needs_low_stock" | "confirm_request";
 

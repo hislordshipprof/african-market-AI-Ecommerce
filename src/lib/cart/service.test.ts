@@ -715,6 +715,55 @@ describe.skipIf(!hasDb)("Cart service", () => {
     });
   });
 
+  describe("counted stock caps the line (#808)", () => {
+    async function stockedVariant(stock: { stockMode: string; qty: number | null; status: string | null }) {
+      const scoped = storeScoped(storeId);
+      const listing = await scoped.listing.create({
+        data: { storeId, customName: "Oxtail", price: 1899, frozen: false, perishable: false, ...stock },
+      });
+      return scoped.listingVariant.create({ data: { listingId: listing.id, label: "1 lb", price: 1899, weightG: 454 } });
+    }
+
+    it("refuses an add past the counted stock with how many are left, and accepts up to it", async () => {
+      const oxtail = await stockedVariant({ stockMode: "counted", qty: 4, status: null });
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await expect(addLine(storeId, cartId, oxtail.id, 6)).rejects.toMatchObject({ code: "MAX_PER_ORDER", message: "Only 4 left" });
+      expect((await getCartWithLines(storeId, cartId))!.lines).toHaveLength(0);
+      await addLine(storeId, cartId, oxtail.id, 4);
+      const cart = await getCartWithLines(storeId, cartId);
+      expect(cart!.lines[0].qty).toBe(4);
+      expect(cart!.lines[0].variant.listing.stockLeft).toBe(4);
+      await expect(updateLineQty(storeId, cartId, cart!.lines[0].id, 5)).rejects.toMatchObject({ message: "Only 4 left" });
+    });
+
+    it("caps two pack variants of one counted listing at the listing's stock together", async () => {
+      const bunch = await stockedVariant({ stockMode: "counted", qty: 4, status: null });
+      const single = await storeScoped(storeId).listingVariant.create({ data: { listingId: bunch.listingId, label: "Single", price: 99, weightG: 100 } });
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, bunch.id, 3);
+      await expect(addLine(storeId, cartId, single.id, 2)).rejects.toMatchObject({ code: "MAX_PER_ORDER", message: "Only 4 left" });
+      await addLine(storeId, cartId, single.id, 1);
+      const singleLine = (await getCartWithLines(storeId, cartId))!.lines.find((line) => line.variant.id === single.id)!;
+      await expect(updateLineQty(storeId, cartId, singleLine.id, 2)).rejects.toMatchObject({ message: "Only 4 left" });
+    });
+
+    it("lets the assistant's clamped add stop at the counted stock", async () => {
+      const oxtail = await stockedVariant({ stockMode: "counted", qty: 3, status: null });
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, oxtail.id, 6, null, { clampToMax: true });
+      expect((await getCartWithLines(storeId, cartId))!.lines[0].qty).toBe(3);
+    });
+
+    it("leaves a status-mode listing uncapped by stock", async () => {
+      const low = await stockedVariant({ stockMode: "status", qty: null, status: "low" });
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, low.id, 6);
+      const line = (await getCartWithLines(storeId, cartId))!.lines[0];
+      expect(line.qty).toBe(6);
+      expect(line.variant.listing.stockLeft).toBeUndefined();
+    });
+  });
+
   describe("updateLineQty", () => {
     it("updates quantity on an existing line", async () => {
       const cartId = await getOrCreateCart(storeId, null, null);
