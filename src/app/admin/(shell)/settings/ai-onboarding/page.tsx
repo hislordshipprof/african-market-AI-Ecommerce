@@ -18,7 +18,7 @@ export default async function AiOnboardingSettingsPage() {
   ]);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <div className="max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 className="text-2xl font-bold text-foreground">AI and onboarding settings</h1>
       <p className="mt-2 max-w-prose text-sm text-muted-foreground">
         These apply to every store. A change takes effect the next time the feature runs.

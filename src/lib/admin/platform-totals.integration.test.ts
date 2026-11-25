@@ -70,6 +70,24 @@ describe.skipIf(!hasDb)("platform totals (#831)", () => {
     expect(totals).toMatchObject({ ok: true, refundsCents: 4000, netCents: pages.reduce((sum, page) => sum + page.netCents, 0) });
   });
 
+  it("splits the figures by store day and by store, for the admin Home and Stores pages (#859)", async () => {
+    const totals = await platformTotals("1999-03-02", "1999-03-04", NOW);
+    if (!totals.ok) throw new Error(totals.reason);
+    expect(totals.days.map(({ day, orders, goodsCents }) => ({ day, orders, goodsCents }))).toEqual([
+      { day: "1999-03-02", orders: 1, goodsCents: 1500 },
+      { day: "1999-03-03", orders: 0, goodsCents: 0 },
+      { day: "1999-03-04", orders: 1, goodsCents: 2000 },
+    ]);
+    const ours = totals.stores.filter((row) => [storeA, storeB, storeC].includes(row.storeId));
+    expect(ours.sort((a, b) => a.storeId.localeCompare(b.storeId))).toEqual(
+      [
+        { storeId: storeA, orders: 1, goodsCents: 2000, today: { orders: 1, goodsCents: 2000 } },
+        { storeId: storeB, orders: 1, goodsCents: 1500, today: { orders: 0, goodsCents: 0 } },
+        { storeId: storeC, orders: 0, goodsCents: 0, today: { orders: 0, goodsCents: 0 } },
+      ].sort((a, b) => a.storeId.localeCompare(b.storeId)),
+    );
+  });
+
   it("refuses a range it cannot read rather than guessing", async () => {
     expect(await platformTotals("1999-03-04", "1999-03-02", NOW)).toMatchObject({ ok: false });
     expect(await platformTotals("2027-01-01", "2027-01-02", NOW)).toMatchObject({ ok: false });

@@ -99,7 +99,7 @@ test.describe("store WhatsApp number (#558, fake provider)", () => {
     await page.waitForURL("**/admin", { timeout: 15000 });
     await page.goto("/admin/stores");
 
-    await page.getByRole("row", { name: /Mama Ngozi/ }).getByRole("link", { name: "Edit" }).click();
+    await page.getByRole("row", { name: /Mama Ngozi/ }).getByRole("link", { name: /Mama Ngozi/ }).click();
     const section = page.getByRole("region", { name: "Store WhatsApp number" });
     await expect(section.getByText("Live")).toBeVisible();
     await expect(section.getByText(PHONE_ID)).toBeVisible();

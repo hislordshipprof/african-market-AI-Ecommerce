@@ -59,6 +59,9 @@ const BILLING_STATUS_LABELS: Record<string, string> = {
   paused: "Paused",
 };
 
+/** Every status a store's billing can show, "none" first. */
+export const BILLING_STATUSES = Object.keys(BILLING_STATUS_LABELS);
+
 export function billingStatusLabel(status: string): string {
   return BILLING_STATUS_LABELS[status] ?? status;
 }

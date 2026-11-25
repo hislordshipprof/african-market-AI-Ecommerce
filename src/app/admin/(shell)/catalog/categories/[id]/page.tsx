@@ -15,7 +15,7 @@ export default async function CategoryEditorPage(props: { params: Promise<{ id: 
   const deletable = productCount === 0 && childCount === 0;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
+    <div className="max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <Link
         href="/admin/catalog/categories"
         className="-ml-2 inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
