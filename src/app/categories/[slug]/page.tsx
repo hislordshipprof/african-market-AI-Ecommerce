@@ -113,7 +113,7 @@ export default async function CategoryPage({
               Good ingredients for the meals you love.
             </p>
             {subcategories.length > 1 && (
-              <nav className="sf-filter-subrow" aria-label={`${category.aisle?.name ?? category.name} subcategories`}>
+              <nav className="sf-filter-subrow sf-subcategory-row" aria-label={`${category.aisle?.name ?? category.name} subcategories`}>
                 <Link
                   className="sf-chip"
                   aria-current={category.aisle ? undefined : "page"}
