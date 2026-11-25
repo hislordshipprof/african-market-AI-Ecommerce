@@ -14,12 +14,14 @@ import { markDelivered, markOutForDelivery } from "../order/service";
 const TOKEN_BYTES = 32;
 const STEP_MS = 15 * 60_000;
 const ROUTE_STATUSES = ["READY", "OUT_FOR_DELIVERY", "DELIVERED"];
+/** Orders a route can take: Ready, or sent out by staff before any driver had the link (#811). */
+const ROUTABLE_STATUSES = ["READY", "OUT_FOR_DELIVERY"];
 
-export const ROUTE_NO_ORDERS = "No Ready store-delivery orders in this slot are waiting for a driver";
+export const ROUTE_NO_ORDERS = "No store-delivery orders in this slot are waiting for a driver";
 export const ROUTE_BAD_PHONE = "Enter the driver's US mobile number";
 export const ROUTE_BAD_NAME = "Enter the driver's name";
-export const ROUTE_SMS_FAILED = "The text to the driver could not be sent. Check the number and try again";
 export const ROUTE_NOT_FOUND = "Route not found";
+export const ROUTE_NO_LINK = "The driver's link could not be made for this store. Contact support";
 
 export function hashRouteToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -63,12 +65,15 @@ export function routeSlotLabel(timezone: string, slot: string): string {
   });
 }
 
-/** Sent, not revoked, not expired. A route whose text never went out does not hold its orders. */
+/** Handed to the driver (texted, or the link given to the owner to send), not revoked, not expired. */
 function liveRouteWhere(now: Date): Prisma.DriverRouteWhereInput {
   return { revokedAt: null, sentAt: { not: null }, expiresAt: { gt: now } };
 }
 
-type AssignResult = { ok: true; routeId: string; count: number } | { ok: false; error: string };
+/** `link` comes back only when the text did not go out, so the owner can send it another way (#811). */
+type AssignResult =
+  | { ok: true; routeId: string; count: number; texted: boolean; link?: string }
+  | { ok: false; error: string };
 
 export async function assignDriverRoute(
   storeId: string,
@@ -92,7 +97,7 @@ export async function assignDriverRoute(
     const orders = await tx.order.findMany({
       where: {
         fulfillment: "store-delivery",
-        status: "READY",
+        status: { in: ROUTABLE_STATUSES },
         pickupSlot: input.slot,
         OR: [{ driverRouteId: null }, { driverRoute: { NOT: liveRouteWhere(now) } }],
       },
@@ -135,12 +140,12 @@ export async function assignDriverRoute(
     }
   }
   const scoped = storeScoped(storeId);
-  if (!sent) {
+  if (!url) {
     await scoped.driverRoute.update({ where: { id: route.id }, data: { revokedAt: new Date() } });
-    return { ok: false, error: ROUTE_SMS_FAILED };
+    return { ok: false, error: ROUTE_NO_LINK };
   }
   await scoped.driverRoute.update({ where: { id: route.id }, data: { sentAt: new Date() } });
-  return { ok: true, routeId: route.id, count };
+  return sent ? { ok: true, routeId: route.id, count, texted: true } : { ok: true, routeId: route.id, count, texted: false, link: url };
 }
 
 export async function revokeDriverRoute(
@@ -260,7 +265,7 @@ export async function driverMarkDelivered(
 export interface DriverRouteSlot {
   slot: string;
   label: string;
-  /** Ready orders not on a live route: what Assign would send. */
+  /** Ready or out-for-delivery orders not on a live route: what Assign would send. */
   waiting: number;
   routes: Array<{ id: string; driverName: string; phoneLast4: string; orders: number; expiresAt: Date }>;
 }
@@ -294,7 +299,7 @@ export async function driverRouteBoard(storeId: string, timezone: string, now: D
     slotFor(route.slot).routes.push({ id: route.id, driverName: route.driverName, phoneLast4: route.driverPhone.slice(-4), orders: count, expiresAt: route.expiresAt });
   }
   for (const order of orders) {
-    if (order.status === "READY" && (!order.driverRouteId || !live.has(order.driverRouteId))) slotFor(order.pickupSlot!).waiting += 1;
+    if ((!order.driverRouteId || !live.has(order.driverRouteId))) slotFor(order.pickupSlot!).waiting += 1;
   }
   return [...slots.values()].sort((a, b) => a.slot.localeCompare(b.slot));
 }
