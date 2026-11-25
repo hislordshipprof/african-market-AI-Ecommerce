@@ -1849,9 +1849,9 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               label={payLabel}
             />
             {Object.keys(fieldErrors).length > 0 && (
-              <p className={styles.error}>
+              <p className={styles.error} role="alert">
                 <CircleAlert size={16} aria-hidden />
-                Fix the contact details marked in red, then place your order.
+                Some contact details need a fix. Correct the fields with a message, then place your order.
               </p>
             )}
             {addressHold && (
@@ -2128,7 +2128,7 @@ function DemoCheckoutPage({
       courierEligible={courierEligible}
       onSubmit={pay}
       paymentSection={demoPaymentSection}
-      payLabel={quote ? `Place demo order · ${money(quote.holdCents)} hold` : "Place demo order"}
+      payLabel={quote ? `Place demo order · ${money(quote.totalCents)}` : "Place demo order"}
       isRealPayment={false}
       outcomeSelector={demoOutcomeSelector}
     />

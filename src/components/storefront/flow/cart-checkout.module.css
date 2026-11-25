@@ -312,7 +312,7 @@
 .notice {
   padding: 14px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   background: var(--color-bg);
   color: var(--color-ink);
@@ -395,19 +395,6 @@
 /* Breaks between the opening and the ready time, so the dot never starts a line. */
 .queueNotice strong span {
   display: inline-block;
-}
-.payTotal {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  margin: 14px 0 8px;
-  font-size: 14px;
-  color: var(--color-muted);
-}
-.payTotal strong {
-  color: var(--color-ink);
-  font-size: 16px;
 }
 .error {
   display: flex;
@@ -557,12 +544,18 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 4px 14px;
-  font-size: 13px;
-  padding: 7px 0;
+  align-items: baseline;
+  gap: 4px 16px;
+  font-size: 16px;
+  padding: 8px 0;
 }
-.miniLines li > span + span {
-  white-space: nowrap;
+.miniLines li > span:first-child {
+  flex: 1 1 12ch;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.miniLines li > :global(.flow-money) {
+  margin-left: auto;
 }
 .stages {
   display: flex;
