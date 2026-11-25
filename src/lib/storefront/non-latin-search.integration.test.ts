@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { storeScoped } from "../db";
 import { searchCatalog } from "../assistant/tools/execute";
 import { searchListingMatches } from "../copilot/search";
-import { searchListings } from "./service";
+import { searchListings, suggestSearch } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -58,6 +58,15 @@ describe.skipIf(!hasDb)("search for a Ge'ez-script name", () => {
 
     const copilot = await searchListingMatches(storeId, query);
     expect(copilot.listings.map((listing) => listing.id)).toEqual([doroWat]);
+  });
+
+  it.each([
+    ["one word of it", "ዶሮ", [{ text: "ዶሮ ወጥ" }]],
+    ["a one-character typo", "ዶሮ ወፕ", []],
+  ])("the search box suggests it as you type, from %s (#835)", async (_, query, suggestions) => {
+    const box = await suggestSearch(storeId, query);
+    expect(box.products.map((hit) => hit.id)).toEqual([doroWat]);
+    expect(box.suggestions).toEqual(suggestions);
   });
 
   // A long listing name must not make a non-ASCII search scan every run of words (review finding 1).
