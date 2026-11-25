@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareToLastWeek, needsYouNow } from "./home";
+import { compareToLastWeek, needsYouNow } from "./home-needs";
 
 const now = new Date("2026-11-25T18:00:00Z");
 const none = {

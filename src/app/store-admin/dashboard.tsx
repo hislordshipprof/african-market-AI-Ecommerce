@@ -11,7 +11,8 @@ import type { GoLiveItemView } from "@/components/go-live/go-live-items";
 import { displayAddress } from "@/lib/directory/links";
 import { money } from "@/lib/format";
 import { orderStatusLabel, FULFILLMENT_LABELS } from "@/lib/order/status-labels";
-import { compareToLastWeek, type NeedsItem, type StoreHome } from "@/lib/store-admin/home";
+import { compareToLastWeek, type NeedsItem } from "@/lib/store-admin/home-needs";
+import type { StoreHome } from "@/lib/store-admin/home";
 import { GoLiveCard, LiveNotice } from "./go-live-card";
 import {
   AlertCircle,
