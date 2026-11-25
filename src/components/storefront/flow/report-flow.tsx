@@ -76,7 +76,7 @@ export function ReportFlow(props: OrderFlowProps) {
       ) : order === undefined ? (
         <FlowLoading />
       ) : !order ? (
-        <FlowError message="Order not found in this browser for this store." />
+        <FlowError title="Order not found" message="We can’t find this order in this browser for this store. Open the link from your order message, then report the problem from there." />
       ) : result ? (
         <FlowCard
           title={

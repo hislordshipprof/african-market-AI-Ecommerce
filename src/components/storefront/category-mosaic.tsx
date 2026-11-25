@@ -21,10 +21,7 @@ export function CategoryMosaic({
   if (!categories.length) return null;
   // The home rail: the first six aisles this store stocks (#782), in platform order.
   const visible = all ? categories : categories.slice(0, 6);
-  return (
-    <section data-testid="category-mosaic" aria-label="Store aisles">
-      <RailScroller className={all ? "sf-category-rail sf-all-categories" : "sf-category-rail"} label="Categories" title={all ? "Find your favorites" : "Aisles full of home"} description="The staples you know. A few new favorites." href={all ? undefined : "/categories"} hrefLabel="See all aisles">
-        {visible.map((cat) => (
+  const tiles = visible.map((cat) => (
           <Link
             key={cat.id}
             href={`/categories/${cat.slug}`}
@@ -40,8 +37,17 @@ export function CategoryMosaic({
               <ArrowUpRight size={20} aria-hidden />
             </div>
           </Link>
-        ))}
-      </RailScroller>
+  ));
+  return (
+    <section data-testid="category-mosaic" aria-label="Store aisles">
+      {/* The aisles page shows every aisle at once, under the page's own heading. */}
+      {all ? (
+        <div className="sf-aisle-grid">{tiles}</div>
+      ) : (
+        <RailScroller className="sf-category-rail" label="Aisles" title="Aisles full of home" description="The staples you know. A few new favorites." href="/categories" hrefLabel="See all aisles">
+          {tiles}
+        </RailScroller>
+      )}
     </section>
   );
 }

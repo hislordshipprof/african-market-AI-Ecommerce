@@ -23,7 +23,7 @@ async function receiptRows(page: Page): Promise<string[][]> {
   await expect(receipt.locator(".flow-fee-total").first()).toBeVisible();
   return receipt.locator(".flow-fee").evaluateAll((rows) => rows.map((row) => [
     row.querySelector("div > span")?.textContent?.trim() ?? "",
-    row.querySelector(".sf-price > [aria-label]")?.getAttribute("aria-label") ?? "",
+    row.querySelector(".flow-money")?.textContent?.trim() ?? "",
   ]));
 }
 

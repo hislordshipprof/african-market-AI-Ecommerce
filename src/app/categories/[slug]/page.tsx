@@ -84,25 +84,25 @@ export default async function CategoryPage({
     </Link>
   ));
   return (
-    <StorefrontShell store={store}>
+    <StorefrontShell store={store} pageTitled>
       <div className="sf-container">
         <nav className="sf-breadcrumb" aria-label="Breadcrumb">
           <Link href="/">Home</Link>
           <span aria-hidden>/</span>
-          <Link href="/categories">Categories</Link>
+          <Link href="/categories">Aisles</Link>
           <span aria-hidden>/</span>
           <span>{category.name}</span>
         </nav>
-        <div className="sf-mobile-chips" aria-label="Categories">
+        <div className="sf-mobile-chips" aria-label="Aisles">
           {categoryLinks}
         </div>
         <div className="sf-browse">
           <aside className="sf-sidebar">
-            <h3>Shop the aisles</h3>
-            <nav aria-label="Categories">{categoryLinks}</nav>
+            <p className="sf-sidebar-title">Shop the aisles</p>
+            <nav aria-label="Aisles">{categoryLinks}</nav>
           </aside>
           <section aria-label={category.name}>
-            <h2 className="sf-page-title">{category.name}</h2>
+            <h1 className="sf-page-title">{category.name}</h1>
             <p className="sf-page-intro">
               Good ingredients for the meals you love.
             </p>

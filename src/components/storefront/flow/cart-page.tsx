@@ -9,7 +9,7 @@ import {
   useTransition,
   useSyncExternalStore,
 } from "react";
-import { Trash2, ArrowRight } from "lucide-react";
+import { Trash2, ArrowRight, CircleAlert } from "lucide-react";
 import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 import { QuickAddStepper } from "../quick-add-stepper";
 import { useCart } from "../cart-provider";
@@ -35,6 +35,7 @@ import { toast } from "sonner";
 import {
   DemoNotice,
   FeeLine,
+  Money,
   FlowCard,
   FlowHeading,
   FlowLoading,
@@ -273,7 +274,10 @@ export function CartPage({
                         />
                       </div>
                       <div className={styles.lineBody}>
-                        <h3>{line.name}</h3>
+                        <div className={styles.lineHead}>
+                          <h3>{line.name}</h3>
+                          <Money cents={line.price * line.quantity} />
+                        </div>
                         <p className={styles.muted}>
                           {money(line.price)}
                           {line.packLabel && ` / ${line.packLabel}`}
@@ -281,16 +285,19 @@ export function CartPage({
                         </p>
                         {(line.available === false || !item?.available) && (
                           <p className={styles.error}>
+                            <CircleAlert size={16} aria-hidden />
                             Unavailable. Remove this item before checkout.
                           </p>
                         )}
                         {item && line.quantity > item.maxPerOrder ? (
                           <p className={styles.error}>
+                            <CircleAlert size={16} aria-hidden />
                             Maximum {item.maxPerOrder} per order. Reduce the
                             quantity.
                           </p>
                         ) : overStock(line) ? (
                           <p className={styles.error}>
+                            <CircleAlert size={16} aria-hidden />
                             Only {stockLeft} left. Reduce the quantity.
                           </p>
                         ) : (
@@ -334,7 +341,6 @@ export function CartPage({
                           </button>
                         </div>
                       </div>
-                      <strong>{money(line.price * line.quantity)}</strong>
                     </li>
                   );
                 })}
@@ -343,34 +349,6 @@ export function CartPage({
             {/* After the lines, so a phone shows the first line without scrolling (#708 P1). */}
             <AssistantSlot label="Shop with AI" />
             {!realCheckout && <DemoNotice />}
-            {!!related.length && (
-              <FlowCard>
-                <RailScroller
-                  title="Often bought together"
-                  label="Often bought together"
-                >
-                  {related.map((item) => (
-                    <div className="sf-rail-item" key={cartItemKey(item)}>
-                      <ListingCard
-                        listing={{
-                          id: item.listingId,
-                          variantId: item.variantId,
-                          displayName: item.name,
-                          startingPrice: item.price,
-                          imageUrl: item.imageUrl,
-                          packLabel: item.packLabel,
-                          weightG: item.shownWeightG,
-                          frozen: item.frozen,
-                          perishable: item.frozen,
-                          maxPerOrder: item.maxPerOrder,
-                          badge: "in-stock",
-                        }}
-                      />
-                    </div>
-                  ))}
-                </RailScroller>
-              </FlowCard>
-            )}
           </div>
           <aside className={styles.sticky}>
             <FlowCard title="Basket summary">
@@ -417,6 +395,7 @@ export function CartPage({
               )}
               {invalid && (
                 <p className={styles.error}>
+                  <CircleAlert size={16} aria-hidden />
                   Review unavailable items and quantities above.
                 </p>
               )}
@@ -434,13 +413,42 @@ export function CartPage({
               </p>
             </FlowCard>
           </aside>
+            {/* After the summary, so a phone reads the total before the suggestions (#826). */}
+            {!!related.length && (
+              <FlowCard className={styles.after}>
+                <RailScroller
+                  title="Often bought together"
+                  label="Often bought together"
+                >
+                  {related.map((item) => (
+                    <div className="sf-rail-item" key={cartItemKey(item)}>
+                      <ListingCard
+                        listing={{
+                          id: item.listingId,
+                          variantId: item.variantId,
+                          displayName: item.name,
+                          startingPrice: item.price,
+                          imageUrl: item.imageUrl,
+                          packLabel: item.packLabel,
+                          weightG: item.shownWeightG,
+                          frozen: item.frozen,
+                          perishable: item.frozen,
+                          maxPerOrder: item.maxPerOrder,
+                          badge: "in-stock",
+                        }}
+                      />
+                    </div>
+                  ))}
+                </RailScroller>
+              </FlowCard>
+            )}
         </div>
       )}
       {!!lines.length && (
         <div className={styles.mobileAction} data-basket-action="" data-blocked={blockedReason ? "" : undefined}>
           <div>
             <small>Subtotal</small>
-            <strong>{money(subtotal)}</strong>
+            <Money cents={subtotal} />
             {blockedReason && <small id="cart-mobile-reason">{blockedReason}</small>}
           </div>
           {!minimum.met || invalid || !settings.takingOrders ? (

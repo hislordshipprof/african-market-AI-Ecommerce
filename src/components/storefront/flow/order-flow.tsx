@@ -19,6 +19,7 @@ import {
   AddressCard,
   DemoNotice,
   FeeLine,
+  Money,
   FlowCard,
   FlowError,
   FlowHeading,
@@ -116,7 +117,7 @@ export function OrderFlow(props: OrderFlowProps) {
     return (
       <EmptyState
         title="Order not found"
-        description="This demo link only works in the browser and store where you placed the order."
+        description="We can’t find this order in this browser. Open the link from your order message on the device you ordered with, or ask the store."
       >
         <Link className="sf-button" href="/">
           Return to the store
@@ -161,7 +162,7 @@ export function OrderFlow(props: OrderFlowProps) {
     <div className="of-wrap">
       <FlowHeading
         title={
-          props.confirmation ? "You're all set." : pending ? "Substitution pending" : statusLabel(order.status)
+          props.confirmation ? "You're all set." : pending ? "Waiting for a swap choice" : statusLabel(order.status)
         }
         description={`Order ${order.number} · ${order.storeName}`}
         backHref="/"
@@ -175,8 +176,9 @@ export function OrderFlow(props: OrderFlowProps) {
             <h2>Order placed</h2>
           </div>
           <p>
-            Your test payment hold is {money(order.quote.holdCents)}. The final
-            amount is calculated after picking; unused buffer is released.
+            We hold {money(order.quote.holdCents)} on your card (a test hold in
+            this demo). After picking you pay only the final amount, and we
+            release the rest.
           </p>
           <p>
             {props.settings.closed
@@ -242,7 +244,7 @@ export function OrderFlow(props: OrderFlowProps) {
             </div>
           )}
           <FlowCard title="Order progress">
-            {pending && <p className="flow-demo" role="status">Substitution pending · your shopper needs a choice before continuing.</p>}
+            {pending && <p className="flow-demo" role="status">An item is short. Choose a swap or a refund so your shopper can continue.</p>}
             <ol className="of-timeline">
               {stages.map((stage) => {
                 const event = order.events.find((e) => e.status === stage);
@@ -356,7 +358,7 @@ export function OrderFlow(props: OrderFlowProps) {
               className="sf-text-link"
               href={`/order/${order.token}/report`}
             >
-              Report an issue
+              Report a problem
             </Link>
           </div>
         </div>
@@ -374,10 +376,11 @@ export function OrderFlow(props: OrderFlowProps) {
                 <div>
                   <strong>{line.name}</strong>
                   <small>
-                    {line.quantity} × {money(line.price)} {line.packLabel}
+                    {line.quantity} × {money(line.price)}
+                    {line.packLabel && ` / ${line.packLabel}`}
                   </small>
                 </div>
-                <span>{money(line.price * line.quantity)}</span>
+                <Money cents={line.price * line.quantity} />
               </div>
             ))}
             {order.substitutions
@@ -390,10 +393,10 @@ export function OrderFlow(props: OrderFlowProps) {
           </FlowCard>
           <FlowCard title="Payment summary">
             <FeeLine
-              label="Original order total"
+              label="Estimated total"
               cents={order.quote.totalCents}
             />
-            <FeeLine label="Test payment hold" cents={order.quote.holdCents} />
+            <FeeLine label="Authorization hold" cents={order.quote.holdCents} />
             <FeeLine
               label={
                 order.finalCents === undefined
@@ -404,9 +407,9 @@ export function OrderFlow(props: OrderFlowProps) {
               strong
             />
             <p>
-              Includes tax, fulfilment fees and tip. The hold includes{" "}
-              {money(order.quote.bufferCents)} for approved changes. No real
-              payment is taken.
+              Includes tax, fulfillment fees and tip. The hold includes{" "}
+              {money(order.quote.bufferCents)} for swaps you approve. This is a
+              demo: no real payment is taken.
             </p>
           </FlowCard>
         </aside>

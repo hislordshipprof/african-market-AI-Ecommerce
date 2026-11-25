@@ -3,7 +3,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   MapPin,
-  ShieldCheck,
+  CircleAlert,
   ShoppingBag,
   Info,
 } from "lucide-react";
@@ -14,7 +14,7 @@ import type {
   Fulfillment,
 } from "@/lib/customer-flow/contracts";
 import { orderSummary } from "@/lib/checkout/summary";
-import { PriceDisplay } from "../price-display";
+import { money } from "@/lib/format";
 
 export function FlowHeading({
   title,
@@ -132,6 +132,11 @@ export function QuoteLines({
   );
 }
 
+/** A money amount in a totals column (#826): one format (#737), tabular figures, never wrapped. */
+export function Money({ cents, className }: { cents: number; className?: string }) {
+  return <span className={`flow-money ${className ?? ""}`}>{money(cents)}</span>;
+}
+
 export function FeeLine({
   label,
   cents,
@@ -149,7 +154,7 @@ export function FeeLine({
         <span>{label}</span>
         {detail && <small>{detail}</small>}
       </div>
-      <PriceDisplay cents={cents} />
+      <Money cents={cents} />
     </div>
   );
 }
@@ -192,7 +197,7 @@ export function AddressCard({
   );
 }
 export function FlowError({
-  title = "Let’s get this sorted",
+  title = "Something went wrong",
   message,
   children,
 }: {
@@ -202,7 +207,7 @@ export function FlowError({
 }) {
   return (
     <div className="flow-error" role="alert">
-      <ShieldCheck size={24} aria-hidden />
+      <CircleAlert size={24} aria-hidden />
       <div>
         <h2>{title}</h2>
         <p>{message}</p>

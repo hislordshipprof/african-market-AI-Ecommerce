@@ -1030,7 +1030,7 @@ export function CartProvider({
             <div className={styles.summary}>
               <div className={styles.total}>
                 <span>Subtotal</span>
-                <strong>{money(subtotal)}</strong>
+                <strong className="flow-money">{money(subtotal)}</strong>
               </div>
               {minimum > 0 && (
                 <progress
@@ -1136,7 +1136,10 @@ export function CartProvider({
                   />
                 </div>
                 <div className={styles.lineDetails}>
-                  <h3>{line.name}</h3>
+                  <div className={styles.lineHead}>
+                    <h3>{line.name}</h3>
+                    <span className="flow-money">{money(line.price * line.quantity)}</span>
+                  </div>
                   <p>
                     {money(line.price)}
                     {line.packLabel && ` / ${line.packLabel}`}

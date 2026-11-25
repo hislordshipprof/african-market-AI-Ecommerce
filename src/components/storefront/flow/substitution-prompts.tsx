@@ -6,6 +6,7 @@ import type { SubstitutionPromptView } from "@/lib/order/substitution";
 import { Button } from "../primitives";
 import { FlowCard } from "./common";
 import { money } from "@/lib/format";
+import { CircleAlert } from "lucide-react";
 import "./order-flow.css";
 
 const REFRESH_MS = 5000;
@@ -114,7 +115,7 @@ export function SubstitutionPrompts({ token, prompts: initial }: { token: string
                   <p className="of-pending" role="status">Saving your choice…</p>
                 )}
                 {errors[prompt.id] && (
-                  <p className="of-error" role="alert">{errors[prompt.id]}</p>
+                  <p className="of-error of-field-error" role="alert"><CircleAlert size={16} aria-hidden />{errors[prompt.id]}</p>
                 )}
                 <div className="of-actions">
                   {prompt.proposed && (

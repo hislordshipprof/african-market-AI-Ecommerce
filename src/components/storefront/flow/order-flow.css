@@ -149,9 +149,24 @@
   font: inherit;
 }
 .of-form input[type="file"] {
-  min-height: 48px;
+  min-width: 0;
+  max-width: 100%;
   font: inherit;
   font-weight: 400;
+  color: var(--color-muted);
+}
+/* The browser's file button, drawn as the store's outlined pill (#826). */
+.of-form input[type="file"]::file-selector-button {
+  min-height: 44px;
+  margin-right: 12px;
+  padding: 0 20px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 .of-wrap select {
   min-height: 48px;
@@ -166,7 +181,7 @@
 }
 .of-error {
   color: var(--color-deal);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 .of-check span {
@@ -248,6 +263,7 @@
 }
 .of-line > div:nth-child(2) {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .of-line strong {
   overflow-wrap: anywhere;
