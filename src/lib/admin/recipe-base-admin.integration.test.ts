@@ -411,7 +411,7 @@ describe("recipe base admin (real sessions, lane DB)", () => {
     });
 
     it("does not delete a curated dish", async () => {
-      expect(await deleteRecipe({}, idForm(recipes.jollof, await versionOf(recipes.jollof)))).toMatchObject({ ok: false, message: "Only a looked-up dish can be deleted. Edit a curated dish instead." });
+      expect(await deleteRecipe({}, idForm(recipes.jollof, await versionOf(recipes.jollof)))).toMatchObject({ ok: false, message: "Only a dish that is not curated can be deleted. Edit a curated dish instead." });
       expect(await readRecipe(recipes.jollof)).not.toBeNull();
       expect(await audits(recipes.jollof, "catalog.recipe_delete")).toHaveLength(0);
     });

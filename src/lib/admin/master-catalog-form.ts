@@ -64,8 +64,9 @@ const optionalText = (max: number, message: string) =>
   z.string().trim().max(max, message).transform((value) => value || null);
 
 export const masterProductFormSchema = z.strictObject({
-  productId: z.string().min(1).max(200),
-  version: z.string().min(1).max(200),
+  /** Empty creates a new product (the admin assistant's product card, #833). */
+  productId: z.string().max(200).transform((value) => value || null),
+  version: z.string().max(200),
   name: z.string().trim().min(1, "Enter a name").max(200, "Keep the name under 200 characters"),
   categoryId: z.string().max(200).transform((value) => value || null),
   subcategory: optionalText(100, "Keep the subcategory under 100 characters"),

@@ -29,7 +29,7 @@ export default async function RecipeEditorPage(props: { params: Promise<{ id: st
         <OriginLabel origin={recipe.origin} />
       </div>
       <p className="mt-1 text-muted-foreground">
-        {recipe.origin === "lookup" ? "Looked up online" : "Curated"}
+        {{ lookup: "Looked up online", drafted: "Drafted by the admin assistant", curated: "Curated" }[recipe.origin]}
         {recipe.cuisine ? `, ${recipe.cuisine}` : ""}. Saved {DATE.format(recipe.createdAt)}.
       </p>
       {recipe.sourceUrl && (
@@ -53,11 +53,11 @@ export default async function RecipeEditorPage(props: { params: Promise<{ id: st
         <RecipeForm recipe={recipe} products={products} />
       </section>
 
-      {recipe.origin === "lookup" && (
+      {recipe.origin !== "curated" && (
         <section aria-labelledby="review-heading" className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
           <h2 id="review-heading" className="font-heading text-lg font-bold text-foreground">Review</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Mark it curated once the ingredients are right. Delete it if the lookup got the dish wrong: the next shopper who asks for it gets a fresh lookup.
+            Mark it curated once the ingredients are right. Delete it if the dish is wrong: the next shopper who asks for it gets a fresh lookup.
           </p>
           <LookupActions recipeId={recipe.id} version={recipe.version} name={recipe.name} />
         </section>

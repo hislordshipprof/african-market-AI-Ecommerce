@@ -15,9 +15,17 @@ function stateLine(card: AdminDraftCard): string {
   return "Nothing changes until you confirm. Expires 24 hours after it was drafted.";
 }
 
+/** What the admin chose on the card before Confirm. */
+export interface DraftChoice {
+  text?: string;
+  keep?: string[];
+  image?: File;
+}
+
 /**
  * A change the admin assistant drafted (#832): what changes, from what to what, for which store. Nothing is applied
- * until Confirm; the one text on the card (a reply, a reason, a note, a slug) can be edited first.
+ * until Confirm; the one text on the card (a reply, a reason, a note, a slug) can be edited first. A workflow lists its
+ * steps, a batch its items to untick, and a product card takes a photo (#833).
  */
 export function AdminDraftCardView({
   card,
@@ -27,12 +35,16 @@ export function AdminDraftCardView({
 }: {
   card: AdminDraftCard;
   disabled: boolean;
-  onConfirm: (text: string | undefined) => void;
+  onConfirm: (choice: DraftChoice) => void;
   onDismiss: () => void;
 }) {
   const [text, setText] = useState(card.editable?.text ?? "");
+  const [kept, setKept] = useState<string[]>(() => card.items?.map((item) => item.key) ?? []);
+  const [image, setImage] = useState<File | null>(null);
   const open = card.state === "pending";
   const fieldId = `draft-${card.id}-text`;
+  const items = card.items ?? [];
+  const toggle = (key: string, on: boolean) => setKept((current) => (on ? [...current, key] : current.filter((item) => item !== key)));
 
   return (
     <article aria-labelledby={`draft-${card.id}`} className="max-w-[65ch] rounded-xl border border-border bg-card px-4 py-4">
@@ -53,6 +65,57 @@ export function AdminDraftCardView({
             </div>
           ))}
         </dl>
+      ) : null}
+
+      {card.steps && card.steps.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-[0.8125rem] font-semibold text-foreground">Steps, in this order</p>
+          <ol className="mt-1 flex list-decimal flex-col gap-1 pl-5 text-base leading-6 text-foreground">
+            {card.steps.map((step) => <li key={step}>{step}</li>)}
+          </ol>
+        </div>
+      ) : null}
+
+      {items.length > 0 ? (
+        <fieldset className="mt-3" disabled={!open || disabled}>
+          <legend className="text-[0.8125rem] font-semibold text-foreground">
+            {open ? `${kept.length} of ${items.length} ticked. Untick any to leave out.` : `${items.length} ${items.length === 1 ? "item" : "items"}`}
+          </legend>
+          <ul className="mt-1 flex flex-col divide-y divide-border">
+            {items.map((item) => (
+              <li key={item.key}>
+                <label className="flex min-h-12 items-start gap-3 py-2 text-base leading-6 text-foreground">
+                  {open ? (
+                    <input
+                      type="checkbox"
+                      checked={kept.includes(item.key)}
+                      onChange={(event) => toggle(item.key, event.target.checked)}
+                      className="mt-1 size-5 shrink-0 accent-primary"
+                    />
+                  ) : null}
+                  <span className="min-w-0 break-words">
+                    {item.label}
+                    {item.problems.length > 0 ? <span className="block text-sm text-destructive">{item.problems.join(", ")}</span> : null}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </fieldset>
+      ) : null}
+
+      {card.acceptsPhoto && open ? (
+        <label htmlFor={`draft-${card.id}-photo`} className="mt-3 flex flex-col gap-1 text-[0.8125rem] font-semibold text-foreground">
+          Product photo (optional, JPEG, PNG or WebP, up to 2 MB)
+          <input
+            id={`draft-${card.id}-photo`}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            disabled={disabled}
+            onChange={(event) => setImage(event.target.files?.[0] ?? null)}
+            className="min-h-12 rounded-lg border border-border bg-background px-3 py-2 text-base font-normal text-foreground file:mr-3 file:rounded-full file:border-0 file:bg-muted file:px-3 file:py-1 file:text-sm file:font-semibold"
+          />
+        </label>
       ) : null}
 
       {card.editable ? (
@@ -90,9 +153,13 @@ export function AdminDraftCardView({
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
             type="button"
-            disabled={disabled || (card.editable !== null && !text.trim())}
+            disabled={disabled || (card.editable !== null && !text.trim()) || (items.length > 0 && kept.length === 0)}
             className="min-h-12 rounded-full px-6"
-            onClick={() => onConfirm(card.editable ? text : undefined)}
+            onClick={() => onConfirm({
+              ...(card.editable ? { text } : {}),
+              ...(items.length > 0 ? { keep: kept } : {}),
+              ...(image ? { image } : {}),
+            })}
           >
             Confirm
           </Button>
