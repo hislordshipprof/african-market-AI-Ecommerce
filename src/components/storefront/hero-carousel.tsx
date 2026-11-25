@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, ChevronLeft, ChevronRight, Pause, Play, ShieldCheck, Store, Truck } from "lucide-react";
 import type { StorefrontBanner, StorefrontListing } from "@/lib/storefront/service";
-import { editorial, photoOrFallback } from "@/lib/storefront/editorial";
+import { heroFocus, heroPhotos, photoOrFallback } from "@/lib/storefront/editorial";
 import { canAutoplay, HERO_INTERVAL } from "@/lib/storefront/motion";
 import { ProductImage } from "./product-image";
 import { useReducedMotion } from "./use-reduced-motion";
@@ -94,11 +94,12 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
   const slide = (i: number, state: "current" | "leaving") => {
     const item = banners[i];
     const itemSubject = products[i % Math.max(1, products.length)];
+    const photo = photoOrFallback(item.imageUrl, [heroPhotos.mamaNgoziYams, heroPhotos.mamaNgoziSpices, heroPhotos.mamaNgoziPeppers][i % 3].src);
     return (
           <div key={item.id} className="sf-hero-slide" role="group" aria-roledescription="slide" aria-label={`${i + 1} of ${banners.length}`}
             aria-hidden={state === "leaving" || undefined} data-leaving={state === "leaving" || undefined} data-enter={(state === "current" && changed) || undefined}>
             <div className="sf-hero-background" style={{ animationPlayState: running ? "running" : "paused" }}>
-              <Image src={photoOrFallback(item.imageUrl, [editorial.market, editorial.spices, editorial.grains][i % 3])} alt="" fill sizes="100vw" preload={i === 0 && !changed} fetchPriority={i === 0 && !changed ? "high" : undefined} draggable={false} />
+              <Image src={photo} alt="" fill sizes="100vw" style={{ objectPosition: heroFocus(photo) }} preload={i === 0 && !changed} fetchPriority={i === 0 && !changed ? "high" : undefined} draggable={false} />
             </div>
             <div className="sf-hero-shade" />
             <div className="sf-hero-inner sf-container">
