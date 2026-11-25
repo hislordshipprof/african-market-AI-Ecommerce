@@ -28,6 +28,7 @@ import {
 } from "../../copilot/types";
 import { ADMIN_ASSISTANT_PROMPT } from "./prompt";
 import { adminAssistantTools, createReadBook, type ReadBook } from "./tools";
+import { cardOf, insertAdminDrafts, loadAdminDraftCards, type AdminDraftCard } from "./drafts";
 import { LINKS_MAX, type AdminAssistantMessage, type AdminAssistantResult, type AssistantLink } from "./types";
 
 export const NUMBER_REFUSED =
@@ -97,7 +98,11 @@ async function readReplay(userId: string, messageId: string): Promise<AdminAssis
     if (!receipt?.reply || !receipt.conversationId) return null;
     const conversation = await tx.adminAssistantConversation.findUnique({ where: { id: receipt.conversationId }, select: { messages: true } });
     const turn = parseAdminMessages(conversation?.messages).find((message) => message.role === "assistant" && message.messageId === messageId);
-    return { ok: true, conversationId: receipt.conversationId, reply: receipt.reply, links: turn?.links ?? [] };
+    const drafts = await tx.adminAssistantDraft.findMany({
+      where: { userId, conversationId: receipt.conversationId, clientMessageId: messageId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    return { ok: true, conversationId: receipt.conversationId, reply: receipt.reply, links: turn?.links ?? [], drafts: drafts.map((row) => cardOf(row)) };
   });
 }
 
@@ -181,7 +186,7 @@ export async function sendAdminAssistantTurn(input: {
     const links = book.links.slice(0, LINKS_MAX);
     const usage = turnUsage(modelId, result.steps);
 
-    await platformAdminTransaction(async (tx) => {
+    const drafts = await platformAdminTransaction(async (tx) => {
       if (!(await lockAdminAssistantLease(tx, conversation.id, token))) throw new TurnLost();
       const messages: AdminAssistantMessage[] = [
         ...conversation.messages,
@@ -191,9 +196,10 @@ export async function sendAdminAssistantTurn(input: {
       await saveAdminAssistantTurn(tx, { conversationId: conversation.id, messages, ...usage });
       const recorded = await recordAdminAssistantReply(tx, { userId: actor.id, messageId: input.messageId, reply, conversationId: conversation.id });
       if (!recorded) throw new TurnLost();
+      return insertAdminDrafts(tx, { userId: actor.id, email: actor.email, conversationId: conversation.id, messageId: input.messageId }, book.drafts);
     }, WRITE_TRANSACTION);
     committed = true;
-    return { ok: true, conversationId: conversation.id, reply, links };
+    return { ok: true, conversationId: conversation.id, reply, links, drafts };
   } catch (error) {
     if (error instanceof AssistantConfigError) return { ok: false, code: "copilot_unavailable", message: UNAVAILABLE_MESSAGE };
     logModelFailure(error);
@@ -211,16 +217,21 @@ export async function sendAdminAssistantTurn(input: {
   }
 }
 
-/** The admin's latest chat, for the page. */
-export async function loadAdminAssistantChat(userId: string): Promise<{ conversationId: string | null; messages: AdminAssistantMessage[] }> {
+/** The admin's latest chat, for the page, with each turn's draft cards. */
+export async function loadAdminAssistantChat(userId: string): Promise<{
+  conversationId: string | null;
+  messages: AdminAssistantMessage[];
+  drafts: Record<string, AdminDraftCard[]>;
+}> {
   const conversation = await platformAdminTransaction((tx) => tx.adminAssistantConversation.findFirst({
     where: { userId },
     orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
     select: { id: true, messages: true },
   }));
-  if (!conversation) return { conversationId: null, messages: [] };
+  if (!conversation) return { conversationId: null, messages: [], drafts: {} };
   return {
     conversationId: conversation.id,
+    drafts: await loadAdminDraftCards(userId, conversation.id),
     messages: parseAdminMessages(conversation.messages).map((message) => {
       const shown = { ...message };
       delete shown.costMicros;
