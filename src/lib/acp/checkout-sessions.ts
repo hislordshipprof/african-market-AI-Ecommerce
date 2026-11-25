@@ -93,7 +93,10 @@ async function fillCart(storeId: string, cartId: string, items: AcpItem[], repla
     for (const [index, item] of items.entries()) {
       const applied = await applyAddLine(tx, storeId, cartId, item.id, item.quantity, { requireActive: true });
       if (!applied.ok && applied.code === "max_per_order") {
-        throw new Refused("invalid_quantity", `At most ${applied.maxPerOrder} of item ${item.id} per order.`, `$.line_items[${index}].quantity`);
+        const why = applied.stockLeft !== undefined
+          ? `Only ${applied.stockLeft} of item ${item.id} left.`
+          : `At most ${applied.maxPerOrder} of item ${item.id} per order.`;
+        throw new Refused("invalid_quantity", why, `$.line_items[${index}].quantity`);
       }
       if (!applied.ok) {
         throw new Refused("invalid_item_id", `The item ID '${item.id}' does not exist at this store.`, `$.line_items[${index}].id`);
