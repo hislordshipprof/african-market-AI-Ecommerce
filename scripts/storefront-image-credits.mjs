@@ -27,13 +27,13 @@ const licenseLink = (license) => {
 };
 const editorial = [
   [
-    "Hero and Jollof night collection",
+    "Jollof night and Caribbean breakfast collections",
     "1665556899022-9761f95769e5",
     "a-plate-of-food-gmQfS47FBOM",
     "Keesha's Kitchen (https://keeshaskitchen.com)",
   ],
   [
-    "Market hero and demo store story (Bodija Market, Ibadan)",
+    "Demo store story and default storefront photo (Bodija Market, Ibadan)",
     "1734255026082-82fdc81991f0",
     "a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00",
     "Tunde Buremo",
@@ -43,12 +43,6 @@ const editorial = [
     "1734255074937-4b446b8dcf18",
     "a-man-standing-under-an-umbrella-in-a-market-NgH0WKgVR0A",
     "Tunde Buremo",
-  ],
-  [
-    "Fish category / offer tile (Akosombo, Ghana)",
-    "1689187015184-a9bc081f3de6",
-    "a-pile-of-dried-bananas-sitting-on-top-of-a-blue-table-4i4y-5G4M9Q",
-    "Brah Lyrix",
   ],
   [
     "Spice category / soup collection (ingredient still life)",

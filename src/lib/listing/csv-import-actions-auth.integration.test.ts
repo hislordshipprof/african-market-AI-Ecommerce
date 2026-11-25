@@ -749,7 +749,8 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect(session?.session.twoFactorVerified).toBe(true);
   }, 60_000);
 
-  it("owner who never enabled 2FA: both redirect to sign-in", async () => {
+  // 2FA is optional for owners (#840): a CSV import is neither money nor team, so it needs no 2FA.
+  it("owner who never enabled 2FA can preview an import", async () => {
     const session = await readSession(cookies.never);
     expect(session?.user.id).toBe(ids.never);
     expect(session?.user.twoFactorEnabled).toBe(false);
@@ -757,18 +758,11 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect((await storeScoped(storeAId).storeMembership.findUnique({
       where: { storeId_userId: { storeId: storeAId, userId: ids.never } },
     }))?.role).toBe("owner");
-    await expectDenied({
-      slug: storeASlug,
-      cookie: cookies.never,
-      url: signIn(storeASlug),
-      csvName: `Never 2FA ${RUN}`,
-      actorId: ids.never,
-      actorStartsAtZero: true,
-      watchStoreIds: [storeAId],
-    });
+    asStore(storeASlug, cookies.never);
+    expect((await csvPreviewAction(formWith(countedFile(`Never 2FA ${RUN}`)))).error).toBeUndefined();
   });
 
-  it("owner who turned 2FA off keeps a verified session but is sent to sign-in", async () => {
+  it("owner who turned 2FA off keeps a verified session and can still preview an import", async () => {
     const verified = await enableVerified(emails.turnedOff);
     const disabled = await authPost("/two-factor/disable", { password }, verified.jar.header());
     expect(disabled.status, await disabled.clone().text()).toBe(200);
@@ -787,15 +781,8 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect(session?.user.id).toBe(ids.turnedOff);
     expect(session?.user.twoFactorEnabled).toBe(false);
     expect(session?.session.twoFactorVerified).toBe(true);
-    await expectDenied({
-      slug: storeASlug,
-      cookie: again.jar.header(),
-      url: signIn(storeASlug),
-      csvName: `2FA off ${RUN}`,
-      actorId: ids.turnedOff,
-      actorStartsAtZero: true,
-      watchStoreIds: [storeAId],
-    });
+    asStore(storeASlug, again.jar.header());
+    expect((await csvPreviewAction(formWith(countedFile(`2FA off ${RUN}`)))).error).toBeUndefined();
   }, 45_000);
 
   it("owner whose session predates 2FA is sent to sign-in", async () => {
@@ -1173,7 +1160,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     }))?.role).toBe("owner");
   }, 120_000);
 
-  it("same verified session observes twoFactorEnabled becoming false", async () => {
+  it("same verified session keeps working once twoFactorEnabled becomes false (#840: 2FA is optional)", async () => {
     const name = `Flag ${RUN}`;
     asStore(storeASlug, cookies.flag);
     const preview = await csvPreviewAction(formWith(countedFile(name)));
@@ -1184,12 +1171,8 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect(session?.user.id).toBe(ids.flag);
     expect(session?.session.twoFactorVerified).toBe(true);
     expect(session?.user.twoFactorEnabled).toBe(false);
-    const before = await catalogSnapshot(storeAId);
-    const beforeToken = await tokenView(storeAId, token);
-    await expect(csvPreviewAction(formWith(countedFile(`${name} again`)))).rejects.toThrow(redirectTo(signIn(storeASlug)));
-    await expect(csvCommitAction(token, selectionOf(preview.preview!))).rejects.toThrow(redirectTo(signIn(storeASlug)));
-    expect(await catalogSnapshot(storeAId)).toEqual(before);
-    expect(await tokenView(storeAId, token)).toEqual(beforeToken);
+    expect((await csvPreviewAction(formWith(countedFile(`${name} again`)))).error).toBeUndefined();
+    expect(token).toBeTruthy();
   });
 
   it("denied inputs never reach file or token validation", async () => {

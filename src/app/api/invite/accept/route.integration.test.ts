@@ -15,6 +15,7 @@ vi.mock("next/headers", () => ({
 import { POST } from "./route";
 import { authPrisma, storeScoped } from "@/lib/db";
 import { authPost, testSignUp, collectCookies } from "../../../../lib/test-auth";
+import { createInvite } from "@/lib/invite/service";
 
 const suffix = `${Date.now()}-inv`;
 const password = "GuardPass-123!";
@@ -90,6 +91,45 @@ describe("invite accept boundary", () => {
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "Missing invite token" });
       expect(await memberships()).toBe(0);
+    }
+  });
+
+  it("an invitee without 2FA accepts with a password session; once 2FA is on, a session without the code is refused (#840)", async () => {
+    const plainEmail = `invite-840-${suffix}@test.example`;
+    const signedUp = await testSignUp({ email: plainEmail, password, name: "Invite 840" });
+    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+    const plainId = (await authPrisma.user.findFirstOrThrow({ where: { email: plainEmail } })).id;
+    const signedIn = await authPost("/sign-in/email", { email: plainEmail, password });
+    const plainCookies = collectCookies(signedIn);
+    const invite = () => createInvite({
+      storeId, email: plainEmail, role: "staff", invitedById: userId, actorEmail: email,
+      baseUrl: "http://localhost:3000", storeSlug: `inv309-${suffix}`, storeName: "Invite 309",
+    });
+    const tokenOf = (url: string) => new URL(url).pathname.split("/").pop()!;
+    const ownCookies = headerState.get("cookie") ?? "";
+    try {
+      headerState.set("cookie", plainCookies);
+      await authPrisma.user.update({ where: { id: plainId }, data: { twoFactorEnabled: true } });
+      const refused = await postInvite(JSON.stringify({ token: tokenOf((await invite()).inviteUrl) }));
+      expect(refused.status).toBe(403);
+      expect(await memberships()).toBe(0);
+
+      await authPrisma.user.update({ where: { id: plainId }, data: { twoFactorEnabled: false } });
+      const accepted = await postInvite(JSON.stringify({ token: tokenOf((await invite()).inviteUrl) }));
+      expect(accepted.status, await accepted.clone().text()).toBe(200);
+      expect(await storeScoped(storeId).storeMembership.findFirst({ where: { userId: plainId } })).toMatchObject({ role: "staff" });
+    } finally {
+      headerState.set("cookie", ownCookies);
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM store_memberships WHERE user_id = ${plainId}`;
+        await tx.$executeRaw`DELETE FROM store_invites WHERE store_id = ${storeId}`;
+        await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id = ${storeId}`;
+        await tx.$executeRaw`DELETE FROM sessions WHERE user_id = ${plainId}`;
+        await tx.$executeRaw`DELETE FROM accounts WHERE user_id = ${plainId}`;
+        await tx.$executeRaw`DELETE FROM users WHERE id = ${plainId}`;
+      });
     }
   });
 
