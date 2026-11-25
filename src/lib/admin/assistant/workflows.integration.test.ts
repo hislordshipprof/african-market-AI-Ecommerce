@@ -4,7 +4,7 @@ vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
 });
 
-const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));
+const { headerState, synonymFault } = vi.hoisted(() => ({ headerState: new Headers(), synonymFault: { callsBeforeThrow: -1 } }));
 
 vi.mock("next/headers", () => ({ headers: async () => headerState }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {}, revalidateTag: () => {}, unstable_cache: (fn: () => unknown) => () => fn() }));
@@ -16,6 +16,17 @@ vi.mock("next/navigation", () => ({
     throw new Error("NEXT_NOT_FOUND");
   },
 }));
+
+vi.mock("../product-synonyms", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../product-synonyms")>();
+  return {
+    ...real,
+    addProductSynonym: async (...args: Parameters<typeof real.addProductSynonym>) => {
+      if (synonymFault.callsBeforeThrow >= 0 && synonymFault.callsBeforeThrow-- === 0) throw new Error("connection reset");
+      return real.addProductSynonym(...args);
+    },
+  };
+});
 
 import { auth } from "../../auth";
 import { fakeAddressBackend, setAddressProvider } from "../../address/provider";
@@ -105,6 +116,7 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
   }, 60_000);
 
   afterEach(() => {
+    synonymFault.callsBeforeThrow = -1;
     vi.restoreAllMocks();
   });
 
@@ -241,6 +253,19 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       expect(await platformAdmin.productSynonym.count({ where: { productId: product.clean1, term: "ofada", language: "yo" } })).toBe(1);
     });
 
+    it("keeps a batch confirmed when an item throws after another was done", async () => {
+      signInAs(admin);
+      const { cards } = await draft("draft_synonyms", { synonyms: [
+        { product: `Jollof rice mix ${RUN}`, term: "party rice" },
+        { product: `Jollof rice mix ${RUN}`, term: "jollof seasoning" },
+      ] });
+      synonymFault.callsBeforeThrow = 1;
+      const result = await confirmAdminAssistantDraft({ draftId: cards[0]!.id });
+      expect(result).toMatchObject({ ok: true, draft: { state: "confirmed", outcome: expect.stringContaining("Not done: \"jollof seasoning\"") } });
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true, draft: { state: "confirmed" } });
+      expect(await platformAdmin.productSynonym.count({ where: { productId: product.clean2 } })).toBe(1);
+    });
+
     it("merges a duplicate pair into the product the admin keeps", async () => {
       signInAs(admin);
       // Made here, not in beforeAll: a duplicate scan in another test file replaces the open pairs, or finds this one.
@@ -307,6 +332,21 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       // No photo storage in tests: the upload's own refusal shows that the photo went through it.
       expect((result as { draft: AdminDraftCard }).draft.outcome).toMatch(/Step 3 did not run: (Upload a JPEG|Photo storage)/);
       expect(await platformAdmin.auditLog.count({ where: { entityId: created.id, action: "catalog.product_create", actorId: admin.id } })).toBe(1);
+    });
+
+    it("keeps the card confirmed when a later step throws, so confirming again cannot create a second product", async () => {
+      signInAs(admin);
+      const name = `Ugu leaves ${RUN}`;
+      const { cards } = await draft("draft_product", {
+        name, category: `Grains ${RUN}`, size: "200 g", description: "Dried fluted pumpkin leaves.", synonyms: [{ term: "fluted pumpkin", language: "en" }], notDuplicate: true,
+      });
+      synonymFault.callsBeforeThrow = 0;
+
+      const result = await confirmAdminAssistantDraft({ draftId: cards[0]!.id });
+      expect(result).toMatchObject({ ok: true, draft: { state: "confirmed" } });
+      expect((result as { draft: AdminDraftCard }).draft.outcome).toMatch(/Step 2 did not run: .*Done: the product was created/);
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true, draft: { state: "confirmed" } });
+      expect(await platformAdmin.masterProduct.count({ where: { name } })).toBe(1);
     });
 
     it("edits a product, and goes stale when someone else saved it first", async () => {

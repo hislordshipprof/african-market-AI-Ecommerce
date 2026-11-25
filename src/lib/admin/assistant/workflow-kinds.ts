@@ -22,6 +22,16 @@ function form(values: Record<string, string>): FormData {
 /** One workflow step's result: done, or the reason it stopped. */
 type Step = { ok: true } | { ok: false; error: string };
 
+/** A step that throws after an earlier write is reported like one that failed, so the card is never reopened and re-run. */
+async function settled(run: () => Promise<Step>): Promise<Step> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error("admin assistant workflow step threw", error);
+    return { ok: false, error: "It failed unexpectedly." };
+  }
+}
+
 /**
  * Runs the steps in order and stops at the first that fails. The first step failing changes nothing, so the card stays
  * open; a later one leaves what was done in place (deleting a store is never the assistant's), and the outcome says so.
@@ -29,7 +39,7 @@ type Step = { ok: true } | { ok: false; error: string };
 async function runSteps(steps: Array<{ done: string; run: () => Promise<Step> }>): Promise<{ ok: true; outcome: string } | { ok: false; error: string }> {
   const done: string[] = [];
   for (const [index, step] of steps.entries()) {
-    const result = await step.run();
+    const result = index === 0 ? await step.run() : await settled(step.run);
     if (!result.ok) {
       if (index === 0) return { ok: false, error: result.error };
       return { ok: true, outcome: `Step ${index + 1} did not run: ${result.error} Done: ${done.join(", ")}. Finish the rest on the admin screen.` };
@@ -45,8 +55,8 @@ export const BATCH_MAX = 20;
 /** Runs each ticked item through the admin's own function; one that fails does not stop the rest. */
 async function runBatch<T extends { key: string; label: string }>(items: T[], run: (item: T) => Promise<Step>): Promise<{ ok: true; outcome: string } | { ok: false; error: string }> {
   const failed: string[] = [];
-  for (const item of items) {
-    const result = await run(item);
+  for (const [index, item] of items.entries()) {
+    const result = index === 0 ? await run(item) : await settled(() => run(item));
     if (!result.ok) failed.push(`${item.label}: ${result.error}`);
   }
   if (failed.length === items.length) return { ok: false, error: `Nothing was done. ${failed.join("; ")}` };
