@@ -228,6 +228,7 @@ model User {
   pushSubscriptions       PushSubscription[]
   supportMessages         SupportMessage[]
   copilotConversations    CopilotConversation[]
+  adminAssistantConversations AdminAssistantConversation[]
   aiReviewFlags           AiReviewFlag[]
   stockProposalDecisions  StockProposal[]          @relation("StockProposalDecision")
   copilotDraftDecisions   CopilotDraft[]           @relation("CopilotDraftDecision")
@@ -819,6 +820,43 @@ model CopilotClientMessage {
   @@index([storeId])
   @@index([conversationId])
   @@map("copilot_client_messages")
+}
+
+/// A platform admin's chat with the admin assistant (#831). Per admin, never store-scoped.
+model AdminAssistantConversation {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  model         String
+  messages      Json      @default("[]")
+  inFlightUntil DateTime? @map("in_flight_until")
+  tokensIn      Int       @default(0) @map("tokens_in")
+  tokensOut     Int       @default(0) @map("tokens_out")
+  costMicros    BigInt    @default(0) @map("cost_micros")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  lastMessageAt DateTime  @default(now()) @map("last_message_at")
+
+  user     User                          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  receipts AdminAssistantClientMessage[]
+
+  @@index([userId, lastMessageAt])
+  @@map("admin_assistant_conversations")
+}
+
+/// One admin message id, claimed for 60 seconds, then holding the reply for a replay (#831).
+model AdminAssistantClientMessage {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  conversationId  String?  @map("conversation_id")
+  clientMessageId String   @map("client_message_id")
+  reply           String?
+  claimedUntil    DateTime @map("claimed_until")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  conversation AdminAssistantConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientMessageId])
+  @@index([conversationId])
+  @@map("admin_assistant_client_messages")
 }
 
 /// A stock change the owner has not applied until they tap confirm. No stock-event foreign key.
