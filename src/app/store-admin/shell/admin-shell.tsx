@@ -31,7 +31,7 @@ import { activeNavPath, isBarePath, storeAdminNav, type NavGroup, type NavIcon }
 import { SignOutButton } from "../sign-out-button";
 import { SearchDialog } from "./search-dialog";
 import { shellCountsAction } from "./actions";
-import type { ShellData } from "./shell-data";
+import type { ShellCounts, ShellData } from "./shell-data";
 
 const ICONS: Record<NavIcon, LucideIcon> = {
   home: Home,
@@ -65,25 +65,33 @@ function withStore(path: string, slug: string): string {
  * The store admin's frame (#860): a grouped sidebar beside every page from 1024px, a drawer opened from the top
  * bar below it, and the top bar with search, order alerts and View store. Store tokens only, so every theme applies.
  */
-export function AdminShell({ data, children }: { data: ShellData; children: React.ReactNode }) {
+export function AdminShell({ data, children }: { data: ShellData | null; children: React.ReactNode }) {
   const pathname = usePathname() || "/store-admin";
-  const bare = isBarePath(pathname);
-  const [counts, setCounts] = useState({ newOrders: data.newOrders, unreadMessages: data.unreadMessages });
+  const chrome = data !== null && !isBarePath(pathname);
+  // Counts fetched after a page change, kept with the layout data they came after: a fresh layout's counts win.
+  const [fetched, setFetched] = useState<{ after: ShellData | null; counts: ShellCounts } | null>(null);
+  const counts = fetched && fetched.after === data ? fetched.counts : { newOrders: data?.newOrders ?? 0, unreadMessages: data?.unreadMessages ?? 0 };
+  const dataRef = useRef(data);
+  useEffect(() => {
+    dataRef.current = data;
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const drawer = useRef<HTMLDialogElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
 
-  const groups = storeAdminNav({ role: data.role, newOrders: counts.newOrders, unreadMessages: counts.unreadMessages, payoutsAlert: data.payoutsAlert });
+  const groups = data
+    ? storeAdminNav({ role: data.role, newOrders: counts.newOrders, unreadMessages: counts.unreadMessages, payoutsAlert: data.payoutsAlert })
+    : [];
   const current = activeNavPath(groups, pathname);
 
   // The layout is not rendered again on client navigation, so the counts are fetched per page.
   const firstPath = useRef(pathname);
   useEffect(() => {
-    if (pathname === firstPath.current) return;
+    if (pathname === firstPath.current || !dataRef.current) return;
     let live = true;
     shellCountsAction()
-      .then((fresh) => live && setCounts(fresh))
+      .then((fresh) => live && setFetched({ after: dataRef.current, counts: fresh }))
       .catch(() => {});
     return () => {
       live = false;
@@ -91,6 +99,7 @@ export function AdminShell({ data, children }: { data: ShellData; children: Reac
   }, [pathname]);
 
   useEffect(() => {
+    if (!chrome) return;
     function onKey(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -99,7 +108,7 @@ export function AdminShell({ data, children }: { data: ShellData; children: Reac
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [chrome]);
 
   useEffect(() => {
     const dialog = drawer.current;
@@ -108,120 +117,131 @@ export function AdminShell({ data, children }: { data: ShellData; children: Reac
     if (!drawerOpen && dialog.open) dialog.close();
   }, [drawerOpen]);
 
-  if (bare) return <>{children}</>;
-
-  const sidebar = (
+  const sidebar = chrome ? (
     <SidebarBody data={data} groups={groups} current={current} onNavigate={() => setDrawerOpen(false)} />
-  );
+  ) : null;
 
+  // One tree shape with or without the chrome: the layout gains the shell after sign-in by a refresh, and a
+  // changed shape would remount the page and lose what the member had typed.
   return (
-    <div className="min-h-dvh bg-background">
-      <a
-        href="#store-admin-main"
-        className="sr-only z-50 rounded-md bg-card px-4 py-2 text-sm font-medium text-foreground focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:outline-2 focus:outline-offset-2 focus:outline-ring"
-      >
-        Skip to content
-      </a>
+    <div className={chrome ? "min-h-dvh bg-background" : undefined}>
+      {chrome && data && (
+        <>
+          <a
+            href="#store-admin-main"
+            className="sr-only z-50 rounded-md bg-card px-4 py-2 text-sm font-medium text-foreground focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+          >
+            Skip to content
+          </a>
 
-      <aside aria-label="Store admin" className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-card lg:flex">
-        {sidebar}
-      </aside>
+          <aside aria-label="Store admin" className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-card lg:flex">
+            {sidebar}
+          </aside>
 
-      <dialog
-        ref={drawer}
-        aria-label="Menu"
-        onClose={() => {
-          setDrawerOpen(false);
-          menuButton.current?.focus();
-        }}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) setDrawerOpen(false);
-        }}
-        className="m-0 h-dvh max-h-none w-[min(18rem,85vw)] max-w-none border-r border-border bg-card p-0 text-foreground backdrop:bg-black/40 lg:hidden"
-      >
-        <div className="flex h-full flex-col">
-          <div className="absolute right-2 top-3">
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(false)}
-              aria-label="Close menu"
-              className={`flex size-11 items-center justify-center rounded-full text-foreground hover:bg-muted ${FOCUS}`}
-            >
-              <X className="size-5" aria-hidden />
-            </button>
-          </div>
-          {sidebar}
-        </div>
-      </dialog>
+          <dialog
+            ref={drawer}
+            aria-label="Menu"
+            onClose={() => {
+              setDrawerOpen(false);
+              menuButton.current?.focus();
+            }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setDrawerOpen(false);
+            }}
+            className="m-0 h-dvh max-h-none w-[min(18rem,85vw)] max-w-none border-r border-border bg-card p-0 text-foreground backdrop:bg-black/40 lg:hidden"
+          >
+            <div className="flex h-full flex-col">
+              <div className="absolute right-2 top-3">
+                <button
+                  type="button"
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="Close menu"
+                  className={`flex size-11 items-center justify-center rounded-full text-foreground hover:bg-muted ${FOCUS}`}
+                >
+                  <X className="size-5" aria-hidden />
+                </button>
+              </div>
+              {sidebar}
+            </div>
+          </dialog>
+        </>
+      )}
 
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
-          <div className="flex h-16 items-center gap-2 px-3 sm:gap-3 sm:px-6 lg:px-8">
-            <button
-              ref={menuButton}
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              aria-label="Open menu"
-              aria-haspopup="dialog"
-              className={`flex size-11 shrink-0 items-center justify-center rounded-full border border-border text-foreground hover:bg-muted lg:hidden ${FOCUS}`}
-            >
-              <Menu className="size-5" aria-hidden />
-            </button>
-            <p className="min-w-0 truncate font-heading text-base font-bold text-foreground lg:hidden">{data.store.name}</p>
+      <div className={chrome ? "lg:pl-64" : undefined}>
+        {chrome && data && (
+          <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
+            <div className="flex h-16 items-center gap-2 px-3 sm:gap-3 sm:px-6 lg:px-8">
+              <button
+                ref={menuButton}
+                type="button"
+                onClick={() => setDrawerOpen(true)}
+                aria-label="Open menu"
+                aria-haspopup="dialog"
+                className={`flex size-11 shrink-0 items-center justify-center rounded-full border border-border text-foreground hover:bg-muted lg:hidden ${FOCUS}`}
+              >
+                <Menu className="size-5" aria-hidden />
+              </button>
+              <p className="min-w-0 truncate font-heading text-base font-bold text-foreground lg:hidden">{data.store.name}</p>
 
-            <button
-              type="button"
-              onClick={() => setSearchOpen(true)}
-              className={`hidden h-11 w-full max-w-md items-center gap-2 rounded-lg border border-input bg-card px-3 text-left text-sm text-muted-foreground hover:border-foreground/30 lg:flex ${FOCUS}`}
-            >
-              <Search className="size-4 shrink-0" aria-hidden />
-              <span className="flex-1 truncate">Search orders, products, customers…</span>
-              <kbd className="rounded border border-border px-1.5 py-0.5 font-sans text-xs text-muted-foreground">⌘ K</kbd>
-            </button>
-
-            <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
               <button
                 type="button"
                 onClick={() => setSearchOpen(true)}
-                aria-label="Search"
-                className={`flex size-11 items-center justify-center rounded-full text-foreground hover:bg-muted lg:hidden ${FOCUS}`}
+                className={`hidden h-11 w-full max-w-md items-center gap-2 rounded-lg border border-input bg-card px-3 text-left text-sm text-muted-foreground hover:border-foreground/30 lg:flex ${FOCUS}`}
               >
-                <Search className="size-5" aria-hidden />
+                <Search className="size-4 shrink-0" aria-hidden />
+                <span className="flex-1 truncate">Search orders, products, customers…</span>
+                <kbd className="rounded border border-border px-1.5 py-0.5 font-sans text-xs text-muted-foreground">⌘ K</kbd>
               </button>
-              <Link
-                href={withStore("/store-admin/orders", data.store.slug)}
-                aria-label={counts.newOrders > 0 ? `Order alerts: ${counts.newOrders} new` : "Order alerts: no new orders"}
-                data-testid="order-alerts-bell"
-                className={`relative flex size-11 items-center justify-center rounded-full text-foreground hover:bg-muted ${FOCUS}`}
-              >
-                <Bell className="size-5" aria-hidden />
-                {counts.newOrders > 0 && (
-                  <span className="absolute right-1.5 top-1.5 flex min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[11px] font-bold leading-5 text-background tabular-nums">
-                    {counts.newOrders}
-                  </span>
-                )}
-              </Link>
-              {data.storeAddress && (
-                <a
-                  href={data.storeAddress}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`hidden min-h-11 items-center gap-2 rounded-full border border-input bg-card px-4 text-sm font-medium text-foreground hover:bg-muted sm:inline-flex ${FOCUS}`}
-                >
-                  View store
-                  <ExternalLink className="size-4" aria-hidden />
-                </a>
-              )}
-            </div>
-          </div>
-        </header>
 
-        <main id="store-admin-main" tabIndex={-1} className="px-4 py-6 focus:outline-none sm:px-6 lg:px-8">
+              <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen(true)}
+                  aria-label="Search"
+                  className={`flex size-11 items-center justify-center rounded-full text-foreground hover:bg-muted lg:hidden ${FOCUS}`}
+                >
+                  <Search className="size-5" aria-hidden />
+                </button>
+                <Link
+                  href={withStore("/store-admin/orders", data.store.slug)}
+                  aria-label={counts.newOrders > 0 ? `Order alerts: ${counts.newOrders} new` : "Order alerts: no new orders"}
+                  data-testid="order-alerts-bell"
+                  className={`relative flex size-11 items-center justify-center rounded-full text-foreground hover:bg-muted ${FOCUS}`}
+                >
+                  <Bell className="size-5" aria-hidden />
+                  {counts.newOrders > 0 && (
+                    <span className="absolute right-1.5 top-1.5 flex min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[11px] font-bold leading-5 text-background tabular-nums">
+                      {counts.newOrders}
+                    </span>
+                  )}
+                </Link>
+                {data.storeAddress && (
+                  <a
+                    href={data.storeAddress}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`hidden min-h-11 items-center gap-2 rounded-full border border-input bg-card px-4 text-sm font-medium text-foreground hover:bg-muted sm:inline-flex ${FOCUS}`}
+                  >
+                    View store
+                    <ExternalLink className="size-4" aria-hidden />
+                  </a>
+                )}
+              </div>
+            </div>
+          </header>
+        )}
+
+        <div
+          id="store-admin-main"
+          role={chrome ? "main" : undefined}
+          tabIndex={chrome ? -1 : undefined}
+          className={chrome ? "px-4 py-6 focus:outline-none sm:px-6 lg:px-8" : undefined}
+        >
           {children}
-        </main>
+        </div>
       </div>
 
-      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} storeSlug={data.store.slug} />
+      {chrome && data && <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} storeSlug={data.store.slug} />}
     </div>
   );
 }

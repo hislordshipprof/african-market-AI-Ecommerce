@@ -19,18 +19,11 @@ export default async function StoreAdminLayout({ children }: { children: React.R
   const shell = await loadShell();
   return (
     <>
-      {shell ? (
-        <AdminShell data={shell}>
-          <TwoFactorReminder />
-          {children}
-        </AdminShell>
-      ) : (
-        <>
-          <ShellRefresh />
-          <TwoFactorReminder />
-          {children}
-        </>
-      )}
+      <AdminShell data={shell}>
+        <TwoFactorReminder />
+        {children}
+      </AdminShell>
+      {!shell && <ShellRefresh />}
       <StoreAssistantHost />
     </>
   );
