@@ -118,7 +118,7 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
   });
 
   it("shows the refund amount, refuses a confirm with no typed reason, and refunds with the admin's reason in AuditLog", async () => {
-    const { result, cards } = await draft("draft_platform_refund", { orderNumber: 8341, storeSlug: slug, amountDollars: 5 });
+    const { result, cards } = await draft("draft_platform_refund", { orderNumber: 8341, store: slug, amountDollars: 5 });
     expect(result).toMatchObject({ drafted: true });
     const card = cards[0]!;
     expect(card.editable).toMatchObject({ text: "" });
@@ -135,7 +135,8 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
   });
 
   it("resolves a refund-failed order with the typed reason as the note", async () => {
-    const { cards } = await draft("draft_refund_resolve", { orderNumber: 8342, storeSlug: slug });
+    // The read tools give the store's name, not its slug, so either finds the order.
+    const { cards } = await draft("draft_refund_resolve", { orderNumber: 8342, store: `money market ${RUN}` });
     const card = cards[0]!;
     expect(card.changes.map((change) => change.to).join(" ")).toContain("$20.00");
     expect(card.editable).toMatchObject({ text: "" });
@@ -179,7 +180,7 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
   });
 
   it("drafts one order per refund card: the tool takes a single order, never a list", async () => {
-    const { result, cards } = await draft("draft_platform_refund", { orderNumber: 8341, storeSlug: slug, amountDollars: 1, orders: [8342] });
+    const { result, cards } = await draft("draft_platform_refund", { orderNumber: 8341, store: slug, amountDollars: 1, orders: [8342] });
     expect(result).toMatchObject({ drafted: true });
     expect(cards).toHaveLength(1);
     expect(cards[0]!.items).toBeUndefined();

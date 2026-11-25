@@ -13,13 +13,23 @@ import { addDraft, refused } from "./draft-tools";
 import { audited, link, type ToolContext } from "./tools";
 
 const REASON_LABEL = "Reason (type it to confirm)";
-const orderInput = { orderNumber: z.number().int().positive(), storeSlug: z.string().min(1).max(100) };
+const orderInput = {
+  orderNumber: z.number().int().positive(),
+  store: z.string().min(1).max(200).describe("The store's slug or its name, as the read tools give it"),
+};
 
-async function orderBy(number: number, storeSlug: string) {
-  return platformAdminTransaction((tx) => tx.order.findFirst({
-    where: { number, store: { slug: storeSlug.trim().toLowerCase() } },
-    select: { id: true, number: true, status: true, storeId: true, store: { select: { name: true } } },
-  }));
+/** The order by number in the store named by slug or by whole name (the read tools give the name). */
+async function orderBy(number: number, store: string) {
+  const wanted = store.trim().toLocaleLowerCase("en-US");
+  return platformAdminTransaction(async (tx) => {
+    const stores = await tx.store.findMany({ select: { id: true, slug: true, name: true } });
+    const match = stores.find((row) => row.slug === wanted) ?? stores.find((row) => row.name.toLocaleLowerCase("en-US") === wanted);
+    if (!match) return null;
+    return tx.order.findFirst({
+      where: { number, storeId: match.id },
+      select: { id: true, number: true, status: true, storeId: true, store: { select: { name: true } } },
+    });
+  });
 }
 
 /**
@@ -30,10 +40,10 @@ export function moneyTools(ctx: ToolContext) {
   const { book } = ctx;
   return {
     draft_platform_refund: tool({
-      description: "Draft one refund to the customer, from the platform, for one delivered or completed order: its number, its store's slug and the amount in dollars. One order per card. The admin types the reason on the card.",
+      description: "Draft one refund to the customer, from the platform, for one delivered or completed order: its number, its store (slug or name) and the amount in dollars. One order per card. The admin types the reason on the card.",
       inputSchema: z.object({ ...orderInput, amountDollars: z.number().positive().max(100_000) }),
       execute: (input) => audited(ctx, "draft_platform_refund", input, async () => {
-        const order = await orderBy(input.orderNumber, input.storeSlug);
+        const order = await orderBy(input.orderNumber, input.store);
         if (!order) return refused("No order with that number at that store.");
         if (!(PLATFORM_REFUNDABLE_FROM as readonly string[]).includes(order.status)) return refused("Only a delivered, completed or partly refunded order can be refunded.");
         const amountCents = Math.round(input.amountDollars * 100);
@@ -50,10 +60,10 @@ export function moneyTools(ctx: ToolContext) {
     }),
 
     draft_refund_resolve: tool({
-      description: "Draft resolving one order whose refund failed, after the customer was repaid outside Stripe: its number, its store's slug, and the amount repaid in dollars (leave it out when the whole amount owed was repaid). The admin types the note on the card.",
+      description: "Draft resolving one order whose refund failed, after the customer was repaid outside Stripe: its number, its store (slug or name), and the amount repaid in dollars (leave it out when the whole amount owed was repaid). The admin types the note on the card.",
       inputSchema: z.object({ ...orderInput, repaidDollars: z.number().positive().max(100_000).optional() }),
       execute: (input) => audited(ctx, "draft_refund_resolve", input, async () => {
-        const order = await orderBy(input.orderNumber, input.storeSlug);
+        const order = await orderBy(input.orderNumber, input.store);
         const row = order ? (await listRefundFailedOrders()).find((failed) => failed.orderId === order.id) : null;
         if (!order || !row) return refused("That order's refund has not failed, or it is already resolved.");
         const repaidCents = input.repaidDollars ? Math.round(input.repaidDollars * 100) : row.owedCents;
