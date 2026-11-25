@@ -290,7 +290,9 @@ export function copilotTools(storeId: string, book: DraftBook, options: ToolOpti
         return recorded(book, {
           total: result.total,
           listings: result.fixes.map((fix) => ({ name: fix.name, missing: fix.missing })),
-          note: "The owner sees a link to edit each listing below your reply. Do not write links.",
+          note: options.drafts
+            ? "The owner sees a link to edit each listing below your reply. Do not write links."
+            : "This channel shows no links. Name each listing and say the owner can fix it under Products in store admin.",
         });
       },
     }),
