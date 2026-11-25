@@ -6,6 +6,7 @@ import { parseInput } from "../security/parse-input";
 import { saveStoreSettings, type SettingsResult } from "../store-settings/settings";
 import { STORE_ABOUT_MAX } from "../store-settings/fields";
 import { WEEK_DAYS } from "../store-settings/weekly-hours";
+import { SLOT_FIELD_NAMES } from "../admin/slot-form";
 
 const day = z.strictObject({ closed: z.boolean(), open: z.string().max(10), close: z.string().max(10) });
 const settingsSchema = z.strictObject({
@@ -15,6 +16,8 @@ const settingsSchema = z.strictObject({
   minimumOrderCents: z.number().int(),
   phone: z.string().max(40),
   about: z.string().max(STORE_ABOUT_MAX * 4),
+  /** The slot fields by their form name (#807), as the platform admin store form posts them. */
+  slots: z.partialRecord(z.enum(SLOT_FIELD_NAMES as [string, ...string[]]), z.string().max(400)),
 });
 
 /** Owner only. The store is the session's; the input never names one. */

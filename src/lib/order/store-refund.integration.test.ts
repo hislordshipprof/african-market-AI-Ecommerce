@@ -13,7 +13,7 @@ vi.mock("../inngest/notify", async (original) => ({
   scheduleCourierCancel: () => {},
 }));
 
-const { storeRefundAction, markNoShowAction } = await import("./actions");
+const { storeRefundAction, storeRefundPreviewAction, markNoShowAction } = await import("./actions");
 const { storeScoped } = await import("../db");
 const { setStripeProvider } = await import("../stripe");
 const { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount } = await import("../stripe/fake");
@@ -124,6 +124,27 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
     expect(after.audits).toHaveLength(1);
     expect(after.audits[0]).toMatchObject({ action: "store_refund", actorId: OWNER.id, actorEmail: OWNER.email, entityType: "order" });
     expect(after.audits[0].after).toMatchObject({ amountCents: 1060, reason: "Bruised yam", lines: [{ lineId: yam.id, qty: 1 }] });
+  });
+
+  it("shows the exact amount before the refund, with the coupon share taken off, and the refund records that amount (#806)", async () => {
+    const { order, yam } = await capturedOrder();
+    // A $2.50 code on $25 of goods, as capture writes it on the lines: the yam line carries $2.00, so one yam takes $1.00 off.
+    const scoped = storeScoped(storeId);
+    await scoped.orderLine.update({ where: { id: yam.id }, data: { discountCents: 200 } });
+    await scoped.order.update({ where: { id: order.id }, data: { capturedAmountCents: 2400, captureCents: 2400 } });
+    const picks = [{ lineId: yam.id, qty: 1 }];
+    // $9.00 of goods is 40% of the $22.50 charged, so 60¢ of the $1.50 fee goes with it.
+    const preview = await storeRefundPreviewAction(order.id, picks);
+    expect(preview).toEqual({ ok: true, whole: false, itemsCents: 1000, couponShareCents: 100, serviceFeeCents: 60, taxCents: 0, amountCents: 960 });
+    expect(await refund(order.id, picks)).toMatchObject({ ok: true, amountCents: 960 });
+    expect((await state(order.id)).requests[0].amountCents).toBe(960);
+  });
+
+  it("shows what is left on the order for a whole-order refund, and refuses more units than are left", async () => {
+    const { order, yam } = await capturedOrder();
+    await refund(order.id, [{ lineId: yam.id, qty: 1 }]);
+    expect(await storeRefundPreviewAction(order.id, "whole_order")).toEqual({ ok: true, whole: true, amountCents: 2650 - 1060 });
+    expect(await storeRefundPreviewAction(order.id, [{ lineId: yam.id, qty: 2 }])).toEqual({ ok: false, error: "Choose at least one item, and no more than is left to refund of it." });
   });
 
   it("never refunds a unit twice, and a resubmitted form refunds once", async () => {

@@ -1,12 +1,12 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createStore, updateStore } from "@/lib/admin/actions";
 import type { StoreFormState } from "@/lib/admin/actions";
 import type { Store } from "@prisma/client";
 import { VALID_US_TIMEZONES } from "@/lib/admin/timezone";
-import { SLOT_FORMS, WEEKDAYS, slotFormValues, type SlotFormPrefix } from "@/lib/admin/slot-form";
+import { SLOT_FORMS, WEEKDAYS, slotFormValues, slotGapWarning, type SlotFormPrefix } from "@/lib/admin/slot-form";
 import { SLUG_INPUT_PATTERN } from "@/lib/slug";
 import { displayAddress } from "@/lib/directory/links";
 import { HoursEditor } from "@/components/store-hours/hours-editor";
@@ -43,8 +43,27 @@ export function StoreForm({
 
   const sv = state.submittedValues;
 
+  // The slot settings that would offer nothing in the next 7 days (#807), read from the form as it stands.
+  const formRef = useRef<HTMLFormElement>(null);
+  const [gaps, setGaps] = useState<Partial<Record<SlotFormPrefix, string>>>({});
+  function checkGaps() {
+    requestAnimationFrame(() => {
+      if (!formRef.current) return;
+      const data = new FormData(formRef.current);
+      const read = (key: string) => data.get(key)?.toString() ?? null;
+      let hours: unknown = null;
+      try {
+        hours = JSON.parse(read("hours") || "null");
+      } catch {}
+      const now = new Date();
+      const next = Object.fromEntries(SLOT_FORMS.map(({ prefix }) => [prefix, slotGapWarning(read, prefix, hours, read("timezone") ?? "", now) ?? undefined]));
+      setGaps((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+    });
+  }
+  useEffect(checkGaps, []);
+
   return (
-    <form action={formAction} className="space-y-5">
+    <form ref={formRef} action={formAction} onChange={checkGaps} onClick={checkGaps} className="space-y-5">
       {mode === "edit" && store && (
         <input type="hidden" name="storeId" value={store.id} />
       )}
@@ -484,6 +503,7 @@ export function StoreForm({
               title={form.title}
               values={sv ?? slotFormValues(store?.[form.column] ?? null, form.prefix)}
               errors={state.fieldErrors ?? {}}
+              warning={gaps[form.prefix]}
             />
           ))}
         </div>
@@ -523,11 +543,13 @@ function SlotFields({
   title,
   values,
   errors,
+  warning,
 }: {
   prefix: SlotFormPrefix;
   title: string;
   values: Record<string, string>;
   errors: Record<string, string>;
+  warning?: string;
 }) {
   const error = (suffix: string) =>
     errors[`${prefix}${suffix}`] ? (
@@ -554,6 +576,9 @@ function SlotFields({
         </label>
       </div>
       {error("Enabled")}
+      {warning && (
+        <p role="status" className="rounded-md border border-border bg-muted p-3 text-sm text-foreground">{warning}</p>
+      )}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {numbers.map((field) => (
           <div key={field.suffix}>

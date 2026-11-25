@@ -90,7 +90,7 @@ export async function slotOptions(
   const schedule = fulfillment === "store-delivery" ? readSlotSchedule(store.storeDeliverySlotSettings) : null;
   if (!schedule) return { required: false, slots: [] };
   const booked = await bookedCounts(client, storeId, fulfillment);
-  return { required: true, slots: scheduledSlots(schedule, store.timezone, now, booked) };
+  return { required: true, slots: scheduledSlots(schedule, store.hours, store.timezone, now, booked) };
 }
 
 /**
@@ -116,7 +116,7 @@ async function cateringSlotOptions(
   const booked = await bookedCounts(client, storeId, fulfillment);
   return {
     required: true,
-    slots: scheduledSlots({ ...schedule, leadMinutes, daysAhead: MAX_DAYS_AHEAD }, store.timezone, now, booked),
+    slots: scheduledSlots({ ...schedule, leadMinutes, daysAhead: MAX_DAYS_AHEAD }, store.hours, store.timezone, now, booked),
     ...prep,
   };
 }
