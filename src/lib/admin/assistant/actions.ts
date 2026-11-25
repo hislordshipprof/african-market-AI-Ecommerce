@@ -5,6 +5,8 @@ import { parseInput } from "@/lib/security/parse-input";
 import { FIXED_ERROR, MESSAGE_MAX } from "../../copilot/types";
 import { requirePlatformAdmin } from "../session";
 import { loadAdminAssistantChat, sendAdminAssistantTurn } from "./turn";
+import { adminBriefing } from "./briefing";
+import type { AdminBriefing } from "./briefing-view";
 import { confirmAdminDraft, rejectAdminDraft, type AdminDraftCard, type AdminDraftResult } from "./drafts";
 import type { AdminAssistantResult } from "./types";
 
@@ -27,9 +29,11 @@ export async function sendAdminAssistantMessage(input: unknown): Promise<AdminAs
   }
 }
 
-export async function loadAdminAssistant(): ReturnType<typeof loadAdminAssistantChat> {
+/** What the assistant sheet shows when it first opens (#855): the admin's own chat and today's briefing. */
+export async function loadAdminAssistant(): Promise<Awaited<ReturnType<typeof loadAdminAssistantChat>> & { briefing: AdminBriefing }> {
   const session = await requirePlatformAdmin();
-  return loadAdminAssistantChat(session.user.id);
+  const [chat, briefing] = await Promise.all([loadAdminAssistantChat(session.user.id), adminBriefing(new Date())]);
+  return { ...chat, briefing };
 }
 
 const confirmSchema = z.strictObject({

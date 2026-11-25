@@ -1,5 +1,7 @@
 import { requirePlatformAdmin } from "@/lib/admin/session";
+import { Suspense } from "react";
 import { AdminNav } from "./admin-nav-menu";
+import { AdminAssistantDock } from "./assistant/admin-assistant-dock";
 import styles from "./admin-shell.module.css";
 
 export default async function AdminShellLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +19,9 @@ export default async function AdminShellLayout({ children }: { children: React.R
       <main id="admin-main" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
         {children}
       </main>
+      <Suspense fallback={null}>
+        <AdminAssistantDock />
+      </Suspense>
     </div>
   );
 }

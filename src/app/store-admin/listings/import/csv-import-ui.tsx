@@ -619,7 +619,7 @@ function PreviewStep({
       )}
 
       {/* Action bar */}
-      <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]/95 px-4 py-3 shadow-md backdrop-blur-sm">
+      <div data-assistant-avoid className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]/95 px-4 py-3 shadow-md backdrop-blur-sm">
         <Button variant="outline" onClick={onBack} disabled={isPending} className="shrink-0">
           <ArrowLeft className="mr-1 h-4 w-4" />
           Back

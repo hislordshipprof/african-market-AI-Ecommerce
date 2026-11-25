@@ -1,11 +1,12 @@
 import Image from "next/image";
+import type { CSSProperties } from "react";
 import { directoryLink } from "@/lib/directory/attribution";
-import { ArrowRight, Check, ShoppingBag, Truck } from "lucide-react";
+import { Check, ShoppingBag, Truck } from "lucide-react";
 import type { DirectoryStore } from "@/lib/directory/stores";
 import { storeInitials } from "@/lib/store-initials";
 import { cuisineLabels } from "@/lib/directory/listing-fields";
 import { formatMiles } from "@/lib/directory/distance";
-import { deliveryLine } from "@/lib/directory/delivery-line";
+import { deliveryFee, deliveryLine } from "@/lib/directory/delivery-line";
 import { OpenNow } from "./open-now";
 import styles from "./directory.module.css";
 
@@ -16,63 +17,61 @@ export type CardStore = DirectoryStore & { href: string; distanceMi?: number; de
 const ownerPhoto = (url: string | null) => (url && !url.endsWith(".svg") ? url : null);
 
 /**
- * The directory's one card (#453, #690): the home, its search results and the state and city pages.
- * Pickup and delivery sit under the header so cards compare at a glance; the whole card is the link (#728).
+ * The directory's one card (#453, #863): the home, its search results and the state and city pages.
+ * The store's own photo, or its colour when it has none; open now, then how to order. No delivery time:
+ * none exists in data, and a courier's fee is only known from a quote (ADR-0006). The whole card is the link (#728).
  */
 export function StoreCard({ store }: { store: CardStore }) {
   const delivery = deliveryLine(store);
+  const fee = deliveryFee(store);
   const photo = ownerPhoto(store.ownerPhotoUrl);
   const cuisines = cuisineLabels(store.cuisineTags);
+  const area = store.neighborhood?.trim() || [store.city, store.state].filter(Boolean).join(", ");
+  const brand = { "--card-brand": store.brandColor ?? undefined } as CSSProperties;
   return (
     <a className={styles.card} href={directoryLink(store.href)}>
-      <span className={styles.cardHead}>
-        {photo ? (
-          <Image className={styles.face} src={photo} alt="" width={56} height={56} unoptimized />
-        ) : store.logoUrl ? (
-          <Image className={styles.logo} src={store.logoUrl} alt="" width={56} height={56} unoptimized />
-        ) : (
-          <span className={styles.initials} aria-hidden="true">{storeInitials(store.name)}</span>
-        )}
-        <span className={styles.heading}>
-          <span className={styles.name}>{store.name}</span>
-          <span className={styles.place}>{store.neighborhood?.trim() || [store.city, store.state].filter(Boolean).join(", ")}</span>
+      <span className={styles.cardMedia} style={brand} data-photo={photo ? true : undefined}>
+        {photo ? <Image className={styles.cardPhoto} src={photo} alt="" fill sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw" unoptimized /> : null}
+        <span className={styles.cardOpen}>
           <OpenNow hours={store.hours} timezone={store.timezone} />
         </span>
-        {store.distanceMi !== undefined ? (
-          <span className={styles.distance}>
-            {formatMiles(store.distanceMi)}
-            <span className={styles.srOnly}> away</span>
-          </span>
-        ) : null}
+        <span className={styles.cardPlate}>
+          {store.logoUrl ? (
+            <Image className={styles.logo} src={store.logoUrl} alt="" width={44} height={44} unoptimized />
+          ) : (
+            <span className={styles.initials} aria-hidden="true">{storeInitials(store.name)}</span>
+          )}
+        </span>
       </span>
-      {store.pickupEnabled || delivery ? (
-        <span className={styles.flags}>
-          {store.pickupEnabled ? (
-            <span className={styles.flag}><ShoppingBag aria-hidden="true" size={14} />Pickup</span>
-          ) : null}
-          {delivery ? (
-            <span className={styles.flag} data-maybe={delivery === "Courier may be available" || undefined}>
-              {delivery === "Delivers to you" ? <Check aria-hidden="true" size={14} /> : <Truck aria-hidden="true" size={14} />}
-              {delivery}
+      <span className={styles.cardBody}>
+        <span className={styles.cardTitle}>
+          <span className={styles.name}>{store.name}</span>
+          {store.distanceMi !== undefined ? (
+            <span className={styles.distance}>
+              {formatMiles(store.distanceMi)}
+              <span className={styles.srOnly}> away</span>
             </span>
           ) : null}
         </span>
-      ) : null}
-      {store.listingBlurb ? <span className={styles.blurb}>{store.listingBlurb}</span> : null}
-      {store.ownerName || store.ownerStory ? (
-        <span className={styles.owner}>
-          {store.ownerName ? <span className={styles.ownerName}>Run by {store.ownerName}</span> : null}
-          {store.ownerStory ? <span className={styles.story}>{store.ownerStory}</span> : null}
-        </span>
-      ) : null}
-      {cuisines.length > 0 ? (
-        <span className={styles.flags}>
-          {cuisines.map((label) => <span key={label} className={styles.tag}>{label}</span>)}
-        </span>
-      ) : null}
-      <span className={styles.visit} aria-hidden="true">
-        Visit store
-        <ArrowRight size={16} />
+        <span className={styles.place}>{[area, ...cuisines].filter(Boolean).join(", ")}</span>
+        {store.listingBlurb ? <span className={styles.blurb}>{store.listingBlurb}</span> : null}
+        {store.pickupEnabled || delivery ? (
+          <span className={styles.flags}>
+            {delivery && delivery !== "Courier may be available" ? (
+              <span className={styles.flag}>
+                {delivery === "Delivers to you" ? <Check aria-hidden="true" size={16} /> : <Truck aria-hidden="true" size={16} />}
+                {delivery}
+                {fee ? <span className={styles.fee}>{` · ${fee}`}</span> : null}
+              </span>
+            ) : null}
+            {store.pickupEnabled ? (
+              <span className={styles.flag}><ShoppingBag aria-hidden="true" size={16} />Pickup</span>
+            ) : null}
+            {delivery === "Courier may be available" ? (
+              <span className={styles.flag} data-maybe><Truck aria-hidden="true" size={16} />{delivery}</span>
+            ) : null}
+          </span>
+        ) : null}
       </span>
     </a>
   );

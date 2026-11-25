@@ -65,16 +65,17 @@ test.afterEach(cleanUp);
 
 test("an admin asks which stores are stuck in onboarding and opens the store from the answer (#831)", async ({ page }) => {
   await adminSignIn(page);
-  await page.getByRole("navigation").getByRole("link", { name: "Assistant" }).first().click();
-  await expect(page.getByRole("heading", { name: "Assistant", level: 1 })).toBeVisible();
+  await page.getByTestId("assistant-launcher").click();
+  const sheet = page.getByRole("dialog", { name: "Assistant" });
+  await expect(sheet.getByRole("heading", { name: "Assistant" })).toBeVisible();
   await proof(page, "empty");
 
-  await page.getByLabel("Message").fill("Which stores are stuck in onboarding?");
-  await page.getByRole("button", { name: "Send" }).click();
+  await sheet.getByLabel("Message").fill("Which stores are stuck in onboarding?");
+  await sheet.getByRole("button", { name: "Send" }).click();
 
-  const answer = page.getByRole("region", { name: "Conversation" });
+  const answer = sheet.getByRole("region", { name: "Conversation" });
   await expect(answer.getByText("still in setup")).toBeVisible();
-  const store = page.getByRole("region", { name: "Open in admin" }).getByRole("link", { name: STORE_NAME });
+  const store = sheet.getByRole("list", { name: "Open in admin" }).getByRole("link", { name: STORE_NAME });
   await expect(store).toBeVisible();
   await proof(page, "answer");
 

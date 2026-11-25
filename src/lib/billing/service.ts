@@ -26,6 +26,13 @@ export async function pilotPlacesLeft(): Promise<number> {
   return Math.max(0, PILOT_STORE_CAP - taken);
 }
 
+/** The pilot offer line under the plan table, only while places remain (#838); /sell and the directory home show it. */
+export async function pilotOffer(): Promise<string | undefined> {
+  return (await pilotPlacesLeft()) > 0
+    ? `Pilot offer: your first ${PILOT_FREE_MONTHS} months free, for the first ${PILOT_STORE_CAP} stores.`
+    : undefined;
+}
+
 export interface Actor {
   id: string;
   email: string;
