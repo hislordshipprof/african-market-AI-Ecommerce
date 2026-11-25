@@ -30,6 +30,7 @@ export default async function TeamPage() {
         email: inv.email,
         role: inv.role,
         expiresAt: inv.expiresAt.toISOString(),
+        emailFailed: inv.emailStatus === "failed",
       }))}
     />
   );
