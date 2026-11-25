@@ -13,22 +13,29 @@ import { addDraft, refused } from "./draft-tools";
 import { audited, link, type ToolContext } from "./tools";
 
 const REASON_LABEL = "Reason (type it to confirm)";
+const AMBIGUOUS_STORE = "More than one store matches that name; give its slug.";
 const orderInput = {
   orderNumber: z.number().int().positive(),
   store: z.string().min(1).max(200).describe("The store's slug or its name, as the read tools give it"),
 };
 
-/** The order by number in the store named by slug or by whole name (the read tools give the name). */
+/**
+ * The order by number in the store named by slug or by whole name (the read tools give the name). Store names are not
+ * unique, so a name or slug that matches more than one store is refused rather than guessed.
+ */
 async function orderBy(number: number, store: string) {
   const wanted = store.trim().toLocaleLowerCase("en-US");
   return platformAdminTransaction(async (tx) => {
     const stores = await tx.store.findMany({ select: { id: true, slug: true, name: true } });
-    const match = stores.find((row) => row.slug === wanted) ?? stores.find((row) => row.name.toLocaleLowerCase("en-US") === wanted);
+    const matches = stores.filter((row) => row.slug === wanted || row.name.toLocaleLowerCase("en-US") === wanted);
+    if (matches.length > 1) return AMBIGUOUS_STORE;
+    const [match] = matches;
     if (!match) return null;
-    return tx.order.findFirst({
+    const order = await tx.order.findFirst({
       where: { number, storeId: match.id },
-      select: { id: true, number: true, status: true, storeId: true, store: { select: { name: true } } },
+      select: { id: true, number: true, status: true, storeId: true, store: { select: { name: true, slug: true } } },
     });
+    return order && { ...order, storeLabel: `${order.store.name} (${order.store.slug})` };
   });
 }
 
@@ -44,13 +51,14 @@ export function moneyTools(ctx: ToolContext) {
       inputSchema: z.object({ ...orderInput, amountDollars: z.number().positive().max(100_000) }),
       execute: (input) => audited(ctx, "draft_platform_refund", input, async () => {
         const order = await orderBy(input.orderNumber, input.store);
+        if (typeof order === "string") return refused(order);
         if (!order) return refused("No order with that number at that store.");
         if (!(PLATFORM_REFUNDABLE_FROM as readonly string[]).includes(order.status)) return refused("Only a delivered, completed or partly refunded order can be refunded.");
         const amountCents = Math.round(input.amountDollars * 100);
-        const href = link(book, `Order ${order.number}, ${order.store.name}`, `/admin/orders/search/${order.id}`);
+        const href = link(book, `Order ${order.number}, ${order.storeLabel}`, `/admin/orders/search/${order.id}`);
         return addDraft(ctx, "platform_refund", order.storeId, { orderId: order.id, amountCents, submissionId: crypto.randomUUID(), reason: "" }, {
           title: "Refund the customer",
-          storeName: order.store.name,
+          storeName: order.storeLabel,
           changes: [{ field: `Order ${order.number}`, from: "Not refunded", to: `${money(amountCents)} refunded to the customer's card` }],
           editable: { label: REASON_LABEL, text: "", max: PLATFORM_REFUND_REASON_MAX },
           warning: `Sends ${money(amountCents)} back to the customer's card. This cannot be undone.`,
@@ -64,14 +72,15 @@ export function moneyTools(ctx: ToolContext) {
       inputSchema: z.object({ ...orderInput, repaidDollars: z.number().positive().max(100_000).optional() }),
       execute: (input) => audited(ctx, "draft_refund_resolve", input, async () => {
         const order = await orderBy(input.orderNumber, input.store);
+        if (typeof order === "string") return refused(order);
         const row = order ? (await listRefundFailedOrders()).find((failed) => failed.orderId === order.id) : null;
         if (!order || !row) return refused("That order's refund has not failed, or it is already resolved.");
         const repaidCents = input.repaidDollars ? Math.round(input.repaidDollars * 100) : row.owedCents;
         if (repaidCents < 1) return refused("Nothing is owed on that order.");
-        const href = link(book, `Order ${order.number}, ${order.store.name}`, `/admin/orders/search/${order.id}`);
+        const href = link(book, `Order ${order.number}, ${order.storeLabel}`, `/admin/orders/search/${order.id}`);
         return addDraft(ctx, "refund_resolve", order.storeId, { orderId: order.id, repaidCents, displayedOwedCents: row.owedCents, note: "" }, {
           title: "Resolve a failed refund",
-          storeName: order.store.name,
+          storeName: order.storeLabel,
           changes: [
             { field: `Order ${order.number}`, from: "Refund failed", to: "Cancelled, resolved by hand" },
             { field: "Repaid outside Stripe", from: `${money(row.owedCents)} owed`, to: money(repaidCents) },

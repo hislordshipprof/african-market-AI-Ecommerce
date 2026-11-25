@@ -43,6 +43,8 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
   const admin = { id: "", email: `admin-${RUN}@example.com` };
   const storeId = crypto.randomUUID();
   const setupId = crypto.randomUUID();
+  const twinId = crypto.randomUUID();
+  const decoyId = crypto.randomUUID();
   const slug = `money-${RUN}`;
   const setupSlug = `golive-${RUN}`;
   const ids = { refundable: "", failed: "", category: "", recipe: "" };
@@ -77,6 +79,9 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
       await tx.adminAssistantConversation.create({ data: { id: conversationId, userId: admin.id, model: "test" } });
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, address_line1, zip, updated_at) VALUES (${storeId}, ${`Money Market ${RUN}`}, ${slug}, 'active', '1 Money Way', '20782', now())`;
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, address_line1, zip, updated_at) VALUES (${setupId}, ${`Go Live Market ${RUN}`}, ${setupSlug}, 'setup', '2 Money Way', '20782', now())`;
+      // Store names are not unique: the twin shares the setup store's name, and the decoy is named the twin's slug.
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, address_line1, zip, updated_at) VALUES (${twinId}, ${`Go Live Market ${RUN}`}, ${`twin-${RUN}`}, 'active', '3 Money Way', '20782', now())`;
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, address_line1, zip, updated_at) VALUES (${decoyId}, ${`twin-${RUN}`}, ${`decoy-${RUN}`}, 'active', '4 Money Way', '20782', now())`;
       ids.category = (await tx.category.create({ data: { name: categoryName, slug: `empty-${RUN}`, sortOrder: 999 } })).id;
       ids.recipe = (await tx.recipe.create({ data: { key: `stew-${RUN}`, name: recipeName, aliases: [], origin: "drafted", ingredients: { create: [{ position: 0, name: "rice" }] } } })).id;
     });
@@ -106,7 +111,7 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
       await tx.recipe.deleteMany({ where: { id: ids.recipe } });
     });
     // Each table in its own transaction, so one the store never wrote to cannot abort the rest.
-    for (const id of [storeId, setupId]) {
+    for (const id of [storeId, setupId, twinId, decoyId]) {
       for (const table of ["refund_requests", "notification_logs", "order_lines", "stock_events", "orders", "customers", "listings", "audit_logs", "store_subscriptions", "stores"]) {
         await owner.$transaction(async (tx) => {
           await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
@@ -123,6 +128,7 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
     const card = cards[0]!;
     expect(card.editable).toMatchObject({ text: "" });
     expect(card.changes.map((change) => change.to).join(" ")).toContain("$5.00");
+    expect(card.storeName).toContain(slug);
 
     expect(await confirmAdminAssistantDraft({ draftId: card.id })).toMatchObject({ ok: false, code: "invalid" });
     expect(await confirmAdminAssistantDraft({ draftId: card.id, text: "   " })).toMatchObject({ ok: false, code: "invalid" });
@@ -132,6 +138,16 @@ describe.skipIf(!hasDb)("platform admin assistant money and hard-to-undo cards (
     expect(await confirmAdminAssistantDraft({ draftId: card.id, text: reason })).toMatchObject({ ok: true, draft: { state: "confirmed" } });
     expect(refundRequests.filter((r) => r.paymentIntentId === `pi_${RUN}_8341`).map((r) => r.amountCents)).toEqual([500]);
     expect((await confirmedAudit(card.id))?.after).toMatchObject({ kind: "platform_refund", params: { reason } });
+  });
+
+  it("refuses a money card when the store named matches more than one store, by name or by one's slug and another's name", async () => {
+    for (const store of [`go live market ${RUN}`, `twin-${RUN}`]) {
+      for (const [name, input] of [["draft_platform_refund", { orderNumber: 8341, store, amountDollars: 5 }], ["draft_refund_resolve", { orderNumber: 8342, store }]] as const) {
+        const { result, cards } = await draft(name, input);
+        expect(result).toEqual({ drafted: false, reason: "More than one store matches that name; give its slug." });
+        expect(cards).toHaveLength(0);
+      }
+    }
   });
 
   it("resolves a refund-failed order with the typed reason as the note", async () => {
