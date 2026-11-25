@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Download, Store } from "lucide-react";
+import { Download } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { PLAN_NAMES, planAllows, storePlan } from "@/lib/billing/plan";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
@@ -10,6 +10,7 @@ import { CANCEL_REASON_LABELS, storeAnalytics, type SalesDay } from "@/lib/analy
 import { type AnalyticsView } from "@/lib/analytics/csv";
 import { FULFILLMENT_LABELS } from "@/lib/order/status-labels";
 import { dayChartScale } from "./day-chart-scale";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 type Search = { store?: string; range?: string; from?: string; to?: string };
 
@@ -20,26 +21,6 @@ const fmtDay = (day: string) => dayLabel.format(new Date(`${day}T00:00:00Z`));
 
 function rangeQuery(range: AnalyticsRange): string {
   return range.preset === "custom" ? `range=custom&from=${range.from}&to=${range.to}` : `range=${range.preset}`;
-}
-
-function Header({ slug, name, range }: { slug: string; name: string; range?: string }) {
-  return (
-    <header className="border-b border-border bg-card">
-      <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
-        <Link
-          href={`/store-admin?store=${slug}`}
-          className="flex min-h-11 items-center gap-2 rounded-lg bg-primary px-3 text-primary-foreground"
-        >
-          <Store className="size-5" aria-hidden />
-          <span className="text-sm font-semibold">Dashboard</span>
-        </Link>
-        <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold text-foreground">Analytics</h1>
-          <p className="text-xs text-muted-foreground">{range ? `${name} · ${range}` : name}</p>
-        </div>
-      </div>
-    </header>
-  );
 }
 
 function Section({
@@ -195,16 +176,16 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
   if (!planAllows(plan, "analytics-dashboard")) {
     return (
-      <div className="min-h-dvh bg-background">
-        <Header slug={store.slug} name={store.name} />
-        <main className="mx-auto max-w-5xl px-4 py-6">
+      <>
+        <PageHeader title="Analytics" description={store.name} />
+        <div>
           <PlanLocked
             title="Analytics dashboard"
             description={`Sales by day, best sellers, repeat shoppers and how fast orders get ready. Your store is on ${PLAN_NAMES[plan]}; the per-order payout breakdown stays in Orders.`}
             storeSlug={store.slug}
           />
-        </main>
-      </div>
+        </div>
+      </>
     );
   }
 
@@ -221,11 +202,11 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const swapsAsked = operations.swapsAnswered + operations.swapsTimedOut;
 
   return (
-    <div className="min-h-dvh bg-background">
-      <Header slug={store.slug} name={store.name} range={`${fmtDay(range.from)} to ${fmtDay(range.to)}, store time`} />
+    <>
+      <PageHeader title="Analytics" description={`${store.name} · ${fmtDay(range.from)} to ${fmtDay(range.to)}, store time`} />
 
-      <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <nav aria-label="Analytics sections" className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 py-2 text-sm">
+      <div className="sticky top-0 z-10 -mx-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <nav aria-label="Analytics sections" className="flex gap-1 overflow-x-auto py-2 text-sm">
           {(["sales", "products", "customers", "operations", "assistant"] as const).map((view) => (
             <a key={view} href={`#${view}`} className="inline-flex min-h-11 shrink-0 items-center rounded-full px-3 font-medium capitalize text-foreground hover:bg-muted">
               {view}
@@ -234,7 +215,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         </nav>
       </div>
 
-      <main className="mx-auto max-w-5xl space-y-8 px-4 py-6">
+      <div className="mt-6 space-y-8">
         <RangePicker slug={store.slug} range={range} today={storeToday(store.timezone)} />
 
         <Section id="sales" title="Sales" note="Captured orders by the day they were placed. Goods revenue leaves out the customer's service fee, tip and delivery fee. The card fee leaves out the customer's service fee. Net to store is after the card fee, the service fee, courier fees, sales tax the platform remits, and refunds less any platform fee Stripe returns with them." csvHref={csv("sales")}>
@@ -382,7 +363,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
             </dl>
           </div>
         </Section>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
