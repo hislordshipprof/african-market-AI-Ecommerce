@@ -12,7 +12,7 @@ import { setEmailSenderForTests, type EmailMessage } from "../email/send";
 import { storePlan } from "./plan";
 import { COURIER_NOT_OFFERED, quoteCheckout } from "../checkout/service";
 import { createFakeBillingProvider, PLAN_LOOKUP_KEYS, setBillingProvider } from "./provider";
-import { getStoreBilling, PILOT_STORE_CAP, setPilot, startSubscription } from "./service";
+import { getStoreBilling, PILOT_STORE_CAP, pilotPlacesLeft, setPilot, startSubscription } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -217,7 +217,9 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     // Pilot places left over in the shared lane DB would make the cap arrive early.
     await platformAdmin.storeSubscription.updateMany({ where: { pilot: true }, data: { pilot: false } });
     const room = PILOT_STORE_CAP;
+    expect(await pilotPlacesLeft()).toBe(5);
     expect(await setPilot(storeB, true, admin)).toEqual({ ok: true });
+    expect(await pilotPlacesLeft()).toBe(4);
     const now = new Date();
     const expected = new Date(now);
     expected.setUTCMonth(expected.getUTCMonth() + 3);
@@ -233,6 +235,8 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     const sixth = (await raw.store.create({ data: { slug: `sub-p6-${run}`, name: "Pilot 6" } })).id;
     extraStores.push(sixth);
     expect(await setPilot(sixth, true, admin)).toEqual({ ok: false, error: "The pilot offer is limited to 5 stores." });
+    // /sell stops showing the pilot offer here (#838).
+    expect(await pilotPlacesLeft()).toBe(0);
     for (const id of [storeB, ...extraStores]) await setPilot(id, false, admin);
   });
 

@@ -1,22 +1,11 @@
 import Link from "next/link";
-import { AlertCircle, Check, Lock, MessageCircle, Store } from "lucide-react";
+import { AlertCircle, MessageCircle, Store } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { getStoreBilling, PILOT_FREE_MONTHS } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
-import {
-  FEATURE_LABELS,
-  PLAN_NAMES,
-  PLAN_PRICES_USD,
-  RECOMMENDED_PLAN,
-  PRO_FEATURES,
-  assistantChatCap,
-  featureLive,
-  planAllows,
-  staffLimit,
-  supportLevel,
-  billingStatusLabel,
-  type Plan,
-} from "@/lib/billing/plan";
+import { PLAN_NAMES, PLAN_PRICES_USD, PLANS, RECOMMENDED_PLAN, supportLevel, billingStatusLabel } from "@/lib/billing/plan";
+import { applicantPlanChoice } from "@/lib/store-application/service";
+import { PlanComparison } from "@/components/billing/plan-comparison";
 import { choosePlanAction, manageBillingAction } from "@/lib/billing/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,38 +14,17 @@ const dateFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numer
 /** An override ends at the start of its UTC date, the date the admin picked. */
 const overrideFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-type PlanLine = { text: string; comingSoon?: boolean };
-
-function planLines(plan: Plan): PlanLine[] {
-  const staff = staffLimit(plan);
-  const lines: PlanLine[] = [
-    "Branded store, catalog, orders, refunds and payouts",
-    "Allergy and diet rules, swap or refund prompts",
-    `${assistantChatCap(plan).toLocaleString("en-US")} shopping-assistant chats a month`,
-    staff === null ? "Unlimited staff" : `Owner + ${staff} staff`,
-    `Support: ${supportLevel(plan).toLowerCase()}`,
-    ...(planAllows(plan, "courier-delivery") ? [] : ["Pickup and your own delivery"]),
-  ].map((text) => ({ text }));
-  return [
-    ...lines,
-    ...PRO_FEATURES.filter((f) => planAllows(plan, f)).map((f) => ({ text: FEATURE_LABELS[f], comingSoon: !featureLive(f) })),
-  ];
-}
-
-function LineText({ text, comingSoon }: PlanLine) {
-  return (
-    <span>
-      {text}
-      {comingSoon && <span className="text-muted-foreground"> (coming soon)</span>}
-    </span>
-  );
-}
-
 export default async function PlanPage({ searchParams }: { searchParams: Promise<{ pending?: string }> }) {
   const { pending } = await searchParams;
   const session = await requireStoreOwner();
   const billing = await getStoreBilling(session.store.id);
-  const usage = await assistantChatUsage(session.store.id, billing.plan);
+  const [usage, applied] = await Promise.all([
+    assistantChatUsage(session.store.id, billing.plan),
+    applicantPlanChoice(session.store.id),
+  ]);
+  // The plan the applicant said they wanted on /sell comes first; "Not sure yet" or no application falls back (#838).
+  const appliedPlan = applied === "starter" || applied === "pro" ? applied : null;
+  const preselected = appliedPlan ?? RECOMMENDED_PLAN;
   const slug = session.store.slug;
   const usedPct = Math.min(100, Math.round((usage.chats / usage.cap) * 100));
 
@@ -174,11 +142,11 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
               Choose a plan
             </h2>
             <div className="grid gap-4 sm:grid-cols-2">
-              {(["starter", "pro"] as const).map((plan) => (
+              {PLANS.map((plan) => (
                 <form
                   key={plan}
                   action={choosePlanAction}
-                  className={`flex flex-col rounded-xl border bg-card p-5 ${plan === RECOMMENDED_PLAN ? "border-primary" : "border-border"}`}
+                  className={`flex flex-col rounded-xl border bg-card p-5 ${plan === preselected ? "border-primary" : "border-border"}`}
                 >
                   <input type="hidden" name="plan" value={plan} />
                   <h3 className="text-base font-semibold text-foreground">{PLAN_NAMES[plan]}</h3>
@@ -186,15 +154,10 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                     ${PLAN_PRICES_USD[plan]}
                     <span className="text-sm font-normal text-muted-foreground"> / month</span>
                   </p>
-                  <ul className="mt-4 flex-1 space-y-2 text-sm text-foreground">
-                    {planLines(plan).map((line) => (
-                      <li key={line.text} className="flex gap-2">
-                        <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                        <LineText {...line} />
-                      </li>
-                    ))}
-                  </ul>
-                  <Button type="submit" className="mt-5 min-h-11" variant={plan === RECOMMENDED_PLAN ? "default" : "outline"}>
+                  {plan === appliedPlan && (
+                    <p className="mt-2 text-sm text-foreground">You chose {PLAN_NAMES[plan]} when you applied.</p>
+                  )}
+                  <Button type="submit" className="mt-5 min-h-11" variant={plan === preselected ? "default" : "outline"}>
                     {billing.pilotTrialAvailable ? `Start ${PLAN_NAMES[plan]}, ${PILOT_FREE_MONTHS} months free` : `Choose ${PLAN_NAMES[plan]}`}
                   </Button>
                 </form>
@@ -203,31 +166,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
           </section>
         )}
 
-        <section aria-labelledby="pro-features" className="rounded-xl border border-border bg-card p-5">
-          <h2 id="pro-features" className="text-base font-semibold text-foreground">
-            Pro features
-          </h2>
-          <ul className="mt-3 divide-y divide-border">
-            {PRO_FEATURES.map((feature) => {
-              const allowed = planAllows(billing.plan, feature);
-              return (
-                <li key={feature} className="flex min-h-11 items-center justify-between gap-3 py-2 text-sm">
-                  <span className="flex items-center gap-2 text-foreground">
-                    {allowed ? (
-                      <Check className="size-4 text-primary" aria-hidden />
-                    ) : (
-                      <Lock className="size-4 text-muted-foreground" aria-hidden />
-                    )}
-                    <LineText text={FEATURE_LABELS[feature]} comingSoon={!featureLive(feature)} />
-                  </span>
-                  <span className={allowed ? "text-muted-foreground" : "font-medium text-foreground"}>
-                    {allowed ? "Included" : "Pro"}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <PlanComparison currentPlan={billing.plan} />
       </main>
     </div>
   );

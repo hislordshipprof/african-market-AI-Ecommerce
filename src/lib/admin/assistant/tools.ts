@@ -2,7 +2,8 @@ import { tool } from "ai";
 import { z } from "zod";
 import { platformAdminTransaction } from "../../db";
 import { readGoLiveChecklist, goLiveItemLabel } from "../../go-live/checklist";
-import { listStoreApplications } from "../../store-application/service";
+import { planChoiceLabel } from "../../store-application/fields";
+import { applicantPlanChoice, listStoreApplications } from "../../store-application/service";
 import { listEscalatedThreads } from "../../support/platform-actions";
 import { getStoreSubscription, listStores } from "../actions";
 import { getReviewStats, listAttributeProposals } from "../catalog-actions";
@@ -114,15 +115,16 @@ export function adminAssistantTools(ctx: ToolContext) {
     }),
 
     store_detail: tool({
-      description: "One store in depth, by its slug: status, plan and billing, metro, payouts, couriers, the go-live checklist.",
+      description: "One store in depth, by its slug: status, plan and billing, the plan wanted when applying, metro, payouts, couriers, the go-live checklist.",
       inputSchema: z.object({ slug: z.string().min(1).max(100) }),
       execute: (input) => audited(ctx, "store_detail", input, async () => {
         const store = (await listStores()).find((row) => row.slug === input.slug.trim().toLowerCase());
         if (!store) return { found: false };
-        const [subscription, checklist, metros] = await Promise.all([
+        const [subscription, checklist, metros, planWanted] = await Promise.all([
           getStoreSubscription(store.id),
           readGoLiveChecklist(store.id, ctx.now),
           listMetros(),
+          applicantPlanChoice(store.id),
         ]);
         link(book, store.name, `/admin/stores/${store.id}`);
         return {
@@ -131,6 +133,7 @@ export function adminAssistantTools(ctx: ToolContext) {
           slug: store.slug,
           status: store.status,
           plan: store.plan,
+          planWantedWhenApplying: planWanted ? planChoiceLabel(planWanted) : null,
           billingStatus: subscription?.status ?? null,
           pilot: subscription?.pilot ?? false,
           metro: metros.find((metro) => metro.id === store.metroId)?.name ?? null,
@@ -252,7 +255,7 @@ export function adminAssistantTools(ctx: ToolContext) {
     }),
 
     applications_waiting: tool({
-      description: "Store applications waiting for a decision, and shopper requests for a store in their area, by state and ZIP.",
+      description: "Store applications waiting for a decision with the plan each wants, and shopper requests for a store in their area, by state and ZIP.",
       inputSchema: z.object({}),
       execute: () => audited(ctx, "applications_waiting", {}, async () => {
         const [{ pending }, areas] = await Promise.all([listStoreApplications(), listStoreRequestAreas()]);
@@ -266,6 +269,7 @@ export function adminAssistantTools(ctx: ToolContext) {
             business: row.businessName,
             city: row.city,
             state: row.state,
+            planWanted: row.planChoice ? planChoiceLabel(row.planChoice) : null,
             applied: day(row.createdAt),
           })),
           requestAreas: zips
