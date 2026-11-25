@@ -94,10 +94,10 @@ describe("stripe return needs a 2FA-verified store owner", () => {
     });
   });
 
-  it("an owner signed in by password only is sent to sign-in and never reaches Stripe", async () => {
+  it("an owner without 2FA is sent to set it up, then back to payouts, and never reaches Stripe (#840)", async () => {
     accountReads = 0;
     headerState.set("cookie", passwordCookies);
-    expect(await landing()).toBe(`/store-admin/sign-in?store=${slug}`);
+    expect(await landing()).toBe(`/store-admin/two-factor?store=${slug}&next=${encodeURIComponent(`/store-admin/payouts?store=${slug}`)}`);
     expect(accountReads).toBe(0);
   });
 

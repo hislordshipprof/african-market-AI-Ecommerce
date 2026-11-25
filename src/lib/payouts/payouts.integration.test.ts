@@ -6,9 +6,15 @@ import { fakeStripeProvider, loginLinksCreated, reset, setNextPayoutsFailure } f
 import { fakePayoutPaymentIntentId, FAKE_PAYOUT_ORDERS } from "@/lib/stripe/fake-payouts";
 
 const session = vi.hoisted(() => ({
-  current: null as null | { store: { id: string; slug: string; stripeAccountId: string | null } },
+  current: null as null | {
+    store: { id: string; slug: string; stripeAccountId: string | null };
+    user?: { twoFactorEnabled: boolean };
+    session?: { twoFactorVerified: boolean };
+  },
 }));
-vi.mock("@/lib/store-admin/session", () => ({
+const VERIFIED = { user: { twoFactorEnabled: true }, session: { twoFactorVerified: true } };
+vi.mock("@/lib/store-admin/session", async (original) => ({
+  hasVerifiedTwoFactor: (await original<typeof import("@/lib/store-admin/session")>()).hasVerifiedTwoFactor,
   requireStoreOwner: async () => {
     // Staff and signed-out users are redirected by the real guard; nothing after it runs.
     if (!session.current) throw new Error("REDIRECT:/store-admin");
@@ -112,7 +118,7 @@ describe.skipIf(!hasDb)("store payouts (#548, lane DB)", () => {
   });
 
   it("gives the owner a CSV of the payout", async () => {
-    session.current = { store: storeA };
+    session.current = { store: storeA, ...VERIFIED };
     const res = await csv(new Request("http://localhost/x"), { params: Promise.resolve({ payoutId: firstPayout }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Disposition")).toContain(`${storeA.slug}-payout-2026-11-06.csv`);
@@ -130,7 +136,7 @@ describe.skipIf(!hasDb)("store payouts (#548, lane DB)", () => {
   });
 
   it("redirects to a fresh login link for the session store and never logs it", async () => {
-    session.current = { store: storeA };
+    session.current = { store: storeA, ...VERIFIED };
     const res = await dashboard(new Request("http://localhost/store-admin/payouts/stripe-dashboard", {
       method: "POST", headers: { origin: "http://localhost", host: "localhost" },
     }));
@@ -141,8 +147,19 @@ describe.skipIf(!hasDb)("store payouts (#548, lane DB)", () => {
     expect(logged.join("\n")).not.toContain("fake-login");
   });
 
+  it("sends an owner without 2FA to set it up, then back to payouts, before any Stripe call (#840)", async () => {
+    session.current = { store: storeA, user: { twoFactorEnabled: false }, session: { twoFactorVerified: false } };
+    const res = await dashboard(new Request("http://localhost/store-admin/payouts/stripe-dashboard", {
+      method: "POST", headers: { origin: "http://localhost", host: "localhost" },
+    }));
+    expect(res.status).toBe(303);
+    const back = `/store-admin/payouts?store=${storeA.slug}`;
+    expect(res.headers.get("Location")).toBe(`/store-admin/two-factor?store=${storeA.slug}&next=${encodeURIComponent(back)}`);
+    expect(loginLinksCreated).toEqual([]);
+  });
+
   it("refuses a cross-site POST for the login link", async () => {
-    session.current = { store: storeA };
+    session.current = { store: storeA, ...VERIFIED };
     const res = await dashboard(new Request("http://localhost/store-admin/payouts/stripe-dashboard", {
       method: "POST", headers: { origin: "https://evil.example", host: "localhost" },
     }));
@@ -156,7 +173,7 @@ describe.skipIf(!hasDb)("store payouts (#548, lane DB)", () => {
     expect(result).toEqual({ ok: false, notFound: false, error: PAYOUTS_ERROR });
     expect(logged.join("\n")).toContain("Raw provider text: acct_secret is restricted");
 
-    session.current = { store: storeA };
+    session.current = { store: storeA, ...VERIFIED };
     vi.spyOn(fakeStripeProvider, "createLoginLink").mockRejectedValueOnce(new Error("Raw: no Express Dashboard"));
     const res = await dashboard(new Request("http://localhost/store-admin/payouts/stripe-dashboard", {
       method: "POST", headers: { origin: "http://localhost", host: "localhost" },

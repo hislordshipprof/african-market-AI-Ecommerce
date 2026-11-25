@@ -5,6 +5,8 @@ import { getStore, revalidateStore } from "@/lib/get-store";
 import { storeScoped, platformAdmin } from "@/lib/db";
 import { getStripeProvider } from "@/lib/stripe";
 import { requireSameOrigin } from "@/lib/security/same-origin";
+import { hasVerifiedTwoFactor, TWO_FACTOR_REQUIRED_MESSAGE } from "@/lib/store-admin/session";
+import { storeTwoFactorPath } from "@/lib/store-admin/sign-in-path";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +18,6 @@ export async function POST(req: NextRequest) {
   });
 
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -43,6 +41,15 @@ export async function POST(req: NextRequest) {
 
   if (!membership || membership.role !== "owner") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Payout settings need 2FA on and verified this session (#840).
+  if (!hasVerifiedTwoFactor(session)) {
+    const payouts = `/store-admin/payouts?store=${encodeURIComponent(store.slug)}`;
+    return NextResponse.json(
+      { error: TWO_FACTOR_REQUIRED_MESSAGE, setupHref: storeTwoFactorPath(store.slug, payouts) },
+      { status: 403 },
+    );
   }
 
   const stripe = getStripeProvider();

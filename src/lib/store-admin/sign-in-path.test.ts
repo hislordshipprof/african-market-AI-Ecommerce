@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storeAdminReturnPath, storeSignInPath } from "./sign-in-path";
+import { storeAdminReturnPath, storeSignInPath, storeTwoFactorPath } from "./sign-in-path";
 
 describe("storeSignInPath (#797)", () => {
   it("names the store and the page the member asked for", () => {
@@ -26,8 +26,16 @@ describe("storeAdminReturnPath (#797)", () => {
   });
 
   it("never leaves store admin or the site", () => {
-    for (const next of ["https://evil.example/store-admin", "//evil.example/store-admin", "/\\evil.example", "/store-adminx", "/admin", "/store-admin/sign-in"]) {
+    for (const next of ["https://evil.example/store-admin", "//evil.example/store-admin", "/\\evil.example", "/store-adminx", "/admin", "/store-admin/sign-in", "/store-admin/two-factor?next=%2Fstore-admin"]) {
       expect(storeAdminReturnPath(next, "mama-ngozi")).toBe("/store-admin?store=mama-ngozi");
     }
+  });
+});
+
+describe("storeTwoFactorPath (#840)", () => {
+  it("names the store and the page to come back to", () => {
+    expect(storeTwoFactorPath("mama-ngozi", "/store-admin/team?store=mama-ngozi")).toBe(
+      "/store-admin/two-factor?store=mama-ngozi&next=%2Fstore-admin%2Fteam%3Fstore%3Dmama-ngozi",
+    );
   });
 });
