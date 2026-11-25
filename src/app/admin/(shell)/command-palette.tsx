@@ -93,7 +93,7 @@ export function CommandPalette() {
       </button>
       <dialog
         ref={dialog}
-        aria-label="Search and jump"
+        aria-label="Go to"
         onClose={() => {
           setQuery("");
           setFound(null);
@@ -106,7 +106,7 @@ export function CommandPalette() {
       >
         <div className="flex items-center gap-2 border-b border-border px-4">
           <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-          <label className="sr-only" htmlFor={`${listId}-input`}>Search or jump to</label>
+          <label className="sr-only" htmlFor={`${listId}-input`}>Jump to</label>
           <input
             id={`${listId}-input`}
             role="combobox"

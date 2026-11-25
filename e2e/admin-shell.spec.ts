@@ -79,7 +79,8 @@ test.describe("Platform admin shell, design A (#859)", () => {
     const menu = page.getByRole("navigation", { name: "Admin" });
     for (const group of ADMIN_NAV_GROUPS) {
       if (!group.label) continue;
-      await expect(menu.getByRole("group", { name: group.label }).getByRole("link")).toHaveText(group.items.map((item) => new RegExp(`^${item.label}`)));
+      const section = menu.locator("div").filter({ has: page.getByRole("heading", { name: group.label, exact: true }) });
+      await expect(section.getByRole("link")).toHaveText(group.items.map((item) => new RegExp(`^${item.label}`)));
     }
 
     for (const group of ADMIN_NAV_GROUPS) {
@@ -98,7 +99,7 @@ test.describe("Platform admin shell, design A (#859)", () => {
   });
 
   test("⌘K opens the palette; arrows and Enter jump to a page or a store; Esc closes it", async ({ page }) => {
-    const palette = page.getByRole("dialog", { name: "Search and jump" });
+    const palette = page.getByRole("dialog", { name: "Go to" });
     // Retried until the page has hydrated and listens for the shortcut.
     await expect(async () => {
       await page.keyboard.press("ControlOrMeta+k");
@@ -177,7 +178,9 @@ test.describe("Platform admin shell, design A (#859)", () => {
 
     // A click anywhere on the row opens the store.
     // The name link covers the row, so a click on the Status cell lands on it.
-    const box = await page.getByRole("row", { name: new RegExp(live.name) }).getByRole("cell").nth(2).boundingBox();
+    const cell = page.getByRole("row", { name: new RegExp(live.name) }).getByRole("cell").nth(2);
+    await cell.scrollIntoViewIfNeeded();
+    const box = await cell.boundingBox();
     if (!box) throw new Error("the store row is not on screen");
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await expect(page).toHaveURL(new RegExp(`/admin/stores/${live.id}$`), { timeout: 15000 });

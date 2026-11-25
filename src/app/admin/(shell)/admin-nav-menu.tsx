@@ -24,8 +24,17 @@ export function AdminShell({ email, counts, children }: { email: string; counts:
   const toggle = useRef<HTMLButtonElement>(null);
   const close = useRef<HTMLButtonElement>(null);
 
+  // While the drawer is open, Esc closes it from anywhere and focus returns to the menu button.
   useEffect(() => {
-    if (open) close.current?.focus();
+    if (!open) return;
+    close.current?.focus();
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      toggle.current?.focus();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
   function closeDrawer() {
@@ -54,9 +63,6 @@ export function AdminShell({ email, counts, children }: { email: string; counts:
       <aside
         id="admin-menu"
         aria-label="Admin menu"
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && open) closeDrawer();
-        }}
         className={`fixed inset-y-0 left-0 z-40 flex w-[264px] flex-col overflow-y-auto overscroll-contain border-r border-border bg-card motion-safe:transition-[transform,visibility] motion-safe:duration-200 lg:visible lg:sticky lg:top-0 lg:h-dvh lg:shrink-0 lg:translate-x-0 ${
           open ? "visible translate-x-0" : "invisible -translate-x-full"
         }`}
@@ -84,13 +90,8 @@ export function AdminShell({ email, counts, children }: { email: string; counts:
 
         <nav aria-label="Admin" className="px-2 pb-4">
           {ADMIN_NAV_GROUPS.map((group) => (
-            <div
-              key={group.label ?? "home"}
-              role={group.label ? "group" : undefined}
-              aria-labelledby={group.label ? groupId(group.label) : undefined}
-              className={group.label ? "mt-4" : ""}
-            >
-              {group.label && <p id={groupId(group.label)} className="px-2.5 pb-1 text-[13px] font-semibold text-muted-foreground">{group.label}</p>}
+            <div key={group.label ?? "home"} className={group.label ? "mt-4" : ""}>
+              {group.label && <h2 className="px-2.5 pb-1 text-[13px] font-semibold text-muted-foreground">{group.label}</h2>}
               <ul>
                 {group.items.map((item) => {
                   const isCurrent = item.href === current;
@@ -166,8 +167,6 @@ export function AdminShell({ email, counts, children }: { email: string; counts:
     </>
   );
 }
-
-const groupId = (label: string) => `admin-nav-${label.toLowerCase().replace(/\W+/g, "-")}`;
 
 function NavBadge({ counts, name }: { counts: Promise<AdminHomeCounts>; name: AdminNavCount }) {
   const counted = use(counts)[name];
