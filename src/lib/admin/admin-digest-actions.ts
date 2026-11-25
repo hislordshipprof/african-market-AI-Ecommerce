@@ -1,13 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { lockPlatformSettingsRow, platformAdminTransaction } from "../db";
+import { parseInput, readFormFields } from "../security/parse-input";
 import { requirePlatformAdmin } from "./session";
 
 /** Switches the platform admins' daily digest email on or off (#834). An unticked box is off. Audited when it changes. */
 export async function setAdminDigestAction(formData: FormData): Promise<void> {
   const session = await requirePlatformAdmin();
-  const enabled = formData.get("enabled") === "on";
+  const parsed = parseInput(z.strictObject({ enabled: z.literal("on").nullable() }), readFormFields(formData, ["enabled"]));
+  if (!parsed.ok) return;
+  const enabled = parsed.data.enabled === "on";
   await platformAdminTransaction(async (tx) => {
     await lockPlatformSettingsRow(tx);
     const before = await tx.platformSettings.findUniqueOrThrow({ where: { id: "platform" }, select: { adminDigestEnabled: true } });
