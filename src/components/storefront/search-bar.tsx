@@ -137,7 +137,7 @@ function SearchInput({ storeId }: { storeId: string }) {
         type="search"
         autoComplete="off"
         className="sf-search-input"
-        placeholder="Search egusi, plantain, your favorites…"
+        placeholder="Search egusi or plantain"
         value={query}
         onFocus={() => setOpen(true)}
         onChange={(e) => {

@@ -9,7 +9,8 @@ import { FulfillmentChip } from "./fulfillment-chip";
 import { ShrinkingHeader } from "./scroll-motion";
 import { StoreLogo } from "./store-logo";
 
-export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
+export async function StorefrontHeader({ store, pageTitled = false }: { store: ValidatedStore; pageTitled?: boolean }) {
+  const StoreName = pageTitled ? "p" : "h1";
   const headerList = await headers();
   const [categories, session] = await Promise.all([
     listCategories(store.id),
@@ -20,7 +21,7 @@ export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
       <div className="sf-header-main sf-container">
         <Link href="/" className="sf-brand">
           <StoreLogo src={store.logoUrl} name={store.name} />
-          <h1 data-testid="store-name" title={store.name}>{store.name}</h1>
+          <StoreName className="sf-brand-name" data-testid="store-name" title={store.name}>{store.name}</StoreName>
         </Link>
         <div className="sf-header-window">
           <FulfillmentChip
