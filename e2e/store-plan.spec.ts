@@ -245,8 +245,10 @@ test.describe("store subscriptions (#494)", () => {
     await page.goto(`/store-admin?store=${SLUG}`);
     await expect(page.getByRole("link", { name: "Upgrade to Pro" })).toHaveCount(0);
     await page.goto(`/store-admin/copilot?store=${SLUG}`);
-    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+    await page.getByTestId("assistant-launcher").click();
+    const sheet = page.getByRole("dialog", { name: "Store assistant" });
+    await expect(sheet.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "Send" })).toBeVisible();
   });
 
   test("admin console shows each store's plan and the failed payment, and sets the pilot offer", async ({ page }) => {
