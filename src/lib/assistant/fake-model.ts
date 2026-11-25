@@ -179,6 +179,7 @@ export function scriptStep(messages: unknown): ScriptStep {
   if (last.name === "draft_store_create" || last.name === "draft_review_approve" || last.name === "draft_product") {
     return { kind: "text", text: "I drafted it on one card below. Confirm or dismiss it; nothing changes until you confirm." };
   }
+  if (last.name === "draft_force_go_live") return { kind: "text", text: "I drafted it on a card below. Type a reason, then confirm or dismiss it; nothing changes until you confirm." };
   if (last.name === "draft_store_status") return { kind: "text", text: "I drafted the suspension. Confirm or dismiss the card below; nothing changes until you confirm." };
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
@@ -253,10 +254,13 @@ function openingStep(lower: string, raw: string, messages: unknown): ScriptStep 
     return { kind: "error" };
   }
   // The platform admin assistant (#831) reads the stores still in setup.
-  if (lower.includes("stuck in onboarding")) return { kind: "tool", name: "find_stores", input: { status: "setup" } };
+  if (lower.includes("stuck in onboarding") || lower.includes("in setup for more than")) return { kind: "tool", name: "find_stores", input: { status: "setup" } };
   // The platform admin assistant drafts a suspension (#832), and refuses a never-allowed request.
   const suspend = /^suspend the store ([a-z0-9-]+)/.exec(lower.trim());
   if (suspend) return { kind: "tool", name: "draft_store_status", input: { slug: suspend[1], status: "suspended" } };
+  // The platform admin assistant drafts a forced go-live, whose card needs a typed reason (#834).
+  const forceLive = /^force go-live for ([a-z0-9-]+)/.exec(lower.trim());
+  if (forceLive) return { kind: "tool", name: "draft_force_go_live", input: { slug: forceLive[1] } };
   // The platform admin assistant runs a store's creation and a review-queue batch as one card each (#833).
   const storeFields = /^create a store: (.+)$/i.exec(raw.trim());
   if (storeFields) {
