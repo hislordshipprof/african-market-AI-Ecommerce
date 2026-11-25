@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { parseInput } from "../../security/parse-input";
+import { parseInput } from "@/lib/security/parse-input";
 import { FIXED_ERROR, MESSAGE_MAX } from "../../copilot/types";
 import { requirePlatformAdmin } from "../session";
 import { loadAdminAssistantChat, sendAdminAssistantTurn } from "./turn";
