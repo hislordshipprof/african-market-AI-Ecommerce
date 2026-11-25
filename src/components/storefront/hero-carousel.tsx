@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, ChevronLeft, ChevronRight, Pause, Play, ShieldCheck, Store, Truck } from "lucide-react";
@@ -8,6 +9,9 @@ import { editorial, photoOrFallback } from "@/lib/storefront/editorial";
 import { canAutoplay, HERO_INTERVAL } from "@/lib/storefront/motion";
 import { ProductImage } from "./product-image";
 import { useReducedMotion } from "./use-reduced-motion";
+
+// The header chip's chunk: a closed store shows when it opens, never a pickup time (#763).
+const PickupChipLabel = dynamic(() => import("./pickup-chip-label"), { ssr: false, loading: () => <>Pickup</> });
 
 // Matches the exit fade in motion.css (.sf-hero-slide[data-leaving]).
 const SLIDE_FADE_MS = 650;
@@ -25,8 +29,8 @@ function useInView(ref: RefObject<HTMLElement | null>, amount: number) {
   return inView;
 }
 
-export function HeroCarousel({ banners, products = [], pickupMinutes = 30, pickupEnabled = true }: {
-  banners: StorefrontBanner[]; products?: StorefrontListing[]; pickupMinutes?: number; pickupEnabled?: boolean;
+export function HeroCarousel({ banners, products = [], pickupMinutes = 30, pickupEnabled = true, hours, timezone = "America/New_York" }: {
+  banners: StorefrontBanner[]; products?: StorefrontListing[]; pickupMinutes?: number; pickupEnabled?: boolean; hours?: unknown; timezone?: string;
 }) {
   const [index, setIndex] = useState(0);
   // The slide fading out, and whether any slide has changed yet (the first slide never animates in).
@@ -107,7 +111,7 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
                 <ProductImage src={itemSubject.imageUrl} name={itemSubject.displayName} sizes="(max-width:767px) 210px, 470px" />
                 <span className="sf-hero-subject-label">{itemSubject.altName || itemSubject.displayName}</span>
               </div>}
-              <div className="sf-glass-pill sf-glass-one"><Store size={18} aria-hidden />{pickupEnabled ? `Pickup in ${pickupMinutes} min` : "Your neighborhood favorites"}</div>
+              <div className="sf-glass-pill sf-glass-one"><Store size={18} aria-hidden />{pickupEnabled ? <PickupChipLabel minutes={pickupMinutes} hours={hours} timezone={timezone} /> : "Your neighborhood favorites"}</div>
               <div className="sf-glass-pill sf-glass-two"><ShieldCheck size={18} aria-hidden />We ask before any swap</div>
             </div>
           </div>

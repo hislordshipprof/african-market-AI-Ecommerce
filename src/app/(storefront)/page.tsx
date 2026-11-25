@@ -91,7 +91,7 @@ export default async function StorefrontPage() {
           </div>
         </div>
       )}
-      <HeroCarousel banners={banners} products={subjects.length ? subjects : favorites.slice(0, 3)} pickupMinutes={store.prepTimeMinutes} pickupEnabled={store.pickupEnabled} />
+      <HeroCarousel banners={banners} products={subjects.length ? subjects : favorites.slice(0, 3)} pickupMinutes={store.prepTimeMinutes} pickupEnabled={store.pickupEnabled} hours={store.hours} timezone={store.timezone} />
       <MarketMarquee />
       <div className="sf-container sf-stack">
         <SectionReveal><CategoryMosaic categories={categories} /></SectionReveal>
