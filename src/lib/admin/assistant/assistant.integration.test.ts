@@ -111,6 +111,8 @@ describe.skipIf(!hasDb)("platform admin assistant (#831)", () => {
     const mine = await loadAdminAssistant();
     expect(mine.messages.map((m) => m.text)).toContain("Which stores are stuck in onboarding?");
     expect(mine.messages.at(-1)?.links).toContainEqual({ label: storeName, href: `/admin/stores/${storeId}` });
+    // The dock loads on first open and shows the Today briefing on an empty chat (#855).
+    expect(Array.isArray(mine.briefing.items)).toBe(true);
 
     signInAs(other);
     const theirs = await loadAdminAssistant();

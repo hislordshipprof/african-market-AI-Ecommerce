@@ -9,7 +9,6 @@ import {
   FolderTree,
   Gauge,
   House,
-  Sparkles,
   MapPinned,
   MessagesSquare,
   Package,
@@ -26,7 +25,6 @@ import {
 /** One entry per line: a new menu entry is one line here, in the place it belongs. */
 export const ADMIN_NAV = [
   { href: "/admin", label: "Home", icon: House },
-  { href: "/admin/assistant", label: "Assistant", icon: Sparkles },
   { href: "/admin/stores", label: "Stores", icon: Store },
   { href: "/admin/billing/subscriptions", label: "Subscriptions", icon: CreditCard },
   { href: "/admin/applications", label: "Applications", icon: FileInput },

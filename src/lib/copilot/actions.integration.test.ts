@@ -40,7 +40,7 @@ import { setStripeProvider } from "../stripe";
 import { storeToday } from "../analytics/range";
 import { fakeStripeProvider } from "../stripe/fake";
 import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
-import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
+import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage, loadStoreAssistant } from "./actions";
 import { makeFakeStep } from "../inngest/fake-step";
 import { runConfirmRequestSteps } from "./alert-functions";
 import { FIXED_ERROR } from "./types";
@@ -318,6 +318,11 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
 
       const panel = await loadCopilotPanel(storeAId, ownerAId);
       expect(panel.messages.map((message) => message.text)).toContain("got 3 cassava");
+      // The assistant sheet (#855) loads the same history, says the chat is locked, and carries the alerts.
+      const dock = await loadStoreAssistant();
+      expect(dock.chatAllowed).toBe(false);
+      expect(dock.messages.map((message) => message.text)).toContain("got 3 cassava");
+      expect(Array.isArray(dock.alerts)).toBe(true);
       expect(panel.messages.map((message) => message.text)).not.toContain("got 2 cassava");
       expect(await confirmStockProposal({ proposalId: sent.proposals[0].id })).toMatchObject({ ok: true, listing: { qty: 8 } });
     } finally {

@@ -29,4 +29,8 @@ describe("ADMIN_NAV", () => {
     }
     expect(new Set(ADMIN_NAV.map((entry) => entry.href)).size).toBe(ADMIN_NAV.length);
   });
+
+  it("has no Assistant entry: the assistant opens from the floating button on every page (#855)", () => {
+    expect(ADMIN_NAV.map((entry) => entry.href)).not.toContain("/admin/assistant");
+  });
 });
