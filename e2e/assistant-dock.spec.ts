@@ -188,16 +188,21 @@ test.describe("platform admin assistant sheet (#855)", () => {
 
   test("a chat that failed to load loads when the sheet opens again", async ({ page }) => {
     await adminSignIn(page);
-    let failed = false;
+    let failing = true;
+    let failed = 0;
     await page.route("**/admin", async (route) => {
-      if (failed || route.request().method() !== "POST" || !route.request().headers()["next-action"]) return route.fallback();
-      failed = true;
+      if (!failing || route.request().method() !== "POST" || !route.request().headers()["next-action"]) return route.fallback();
+      failed += 1;
       await route.abort();
     });
     const launcher = page.getByTestId("assistant-launcher");
     const sheet = page.getByRole("dialog", { name: "Assistant" });
     await launcher.click();
     await expect(sheet.getByText("The assistant couldn't load.", { exact: false })).toBeVisible();
+    // It tries again on the next open, not over and over while the sheet stays open.
+    await page.waitForTimeout(1000);
+    expect(failed).toBe(1);
+    failing = false;
 
     await sheet.getByRole("button", { name: "Close Assistant" }).click();
     await expect(sheet).toBeHidden();

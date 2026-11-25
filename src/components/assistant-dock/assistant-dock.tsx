@@ -70,14 +70,19 @@ export function AssistantDock({
     if (requested) router.replace(withoutDockParam(pathname, search), { scroll: false });
   }, [requested, search, pathname, router]);
 
-  // The chat loads the first time the sheet opens, not on every page load.
+  // The chat loads the first time the sheet opens, not on every page load. A failed load tries again on the next
+  // open only, so the callback sits in a ref: its identity changes every render.
+  const firstOpen = useRef(onFirstOpen);
+  useEffect(() => {
+    firstOpen.current = onFirstOpen;
+  });
   useEffect(() => {
     if (!open || loaded.current) return;
     loaded.current = true;
-    void onFirstOpen().then((ok) => {
+    void firstOpen.current().then((ok) => {
       if (!ok) loaded.current = false;
     });
-  }, [open, onFirstOpen]);
+  }, [open]);
 
   useEffect(() => {
     const node = dialog.current;
