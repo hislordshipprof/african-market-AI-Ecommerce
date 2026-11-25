@@ -11,7 +11,7 @@ export function PlanComparison({ currentPlan, offer }: { currentPlan?: Plan; off
       <h2 id="plans-title" className="text-lg font-semibold text-foreground">
         What each plan gives
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">No commission on your sales on either plan. Change or cancel any time.</p>
+      <p className="mt-1 text-sm text-muted-foreground">No commission on your sales on either plan.</p>
       {offer && (
         <p className="mt-3 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-foreground" data-testid="pilot-offer">
           {offer}

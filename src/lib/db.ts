@@ -8,6 +8,7 @@ import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
 import { EARTH_RADIUS_MI } from "./address/geo";
 import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
+import type { PlanChoice } from "./store-application/fields";
 import { VALID_US_TIMEZONES } from "./admin/timezone";
 import type { OrderSearchFilters } from "./admin/order-search";
 
@@ -3117,8 +3118,8 @@ export async function readStorePlanRows(tx: Pick<PrismaClient, "$queryRaw">, sto
 export async function readApplicantPlanChoice(
   tx: Pick<PrismaClient, "$queryRaw">,
   storeId: string,
-): Promise<"starter" | "pro" | "undecided" | null> {
-  const [row] = await tx.$queryRaw<{ planChoice: "starter" | "pro" | "undecided" | null }[]>`
+): Promise<PlanChoice | null> {
+  const [row] = await tx.$queryRaw<{ planChoice: PlanChoice | null }[]>`
     SELECT plan_choice AS "planChoice" FROM store_applications WHERE store_id = ${storeId}`;
   return row?.planChoice ?? null;
 }

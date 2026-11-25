@@ -18,9 +18,8 @@ const STEPS = [
 export default async function SellPage() {
   // The application form lives on the root domain only; a store's own site has no /sell (#554).
   if ((await headers()).get("x-platform-root") !== "1") notFound();
-  const placesLeft = await pilotPlacesLeft();
-  const offer = placesLeft > 0
-    ? `Pilot offer: your first ${PILOT_FREE_MONTHS} months free, for the first ${PILOT_STORE_CAP} stores. ${placesLeft} ${placesLeft === 1 ? "place" : "places"} left.`
+  const offer = (await pilotPlacesLeft()) > 0
+    ? `Pilot offer: your first ${PILOT_FREE_MONTHS} months free, for the first ${PILOT_STORE_CAP} stores.`
     : undefined;
 
   return (
