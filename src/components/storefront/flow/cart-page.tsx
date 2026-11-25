@@ -9,7 +9,7 @@ import {
   useTransition,
   useSyncExternalStore,
 } from "react";
-import { Trash2, ArrowRight } from "lucide-react";
+import { Trash2, ArrowRight, CircleAlert } from "lucide-react";
 import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 import { QuickAddStepper } from "../quick-add-stepper";
 import { useCart } from "../cart-provider";
@@ -285,16 +285,19 @@ export function CartPage({
                         </p>
                         {(line.available === false || !item?.available) && (
                           <p className={styles.error}>
+                            <CircleAlert size={16} aria-hidden />
                             Unavailable. Remove this item before checkout.
                           </p>
                         )}
                         {item && line.quantity > item.maxPerOrder ? (
                           <p className={styles.error}>
+                            <CircleAlert size={16} aria-hidden />
                             Maximum {item.maxPerOrder} per order. Reduce the
                             quantity.
                           </p>
                         ) : overStock(line) ? (
                           <p className={styles.error}>
+                            <CircleAlert size={16} aria-hidden />
                             Only {stockLeft} left. Reduce the quantity.
                           </p>
                         ) : (
@@ -392,6 +395,7 @@ export function CartPage({
               )}
               {invalid && (
                 <p className={styles.error}>
+                  <CircleAlert size={16} aria-hidden />
                   Review unavailable items and quantities above.
                 </p>
               )}
