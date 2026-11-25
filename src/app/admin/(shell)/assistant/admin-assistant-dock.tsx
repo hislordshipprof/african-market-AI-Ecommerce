@@ -52,7 +52,8 @@ export function AdminAssistantDock() {
   const [pending, startTransition] = useTransition();
 
   function load() {
-    startTransition(async () => {
+    return new Promise<boolean>((resolve) => startTransition(async () => {
+      setNotice(null);
       try {
         const chat = await loadAdminAssistant();
         setConversationId(chat.conversationId);
@@ -60,10 +61,12 @@ export function AdminAssistantDock() {
         setDrafts(chat.drafts);
         setBriefing(chat.briefing);
         setLoaded(true);
+        resolve(true);
       } catch {
         setNotice(LOAD_FAILED);
+        resolve(false);
       }
-    });
+    }));
   }
 
   /** Sends the box's text, or a starter or briefing question when one is tapped. */

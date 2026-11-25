@@ -185,6 +185,27 @@ test.describe("platform admin assistant sheet (#855)", () => {
     await page.reload();
     await expect(launcher).toBeVisible();
   });
+
+  test("a chat that failed to load loads when the sheet opens again", async ({ page }) => {
+    await adminSignIn(page);
+    let failed = false;
+    await page.route("**/admin", async (route) => {
+      if (failed || route.request().method() !== "POST" || !route.request().headers()["next-action"]) return route.fallback();
+      failed = true;
+      await route.abort();
+    });
+    const launcher = page.getByTestId("assistant-launcher");
+    const sheet = page.getByRole("dialog", { name: "Assistant" });
+    await launcher.click();
+    await expect(sheet.getByText("The assistant couldn't load.", { exact: false })).toBeVisible();
+
+    await sheet.getByRole("button", { name: "Close Assistant" }).click();
+    await expect(sheet).toBeHidden();
+    await launcher.click();
+    await expect(sheet.getByText("The assistant couldn't load.", { exact: false })).toHaveCount(0);
+    await sheet.getByLabel("Message").fill("Which stores are stuck in onboarding?");
+    await expect(sheet.getByRole("button", { name: "Send" })).toBeEnabled();
+  });
 });
 
 test.describe("store assistant sheet (#855)", () => {

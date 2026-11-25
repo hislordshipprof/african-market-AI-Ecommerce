@@ -35,7 +35,8 @@ export function AssistantDock({
   hiddenOn?: (pathname: string) => boolean;
   menu?: Array<{ href: string; label: string }>;
   newChat: { onClick: () => void; disabled: boolean };
-  onFirstOpen: () => void;
+  /** Resolves false when the chat could not load; the next open tries again. */
+  onFirstOpen: () => Promise<boolean>;
   children: ReactNode;
 }) {
   const pathname = usePathname() || "/";
@@ -73,7 +74,9 @@ export function AssistantDock({
   useEffect(() => {
     if (!open || loaded.current) return;
     loaded.current = true;
-    onFirstOpen();
+    void onFirstOpen().then((ok) => {
+      if (!ok) loaded.current = false;
+    });
   }, [open, onFirstOpen]);
 
   useEffect(() => {

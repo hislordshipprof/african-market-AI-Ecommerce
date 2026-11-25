@@ -90,7 +90,8 @@ export function StoreAssistantDock({ storeId, lockedTitle }: { storeId: string; 
   const settledDrafts = drafts.filter((card) => card.state !== "pending");
 
   function load() {
-    startTransition(async () => {
+    return new Promise<boolean>((resolve) => startTransition(async () => {
+      setNotice(null);
       try {
         const panel = await loadStoreAssistant();
         setConversationId(panel.conversationId);
@@ -101,10 +102,12 @@ export function StoreAssistantDock({ storeId, lockedTitle }: { storeId: string; 
         setChatAllowed(panel.chatAllowed);
         setStoreSlug(panel.storeSlug);
         setLoaded(true);
+        resolve(true);
       } catch {
         setNotice(LOAD_FAILED);
+        resolve(false);
       }
-    });
+    }));
   }
 
   function send(fixed?: string) {
