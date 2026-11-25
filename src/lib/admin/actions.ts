@@ -10,7 +10,7 @@ import { isSlugRoutable } from "../slug";
 import type { ThemePreset } from "../theme";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { createInvite, INVITE_NOT_EMAILED } from "../invite/service";
+import { copyInviteLink, createInvite, inviteNotEmailed, ownerInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
 import { setPilot, setPlanOverride } from "../billing/service";
@@ -781,9 +781,30 @@ export async function inviteStoreOwnerAction(formData: FormData) {
     });
     return result.emailed
       ? { success: true, id: result.id }
-      : { success: true, id: result.id, warning: INVITE_NOT_EMAILED, inviteUrl: result.inviteUrl };
+      : { success: true, id: result.id, warning: inviteNotEmailed(), inviteUrl: result.inviteUrl };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to send invite";
     return { error: message };
   }
+}
+
+/** A fresh owner invite link to send by hand (#839). The earlier link stops working; the link is shown once, never kept. */
+export async function copyOwnerInviteLinkAction(storeId: string): Promise<{ inviteUrl: string } | { error: string }> {
+  const session = await requirePlatformAdmin();
+  const target = parseInput(z.string().min(1).max(200), storeId);
+  if (!target.ok) return { error: "Store not found" };
+  const store = await platformAdmin.store.findUnique({ where: { id: target.data }, select: { id: true, slug: true } });
+  if (!store) return { error: "Store not found" };
+  const invite = await ownerInvite(store.id);
+  if (!invite) return { error: "This store has no owner invite. Send one below." };
+  const result = await copyInviteLink({
+    storeId: store.id,
+    inviteId: invite.id,
+    actorId: session.user.id,
+    actorEmail: session.user.email,
+    baseUrl: resolveAuthBaseUrl(),
+    storeSlug: store.slug,
+  });
+  if ("error" in result) return { error: "This invite was used or has expired. Send a new one below." };
+  return result;
 }

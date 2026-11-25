@@ -9,6 +9,9 @@ import {
   removeStoreMember,
   resendInvite,
   revokeInvite,
+  copyInviteLink,
+  ownerInvite,
+  inviteNotEmailed,
   _hashTokenForTesting,
   STAFF_LIMIT_MESSAGE,
 } from "./service";
@@ -266,6 +269,90 @@ describe.skipIf(!hasDb)("Invite service", () => {
       const result = await resendInvite({ ...actor(), inviteId: other.id });
       expect(result).toEqual({ error: "Invitation not found" });
       expect(await validateInviteToken(tokenOf(other.inviteUrl))).toMatchObject({ id: other.id });
+    });
+  });
+
+  describe("copyInviteLink (#839)", () => {
+    const admin = () => ({ storeId: storeAId, actorId: inviterUserId, actorEmail: "invite-svc-inviter@example.com", baseUrl: "http://localhost:3000", storeSlug: "invite-svc-a" });
+
+    it("hands back a fresh link once, retires the earlier one and audits it without the token", async () => {
+      setEmailSenderForTests(failingSender);
+      let created;
+      try {
+        created = await createInvite(baseInput({ role: "owner", email: "owner@example.com" }));
+      } finally {
+        setEmailSenderForTests(null);
+      }
+      const first = await copyInviteLink({ ...admin(), inviteId: created.id });
+      if ("error" in first) throw new Error(first.error);
+      const second = await copyInviteLink({ ...admin(), inviteId: created.id });
+      if ("error" in second) throw new Error(second.error);
+
+      expect(await validateInviteToken(tokenOf(created.inviteUrl))).toEqual({ error: "Invalid invitation link" });
+      expect(await validateInviteToken(tokenOf(first.inviteUrl))).toEqual({ error: "Invalid invitation link" });
+      expect(await validateInviteToken(tokenOf(second.inviteUrl))).toMatchObject({ id: created.id, email: "owner@example.com" });
+
+      const logs = await platformAdmin.auditLog.findMany({ where: { storeId: storeAId, action: "invite.link_copied" } });
+      expect(logs).toHaveLength(2);
+      expect(logs[0]).toMatchObject({ actorId: inviterUserId, entityId: created.id });
+      const raw = JSON.stringify(logs);
+      expect(raw).not.toContain(tokenOf(first.inviteUrl));
+      expect(raw).not.toContain(tokenOf(second.inviteUrl));
+      const row = await platformAdmin.storeInvite.findUnique({ where: { id: created.id } });
+      expect(JSON.stringify(row)).not.toContain(tokenOf(second.inviteUrl));
+    });
+
+    it("refuses a used invite and another store's invite", async () => {
+      const used = await createInvite(baseInput({ email: "invite-svc-invitee@example.com" }));
+      await acceptInvite(tokenOf(used.inviteUrl), inviteeUserId, "invite-svc-invitee@example.com");
+      expect(await copyInviteLink({ ...admin(), inviteId: used.id })).toEqual({ error: "Invitation not found" });
+
+      const other = await createInvite(baseInput({ storeId: storeBId, storeSlug: "invite-svc-b" }));
+      expect(await copyInviteLink({ ...admin(), inviteId: other.id })).toEqual({ error: "Invitation not found" });
+      expect(await validateInviteToken(tokenOf(other.inviteUrl))).toMatchObject({ id: other.id });
+    });
+  });
+
+  describe("ownerInvite status (#839)", () => {
+    const owner = (email = "owner@example.com") => baseInput({ role: "owner", email });
+
+    it("is sent when the email went out and failed when it did not", async () => {
+      await createInvite(owner());
+      expect(await ownerInvite(storeAId)).toMatchObject({ email: "owner@example.com", status: "sent" });
+      setEmailSenderForTests(failingSender);
+      try {
+        await createInvite(owner());
+      } finally {
+        setEmailSenderForTests(null);
+      }
+      expect(await ownerInvite(storeAId)).toMatchObject({ status: "failed" });
+    });
+
+    it("is copied after a copy, used after accepting, expired after its time", async () => {
+      const created = await createInvite(owner("invite-svc-invitee@example.com"));
+      const copied = await copyInviteLink({ storeId: storeAId, inviteId: created.id, actorId: inviterUserId, actorEmail: "a@example.com", baseUrl: "http://localhost:3000", storeSlug: "invite-svc-a" });
+      if ("error" in copied) throw new Error(copied.error);
+      expect(await ownerInvite(storeAId)).toMatchObject({ id: created.id, status: "copied" });
+
+      await platformAdmin.storeInvite.update({ where: { id: created.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+      expect(await ownerInvite(storeAId)).toMatchObject({ status: "expired" });
+
+      await platformAdmin.storeInvite.update({ where: { id: created.id }, data: { expiresAt: new Date(Date.now() + 60_000) } });
+      await acceptInvite(tokenOf(copied.inviteUrl), inviteeUserId, "invite-svc-invitee@example.com");
+      expect(await ownerInvite(storeAId)).toMatchObject({ status: "used" });
+    });
+
+    it("is null when the store has no owner invite, and ignores staff invites", async () => {
+      await createInvite(baseInput());
+      expect(await ownerInvite(storeAId)).toBeNull();
+    });
+  });
+
+  describe("inviteNotEmailed (#839)", () => {
+    it("says email is not set up while the sender is Resend's sandbox", () => {
+      expect(inviteNotEmailed({})).toMatch(/isn't set up yet.*copy the link/i);
+      expect(inviteNotEmailed({ EMAIL_FROM: "onboarding@resend.dev" })).toMatch(/isn't set up yet/);
+      expect(inviteNotEmailed({ EMAIL_FROM: "Shop <hi@markets.example>" })).not.toMatch(/isn't set up yet/);
     });
   });
 
