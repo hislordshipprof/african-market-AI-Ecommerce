@@ -9,6 +9,9 @@ import { FulfillmentChip } from "./fulfillment-chip";
 import { ShrinkingHeader } from "./scroll-motion";
 import { StoreLogo } from "./store-logo";
 
+// Past this length a store name steps down a size so it fits three lines whole.
+const LONG_STORE_NAME = 30;
+
 export async function StorefrontHeader({ store, pageTitled = false }: { store: ValidatedStore; pageTitled?: boolean }) {
   const StoreName = pageTitled ? "p" : "h1";
   const headerList = await headers();
@@ -21,7 +24,7 @@ export async function StorefrontHeader({ store, pageTitled = false }: { store: V
       <div className="sf-header-main sf-container">
         <Link href="/" className="sf-brand">
           <StoreLogo src={store.logoUrl} name={store.name} />
-          <StoreName className="sf-brand-name" data-testid="store-name" title={store.name}>{store.name}</StoreName>
+          <StoreName className="sf-brand-name" data-long={store.name.length > LONG_STORE_NAME || undefined} data-testid="store-name" title={store.name}>{store.name}</StoreName>
         </Link>
         <div className="sf-header-window">
           <FulfillmentChip

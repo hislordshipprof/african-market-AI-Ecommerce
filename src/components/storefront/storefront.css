@@ -207,11 +207,15 @@
   max-width: 215px;
   min-width: 0;
   overflow-wrap: anywhere;
-  /* A long store name holds two lines; the full name is in the title and the footer. */
+  /* A long store name holds three lines; the full name is in the title and the footer. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   overflow: hidden;
+}
+.sf-brand-name[data-long] {
+  font-size: 16px;
+  letter-spacing: -0.2px;
 }
 .sf-header-window {
   flex-shrink: 0;
@@ -1409,6 +1413,9 @@
   .sf-search-key {
     display: none;
   }
+  .sf-search-input {
+    padding-right: 16px;
+  }
 }
 @media (min-width: 768px) and (max-width: 1199px) {
   .sf-header-main {
@@ -1517,6 +1524,9 @@
     font-size: 16px;
     max-width: none;
   }
+  .sf-brand-name[data-long] {
+    font-size: 14px;
+  }
   .sf-header-search {
     grid-area: search;
     min-width: 0;
@@ -1599,11 +1609,9 @@
   .sf-offer {
     display: none;
   }
-  /* Each promise stays whole; the second wraps under the first rather than running off the edge. */
   .sf-reassurance {
-    flex-wrap: wrap;
-    gap: 8px 16px;
-    justify-content: center;
+    gap: 16px;
+    justify-content: space-between;
     font-size: 13px;
     white-space: nowrap;
     padding-top: 16px;
