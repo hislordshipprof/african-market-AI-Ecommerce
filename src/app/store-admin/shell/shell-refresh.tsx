@@ -7,20 +7,21 @@ import { isBarePath } from "@/lib/store-admin/nav";
 
 /**
  * The layout is not rendered again on client navigation, so a page reached from sign-in or 2FA set-up would keep
- * the bare frame. One refresh per page, once a session exists, lets the layout load the shell.
+ * the bare frame, or the shell of whoever was signed in before. One refresh per page, while the session's user is
+ * not the one the shell was loaded for, lets the layout load the right shell.
  */
-export function ShellRefresh() {
+export function ShellRefresh({ shellUserId }: { shellUserId: string | null }) {
   const pathname = usePathname() || "/";
   const router = useRouter();
   const { data } = authClient.useSession();
   const refreshedFor = useRef<string | null>(null);
-  const sessionId = data?.session.id ?? null;
+  const sessionUserId = data?.user.id ?? null;
 
   useEffect(() => {
-    if (!sessionId || isBarePath(pathname) || refreshedFor.current === pathname) return;
+    if (!sessionUserId || sessionUserId === shellUserId || isBarePath(pathname) || refreshedFor.current === pathname) return;
     refreshedFor.current = pathname;
     router.refresh();
-  }, [sessionId, pathname, router]);
+  }, [sessionUserId, shellUserId, pathname, router]);
 
   return null;
 }

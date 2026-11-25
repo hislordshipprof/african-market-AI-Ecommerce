@@ -23,7 +23,7 @@ export default async function StoreAdminLayout({ children }: { children: React.R
         <TwoFactorReminder />
         {children}
       </AdminShell>
-      {!shell && <ShellRefresh />}
+      <ShellRefresh shellUserId={shell?.user.id ?? null} />
       <StoreAssistantHost />
     </>
   );

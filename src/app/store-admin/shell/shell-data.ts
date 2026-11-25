@@ -15,7 +15,7 @@ export interface ShellData extends ShellCounts {
   store: { name: string; slug: string; place: string | null; logoUrl: string | null };
   /** Where shoppers reach the store; null when the slug cannot be routed. */
   storeAddress: string | null;
-  user: { name: string };
+  user: { id: string; name: string };
   role: string;
   payoutsAlert: string | null;
   /** The member's other stores, each with its own admin address. */
@@ -61,7 +61,7 @@ export async function loadShell(): Promise<ShellData | null> {
     ...counts,
     store: { name: store.name, slug: store.slug, place: store.city, logoUrl: store.logoUrl },
     storeAddress: host ? storeWebAddress(store.slug, host) : null,
-    user: { name: session.user.name || session.user.email },
+    user: { id: session.user.id, name: session.user.name || session.user.email },
     role: membership.role,
     payoutsAlert: owner ? payoutsAlert(store.stripeOnboardingStatus) : null,
     otherStores: memberships.flatMap(({ store: other }) => {

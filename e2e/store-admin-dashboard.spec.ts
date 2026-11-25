@@ -124,6 +124,30 @@ test.describe.serial("Store admin dashboard (#784)", () => {
     await expect(page).toHaveURL(/\/store-admin\/sign-in/);
   });
 
+  test("when the owner's session ends and staff sign in on the same tab, the shell shows the staff member, not the owner", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(`/store-admin?store=${slug}`);
+    const shell = page.getByRole("complementary", { name: "Store admin" });
+    await expect(shell.getByRole("link", { name: "Payouts" })).toBeVisible();
+
+    // The session ends while the page is open; the next page sends the tab to sign-in without a full load.
+    await page.context().clearCookies();
+    await shell.getByRole("link", { name: "Products" }).click();
+    await page.waitForURL((url) => url.pathname === "/store-admin/sign-in", { timeout: 15_000 });
+    await page.getByLabel("Email").fill(staffEmail);
+    await page.getByLabel("Password").fill("E2eInvitePass-123!");
+    await page.click("button[type='submit']");
+    await page.waitForURL((url) => url.pathname === "/store-admin/two-factor", { timeout: 15_000 });
+    await page.getByRole("link", { name: "Remind me later" }).click();
+    await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
+
+    await expect(shell.getByText("Ada Staff")).toBeVisible();
+    await expect(shell.getByRole("navigation").getByRole("link")).toHaveCount(4);
+    await expect(shell.getByRole("link", { name: "Payouts" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.waitForURL((url) => url.pathname === "/store-admin/sign-in", { timeout: 15_000 });
+  });
+
   test("the owner sees the store's address, confirms Go live, and the store is live and listed", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin?store=${slug}`);
