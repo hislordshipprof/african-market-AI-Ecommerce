@@ -31,6 +31,12 @@
   position: sticky;
   top: 168px;
   min-width: 0;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+.after {
+  grid-column: 1;
+  min-width: 0;
 }
 .muted {
   font-size: 13px;
@@ -50,9 +56,14 @@
   padding: 24px 0;
   border-top: 1px solid var(--color-line);
 }
-.line > strong {
-  white-space: nowrap;
-  font-size: 15px;
+.lineHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+}
+.lineHead > :global(.flow-money) {
+  font-size: 16px;
 }
 .line h3,
 .related h3 {
@@ -399,6 +410,9 @@
   font-size: 16px;
 }
 .error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -407,6 +421,11 @@
   font-size: 16px;
   line-height: 1.5;
   margin: 8px 0;
+}
+.error > svg {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 4px;
 }
 /* The quote could not settle: a visible failure with Retry, never a stuck "estimating" (#708 AC2b). */
 .quoteRetry {
@@ -568,17 +587,16 @@
   background: var(--color-soft);
   color: var(--color-ink);
 }
-/* Phones: the four stages scroll in one row instead of orphaning the last. */
-@media (max-width: 767px) {
+/* Phones: the four stages sit two by two, so none is cut off or orphaned (#826). */
+@media (max-width: 599px) {
   .stages {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    margin-inline: -16px;
-    padding-inline: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .stages a {
-    flex-shrink: 0;
+    justify-content: center;
+    padding-inline: 8px;
+    text-align: center;
   }
 }
 .anchor {
@@ -641,13 +659,6 @@
     font-size: 13px;
     color: var(--muted-foreground);
   }
-  .line {
-    display: grid;
-    grid-template-columns: 64px minmax(0, 1fr);
-  }
-  .line > strong {
-    grid-column: 2;
-  }
   .photo {
     width: 64px;
     height: 64px;
@@ -660,6 +671,11 @@
   }
   .sticky {
     position: static;
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .after {
+    grid-column: auto;
   }
 }
 @media (max-width: 600px) {
@@ -674,9 +690,6 @@
     width: 64px;
     flex-basis: 64px;
     height: 64px;
-  }
-  .line > strong {
-    font-size: 13px;
   }
   .related {
     gap: 12px;
