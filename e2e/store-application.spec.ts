@@ -210,8 +210,8 @@ test("when the owner invite email fails, the admin copies a fresh link that open
     await shoot(page, "839-approved-email-failed");
 
     await section.getByRole("button", { name: "Copy invite link" }).click();
+    await expect(section.getByLabel("Invite link")).toHaveValue(/\/invite\//);
     const first = await section.getByLabel("Invite link").inputValue();
-    expect(first).toContain("/invite/");
     await expect(section.getByTestId("owner-invite-status")).toContainText("Link copied");
     await shoot(page, "839-link-copied");
 
@@ -221,11 +221,14 @@ test("when the owner invite email fails, the admin copies a fresh link that open
 
     // The store page copies again; the link the applicant already has stops working.
     await page.getByRole("link", { name: "Open the store" }).click();
+    // Both pages have an "Owner invite" region, so wait for the store page before using it.
+    await page.waitForURL(`${root}/admin/stores/**`);
     const storeSection = page.getByRole("region", { name: "Owner invite" });
     await expect(storeSection.getByTestId("owner-invite-status")).toContainText("Link copied");
     await storeSection.getByRole("button", { name: "Copy invite link" }).click();
+    await expect(storeSection.getByLabel("Invite link")).not.toHaveValue(first);
     const second = await storeSection.getByLabel("Invite link").inputValue();
-    expect(second).not.toBe(first);
+    expect(second).toContain("/invite/");
     await storeSection.scrollIntoViewIfNeeded();
     await shoot(page, "839-store-page-copied");
 
