@@ -27,7 +27,7 @@ describe.skipIf(!hasDb)("csv aisle column (lane DB)", () => {
     });
     userId = user.id;
     actor = { id: user.id, email: user.email };
-    const vegetables = await raw.category.findUniqueOrThrow({ where: { slug: "vegetables" } });
+    const vegetables = await raw.category.findUniqueOrThrow({ where: { slug: "leafy-greens-and-wrapping-leaves" } });
     masterId = (await platformAdmin.masterProduct.create({
       data: { name: `Aisle Ugu ${RUN}`, categoryId: vegetables.id, status: "active" },
     })).id;
@@ -61,7 +61,7 @@ describe.skipIf(!hasDb)("csv aisle column (lane DB)", () => {
     ].join("\n");
     const preview = await generatePreview(storeId, csv, userId);
     expect(preview.newItems.map((item) => item.row)).toEqual([2, 3, 4]);
-    expect(preview.newItems.map((item) => item.aisle)).toEqual(["Oils & Butters", "Spices & Seasonings", undefined]);
+    expect(preview.newItems.map((item) => item.aisle)).toEqual(["Oils, Sauces & Condiments", "Spices & Seasonings", undefined]);
     expect(preview.errors).toEqual([
       expect.objectContaining({ row: 5, reason: expect.stringContaining('Unknown aisle: "Moon Rocks"') }),
     ]);
@@ -82,6 +82,35 @@ describe.skipIf(!hasDb)("csv aisle column (lane DB)", () => {
     expect(byName.get(`Egusi ${RUN}`)).toBe("cat_spices");
     expect(byName.get(`Plain Thing ${RUN}`)).toBeNull();
     expect(byName.get(masterId)).toBeNull();
+  });
+
+  // #861: a cell names an aisle or a subcategory, as "Aisle > Subcategory" or the subcategory alone; an old
+  // aisle's name still finds where it went.
+  it("maps a row to a subcategory of the two-level tree", async () => {
+    const csv = [
+      "name,price,weight,aisle",
+      `Aboniki ${RUN},3.00,25 g,Health & Wellness > Balms & Ointments`,
+      `Red Oil ${RUN},9.99,1 kg,palm-oil`,
+      `Cocoa Butter ${RUN},6.00,200 g,shea butter & natural butters`,
+      `Malta ${RUN},2.00,330 g,Snacks`,
+      `Wrong Pair ${RUN},2.00,330 g,Drinks > Palm Oil`,
+    ].join("\n");
+    const preview = await generatePreview(storeId, csv, userId);
+    expect(preview.newItems.map((item) => item.aisle)).toEqual([
+      "Health & Wellness > Balms & Ointments", "Oils, Sauces & Condiments > Palm Oil",
+      "Beauty & Personal Care > Shea Butter & Natural Butters", "Snacks & Sweets",
+    ]);
+    expect(preview.errors).toEqual([
+      expect.objectContaining({ row: 6, reason: expect.stringContaining('Unknown aisle: "Drinks > Palm Oil"') }),
+    ]);
+    const result = await commitImport(storeId, preview.importToken, { matchedRows: [], newItemRows: [2, 3, 4, 5], ambiguousResolutions: [] }, actor);
+    const stored = await storeScoped(storeId).listing.findMany({ where: { id: { in: result.listingIds } }, select: { customName: true, categoryId: true } });
+    expect(Object.fromEntries(stored.map((listing) => [listing.customName, listing.categoryId]))).toEqual({
+      [`Aboniki ${RUN}`]: "sub_balms_ointments",
+      [`Red Oil ${RUN}`]: "sub_palm_oil",
+      [`Cocoa Butter ${RUN}`]: "sub_shea_natural_butters",
+      [`Malta ${RUN}`]: "cat_snacks",
+    });
   });
 
   it("accepts a category column as the same thing as aisle", async () => {
