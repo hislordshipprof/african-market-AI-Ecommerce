@@ -16,7 +16,7 @@ export default async function StoreTwoFactor({ searchParams }: { searchParams: P
   if (hasVerifiedTwoFactor(storeSession)) redirect(back);
   return (
     <EnrollTwoFactorForm
-      intro="Two-factor sign-in asks for a code from an app on your phone. You need it for refunds, payouts and team changes. Confirm your password to start."
+      intro="Two-factor sign-in asks for a code from an app on your phone. You need it for refunds, payouts and team changes."
       doneHref={back}
       laterHref={back}
     />
