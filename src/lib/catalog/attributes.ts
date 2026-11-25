@@ -15,6 +15,12 @@ export type Allergen = (typeof ALLERGENS)[number];
 export const DIETARY_CLAIMS = ["halal", "kosher", "vegan", "vegetarian", "no_pork", "gluten_free"] as const;
 export type DietaryClaim = (typeof DIETARY_CLAIMS)[number];
 
+/** "crustacean_shellfish" → "Crustacean shellfish": how an allergen or claim reads to people. */
+export function attributeLabel(value: string): string {
+  const text = value.replaceAll("_", " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** unknown: no data. known: stated by a store owner. reviewed: approved by a platform admin. */
 export type AttributeStatus = "unknown" | "known" | "reviewed";
 

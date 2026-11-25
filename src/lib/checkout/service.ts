@@ -259,6 +259,7 @@ async function untaxedQuote(
     perishable: line.variant.listing.perishable,
     hot: line.variant.listing.prepared === "hot",
     minQty: line.variant.listing.cateringMinQty,
+    stockLeft: line.variant.listing.stockLeft,
   }));
   if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
     const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee, null, null, coupon);

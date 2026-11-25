@@ -25,6 +25,8 @@ export type QuickViewSelectionInput = {
   imageUrl?: string;
   categorySlug?: string;
   maxPerOrder?: number;
+  stockLeft?: number;
+  cateringMinQty?: number;
   listPacks: readonly QuickViewPack[];
   listBasePrice: number;
   /** Cheapest pack, or the pack the category `?pack=` filter already chose. */
@@ -71,6 +73,8 @@ function cartItem(
     categorySlug: input.categorySlug,
     packLabel,
     maxPerOrder: input.maxPerOrder,
+    stockLeft: input.stockLeft,
+    cateringMinQty: input.cateringMinQty,
   };
 }
 

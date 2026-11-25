@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { listingAvailable, stockBadge } from "./stock-badge";
+import { listingAvailable, stockBadge, stockLeftLabel } from "./stock-badge";
 
 describe("stockBadge", () => {
   it("returns in-stock for high confidence counted with qty", () => {
@@ -68,5 +68,14 @@ describe("listing availability, shared by the basket page and cart lines (#717 A
     expect(listingAvailable({ ...listing, stockMode: "counted", qty: 0 })).toBe(false);
     expect(listingAvailable({ ...listing, stockMode: "counted", qty: 3 })).toBe(true);
     expect(listingAvailable({ ...listing, stockMode: "status", status: "out_of_stock" })).toBe(false);
+  });
+});
+
+describe("stockLeftLabel (#808)", () => {
+  it("says how many are left only when a counted listing is at or under the low-stock threshold", () => {
+    expect(stockLeftLabel(4)).toBe("Only 4 left");
+    expect(stockLeftLabel(5)).toBe("Only 5 left");
+    expect(stockLeftLabel(6)).toBeNull();
+    expect(stockLeftLabel(undefined)).toBeNull();
   });
 });

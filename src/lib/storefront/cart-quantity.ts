@@ -59,13 +59,15 @@ export function stepperLimit(input: {
   max: number | undefined;
   /** Units left on a counted listing; caps the stepper when lower than the max (#808). */
   stockLeft?: number;
+  /** A catering minimum: the first add needs room for this many. */
+  minQty?: number;
   available: boolean | undefined;
   variantId: string | undefined;
 }): StepperLimit {
   if (!input.variantId) return { canAdd: false, canIncrease: false, reason: "Not sold online yet" };
   const ceiling = cartQuantityCeiling(lineMax(input.max, input.stockLeft));
   if (input.available === false || ceiling < 1) return { canAdd: false, canIncrease: false, reason: "No longer available" };
-  if (input.qty >= ceiling) {
+  if (input.qty >= ceiling || (input.qty === 0 && (input.minQty ?? 1) > ceiling)) {
     const reason = input.stockLeft === ceiling ? `Only ${ceiling} left` : `Limit ${ceiling} per order`;
     return { canAdd: false, canIncrease: false, reason };
   }

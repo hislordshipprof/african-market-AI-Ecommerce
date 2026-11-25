@@ -84,3 +84,13 @@ describe("catering minimum and counted stock on the stepper (#808)", () => {
     expect(stepperLimit({ qty: 3, max: 10, stockLeft: 4, available: true, variantId: "v1" }).canIncrease).toBe(true);
   });
 });
+
+describe("a catering minimum above the stock left (#808)", () => {
+  it("cannot be added, and says how many are left", () => {
+    expect(stepperLimit({ qty: 0, max: 99, stockLeft: 3, minQty: 4, available: true, variantId: "v1" })).toEqual({
+      canAdd: false,
+      canIncrease: false,
+      reason: "Only 3 left",
+    });
+  });
+});

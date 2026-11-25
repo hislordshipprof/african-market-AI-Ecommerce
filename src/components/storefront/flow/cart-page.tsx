@@ -45,6 +45,7 @@ import { CouponField } from "./coupon-field";
 
 import { money } from "@/lib/format";
 import { cateringLeadText } from "@/lib/listing/catering";
+import { stockLeftLabel } from "@/lib/storefront/stock-badge";
 export { money };
 const subscribe = () => () => {};
 export function useCartReady() {
@@ -176,7 +177,9 @@ export function CartPage({
       (item) => cartItemKey(item) === cartItemKey(line),
     );
     // The cart line's own fields come from the latest server read; the catalog is the page's copy.
-    return line.available === false || !item?.available || line.quantity > (line.maxPerOrder ?? item.maxPerOrder);
+    const stockLeft = line.stockLeft ?? item?.stockLeft;
+    return line.available === false || !item?.available || line.quantity > (line.maxPerOrder ?? item.maxPerOrder)
+      || (stockLeft !== undefined && line.quantity > stockLeft);
   });
   // The phone bar names every reason Checkout is off, not only the minimum (#708 P1).
   const blockedReason = invalid
@@ -256,7 +259,8 @@ export function CartPage({
               <ul className={styles.lines}>
                 {lines.map((line) => {
                   const key = cartItemKey(line),
-                    item = catalog.find((item) => cartItemKey(item) === key);
+                    item = catalog.find((item) => cartItemKey(item) === key),
+                    stockLeft = line.stockLeft ?? item?.stockLeft;
                   return (
                     <li className={styles.line} key={key} aria-busy={pendingKeys.has(key) || undefined}>
                       <div className={styles.photo}>
@@ -278,11 +282,19 @@ export function CartPage({
                             Unavailable. Remove this item before checkout.
                           </p>
                         )}
-                        {item && line.quantity > item.maxPerOrder && (
+                        {item && line.quantity > item.maxPerOrder ? (
                           <p className={styles.error}>
                             Maximum {item.maxPerOrder} per order. Reduce the
                             quantity.
                           </p>
+                        ) : stockLeft !== undefined && line.quantity > stockLeft ? (
+                          <p className={styles.error}>
+                            Only {stockLeft} left. Reduce the quantity.
+                          </p>
+                        ) : (
+                          stockLeftLabel(stockLeft) && (
+                            <p className={styles.muted} data-testid="line-stock-left">{stockLeftLabel(stockLeft)}</p>
+                          )
                         )}
                         {item?.catering && (
                           <p className={line.quantity < item.catering.minQty ? styles.error : styles.muted}>

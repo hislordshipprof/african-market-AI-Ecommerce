@@ -1,4 +1,4 @@
-import type { StockBadge } from "@/lib/storefront/stock-badge";
+import { stockLeftLabel, type StockBadge } from "@/lib/storefront/stock-badge";
 
 const config: Record<StockBadge, { label: string; className: string }> = {
   "in-stock": {
@@ -15,8 +15,10 @@ const config: Record<StockBadge, { label: string; className: string }> = {
   },
 };
 
-export function StockBadgeChip({ badge }: { badge: StockBadge }) {
-  const { label, className } = config[badge];
+/** With `stockLeft`, a counted listing that is running low reads "Only N left" in the limited style (#808). */
+export function StockBadgeChip({ badge, stockLeft }: { badge: StockBadge; stockLeft?: number }) {
+  const low = badge === "ask-store" ? null : stockLeftLabel(stockLeft);
+  const { label, className } = low ? { label: low, className: config.limited.className } : config[badge];
   return (
     <span
       data-testid="stock-badge"

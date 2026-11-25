@@ -86,6 +86,8 @@ function serverLineToClient(sl: CartLineView): CartLine {
     categorySlug: sl.categorySlug,
     packLabel: sl.variant.label,
     maxPerOrder: effectiveMaxPerOrder(sl.variant.listing.maxPerOrder),
+    stockLeft: sl.variant.listing.stockLeft,
+    cateringMinQty: sl.variant.listing.cateringMinQty ?? undefined,
     available: sl.variant.listing.available,
     alternatives: sl.alternatives?.map((alt) => ({
       listingId: alt.listingId,
@@ -382,6 +384,8 @@ export function CartProvider({
       // The server line's limit and availability are fresher than the page's copy of the listing.
       maxPerOrder: previous?.maxPerOrder ?? item.maxPerOrder,
       available: previous?.available ?? item.available,
+      stockLeft: previous ? previous.stockLeft : item.stockLeft,
+      cateringMinQty: previous?.cateringMinQty ?? item.cateringMinQty,
       alternatives: previous?.alternatives,
       quantity: qty,
       serverLineId: previous?.serverLineId,
@@ -875,8 +879,12 @@ export function CartProvider({
         notify(`${item.name} can\u2019t be added online yet.`);
         return;
       }
-      const next = stepCartQuantity(previous, delta, max);
+      const minQty = linesRef.current.find((line) => cartItemKey(line) === key)?.cateringMinQty ?? item.cateringMinQty;
+      const next = stepCartQuantity(previous, delta, max, minQty);
       if (next === null || rejectStale()) return;
+      // The server adds a catering item at its minimum (#571); say so as it happens (#808).
+      const atMinimum = previous === 0 && next > 1 && next === minQty;
+      if (atMinimum) toast(`${item.name}: ${next} added, the catering minimum.`, { id: `cart:min:${key}` });
       noteGesture(key);
       bump(key, (previous === 0) !== (next === 0));
       put(item, next);
@@ -885,7 +893,9 @@ export function CartProvider({
       if (mounted.current) {
         const total = linesRef.current.reduce((sum, line) => sum + line.quantity, 0);
         setAnnounce(
-          next > previous
+          atMinimum
+            ? `${item.name}: ${next} added, the catering minimum. ${total} in basket.`
+            : next > previous
             ? `${item.name} added. ${total} in basket.`
             : next === 0
               ? `${item.name} removed. ${total} in basket.`

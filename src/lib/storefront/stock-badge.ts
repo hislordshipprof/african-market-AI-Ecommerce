@@ -7,6 +7,17 @@ export interface StockBadgeInput {
   status: string | null;
 }
 
+/**
+ * Owner decision 2026-11-10: one store-wide threshold for counted listings. The copilot alerts the owner
+ * at it, and shoppers see "Only N left" at it (#808).
+ */
+export const LOW_STOCK_THRESHOLD = 5;
+
+/** "Only 3 left" for a counted listing at or under the threshold; null otherwise. */
+export function stockLeftLabel(stockLeft: number | undefined): string | null {
+  return stockLeft !== undefined && stockLeft > 0 && stockLeft <= LOW_STOCK_THRESHOLD ? `Only ${stockLeft} left` : null;
+}
+
 /** Below this confidence the storefront shows "ask store" and the copilot asks the owner. */
 export const ASK_STORE_BELOW = 0.3;
 

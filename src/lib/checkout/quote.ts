@@ -73,7 +73,7 @@ export function withTax(quote: CheckoutQuote, taxCents: number): CheckoutQuote {
 
 export function computeQuote(
   minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean; hot?: boolean; minQty?: number | null }>,
+  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean; perishable?: boolean; hot?: boolean; minQty?: number | null; stockLeft?: number }>,
   contact: Contact,
   fulfillment: Fulfillment,
   serviceFee: ServiceFeeSettings,
@@ -99,6 +99,10 @@ export function computeQuote(
         code: "max-quantity",
         message: `Maximum ${line.maxPerOrder} per order for this item.`,
       });
+    }
+    // Placement reserves only what is left (#808), so the quote stops a line above it before the card is held.
+    if (line.stockLeft !== undefined && line.qty > line.stockLeft) {
+      problems.push({ code: "max-quantity", message: `Only ${line.stockLeft} left of this item.` });
     }
     if (line.minQty != null && line.qty < line.minQty) {
       problems.push({ code: "max-quantity", message: cateringMinMessage(line.minQty) });

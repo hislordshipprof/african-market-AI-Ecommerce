@@ -65,6 +65,8 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
     categorySlug: listing.categorySlug,
     // The fetched detail is fresher than the card's copy of the listing.
     maxPerOrder: detail?.maxPerOrder ?? listing.maxPerOrder,
+    stockLeft: listing.stockLeft,
+    cateringMinQty: detail ? detail.catering?.minQty : listing.cateringMinQty,
     listPacks: listing.packOptions ?? [],
     listBasePrice: listing.startingPrice,
     defaultVariantId: listing.variantId,
