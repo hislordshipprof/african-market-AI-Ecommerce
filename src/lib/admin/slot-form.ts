@@ -5,6 +5,7 @@ import {
   formatWindows,
   parseWindows,
   readSlotSchedule,
+  scheduledSlots,
   type SlotSchedule,
 } from "../order/slot-schedule";
 
@@ -84,4 +85,20 @@ export function slotFormValues(raw: unknown, prefix: SlotFormPrefix): Record<str
     values[`${prefix}${day}`] = schedule ? formatWindows(schedule.windows[index]) : "";
   });
   return values;
+}
+
+/**
+ * Why the form's slots would offer shoppers nothing in the next 7 days, with `hours` and `timezone` as the same form
+ * has them (#807); null when a slot fits, slots are off, or the form does not read yet.
+ */
+export function slotGapWarning(
+  read: (key: string) => string | null,
+  prefix: SlotFormPrefix,
+  hours: unknown,
+  timezone: string,
+  now: Date,
+): string | null {
+  const { schedule } = readSlotForm(read, prefix);
+  if (!schedule || scheduledSlots({ ...schedule, daysAhead: 7 }, hours, timezone, now, new Map()).length > 0) return null;
+  return "These settings leave no slot in the next 7 days. Slots are offered only inside the store's opening hours, so check the windows, slot length and lead time against them.";
 }

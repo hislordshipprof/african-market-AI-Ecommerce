@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getStoreLocalTime, isValidTimezone, parseTimeMinutes } from "./store-hours";
+import { getStoreLocalTime, isValidTimezone, parseTimeMinutes, storeOpenAt } from "./store-hours";
 import { ASAP_SLOT, pickupSlotsToday, type PickupSlot, type PickupStore } from "./pickup-slots";
 
 /** A card hold can be as short as 5 days (Visa merchant-initiated), so no slot ends later than that (#565). */
@@ -81,17 +81,24 @@ function slotLabel(timezone: string, start: Date, end: Date): string {
  * The open slots of a schedule, in the store's zone. Candidates are UTC
  * instants 15 minutes apart, so a local time inside the spring-forward gap is
  * never produced; a repeated fall-back hour keeps its first instant. A slot
- * starts at least the lead time from now, ends within days ahead of now, and
- * is dropped once `booked` reaches capacity.
+ * starts at least the lead time from now, ends within days ahead of now, falls
+ * wholly inside the store's opening hours (#807), and is dropped once `booked`
+ * reaches capacity.
  */
 export function scheduledSlots(
   schedule: SlotSchedule,
+  hours: unknown,
   timezone: string,
   now: Date,
   booked: ReadonlyMap<string, number>,
 ): PickupSlot[] {
   if (!isValidTimezone(timezone)) return [];
   const slotMs = schedule.slotMinutes * 60_000;
+  const open = storeOpenAt(hours, timezone);
+  const openThrough = (start: number) => {
+    for (let minute = start; minute < start + slotMs; minute += 60_000) if (!open(minute)) return false;
+    return true;
+  };
   const latest = now.getTime() + schedule.daysAhead * DAY_MS;
   const closed = new Set(schedule.closedDates);
   const seen = new Set<string>();
@@ -106,7 +113,7 @@ export function scheduledSlots(
       minute >= window.start
       && minute + schedule.slotMinutes <= window.end
       && (minute - window.start) % schedule.slotMinutes === 0);
-    if (!fits) continue;
+    if (!fits || !openThrough(at)) continue;
     const key = `${date} ${minute}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -127,5 +134,5 @@ export function pickupSlotsFor(store: SlotStore, now: Date, booked: ReadonlyMap<
   const schedule = readSlotSchedule(store.pickupSlotSettings);
   if (!schedule || !store.pickupEnabled) return today;
   const asap = today.some((slot) => slot.id === ASAP_SLOT.id) ? [ASAP_SLOT] : [];
-  return [...asap, ...scheduledSlots(schedule, store.timezone, now, booked)];
+  return [...asap, ...scheduledSlots(schedule, store.hours, store.timezone, now, booked)];
 }

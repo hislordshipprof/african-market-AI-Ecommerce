@@ -16,6 +16,7 @@ import { VALID_US_TIMEZONES } from "@/lib/admin/timezone";
 import { weeklyHoursError, type WeekDay, type WeekHours } from "@/lib/store-settings/weekly-hours";
 import { STORE_ABOUT_MAX } from "@/lib/store-settings/fields";
 import { updateStoreSettings } from "@/lib/store-admin/settings-actions";
+import { SlotSettings } from "./slot-settings";
 
 const ZONE_NAMES: Record<string, string> = {
   "America/New_York": "Eastern",
@@ -34,6 +35,8 @@ interface Values {
   minimumOrderCents: number;
   phone: string;
   about: string;
+  /** Slot form fields by name (#807). */
+  slots: Record<string, string>;
 }
 
 interface Props {
@@ -59,6 +62,7 @@ export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, ho
   const [minimum, setMinimum] = useState(dollars(initial.minimumOrderCents));
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
+  const [now] = useState(() => new Date());
 
   function change(next: Partial<Values>) {
     setValues((current) => ({ ...current, ...next }));
@@ -180,6 +184,25 @@ export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, ho
                   The smallest basket shoppers can check out, for pickup and delivery alike. 0 means no minimum.
                 </p>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Pickup and delivery slots</CardTitle>
+              <CardDescription>
+                Times shoppers can book at checkout, in your time zone and inside your opening hours.
+                {storeDeliveryEnabled ? "" : " Store delivery slots apply once the platform team turns store delivery on."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <SlotSettings
+                slots={values.slots}
+                onChange={(slots) => change({ slots })}
+                hours={values.hours}
+                timezone={values.timezone}
+                now={now}
+              />
             </CardContent>
           </Card>
 

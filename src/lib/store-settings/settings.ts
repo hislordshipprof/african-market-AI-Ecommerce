@@ -1,4 +1,6 @@
+import { Prisma } from "@prisma/client";
 import { platformAdminTransaction } from "../db";
+import { readSlotForm } from "../admin/slot-form";
 import { revalidateStore } from "../get-store";
 import { VALID_US_TIMEZONES } from "../admin/timezone";
 import { MINIMUM_ORDER_MAX_CENTS, STORE_ABOUT_MAX } from "./fields";
@@ -13,17 +15,19 @@ export interface StoreSettingsInput {
   minimumOrderCents: number;
   phone: string;
   about: string;
+  /** Slot form fields by name; an unticked or missing Enabled turns that schedule off. */
+  slots: Partial<Record<string, string>>;
 }
 
 export type SettingsResult = { ok: true } | { ok: false; message: string };
 
 const refuse = (message: string): SettingsResult => ({ ok: false, message });
 
-const AUDITED = { hours: true, timezone: true, pickupEnabled: true, minimumOrderCents: true, phone: true, ownerStory: true } as const;
+const AUDITED = { hours: true, timezone: true, pickupEnabled: true, minimumOrderCents: true, phone: true, ownerStory: true, pickupSlotSettings: true, storeDeliverySlotSettings: true } as const;
 
 /**
- * The owner's store settings (#786): weekly hours, time zone, pickup, one minimum order for every fulfillment, phone
- * and about. Saving marks the time zone as set for the go-live checklist. Every save writes an audit row.
+ * The owner's store settings (#786): weekly hours, time zone, pickup, one minimum order for every fulfillment, phone,
+ * about, and pickup and store-delivery slots (#807). Saving marks the time zone as set for the go-live checklist. Every save writes an audit row.
  */
 export async function saveStoreSettings(storeId: string, input: StoreSettingsInput, actor: { id: string; email: string }): Promise<SettingsResult> {
   const hoursError = weeklyHoursError(input.hours);
@@ -36,6 +40,11 @@ export async function saveStoreSettings(storeId: string, input: StoreSettingsInp
   if (!phone.ok) return refuse("Enter a 10-digit US phone number, or leave it empty.");
   const about = input.about.trim().replace(/[ \t]+/g, " ") || null;
   if (about && [...about].length > STORE_ABOUT_MAX) return refuse(`Keep "About the store" to ${STORE_ABOUT_MAX} characters.`);
+  const read = (key: string) => input.slots[key] ?? null;
+  const pickupSlots = readSlotForm(read, "pickupSlots");
+  const deliverySlots = readSlotForm(read, "deliverySlots");
+  const slotError = Object.values({ ...pickupSlots.errors, ...deliverySlots.errors })[0];
+  if (slotError) return refuse(slotError);
 
   const after = {
     hours: writeWeeklyHours(input.hours),
@@ -44,11 +53,21 @@ export async function saveStoreSettings(storeId: string, input: StoreSettingsInp
     minimumOrderCents: input.minimumOrderCents,
     phone: phone.phone,
     ownerStory: about,
+    pickupSlotSettings: pickupSlots.schedule,
+    storeDeliverySlotSettings: deliverySlots.schedule,
   };
   const store = await platformAdminTransaction(async (tx) => {
     const before = await tx.store.findUnique({ where: { id: storeId }, select: { id: true, slug: true, customDomain: true, ...AUDITED } });
     if (!before) return null;
-    await tx.store.update({ where: { id: storeId }, data: { ...after, timezoneSetAt: new Date() } });
+    await tx.store.update({
+      where: { id: storeId },
+      data: {
+        ...after,
+        pickupSlotSettings: after.pickupSlotSettings ?? Prisma.JsonNull,
+        storeDeliverySlotSettings: after.storeDeliverySlotSettings ?? Prisma.JsonNull,
+        timezoneSetAt: new Date(),
+      },
+    });
     const { id, slug, customDomain, ...audited } = before;
     await tx.auditLog.create({
       data: { storeId, actorId: actor.id, actorEmail: actor.email, action: "store.settings", entityType: "store", entityId: storeId, before: audited, after },

@@ -36,14 +36,14 @@ async function adminSignIn(page: Page) {
   await page.waitForURL("**/admin", { timeout: 15_000 });
 }
 
-async function shoot(page: Page, name: string) {
+async function shoot(page: Page, name: string, ticket = "786") {
   mkdirSync(SHOTS, { recursive: true });
   for (const [scheme, width] of [["light", 1280], ["dark", 390]] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width, height: 900 });
     // Let the page lay out again at the new width before the full-page capture.
     await page.waitForTimeout(500);
-    await page.screenshot({ path: `${SHOTS}/786-${name}-${width}-${scheme}.png`, fullPage: true });
+    await page.screenshot({ path: `${SHOTS}/${ticket}-${name}-${width}-${scheme}.png`, fullPage: true });
   }
   await page.emulateMedia({ colorScheme: "light" });
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -136,6 +136,39 @@ test.describe.serial("Owner store settings (#786)", () => {
     await expect(page.getByTestId("trust-strip")).toContainText("9:00 AM - 5:30 PM");
   });
 
+  test("the owner sets pickup slots inside the hours; the form says when no slot fits in 7 days (#807)", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(`/store-admin/settings?store=${slug}`);
+    const slotsCard = page.locator("section", { has: page.getByRole("switch", { name: "Pickup slots" }) });
+    await page.getByRole("switch", { name: "Pickup slots" }).click();
+    // Turning slots on starts each day at its opening hours.
+    await expect(page.getByLabel("Monday", { exact: true })).toHaveValue("9:00 AM - 5:30 PM");
+    await expect(page.getByLabel("Sunday", { exact: true })).toHaveValue("");
+    await expect(slotsCard.getByRole("status")).toHaveCount(0);
+
+    // Only evening times, after every closing: no slot in the next 7 days.
+    for (const day of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]) {
+      await page.getByLabel(day, { exact: true }).fill("9:00 PM - 11:00 PM");
+    }
+    await expect(slotsCard.getByRole("status")).toContainText("no slot in the next 7 days");
+    await shoot(page, "owner-slots-warning", "807");
+
+    await page.getByLabel("Saturday", { exact: true }).fill("10:00 AM - 2:00 PM");
+    await expect(slotsCard.getByRole("status")).toHaveCount(0);
+    await slotsCard.getByLabel("Slot length").fill("30");
+    await slotsCard.getByLabel("Orders per slot").fill("6");
+    await slotsCard.getByLabel("Lead time").fill("180");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await shoot(page, "owner-slots-saved", "807");
+
+    const saved = await asPlatformAdmin((tx) => tx.store.findUniqueOrThrow({ where: { id: storeId } }));
+    expect(saved.pickupSlotSettings).toMatchObject({ slotMinutes: 30, capacity: 6, leadMinutes: 180 });
+    expect(saved.storeDeliverySlotSettings).toBeNull();
+    const audit = await asPlatformAdmin((tx) => tx.auditLog.findFirstOrThrow({ where: { storeId, action: "store.settings" }, orderBy: { createdAt: "desc" } }));
+    expect(audit.after).toMatchObject({ pickupSlotSettings: { slotMinutes: 30, capacity: 6 } });
+  });
+
   test("the platform admin edits hours with the same editor; the slug pattern compiles and the hint shows the real address", async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (message) => {
@@ -152,6 +185,13 @@ test.describe.serial("Owner store settings (#786)", () => {
     expect(await page.locator("#slug").evaluate((input: HTMLInputElement) => input.validity.patternMismatch)).toBe(true);
     await page.locator("#slug").fill(slug);
     await shoot(page, "admin-hours");
+    // The admin form warns the same way (#807).
+    await page.locator("#pickupSlotsSat").fill("9:00 PM - 11:00 PM");
+    await expect(page.getByRole("status").filter({ hasText: "no slot in the next 7 days" })).toBeVisible();
+    await page.getByRole("status").filter({ hasText: "no slot in the next 7 days" }).scrollIntoViewIfNeeded();
+    await shoot(page, "admin-slots-warning", "807");
+    await page.locator("#pickupSlotsSat").fill("10:00 AM - 2:00 PM");
+    await expect(page.getByRole("status").filter({ hasText: "no slot in the next 7 days" })).toHaveCount(0);
     await page.getByRole("button", { name: "Save changes" }).click();
     await page.waitForURL("**/admin/stores", { timeout: 15_000 });
     const saved = await asPlatformAdmin((tx) => tx.store.findUniqueOrThrow({ where: { id: storeId } }));
