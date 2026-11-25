@@ -100,5 +100,5 @@ export function slotGapWarning(
 ): string | null {
   const { schedule } = readSlotForm(read, prefix);
   if (!schedule || scheduledSlots({ ...schedule, daysAhead: 7 }, hours, timezone, now, new Map()).length > 0) return null;
-  return "These settings leave no slot in the next 7 days. Slots are offered only inside your opening hours, so check the windows, slot length and lead time against them.";
+  return "These settings leave no slot in the next 7 days. Slots are offered only inside the store's opening hours, so check the windows, slot length and lead time against them.";
 }
