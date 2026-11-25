@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useTransition, type FormEvent, type ReactNode } from "react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, CheckCircle2, MessageCircle, Store } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertCircle, CheckCircle2, MessageCircle } from "lucide-react";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -138,10 +138,8 @@ function NoticeSettings({ initial }: { initial: Notices }) {
   );
 }
 
-export function WhatsAppLinkForm({ storeName, storeSlug, configured, state, children }: Props) {
+export function WhatsAppLinkForm({ storeName, configured, state, children }: Props) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const storeParam = searchParams.get("store") ?? storeSlug;
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -185,28 +183,10 @@ export function WhatsAppLinkForm({ storeName, storeSlug, configured, state, chil
   const showForm = state.kind === "none" || editing;
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Store className="size-5" aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold text-foreground">{storeName}</h1>
-            <p className="text-xs text-muted-foreground">WhatsApp</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader title="WhatsApp" description={storeName} />
 
-      <main className="mx-auto max-w-2xl px-4 py-6">
-        <Link
-          href={`/store-admin?store=${storeParam}`}
-          className="mb-6 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" aria-hidden />
-          Back to dashboard
-        </Link>
-
+      <div className="max-w-3xl">
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-foreground">Your WhatsApp number</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -357,7 +337,7 @@ export function WhatsAppLinkForm({ storeName, storeSlug, configured, state, chil
           </CardContent>
         </Card>
         {children}
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
