@@ -69,6 +69,7 @@ import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, fulfillmentHeadline, ful
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 import { NewOrderEmailToggle } from "./new-order-email-toggle";
 import { ActionError } from "./action-error";
+import { setupHrefOf } from "../two-factor-error";
 import { CourierTiming } from "./courier-timing";
 import { BatchPicking, packingHref } from "./batch-picking";
 import { orderPrepMinutes } from "@/lib/listing/prepared";
@@ -229,7 +230,7 @@ export function OrderInbox({
   const [cancelReason, setCancelReason] = useState<StoreCancelReason | null>(null);
   const [cancelNote, setCancelNote] = useState("");
   /** The last failed action, keyed by the order, line or dialog it was for. */
-  const [actionError, setActionError] = useState<{ key: string; message: string } | null>(null);
+  const [actionError, setActionError] = useState<{ key: string; message: string; setupHref?: string } | null>(null);
   const prevOrderIdsRef = useRef(new Set(initialOrders.map((o) => o.id)));
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -335,7 +336,7 @@ export function OrderInbox({
       }
       if (!result.ok) {
         const error = (result as { error?: string }).error;
-        setActionError({ key, message: error ?? STAFF_GENERIC_ERROR });
+        setActionError({ key, message: error ?? STAFF_GENERIC_ERROR, setupHref: setupHrefOf(result) });
         return;
       }
       onDone(result);
@@ -343,6 +344,7 @@ export function OrderInbox({
   }
 
   const errorFor = (key: string) => (actionError?.key === key ? actionError.message : null);
+  const setupHrefFor = (key: string) => (actionError?.key === key ? actionError.setupHref : undefined);
 
   function handleAcceptConfirm() {
     if (!acceptingOrderId) return;
@@ -782,7 +784,7 @@ export function OrderInbox({
                   </Button>
                 )}
 
-                <ActionError message={errorFor(selectedOrder.id)} className="mb-4" />
+                <ActionError message={errorFor(selectedOrder.id)} setupHref={setupHrefFor(selectedOrder.id)} className="mb-4" />
 
                 {selectedOrder.status === "PICKING" && (
                   <Button

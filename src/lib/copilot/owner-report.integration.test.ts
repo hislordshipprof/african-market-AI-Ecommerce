@@ -382,7 +382,7 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
     expect([ugwu.status, ugwu.confidence]).toEqual(["in_stock", 1]);
   });
 
-  it("auth: members submit, only the owner confirms; others are redirected", async () => {
+  it("auth: members submit, with or without 2FA, only the owner confirms; others are redirected", async () => {
     extraction([{ name: "gari", quantity: 1 }]);
     asStore(slugA, cookies.staff);
     const sent = await submitVoiceReport({ transcript: "got one gari" });
@@ -391,7 +391,12 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
     const confirm = { reportId: sent.report.id, itemIds: [sent.report.items[0]!.id] };
     await expect(confirmOwnerReportItems(confirm)).rejects.toThrow(/NEXT_REDIRECT:/);
 
-    for (const who of ["", cookies.no2fa, cookies.outsider]) {
+    // 2FA is optional for members (#840): staff without it submit like any staff, and still cannot confirm.
+    asStore(slugA, cookies.no2fa);
+    expect((await submitVoiceReport({ transcript: "got one gari" })).ok).toBe(true);
+    await expect(confirmOwnerReportItems(confirm)).rejects.toThrow(/NEXT_REDIRECT:/);
+
+    for (const who of ["", cookies.outsider]) {
       asStore(slugA, who);
       await expect(submitVoiceReport({ transcript: "got one gari" })).rejects.toThrow(/NEXT_REDIRECT:/);
       await expect(submitPhotoReport(new FormData())).rejects.toThrow(/NEXT_REDIRECT:/);

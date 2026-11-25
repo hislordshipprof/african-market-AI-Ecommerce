@@ -19,6 +19,7 @@ import { money } from "@/lib/format";
 import { markNoShowAction, storeRefundAction, storeRefundPreviewAction } from "@/lib/order/actions";
 import type { StoreRefundPreview } from "@/lib/order/store-refund";
 import { ActionError } from "./action-error";
+import { setupHrefOf } from "../two-factor-error";
 
 export type RefundableLine = { id: string; name: string; variant: string; unitPriceCents: number; refundableQty: number };
 
@@ -40,7 +41,7 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
   const [qty, setQty] = useState<Record<string, number>>({});
   const [reason, setReason] = useState("");
   const [submissionId, setSubmissionId] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; setupHref?: string } | null>(null);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const done = onDone ?? ((message: string) => {
@@ -90,7 +91,7 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
         ? await markNoShowAction(orderId, reason || null)
         : await storeRefundAction(orderId, { picks: whole ? "whole_order" : picks, reason, submissionId });
       if (!result.ok) {
-        setError(result.error);
+        setError({ message: result.error, setupHref: setupHrefOf(result) });
         return;
       }
       setOpen(null);
@@ -182,7 +183,7 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
               <Label htmlFor="refund-reason">{open === "no_show" ? "Note (optional)" : "Reason"}</Label>
               <Textarea id="refund-reason" maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
             </div>
-            <ActionError message={error} />
+            <ActionError message={error?.message} setupHref={error?.setupHref} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(null)} className="min-h-11 rounded-full">
@@ -201,7 +202,7 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
 /** What the customer gets back, line by line, before the owner confirms (#806). */
 function RefundAmount({ preview }: { preview: StoreRefundPreview | null }) {
   if (!preview) return <p className="text-sm text-muted-foreground" role="status">Working out the amount…</p>;
-  if (!preview.ok) return <ActionError message={preview.error} />;
+  if (!preview.ok) return <ActionError message={preview.error} setupHref={setupHrefOf(preview)} />;
   return (
     <dl className="space-y-1 rounded-lg border border-border px-3 py-2 text-sm" aria-live="polite" data-testid="refund-amount">
       {!preview.whole && (

@@ -43,7 +43,7 @@ describe.skipIf(!hasDb)("store refund after capture (#798)", () => {
 
   beforeEach(() => {
     requireStoreOwner.mockReset();
-    requireStoreOwner.mockResolvedValue({ store: { id: storeId, slug: run }, user: OWNER, membership: { role: "owner", readOnly: false } });
+    requireStoreOwner.mockResolvedValue({ store: { id: storeId, slug: run }, user: { ...OWNER, twoFactorEnabled: true }, session: { twoFactorVerified: true }, membership: { role: "owner", readOnly: false } });
   });
 
   afterAll(async () => {
