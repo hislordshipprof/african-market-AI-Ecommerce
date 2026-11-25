@@ -1,9 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, CircleAlert } from "lucide-react";
+import { Check, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,6 +17,7 @@ import { updateStoreSettings } from "@/lib/store-admin/settings-actions";
 import { SlotSettings } from "./slot-settings";
 import { OneOffChanges } from "./one-off-changes";
 import type { StoreChangeRef } from "@/lib/store-settings/store-change";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 const ZONE_NAMES: Record<string, string> = {
   "America/New_York": "Eastern",
@@ -59,9 +58,7 @@ function dollars(cents: number): string {
 }
 
 /** The owner's store settings (#786). Delivery stays with the platform team; one minimum covers every order. */
-export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, hoursSaved, timezoneConfirmed, storeDeliveryEnabled, oneOffChanges }: Props) {
-  const searchParams = useSearchParams();
-  const storeParam = searchParams.get("store") ?? storeSlug;
+export function SettingsForm({ storeName, initial, unreadableDays, hoursSaved, timezoneConfirmed, storeDeliveryEnabled, oneOffChanges }: Props) {
   const [values, setValues] = useState(initial);
   const [minimum, setMinimum] = useState(dollars(initial.minimumOrderCents));
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -88,22 +85,10 @@ export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, ho
   }
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <Link href={`/store-admin?store=${storeParam}`} aria-label="Back to store admin">
-            <Button variant="ghost" size="icon" className="size-9" tabIndex={-1}>
-              <ArrowLeft className="size-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">Settings</h1>
-            <p className="text-xs text-muted-foreground">{storeName}</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader title="Settings" description={storeName} />
 
-      <main className="mx-auto max-w-2xl px-4 py-6">
+      <div className="max-w-3xl">
         <form onSubmit={save} className="flex flex-col gap-6">
           <Card>
             <CardHeader>
@@ -266,7 +251,7 @@ export function SettingsForm({ storeName, storeSlug, initial, unreadableDays, ho
             ) : null}
           </div>
         </form>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

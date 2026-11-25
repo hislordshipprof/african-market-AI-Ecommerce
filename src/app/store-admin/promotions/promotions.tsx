@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createCouponAction, setCouponActiveAction, updateCouponAction } from "@/lib/coupon/actions";
 import { money } from "@/lib/format";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 export interface CouponRow {
   id: string;
@@ -189,10 +189,8 @@ function CouponForm({ coupon, zoneName, nowLocal, onDone }: { coupon: CouponRow 
   );
 }
 
-export function Promotions({ storeName, storeSlug, zoneName, nowLocal, coupons }: Props) {
+export function Promotions({ storeName, zoneName, nowLocal, coupons }: Props) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const storeParam = searchParams.get("store") ?? storeSlug;
   const [isPending, startTransition] = useTransition();
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -209,24 +207,10 @@ export function Promotions({ storeName, storeSlug, zoneName, nowLocal, coupons }
   }
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-          <Link
-            href={`/store-admin?store=${storeParam}`}
-            aria-label="Back to store admin"
-            className="inline-flex size-11 items-center justify-center rounded-lg text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
-          >
-            <ArrowLeft className="size-4" aria-hidden />
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">Promotions</h1>
-            <p className="text-[13px] text-muted-foreground">{storeName}</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader title="Promotions" description={storeName} />
 
-      <main className="mx-auto max-w-3xl px-4 py-6">
+      <div className="max-w-3xl">
         <div className="flex flex-col gap-6">
           <Card>
             <CardHeader>
@@ -302,7 +286,7 @@ export function Promotions({ storeName, storeSlug, zoneName, nowLocal, coupons }
             </ul>
           )}
         </div>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
