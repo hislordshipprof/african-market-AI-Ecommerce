@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { insertStoreApplication, platformAdmin, platformAdminTransaction } from "../db";
+import { insertStoreApplication, platformAdmin, platformAdminTransaction, readApplicantPlanChoice, storeScopedTransaction } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { normalizeEmail } from "../email";
 import { sendEmail, type EmailMessage } from "../email/send";
@@ -16,7 +16,7 @@ import { resolveAuthBaseUrl } from "../auth";
 import { requestCourierRegistration } from "../delivery/courier-registration";
 import { revalidateStore } from "../get-store";
 import { readAiOnboardingSettings } from "../admin/ai-onboarding-settings";
-import { REJECT_REASON_MAX, STORE_TYPES } from "./fields";
+import { PLAN_CHOICES, REJECT_REASON_MAX, STORE_TYPES, type PlanChoice } from "./fields";
 
 const HOUR_MS = 60 * 60 * 1000;
 const PER_IP_PER_HOUR = 5;
@@ -81,6 +81,7 @@ const applicationSchema = z.object({
   }),
   offersPickup: z.boolean(),
   offersDelivery: z.boolean(),
+  planChoice: z.enum(PLAN_CHOICES.map((choice) => choice.value) as [PlanChoice, ...PlanChoice[]], { message: "Pick a plan, or Not sure yet" }),
 });
 
 function formValue(input: Record<string, unknown>, key: string): string {
@@ -115,6 +116,7 @@ export async function submitStoreApplication(
     website: formValue(input, "website"),
     offersPickup: formValue(input, "offersPickup") === "on",
     offersDelivery: formValue(input, "offersDelivery") === "on",
+    planChoice: formValue(input, "planChoice"),
   });
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -182,6 +184,14 @@ function adminNoticeHtml(application: NewApplication): string {
     `${escapeHtml(application.businessName)} in ${escapeHtml(application.city)}, ${escapeHtml(application.state)} applied to sell on African Markets.`,
     `Review it on <a href="${escapeHtml(link)}">the Applications page</a>.`,
   ]);
+}
+
+/**
+ * The plan the store's applicant said they wanted on /sell (#838), read under the store's own RLS context.
+ * Null when the store did not come from an application, or applied before the question existed.
+ */
+export async function applicantPlanChoice(storeId: string): Promise<PlanChoice | null> {
+  return storeScopedTransaction(storeId, (tx) => readApplicantPlanChoice(tx, storeId));
 }
 
 /** The admin list shows at most this many pending applications, oldest first. */

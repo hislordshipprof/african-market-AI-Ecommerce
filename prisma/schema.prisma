@@ -2327,6 +2327,8 @@ model StoreApplication {
   website            String?
   offersPickup       Boolean   @default(false) @map("offers_pickup")
   offersDelivery     Boolean   @default(false) @map("offers_delivery")
+  /// starter | pro | undecided: the plan the applicant is interested in (#838). Binds no one; null before #838.
+  planChoice         String?   @map("plan_choice")
   /// pending | approved | rejected
   status             String    @default("pending")
   /// Internal only; never sent to the applicant.

@@ -8,13 +8,14 @@ vi.mock("next/cache", () => ({
 }));
 
 import { testPrismaClient } from "@/lib/test-prisma";
-import { platformAdmin, storeScoped } from "../db";
+import { platformAdmin, storeScoped, storeScopedTransaction } from "../db";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { fakeAddressBackend, setAddressProvider, type AddressBackend } from "../address/provider";
 import { inngest } from "../inngest/client";
 import { COURIER_REGISTRATION_REQUESTED } from "../delivery/courier-registration";
 import { withAiOnboardingSettings } from "../admin/platform-settings-test-lock";
 import {
+  applicantPlanChoice,
   approveStoreApplication,
   deleteExpiredRejectedApplications,
   listStoreApplications,
@@ -44,6 +45,7 @@ function form(overrides: Record<string, string | null> = {}): Record<string, str
     website: "https://instagram.com/sellmarket",
     offersPickup: "on",
     offersDelivery: null,
+    planChoice: "pro",
     fax: null,
     ...overrides,
   };
@@ -111,6 +113,25 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     if (result.ok || !("fieldErrors" in result)) throw new Error("expected field errors");
     expect(Object.keys(result.fieldErrors).sort()).toEqual(["businessName", "email", "phone", "website", "zip"]);
     expect(await applicationsFor("not-an-email")).toHaveLength(0);
+  });
+
+  it("saves the plan the applicant is interested in, Not sure yet included (#838)", async () => {
+    const unsure = form({ planChoice: "undecided" });
+    const starter = form({ planChoice: "starter" });
+    expect(await submitStoreApplication(unsure, ip(), NOW)).toEqual({ ok: true });
+    expect(await submitStoreApplication(starter, ip(), NOW)).toEqual({ ok: true });
+    expect((await applicationsFor(unsure.email!))[0].planChoice).toBe("undecided");
+    expect((await applicationsFor(starter.email!))[0].planChoice).toBe("starter");
+  });
+
+  it("refuses a missing or unknown plan choice without storing anything (#838)", async () => {
+    for (const planChoice of [null, "", "enterprise"]) {
+      const input = form({ planChoice });
+      const result = await submitStoreApplication(input, ip(), NOW);
+      if (result.ok || !("fieldErrors" in result)) throw new Error("expected field errors");
+      expect(Object.keys(result.fieldErrors)).toEqual(["planChoice"]);
+      expect(await applicationsFor(input.email!)).toHaveLength(0);
+    }
   });
 
   it("a filled honeypot looks accepted but stores nothing", async () => {
@@ -256,6 +277,25 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     const audits = await platformAdmin.auditLog.findMany({ where: { entityType: "store_application", entityId: app.id } });
     expect(audits.map((a) => a.action)).toEqual(["store_application.approve"]);
     expect(audits[0].storeId).toBe(store.id);
+  });
+
+  it("after approval the store reads the plan its applicant chose; another store cannot read it (#838)", async () => {
+    const app = await pending({ planChoice: "starter" });
+    const result = await approveStoreApplication(app.id, `sell-${run}-plan`, actor);
+    if (!result.ok) throw new Error(result.error);
+    expect(await applicantPlanChoice(result.storeId)).toBe("starter");
+
+    const other = await pending({ planChoice: "pro" });
+    const otherResult = await approveStoreApplication(other.id, `sell-${run}-plan-b`, actor);
+    if (!otherResult.ok) throw new Error(otherResult.error);
+    const leaked = await storeScopedTransaction(otherResult.storeId, (tx) =>
+      tx.$queryRaw<unknown[]>`SELECT id FROM store_applications WHERE id = ${app.id}`,
+    );
+    expect(leaked).toHaveLength(0);
+  });
+
+  it("a store with no application has no plan choice (#838)", async () => {
+    expect(await applicantPlanChoice(`no-such-store-${run}`)).toBeNull();
   });
 
   it("approve with a taken or reserved slug changes nothing and the application stays pending", async () => {

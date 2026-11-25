@@ -3113,6 +3113,16 @@ export async function readStorePlanRows(tx: Pick<PrismaClient, "$queryRaw">, sto
   `;
 }
 
+/** The plan choice on a store's own application (#838); the own-store SELECT policy lets only that store read it. */
+export async function readApplicantPlanChoice(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<"starter" | "pro" | "undecided" | null> {
+  const [row] = await tx.$queryRaw<{ planChoice: "starter" | "pro" | "undecided" | null }[]>`
+    SELECT plan_choice AS "planChoice" FROM store_applications WHERE store_id = ${storeId}`;
+  return row?.planChoice ?? null;
+}
+
 /** Where a plan override's end falls against the database clock: after now, and within the cap. */
 export async function overrideEndWindow(
   tx: Pick<PrismaClient, "$queryRaw">,
