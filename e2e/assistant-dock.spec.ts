@@ -224,9 +224,16 @@ test.describe("store assistant sheet (#855)", () => {
 
   test("opens on any store-admin page with the alerts, sends, and confirms a drafted coupon in the sheet", async ({ page }) => {
     await storeOwnerSignIn(page);
-    await page.goto(`/store-admin/orders?store=${STORE_SLUG}`);
     const launcher = page.getByTestId("assistant-launcher");
+    // Sign-in moves on without a full load; the button still appears.
     await expect(launcher).toBeVisible();
+    await page.goto(`/store-admin/orders?store=${STORE_SLUG}`);
+    await expect(launcher).toBeVisible();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.mouse.wheel(0, 20_000);
+    await page.waitForTimeout(400);
+    if (PROOF) await page.screenshot({ path: `${PROOF}/855-store-page-bottom-dark-1280.png` });
+    await page.emulateMedia({ colorScheme: "light" });
     await proof(page, "store-closed");
 
     await launcher.click();
