@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { findStoreForHeaders } from "@/lib/get-store";
 import { pwaMetadata } from "@/lib/pwa/manifest";
 import { TwoFactorReminder } from "./two-factor-reminder";
+import { StoreAssistantHost } from "./store-assistant-host";
 
 /** The store admin installs as its own app, scoped to /store-admin (#563). */
 export async function generateMetadata(): Promise<Metadata> {
@@ -15,6 +16,7 @@ export default function StoreAdminLayout({ children }: { children: React.ReactNo
     <>
       <TwoFactorReminder />
       {children}
+      <StoreAssistantHost />
     </>
   );
 }

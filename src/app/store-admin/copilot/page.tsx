@@ -6,9 +6,7 @@ import { loadDigestHour } from "@/lib/copilot/digest";
 import { listPendingOwnerReports } from "@/lib/copilot/owner-report";
 import { inventoryReport } from "@/lib/copilot/inventory-report";
 import { listWeeklyReports } from "@/lib/copilot/weekly-report";
-import { loadCopilotPanel } from "@/lib/copilot/turn";
 import { AlertsPanel } from "./alerts-panel";
-import { CopilotPanel } from "./copilot-panel";
 import { DigestSetting } from "./digest-setting";
 import { OwnerReportPanel } from "./owner-report-panel";
 import { StockMovement } from "./stock-movement";
@@ -17,12 +15,11 @@ import { ReorderPanel } from "./reorder-panel";
 import { reorderSuggestions } from "@/lib/copilot/reorder";
 import { loadReorderList, reorderText } from "@/lib/copilot/reorder-list";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
-import { FEATURE_LABELS, storeMayUse } from "@/lib/billing/plan";
+import { storeMayUse } from "@/lib/billing/plan";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
-  const [panel, alerts, digestHour, reports, reportsAllowed, movement, reorderAllowed, weekly, chatAllowed] = await Promise.all([
-    loadCopilotPanel(session.store.id, session.user.id),
+  const [alerts, digestHour, reports, reportsAllowed, movement, reorderAllowed, weekly] = await Promise.all([
     listOpenAlerts(session.store.id),
     loadDigestHour(session.store.id),
     listPendingOwnerReports(session.store.id),
@@ -30,7 +27,6 @@ export default async function CopilotPage() {
     inventoryReport(session.store.id),
     storeMayUse(session.store.id, "reorder-suggestions"),
     listWeeklyReports(session.store.id),
-    storeMayUse(session.store.id, "store-assistant"),
   ]);
   const [reorder, savedList] = reorderAllowed
     ? await Promise.all([reorderSuggestions(session.store.id), loadReorderList(session.store.id)])
@@ -55,33 +51,19 @@ export default async function CopilotPage() {
       </header>
       <main className="mx-auto max-w-2xl px-4 py-6">
         <AlertsPanel alerts={alerts} />
-        <CopilotPanel
-          conversationId={panel.conversationId}
-          messages={panel.messages}
-          proposals={panel.proposals}
-          drafts={panel.drafts}
-          voiceAndPhoto={
-            reportsAllowed ? (
-              <OwnerReportPanel reports={reports} embedded />
-            ) : (
-              <PlanLocked
-                title="Voice and photo stock reports"
-                description="Say what came in, or snap the invoice or shelf, and the copilot drafts the stock changes."
-                storeSlug={session.store.slug}
-              />
-            )
-          }
-          voiceAndPhotoWaiting={reports.length}
-          chatLocked={
-            chatAllowed ? undefined : (
-              <PlanLocked
-                title={FEATURE_LABELS["store-assistant"]}
-                description="Ask how sales went this week or what sold most, and tell it what came in or sold at the counter. It answers from your own orders, lists the listings that need fixing, and drafts stock changes, coupons, price changes, one-day hours or delivery changes and product descriptions for you to confirm. Your past chats stay here to read."
-                storeSlug={session.store.slug}
-              />
-            )
-          }
-        />
+        {/* The chat is the Store assistant button on every store-admin page (#855). */}
+        {reportsAllowed ? (
+          <OwnerReportPanel reports={reports} />
+        ) : (
+          <section aria-labelledby="voice-photo-title" className="mt-10 flex flex-col gap-4 border-t border-border pt-8">
+            <h2 id="voice-photo-title" className="font-display text-[1.375rem] leading-tight font-bold text-foreground">Report stock by voice or photo</h2>
+            <PlanLocked
+              title="Voice and photo stock reports"
+              description="Say what came in, or snap the invoice or shelf, and the copilot drafts the stock changes."
+              storeSlug={session.store.slug}
+            />
+          </section>
+        )}
         <StockMovement rows={movement.rows} totals={movement.totals} />
         <section aria-labelledby="reorder-title" className="mt-8 flex flex-col gap-3">
           <div>
