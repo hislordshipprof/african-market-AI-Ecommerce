@@ -359,8 +359,15 @@
   min-width: 0;
 }
 .lineDetails h3 {
+  min-width: 0;
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+.lineHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
 }
 .lineDetails p {
   font-size: 13px;

@@ -40,7 +40,7 @@ test.describe("Guest checkout flow", () => {
     await page.goto(`${base}/checkout`);
 
     await expect(
-      page.getByText("10% buffer, capped at $20"),
+      page.getByText("10% for swaps, up to $20 more", { exact: false }),
     ).toBeVisible();
   });
 

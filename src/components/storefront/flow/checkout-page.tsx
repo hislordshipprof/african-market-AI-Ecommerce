@@ -36,6 +36,7 @@ import {
   AddressCard,
   DemoNotice,
   FlowCard,
+  Money,
   FlowError,
   FlowHeading,
   FlowLoading,
@@ -1620,7 +1621,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             <FlowCard title="Contact details">
               <p className={styles.muted}>{contactNote}</p>
               <label className={styles.field}>
-                Full name
+                Full name (required)
                 <input
                   id="checkout-contact-name"
                   autoComplete="name"
@@ -1633,7 +1634,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 />
               </label>
               {nameInvalid && (
-                <p className={styles.error} id="contact-name-error">{fieldErrors.name}</p>
+                <p className={styles.error} id="contact-name-error"><CircleAlert size={16} aria-hidden />{fieldErrors.name}</p>
               )}
               <label className={styles.field}>
                 Phone number (required)
@@ -1650,7 +1651,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 />
               </label>
               {phoneInvalid && (
-                <p className={styles.error} id="contact-phone-error">{fieldErrors.phone}</p>
+                <p className={styles.error} id="contact-phone-error"><CircleAlert size={16} aria-hidden />{fieldErrors.phone}</p>
               )}
               {whatsapp && (
                 <label className={styles.choice}>
@@ -1680,7 +1681,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 />
               </label>
               {emailInvalid && (
-                <p className={styles.error} id="contact-email-error">{fieldErrors.email}</p>
+                <p className={styles.error} id="contact-email-error"><CircleAlert size={16} aria-hidden />{fieldErrors.email}</p>
               )}
             </FlowCard>
           </div>
@@ -1748,7 +1749,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     aria-describedby={problem && basketIssue ? issueId("basket") : undefined}
                   >
                     <span>{line.quantity} × {line.name}</span>
-                    <span>{money(line.quantity * line.price)}</span>
+                    <Money cents={line.quantity * line.price} />
                     {problem && (
                       <small className={styles.miniLineProblem}>
                         <CircleAlert size={14} aria-hidden />
@@ -1812,11 +1813,10 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               <p role="status">Estimating your order…</p>
             )}
             <p className={styles.notice}>
-              {quote && <>Your card will be authorized for {money(quote.holdCents)}. </>}
-              We authorize the estimated total plus a 10% buffer, capped at $20.
-              You&rsquo;ll be charged the final amount after picking; unused
-              funds are released. Any higher-priced swap requires your approval
-              and must fit within this hold.
+              {quote ? <>We hold {money(quote.holdCents)} on your card: </> : <>We hold </>}
+              the estimated total plus 10% for swaps, up to $20 more. After
+              picking you pay only the final amount, and we release the rest.
+              A pricier swap needs your OK and must fit in the hold.
             </p>
             {quoteFailed && onRetryQuote ? (
               <div className={styles.quoteRetry} role="alert">
@@ -1840,12 +1840,6 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 order, the hold is released.
               </p>
             )}
-            {quote && (
-              <p className={styles.payTotal}>
-                <span>Estimated total</span>
-                <strong>{money(quote.totalCents)}</strong>
-              </p>
-            )}
             <PayButton
               type="submit"
               state={payState}
@@ -1854,6 +1848,12 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               aria-describedby={blocking ? issueId("basket") : addressHold ? "checkout-address-hold" : paymentHold ? "checkout-payment-hold" : undefined}
               label={payLabel}
             />
+            {Object.keys(fieldErrors).length > 0 && (
+              <p className={styles.error} role="alert">
+                <CircleAlert size={16} aria-hidden />
+                Some contact details need a fix. Correct the fields with a message, then place your order.
+              </p>
+            )}
             {addressHold && (
               <p className={styles.muted} id="checkout-address-hold">Confirm your address to place the order.</p>
             )}

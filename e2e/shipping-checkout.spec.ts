@@ -112,7 +112,7 @@ test("a shopper ships dry goods to another state at the carrier's rate (#567), a
     const status = page.getByRole("region", { name: "Order placed" });
     await expect(status).toContainText(/Fulfillment:?\s*Shipping/);
     await expect(status).toContainText(/Carrier:?\s*USPS Ground Advantage/);
-    await expect(page.locator(".flow-fee", { hasText: "Shipping" }).getByLabel(fee!)).toBeVisible();
+    await expect(page.locator(".flow-fee", { hasText: "Shipping" }).locator(".flow-money")).toHaveText(fee!);
 
     const order = await scoped((tx) => tx.order.findFirst({ where: { storeId: store.id } }));
     expect(order).toMatchObject({ fulfillment: "ship", shippingCarrier: "USPS", deliveryState: "MD" });

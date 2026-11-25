@@ -147,11 +147,11 @@
 .flow-fee {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 16px;
   min-width: 0;
-  font-size: 14px;
-  padding-block: 9px;
+  font-size: 16px;
+  padding-block: 8px;
 }
 .flow-fee > div:first-child {
   min-width: 0;
@@ -164,22 +164,22 @@
   margin-top: 4px;
   max-width: 26ch;
 }
-.flow-fee .sf-price {
+.flow-money {
   white-space: nowrap;
-  font-size: 18px;
-}
-.flow-fee .sf-price small {
-  display: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 .flow-fee-total {
   border-top: 1px solid var(--color-line);
-  margin-top: 12px;
-  padding-top: 20px;
-  font-weight: 750;
-  font-size: 17px;
+  margin-top: 8px;
+  padding-top: 16px;
+  font-weight: 700;
+  font-size: 16px;
 }
-.flow-fee-total .sf-price {
-  font-size: 26px;
+.flow-fee-total .flow-money {
+  font-size: 22px;
+  font-weight: 700;
 }
 .flow-address-card {
   display: grid;
@@ -260,8 +260,8 @@
   margin-bottom: 8px;
 }
 .flow-error p {
-  font-size: 14px;
-  color: var(--color-muted);
+  font-size: 16px;
+  color: var(--color-ink);
   line-height: 1.6;
 }
 .flow-closed {
@@ -419,4 +419,15 @@
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+/* A card's action never touches the sentence above it (#826). */
+.flow-card > p + :is(.sf-button, button) {
+  margin-top: 16px;
+}
+/* One column for a short form (message the store): label, field and Send line up (#826). */
+.flow-fields.flow-fields-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.flow-fields-single > button {
+  justify-self: start;
 }

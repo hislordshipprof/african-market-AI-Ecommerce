@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { OrderFlow } from "@/components/storefront/flow/order-flow";
-import { FeeLine, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
+import { FeeLine, FlowCard, FlowHeading, Money } from "@/components/storefront/flow/common";
 import { orderReceipt } from "@/lib/order/receipt";
 import { requestLines } from "@/lib/order/request-lines";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
@@ -94,14 +94,12 @@ export default async function OrderPage({
           />
           <section className={`flow-card ${styles.status}`} aria-labelledby="order-status">
             {query.placed === "1" && <SuccessMark />}
-            <p className={styles.eyebrow}>Status</p>
             <h2 id="order-status">{statusLabel}</h2>
             {outcome && <p>{outcome}</p>}
             {query.placed === "1" && (
               <p>
-                Your card has been authorized for {money(realOrder.totalAuthorizedCents)}.
-                You&rsquo;ll be charged the final amount after picking; unused buffer is
-                released.
+                We hold {money(realOrder.totalAuthorizedCents)} on your card. After
+                picking you pay only the final amount, and we release the rest.
               </p>
             )}
             <dl className={styles.facts}>
@@ -221,7 +219,7 @@ export default async function OrderPage({
                     {line.qtyOrdered} × {line.listingVariant ? variantLabel(line.listingVariant) : "Item"}
                     {receipt.items[index].note && <small className={styles.note}>{receipt.items[index].note}</small>}
                   </span>
-                  <span>{money(receipt.items[index].cents)}</span>
+                  <Money cents={receipt.items[index].cents} />
                 </li>
               ))}
             </ul>
@@ -240,7 +238,7 @@ export default async function OrderPage({
             {receipt.holdCents != null && (
               <FeeLine
                 label="Authorization hold"
-                detail="You're charged the final amount after picking; the rest is released."
+                detail="After picking you pay only the final amount, and we release the rest."
                 cents={receipt.holdCents}
               />
             )}
