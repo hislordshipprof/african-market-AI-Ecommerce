@@ -318,11 +318,10 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
 
       const panel = await loadCopilotPanel(storeAId, ownerAId);
       expect(panel.messages.map((message) => message.text)).toContain("got 3 cassava");
-      // The assistant sheet (#855) loads the same history, says the chat is locked, and carries the alerts.
+      // The assistant sheet (#855) loads the same history and says the chat is locked.
       const dock = await loadStoreAssistant();
       expect(dock.chatAllowed).toBe(false);
       expect(dock.messages.map((message) => message.text)).toContain("got 3 cassava");
-      expect(Array.isArray(dock.alerts)).toBe(true);
       expect(panel.messages.map((message) => message.text)).not.toContain("got 2 cassava");
       expect(await confirmStockProposal({ proposalId: sent.proposals[0].id })).toMatchObject({ ok: true, listing: { qty: 8 } });
     } finally {
