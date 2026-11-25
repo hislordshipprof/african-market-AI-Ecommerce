@@ -18,6 +18,8 @@ const TOKEN_BYTES = 32;
 
 export type StoreRole = "owner" | "staff";
 
+export const INVITE_NOT_EMAILED = "Invite saved, but the email could not be sent. Resend it or share the link.";
+
 export const STAFF_LIMIT_MESSAGE = `The Starter plan includes the owner and ${staffLimit("starter")} staff. Upgrade to Pro for unlimited staff.`;
 
 function hashToken(token: string): string {
@@ -42,10 +44,110 @@ export interface CreateInviteInput {
 
 type InviteTx = Parameters<Parameters<typeof platformAdminTransaction>[0]>[0];
 
-export async function createInvite(input: CreateInviteInput): Promise<{ id: string; tokenHash: string }> {
+/** The invite stands when the email fails; `inviteUrl` lets the inviter share it by hand. */
+export interface SavedInvite {
+  id: string;
+  tokenHash: string;
+  emailed: boolean;
+  inviteUrl: string;
+}
+
+export async function createInvite(input: CreateInviteInput): Promise<SavedInvite> {
   const recorded = await platformAdminTransaction((tx) => recordInvite(tx, input));
-  await sendInviteEmail(input, recorded);
-  return { id: recorded.id, tokenHash: recorded.tokenHash };
+  const emailed = await trySendInviteEmail(input, recorded);
+  return { id: recorded.id, tokenHash: recorded.tokenHash, emailed, inviteUrl: inviteUrl(input, recorded.rawToken) };
+}
+
+async function trySendInviteEmail(input: CreateInviteInput, invite: RecordedInvite): Promise<boolean> {
+  try {
+    await sendInviteEmail(input, invite);
+    return true;
+  } catch (err) {
+    console.error(JSON.stringify({
+      event: "invite_email_failed",
+      storeId: input.storeId,
+      inviteId: invite.id,
+      message: err instanceof Error ? err.message : "send failed",
+    }));
+    return false;
+  }
+}
+
+export interface ResendInviteInput {
+  storeId: string;
+  inviteId: string;
+  actorId: string;
+  actorEmail: string;
+  baseUrl: string;
+  storeSlug: string;
+  storeName: string;
+}
+
+/** A new link and a new 72 hours on the same invite; the old link stops working. */
+export async function resendInvite(input: ResendInviteInput): Promise<SavedInvite | { error: string }> {
+  const { raw, hash } = generateToken();
+  const invite = await platformAdminTransaction(async (tx) => {
+    const pending = await tx.storeInvite.findFirst({
+      where: { id: input.inviteId, storeId: input.storeId, usedAt: null, expiresAt: { gt: new Date() } },
+    });
+    if (!pending) return null;
+    await tx.storeInvite.update({
+      where: { id: pending.id },
+      data: { tokenHash: hash, expiresAt: new Date(Date.now() + INVITE_EXPIRY_HOURS * 60 * 60 * 1000) },
+    });
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.actorId,
+        actorEmail: input.actorEmail,
+        action: "invite.resend",
+        entityType: "store_invite",
+        entityId: pending.id,
+        after: { email: pending.email, role: pending.role },
+      },
+    });
+    return pending;
+  });
+  if (!invite) return { error: "Invitation not found" };
+
+  const sendInput: CreateInviteInput = {
+    storeId: input.storeId,
+    email: invite.email,
+    role: invite.role as StoreRole,
+    invitedById: input.actorId,
+    actorEmail: input.actorEmail,
+    baseUrl: input.baseUrl,
+    storeSlug: input.storeSlug,
+    storeName: input.storeName,
+  };
+  const emailed = await trySendInviteEmail(sendInput, { id: invite.id, tokenHash: hash, rawToken: raw });
+  return { id: invite.id, tokenHash: hash, emailed, inviteUrl: inviteUrl(sendInput, raw) };
+}
+
+/** Deletes a pending invite so its link stops working; the audit row keeps who it was for. */
+export async function revokeInvite(
+  storeId: string,
+  inviteId: string,
+  actorId: string,
+  actorEmail: string,
+): Promise<{ success: true } | { error: string }> {
+  return platformAdminTransaction(async (tx) => {
+    const pending = await tx.storeInvite.findFirst({ where: { id: inviteId, storeId, usedAt: null } });
+    if (!pending) return { error: "Invitation not found" };
+    await tx.storeInvite.delete({ where: { id: pending.id } });
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId,
+        actorEmail,
+        action: "invite.revoke",
+        entityType: "store_invite",
+        entityId: pending.id,
+        before: { email: pending.email, role: pending.role },
+      },
+    });
+    return { success: true as const };
+  });
 }
 
 export type RecordedInvite = { id: string; tokenHash: string; rawToken: string };
@@ -114,12 +216,15 @@ export async function recordInvite(tx: InviteTx, input: CreateInviteInput): Prom
   return { id: created.id, tokenHash: hash, rawToken: raw };
 }
 
+function inviteUrl(input: CreateInviteInput, rawToken: string): string {
+  return `${input.baseUrl}/invite/${rawToken}?store=${input.storeSlug}`;
+}
+
 export async function sendInviteEmail(input: CreateInviteInput, invite: RecordedInvite): Promise<void> {
-  const inviteUrl = `${input.baseUrl}/invite/${invite.rawToken}?store=${input.storeSlug}`;
   await sendEmail({
     to: normalizeEmail(input.email),
     subject: `You're invited to ${input.storeName}`,
-    html: buildInviteHtml(input.storeName, input.role, inviteUrl),
+    html: buildInviteHtml(input.storeName, input.role, inviteUrl(input, invite.rawToken)),
   });
 }
 

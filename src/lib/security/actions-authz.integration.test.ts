@@ -28,7 +28,9 @@ vi.mock("next/navigation", () => ({
 import { createListingAction, deactivateListingAction, updateListingAction } from "../listing/actions";
 import { acceptOrderAction, markLinePickedAction, markLineShortAction } from "../order/actions";
 import { csvCommitAction } from "../listing/csv-import-actions";
-import { inviteMemberAction, removeMemberAction } from "../store-admin/actions";
+import { inviteMemberAction, removeMemberAction, resendInviteAction, revokeInviteAction } from "../store-admin/actions";
+import { setEmailSenderForTests } from "../email/send";
+import { ProviderSendError } from "../notifications/provider-error";
 import { setStoreStatus } from "../admin/actions";
 import { approveProduct } from "../admin/catalog-actions";
 import { resolveRefundFailedAction } from "../admin/refund-resolution";
@@ -346,6 +348,8 @@ describe("action authorization", () => {
       const form = new FormData();
       form.set("email", `new-${suffix}@test.example`);
       await expect(inviteMemberAction(form)).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
+      await expect(resendInviteAction(inviteId)).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
+      await expect(revokeInviteAction(inviteId)).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
       const invite = await storeScoped(storeB).storeInvite.findUnique({ where: { id: inviteId } });
       const membership = await storeScoped(storeB).storeMembership.findFirst({ where: { userId: ownerB } });
       expect(invite?.email).toBe(`kept-${suffix}@test.example`);
@@ -360,11 +364,32 @@ describe("action authorization", () => {
       asA(slugA, cookiesA);
       const removed = await removeMemberAction(ownerB);
       expect(removed).toMatchObject({ error: expect.any(String) });
+      expect(await resendInviteAction(inviteId)).toEqual({ error: "Invitation not found" });
+      expect(await revokeInviteAction(inviteId)).toEqual({ error: "Invitation not found" });
       const invite = await storeScoped(storeB).storeInvite.findUnique({ where: { id: inviteId } });
       const membership = await storeScoped(storeB).storeMembership.findFirst({ where: { userId: ownerB } });
       expect(invite?.usedAt).toBeNull();
       expect(membership?.role).toBe("owner");
       expect(await storeScoped(storeB).storeInvite.count()).toBe(1);
+      expect(await storeScoped(storeB).storeInvite.findUnique({ where: { id: inviteId } })).toMatchObject({ tokenHash: `hash-${suffix}` });
+    });
+
+    it("a failed invite email reads as a plain sentence with a link to share (#809)", async () => {
+      asA(slugA, cookiesA);
+      setEmailSenderForTests({ send: async () => { throw new ProviderSendError(422, "validation_error"); } });
+      try {
+        const form = new FormData();
+        form.set("email", `unmailed-${suffix}@test.example`);
+        const result = await inviteMemberAction(form);
+        expect(result).toMatchObject({
+          success: true,
+          warning: "Invite saved, but the email could not be sent. Resend it or share the link.",
+          inviteUrl: expect.stringContaining("/invite/"),
+        });
+        expect(JSON.stringify(result)).not.toContain("validation_error");
+      } finally {
+        setEmailSenderForTests(null);
+      }
     });
   });
 

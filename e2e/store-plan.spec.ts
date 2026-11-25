@@ -112,6 +112,14 @@ test.describe("store subscriptions (#494)", () => {
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin/plan?store=${SLUG}`);
     await expect(page.getByRole("button", { name: "Start Pro, 3 months free" })).toBeVisible();
+    // A feature that is not live reads the same in the Pro card and the feature list (#809).
+    const proCard = page.locator("form").filter({ has: page.getByRole("heading", { name: "Pro", exact: true }) });
+    const featureList = page.locator("section").filter({ has: page.getByRole("heading", { name: "Pro features" }) });
+    for (const label of ["Your own domain", "WhatsApp for copilot and alerts", "Analytics dashboard"]) {
+      await expect(proCard.getByText(`${label} (coming soon)`, { exact: true })).toBeVisible();
+      await expect(featureList.getByText(`${label} (coming soon)`, { exact: true })).toBeVisible();
+    }
+    await expect(proCard.getByText("Courier delivery", { exact: true })).toBeVisible();
     await shoot(page, "494-plan-choose");
   });
 

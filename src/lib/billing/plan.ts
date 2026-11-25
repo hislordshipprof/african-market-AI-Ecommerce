@@ -32,6 +32,13 @@ export const FEATURE_LABELS: Record<PlanFeature, string> = {
   "analytics-dashboard": "Analytics dashboard",
 };
 
+/** Sold on the plan page but not built yet; every place that lists a feature marks these "coming soon". */
+const NOT_LIVE_FEATURES: ReadonlySet<PlanFeature> = new Set(["own-domain", "whatsapp", "analytics-dashboard"]);
+
+export function featureLive(feature: PlanFeature): boolean {
+  return !NOT_LIVE_FEATURES.has(feature);
+}
+
 export const PLAN_PRICES_USD: Record<Plan, number> = { starter: 49, pro: 99 };
 
 export const PLAN_NAMES: Record<Plan, string> = { starter: "Starter", pro: "Pro" };

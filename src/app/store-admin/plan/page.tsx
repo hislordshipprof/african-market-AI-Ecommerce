@@ -10,6 +10,7 @@ import {
   RECOMMENDED_PLAN,
   PRO_FEATURES,
   assistantChatCap,
+  featureLive,
   planAllows,
   staffLimit,
   supportLevel,
@@ -24,17 +25,31 @@ const dateFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numer
 /** An override ends at the start of its UTC date, the date the admin picked. */
 const overrideFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-function planLines(plan: Plan): string[] {
+type PlanLine = { text: string; comingSoon?: boolean };
+
+function planLines(plan: Plan): PlanLine[] {
   const staff = staffLimit(plan);
-  return [
+  const lines: PlanLine[] = [
     "Branded store, catalog, orders, refunds and payouts",
     "Allergy and diet rules, swap or refund prompts",
     `${assistantChatCap(plan).toLocaleString("en-US")} shopping-assistant chats a month`,
     staff === null ? "Unlimited staff" : `Owner + ${staff} staff`,
     `Support: ${supportLevel(plan).toLowerCase()}`,
     ...(planAllows(plan, "courier-delivery") ? [] : ["Pickup and your own delivery"]),
-    ...PRO_FEATURES.filter((f) => planAllows(plan, f)).map((f) => FEATURE_LABELS[f]),
+  ].map((text) => ({ text }));
+  return [
+    ...lines,
+    ...PRO_FEATURES.filter((f) => planAllows(plan, f)).map((f) => ({ text: FEATURE_LABELS[f], comingSoon: !featureLive(f) })),
   ];
+}
+
+function LineText({ text, comingSoon }: PlanLine) {
+  return (
+    <span>
+      {text}
+      {comingSoon && <span className="text-muted-foreground"> (coming soon)</span>}
+    </span>
+  );
 }
 
 export default async function PlanPage({ searchParams }: { searchParams: Promise<{ pending?: string }> }) {
@@ -173,9 +188,9 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                   </p>
                   <ul className="mt-4 flex-1 space-y-2 text-sm text-foreground">
                     {planLines(plan).map((line) => (
-                      <li key={line} className="flex gap-2">
+                      <li key={line.text} className="flex gap-2">
                         <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                        {line}
+                        <LineText {...line} />
                       </li>
                     ))}
                   </ul>
@@ -203,10 +218,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                     ) : (
                       <Lock className="size-4 text-muted-foreground" aria-hidden />
                     )}
-                    {FEATURE_LABELS[feature]}
-                    {(feature === "whatsapp" || feature === "analytics-dashboard" || feature === "own-domain") && (
-                      <span className="text-muted-foreground">(coming soon)</span>
-                    )}
+                    <LineText text={FEATURE_LABELS[feature]} comingSoon={!featureLive(feature)} />
                   </span>
                   <span className={allowed ? "text-muted-foreground" : "font-medium text-foreground"}>
                     {allowed ? "Included" : "Pro"}
