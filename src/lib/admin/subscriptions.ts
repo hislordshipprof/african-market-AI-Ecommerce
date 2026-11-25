@@ -37,6 +37,25 @@ export function filterSubscriptions(rows: readonly SubscriptionOverviewRow[], fi
   );
 }
 
+export interface FilterOptionCounts {
+  status: Record<string, number>;
+  plan: Record<string, number>;
+}
+
+/** How many stores each option would return with the other filter held; "" is the "All" option. */
+export function filterOptionCounts(
+  rows: readonly SubscriptionOverviewRow[],
+  filters: SubscriptionFilters,
+  options: { statuses: readonly string[]; plans: readonly Plan[] },
+): FilterOptionCounts {
+  const count = (f: SubscriptionFilters) => filterSubscriptions(rows, f).length;
+  const status: Record<string, number> = { "": count({ plan: filters.plan }) };
+  for (const s of options.statuses) status[s] = count({ status: s, plan: filters.plan });
+  const plan: Record<string, number> = { "": count({ status: filters.status }) };
+  for (const p of options.plans) plan[p] = count({ status: filters.status, plan: p });
+  return { status, plan };
+}
+
 export async function listSubscriptions(): Promise<SubscriptionOverviewRow[]> {
   await requirePlatformAdmin();
   return listSubscriptionOverviewRows();
