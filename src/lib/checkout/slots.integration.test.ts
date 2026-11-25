@@ -62,9 +62,10 @@ describe.skipIf(!hasDb)("slot reservation at placeOrder (#565)", () => {
     await raw?.$disconnect();
   });
 
-  async function makeStore(capacity: number) {
+  async function makeStore(capacity: number, hours?: Record<string, string>) {
     const store = await raw.store.create({
       data: {
+        hours,
         slug: `t565-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`,
         name: "Slot Market",
         themePreset: "palm-and-shea",
@@ -174,5 +175,25 @@ describe.skipIf(!hasDb)("slot reservation at placeOrder (#565)", () => {
     const forB = await slotOptions(storeScoped(b.storeId), b.storeId, b.row, "pickup", new Date(), null);
     expect(forB.slots.map((s) => s.id)).toContain(slot);
     await expect(recordAuthorizedOrder(b.storeId, await orderInput(b.storeId, b.variantId, "pickup", slot))).resolves.toMatchObject({ created: true });
+  });
+
+  it("refuses a slot outside the store's hours at booking; closed days offer none (#807)", async () => {
+    // Open mornings only, closed Sundays: a slot from the all-day schedule after noon is not offered.
+    const mornings = "12:00 AM - 12:00 PM";
+    const hours = { monday: mornings, tuesday: mornings, wednesday: mornings, thursday: mornings, friday: mornings, saturday: mornings, sunday: "Closed" };
+    const { storeId, variantId, row } = await makeStore(3, hours);
+    const offered = (await slotOptions(storeScoped(storeId), storeId, row, "pickup", new Date(), null)).slots.map((s) => s.id);
+    const unbounded = (await slotOptions(storeScoped(storeId), storeId, { ...row, hours: null }, "pickup", new Date(), null)).slots.map((s) => s.id);
+    const afterNoon = unbounded.find((id) => !offered.includes(id));
+    expect(afterNoon).toBeDefined();
+    for (const id of offered) {
+      const local = new Date(id).toLocaleString("en-US", { timeZone: "America/Chicago", weekday: "short", hour: "numeric", hourCycle: "h23" });
+      const [day, hour] = local.split(" ");
+      expect(day).not.toBe("Sun,");
+      expect(Number(hour)).toBeLessThan(12);
+    }
+    await expect(recordAuthorizedOrder(storeId, await orderInput(storeId, variantId, "pickup", afterNoon!)))
+      .rejects.toBeInstanceOf(SlotUnavailableError);
+    expect(await storeScoped(storeId).order.count()).toBe(0);
   });
 });

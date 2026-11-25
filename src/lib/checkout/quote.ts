@@ -3,6 +3,7 @@ import { money } from "../format";
 import { cateringMinMessage } from "../listing/catering";
 import { serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
 import { goodsDiscountCents, type CouponTerms } from "../coupon/discount";
+import { minimumOrderGate } from "../storefront/minimum-order";
 import type { CheckoutQuote, Contact, FlowProblem, Fulfillment } from "../customer-flow/contracts";
 
 /** The pure checkout quote. Stripe-free, so the assistant can draw a Review card from it (#247). */
@@ -105,10 +106,16 @@ export function computeQuote(
     subtotalCents += line.price * line.qty;
   }
 
-  if (!cartLines.length || subtotalCents < minimumOrderCents) {
+  const applied = coupon ? couponDiscount(subtotalCents, coupon) : null;
+  const discountCents = applied?.discountCents ?? 0;
+  const goodsCents = subtotalCents - discountCents;
+
+  // The store funds the coupon, so its minimum is on goods after the discount (decision 2026-11-24-07).
+  const minimum = minimumOrderGate(goodsCents, minimumOrderCents);
+  if (!cartLines.length || !minimum.met) {
     problems.push({
       code: "minimum-order",
-      message: `Minimum order is $${(minimumOrderCents / 100).toFixed(2)}.`,
+      message: minimum.message ?? `Minimum order is $${(minimumOrderCents / 100).toFixed(2)}.`,
     });
   }
 
@@ -188,9 +195,6 @@ export function computeQuote(
   }
 
   const tipCents = 0;
-  const applied = coupon ? couponDiscount(subtotalCents, coupon) : null;
-  const discountCents = applied?.discountCents ?? 0;
-  const goodsCents = subtotalCents - discountCents;
   const serviceFeeCentsQuoted = serviceFeeCents(goodsCents, serviceFee);
   const totalCents = goodsCents + taxCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents + courierFeeCents + (shippingFee?.feeCents ?? 0);
   const bufferCents = holdBufferCents(goodsCents, taxCents);

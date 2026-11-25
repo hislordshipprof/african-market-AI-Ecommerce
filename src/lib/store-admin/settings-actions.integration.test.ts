@@ -49,6 +49,7 @@ const VALID = {
   minimumOrderCents: 0,
   phone: "(312) 555-0142",
   about: "  Family shop since 2009: yams, palm oil and fresh fish on Fridays.  ",
+  slots: {} as Record<string, string>,
 };
 
 describe.skipIf(!hasDb)("updateStoreSettings (#786)", () => {
@@ -63,7 +64,7 @@ describe.skipIf(!hasDb)("updateStoreSettings (#786)", () => {
   const row = () =>
     raw.store.findUniqueOrThrow({
       where: { id: ids.a },
-      select: { hours: true, timezone: true, timezoneSetAt: true, pickupEnabled: true, minimumOrderCents: true, phone: true, ownerStory: true },
+      select: { hours: true, timezone: true, timezoneSetAt: true, pickupEnabled: true, minimumOrderCents: true, phone: true, ownerStory: true, pickupSlotSettings: true, storeDeliverySlotSettings: true },
     });
   const audits = () => storeScoped(ids.a).auditLog.findMany({ where: { action: "store.settings" }, orderBy: { createdAt: "asc" } });
 
@@ -129,6 +130,33 @@ describe.skipIf(!hasDb)("updateStoreSettings (#786)", () => {
     as(ids.owner);
     expect(await updateStoreSettings({ ...VALID, phone: " ", about: "" })).toEqual({ ok: true });
     expect(await row()).toMatchObject({ phone: null, ownerStory: null });
+  });
+
+  it("sets pickup and delivery slots, audits the change, and refuses unreadable windows (#807)", async () => {
+    as(ids.owner);
+    const slots = {
+      pickupSlotsEnabled: "on", pickupSlotsMinutes: "30", pickupSlotsLead: "180", pickupSlotsCapacity: "6", pickupSlotsDaysAhead: "3",
+      pickupSlotsMon: "10:00 AM - 1:00 PM",
+      deliverySlotsEnabled: "on", deliverySlotsMinutes: "120", deliverySlotsLead: "240", deliverySlotsCapacity: "2", deliverySlotsDaysAhead: "2",
+      deliverySlotsSat: "2:00 PM - 6:00 PM",
+    };
+    expect(await updateStoreSettings({ ...VALID, slots })).toEqual({ ok: true });
+    const saved = await row();
+    expect(saved.pickupSlotSettings).toMatchObject({ slotMinutes: 30, leadMinutes: 180, capacity: 6, daysAhead: 3 });
+    expect((saved.pickupSlotSettings as { windows: unknown[] }).windows[1]).toEqual([{ start: 600, end: 780 }]);
+    expect(saved.storeDeliverySlotSettings).toMatchObject({ slotMinutes: 120, leadMinutes: 240, capacity: 2, daysAhead: 2 });
+    const last = (await audits()).at(-1)!;
+    expect(last.before).toMatchObject({ pickupSlotSettings: null, storeDeliverySlotSettings: null });
+    expect(last.after).toMatchObject({ pickupSlotSettings: { capacity: 6 }, storeDeliverySlotSettings: { capacity: 2 } });
+
+    const count = (await audits()).length;
+    const refused = await updateStoreSettings({ ...VALID, slots: { ...slots, pickupSlotsMon: "noon till late" } });
+    expect(refused).toEqual({ ok: false, message: expect.stringMatching(/9:00 AM - 12:00 PM/) });
+    expect((await audits()).length).toBe(count);
+
+    // Unticked turns them off again.
+    expect(await updateStoreSettings({ ...VALID, slots: { ...slots, pickupSlotsEnabled: "" } })).toEqual({ ok: true });
+    expect((await row()).pickupSlotSettings).toBeNull();
   });
 
   it("staff cannot change settings", async () => {
