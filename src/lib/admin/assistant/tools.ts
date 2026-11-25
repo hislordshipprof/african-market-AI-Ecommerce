@@ -23,6 +23,7 @@ import { listRefundFailedOrders } from "../refund-resolution";
 import { listStoreRequestAreas } from "../store-requests";
 import { ROWS_MAX, type AssistantLink } from "./types";
 import { draftTools } from "./draft-tools";
+import { moneyTools } from "./money-tools";
 import { workflowTools } from "./workflow-tools";
 import type { PendingAdminDraft } from "./drafts";
 
@@ -80,6 +81,7 @@ export function adminAssistantTools(ctx: ToolContext) {
   return {
     ...draftTools(ctx),
     ...workflowTools(ctx),
+    ...moneyTools(ctx),
     find_stores: tool({
       description: "Find stores by name or slug and/or status (setup is still onboarding). Each store has its plan, metro, open go-live items and each courier's registration error.",
       inputSchema: z.object({

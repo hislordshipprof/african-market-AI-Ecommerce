@@ -16,6 +16,7 @@ import { findCourierIncidents, NOTE_MAX } from "../courier-incidents-query";
 import { saveCourierSettingsAction } from "../courier-settings-actions";
 import { retryCourierRegistration } from "../courier-retry";
 import { setStoreMetro } from "../metros";
+import { MONEY_KINDS } from "./money-kinds";
 import { WORKFLOW_KINDS } from "./workflow-kinds";
 
 type Actor = { id: string; email: string };
@@ -72,6 +73,8 @@ export interface Kind<P> {
   params: z.ZodType<P>;
   /** The params key the card's editable text goes into. */
   editKey?: keyof P & string;
+  /** Money or hard to undo (#834): the confirm is refused until the admin has typed the editable text, a reason. */
+  reasonRequired?: true;
   snapshot(params: P): Promise<Json>;
   apply(params: P, actor: Actor, extras: { image?: File }): Promise<{ ok: true; outcome?: string } | { ok: false; error: string }>;
 }
@@ -246,6 +249,7 @@ export const KINDS = {
     },
   } satisfies Kind<{ threadId: string; body: string }>,
   ...WORKFLOW_KINDS,
+  ...MONEY_KINDS,
 } as const;
 
 export type AdminDraftKind = keyof typeof KINDS;
@@ -398,6 +402,7 @@ export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { 
       return EXPIRED;
     }
     const kind = kindOf(row.kind);
+    if (kind?.reasonRequired && !edits.text?.trim()) return { ok: false, code: "invalid", message: "Type a reason before you confirm." };
     const payload = payloadOf(row.payload);
     const texted = kind?.editKey && edits.text !== undefined ? { ...payload.params, [kind.editKey]: edits.text.trim() } : payload.params;
     const edited = keptItems(texted, edits.keep);
