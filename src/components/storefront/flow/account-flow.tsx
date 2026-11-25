@@ -442,13 +442,13 @@ export function AccountOrderDetail(
     return (
       <div className="sf-account">
         <FlowHeading
-          title="Order unavailable"
+          title="Order not found"
           backHref="/account"
           backLabel="Your account"
         />
         <FlowError
           message={
-            error || "This order is not available in this market and browser."
+            error || "We can’t find this order in this browser for this store. Open the link from your order message, or go back to your account."
           }
         />
       </div>

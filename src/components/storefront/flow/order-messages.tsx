@@ -100,7 +100,7 @@ export function OrderMessages({
           ))}
         </ol>
       )}
-      <form onSubmit={send} className="flow-fields" style={{ marginTop: 16 }}>
+      <form onSubmit={send} className="flow-fields flow-fields-single" style={{ marginTop: 16 }}>
         {messages.length === 0 && (
           <div className="flow-field">
             <label htmlFor="order-message-topic">What is it about?</label>

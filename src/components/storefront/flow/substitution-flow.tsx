@@ -96,7 +96,7 @@ export function SubstitutionCards({
               </strong>{" "}
               difference for this line
               {sub.deltaCents > 0
-                ? ". Choosing Swap approves this increase within your test payment hold."
+                ? ". Choosing Swap approves this increase within your card hold."
                 : "."}
             </p>
             {sub.decision ? (
@@ -159,7 +159,7 @@ export function SubstitutionFlow(props: OrderFlowProps) {
       ) : order === undefined ? (
         <FlowLoading />
       ) : !order ? (
-        <FlowError message="No order found in this browser for this store." />
+        <FlowError title="Order not found" message="We can’t find this order in this browser for this store. Open the link from your order message to choose your swaps." />
       ) : order.substitutions.length ? (
         <SubstitutionCards
           order={order}
