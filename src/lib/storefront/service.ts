@@ -25,18 +25,27 @@ const notE2eListingSql = Prisma.sql`(l.custom_name IS NULL OR LEFT(l.custom_name
 
 /**
  * Listings in one aisle (#782): a master product's category, or the listing's own aisle when it
- * has no master product.
+ * has no master product. An aisle holds its subcategories' listings too (#861).
  */
 function inAisle(categoryId: string | { in: string[] }) {
+  const ids = typeof categoryId === "string" ? [categoryId] : categoryId.in;
+  const category = { OR: [{ id: { in: ids } }, { parentId: { in: ids } }] } satisfies Prisma.CategoryWhereInput;
   // AND keeps this OR apart from notE2eListing's OR when both are spread into one where.
   return {
-    AND: [{ OR: [{ masterProduct: { categoryId } }, { masterProductId: null, categoryId }] }],
+    AND: [{ OR: [{ masterProduct: { category } }, { masterProductId: null, category }] }],
   } satisfies Prisma.ListingWhereInput;
 }
 
-/** The aisle a listing is shown in: its master product's category wins over its own. */
-function aisleOf<C>(listing: { masterProduct: { category?: C | null } | null; category?: C | null }): C | null {
-  return listing.masterProduct ? listing.masterProduct.category ?? null : listing.category ?? null;
+/** A listing's category with its parent, so the aisle can be read (#861). */
+const withAisle = { include: { parent: true } } as const;
+
+/** The aisle a listing is shown in: its master product's category wins over its own; a subcategory shows in its parent. */
+function aisleOf<A>(listing: {
+  masterProduct: { category?: (A & { parent?: A | null }) | null } | null;
+  category?: (A & { parent?: A | null }) | null;
+}): A | null {
+  const category = listing.masterProduct ? listing.masterProduct.category ?? null : listing.category ?? null;
+  return category?.parent ?? category;
 }
 
 /** Cheapest pack first, then id. The projection sorts the same way with UTF-8 bytes. */
@@ -51,8 +60,8 @@ async function readGetFlowCatalog(
   const listings = await storeScoped(storeId).listing.findMany({
     where: { active: true, ...notE2eListing },
     include: {
-      masterProduct: { include: { category: true } },
-      category: true,
+      masterProduct: { include: { category: withAisle } },
+      category: withAisle,
       variants: variantsCheapestFirst,
     },
     orderBy: { createdAt: "desc" },
@@ -105,7 +114,7 @@ export async function readCartAlternatives(
       id: { notIn: excludeListingIds },
       ...inAisle({ in: [...new Set(wanted.map((entry) => entry.categoryId))] }),
     },
-    include: { masterProduct: { include: { category: true } }, category: true, variants: variantsCheapestFirst },
+    include: { masterProduct: { include: { category: withAisle } }, category: withAisle, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
     take: 60,
   });
@@ -133,7 +142,7 @@ export async function readCartAlternatives(
   return result;
 }
 
-/** The aisles this store has an active listing in (#782), in platform order. */
+/** The aisles this store has an active listing in (#782), in platform order; a subcategory counts for its aisle (#861). */
 async function readListCategories(storeId: string) {
   const listings = await storeScoped(storeId).listing.findMany({
     where: { active: true, ...notE2eListing },
@@ -146,7 +155,7 @@ async function readListCategories(storeId: string) {
     }),
   );
   const categories = await platform.category.findMany({
-    where: { id: { in: [...stocked] } },
+    where: { parentId: null, OR: [{ id: { in: [...stocked] } }, { children: { some: { id: { in: [...stocked] } } } }] },
     orderBy: { sortOrder: "asc" },
     include: { masterProducts: { where: { imageUrl: { not: null }, status: "active" }, orderBy: { id: "asc" }, take: 1, select: { imageUrl: true } } },
   });
@@ -208,8 +217,8 @@ export function projectStorefrontListing(listing: {
   maxPerOrder?: number | null;
   cateringMinQty?: number | null;
   imageUrl?: string | null;
-  masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
-  category?: { slug: string } | null;
+  masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string; parent?: { slug: string } | null } | null } | null;
+  category?: { slug: string; parent?: { slug: string } | null } | null;
   variants: { id?: string; label?: string; price: number; weightG?: number; weightPlaceholder?: boolean }[];
 }): StorefrontListing {
   const names = deriveNames(
@@ -267,28 +276,39 @@ async function readListingsByCategory(
   storeId: string,
   categorySlug: string,
 ): Promise<{
-  category: { name: string; slug: string } | null;
+  category: { name: string; slug: string; aisle: { name: string; slug: string } | null } | null;
+  /** The aisle's subcategories this store stocks, in platform order (#861). */
+  subcategories: { name: string; slug: string }[];
   listings: StorefrontListing[];
 }> {
   const category = await platform.category.findUnique({
     where: { slug: categorySlug },
+    include: { parent: true },
   });
-  if (!category) return { category: null, listings: [] };
+  if (!category) return { category: null, subcategories: [], listings: [] };
+  const aisle = category.parent ?? category;
 
   const scoped = storeScoped(storeId);
   const listings = await scoped.listing.findMany({
     where: {
       active: true,
       ...notE2eListing,
-      ...inAisle(category.id),
+      ...inAisle(aisle.id),
     },
-    include: { masterProduct: { include: { category: true } }, category: true, variants: variantsCheapestFirst },
+    include: { masterProduct: { include: { category: withAisle } }, category: withAisle, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
   });
+  const leafOf = (listing: (typeof listings)[number]) => (listing.masterProduct ? listing.masterProduct.category : listing.category);
+  const stocked = new Map<string, { name: string; slug: string; sortOrder: number }>();
+  for (const listing of listings) {
+    const leaf = leafOf(listing);
+    if (leaf?.parentId === aisle.id) stocked.set(leaf.id, { name: leaf.name, slug: leaf.slug, sortOrder: leaf.sortOrder });
+  }
 
   return {
-    category: { name: category.name, slug: category.slug },
-    listings: listings.map(projectStorefrontListing),
+    category: { name: category.name, slug: category.slug, aisle: category.parent ? { name: aisle.name, slug: aisle.slug } : null },
+    subcategories: [...stocked.values()].sort((x, y) => x.sortOrder - y.sortOrder).map(({ name, slug }) => ({ name, slug })),
+    listings: listings.filter((listing) => !category.parent || leafOf(listing)?.id === category.id).map(projectStorefrontListing),
   };
 }
 
@@ -323,8 +343,8 @@ async function readGetListingDetail(
   const listing = await scoped.listing.findUnique({
     where: { id: listingId },
     include: {
-      masterProduct: { include: { category: true } },
-      category: true,
+      masterProduct: { include: { category: withAisle } },
+      category: withAisle,
       variants: variantsCheapestFirst,
     },
   });
@@ -466,7 +486,8 @@ async function readSearchListings(
       END AS matched_term
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
-    LEFT JOIN categories c ON mp.category_id = c.id
+    LEFT JOIN categories leaf ON mp.category_id = leaf.id
+    LEFT JOIN categories c ON c.id = COALESCE(leaf.parent_id, leaf.id)
     ${need ? effectiveAttributesSql : Prisma.empty}
     LEFT JOIN LATERAL (
       SELECT lv.id, lv.label, lv.price, lv.weight_g, lv.weight_placeholder FROM listing_variants lv
@@ -555,7 +576,7 @@ async function readGetActiveListings(
   const scoped = storeScoped(storeId);
   const listings = await scoped.listing.findMany({
     where: { active: true, ...notE2eListing },
-    include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
+    include: { masterProduct: { include: { category: withAisle } }, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
   });
 
@@ -631,7 +652,7 @@ async function readGetCollectionListings(
         orderBy: { sortOrder: "asc" },
         include: {
           listing: {
-            include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
+            include: { masterProduct: { include: { category: withAisle } }, variants: variantsCheapestFirst },
           },
         },
       },
@@ -715,8 +736,8 @@ async function readGetListingsByCategory(
   const listings = await scoped.listing.findMany({
     where: { active: true, ...notE2eListing },
     include: {
-      masterProduct: { include: { category: true } },
-      category: true,
+      masterProduct: { include: { category: withAisle } },
+      category: withAisle,
       variants: variantsCheapestFirst,
     },
     orderBy: { createdAt: "desc" },
@@ -825,7 +846,8 @@ async function readSuggestRows(storeId: string, prefix: string) {
           JOIN listing_variants lv ON lv.id = ol.listing_variant_id WHERE lv.listing_id = l.id) AS ordered
       FROM listings l
       LEFT JOIN master_products mp ON l.master_product_id = mp.id
-      LEFT JOIN categories c ON c.id = CASE WHEN l.master_product_id IS NULL THEN l.category_id ELSE mp.category_id END
+      LEFT JOIN categories leaf ON leaf.id = CASE WHEN l.master_product_id IS NULL THEN l.category_id ELSE mp.category_id END
+      LEFT JOIN categories c ON c.id = COALESCE(leaf.parent_id, leaf.id)
       WHERE l.active = true AND ${notE2eListingSql}
     ) rows
     WHERE display_name IS NOT NULL AND (name_hit OR via IS NOT NULL OR aisle_hit)

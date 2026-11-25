@@ -1,3 +1,4 @@
+import { AISLES } from "../catalog/category-tree";
 import catalog from "./catalog-media.json";
 
 type CatalogEntry = (typeof catalog)[keyof typeof catalog];
@@ -40,19 +41,10 @@ export function localNameFor(name: string) {
   return localNames[name];
 }
 
-export const categoryPhotos: Record<string, string> = {
-  "tubers-and-roots": entries.yam.imageUrl,
-  "grains-and-flours": entries["ofada rice"].imageUrl,
-  "spices-and-seasonings": entries["cameroon pepper"].imageUrl,
-  "oils-and-butters": entries["shea butter"].imageUrl,
-  vegetables: entries["scotch bonnet pepper"].imageUrl,
-  "fish-and-meat": entries.stockfish.imageUrl,
-  frozen: entries["goat meat"].imageUrl,
-  snacks: entries["chin chin"].imageUrl,
-  drinks: entries["dried hibiscus flowers"].imageUrl,
-  beauty: entries["shea butter"].imageUrl,
-  "pantry-staples": entries["white garri"].imageUrl,
-};
+/** Each aisle's photo, by slug (#861). */
+export const categoryPhotos: Record<string, string> = Object.fromEntries(
+  AISLES.map((aisle) => [aisle.slug, entries[aisle.photo]?.imageUrl ?? ""]),
+);
 
 export function isServingSuggestion(url: string | undefined) {
   return !!url && /soup|Swallow|puff-puff|Suya_with/i.test(url);

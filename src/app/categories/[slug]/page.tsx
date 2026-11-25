@@ -19,7 +19,7 @@ export default async function CategoryPage({
     searchParams,
     getStore(),
   ]);
-  const [{ category, listings }, categories] = await Promise.all([
+  const [{ category, subcategories, listings }, categories] = await Promise.all([
     listingsByCategory(store.id, slug),
     listCategories(store.id),
   ]);
@@ -78,7 +78,7 @@ export default async function CategoryPage({
       key={c.id}
       className="sf-chip"
       href={`/categories/${c.slug}`}
-      aria-current={c.slug === slug ? "page" : undefined}
+      aria-current={c.slug === (category.aisle?.slug ?? slug) ? "page" : undefined}
     >
       {c.name}
     </Link>
@@ -91,6 +91,12 @@ export default async function CategoryPage({
           <span aria-hidden>/</span>
           <Link href="/categories">Aisles</Link>
           <span aria-hidden>/</span>
+          {category.aisle && (
+            <>
+              <Link href={`/categories/${category.aisle.slug}`}>{category.aisle.name}</Link>
+              <span aria-hidden>/</span>
+            </>
+          )}
           <span>{category.name}</span>
         </nav>
         <div className="sf-mobile-chips" aria-label="Aisles">
@@ -106,6 +112,28 @@ export default async function CategoryPage({
             <p className="sf-page-intro">
               Good ingredients for the meals you love.
             </p>
+            {subcategories.length > 1 && (
+              <nav className="sf-filter-subrow" aria-label={`${category.aisle?.name ?? category.name} subcategories`}>
+                <Link
+                  className="sf-chip"
+                  aria-current={category.aisle ? undefined : "page"}
+                  href={`/categories/${category.aisle?.slug ?? slug}`}
+                >
+                  All
+                </Link>
+                {subcategories.map((sub) => (
+                  <Link
+                    key={sub.slug}
+                    className="sf-chip"
+                    data-testid="subcategory-chip"
+                    aria-current={sub.slug === slug ? "page" : undefined}
+                    href={`/categories/${sub.slug}`}
+                  >
+                    {sub.name}
+                  </Link>
+                ))}
+              </nav>
+            )}
             <div className="sf-filters">
               <Link
                 className="sf-chip"
