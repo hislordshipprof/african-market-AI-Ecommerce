@@ -51,14 +51,8 @@
   }
 }
 
-/* Native scrollbars follow the theme; tabbing never hides a control under the phone header. */
+/* Native scrollbars follow the theme; tabbing never hides a control under the sticky top bar. */
 :global(html):has(.shell) {
   color-scheme: light dark;
   scroll-padding-top: 4.5rem;
-}
-
-@media (min-width: 64rem) {
-  :global(html):has(.shell) {
-    scroll-padding-top: 0;
-  }
 }
