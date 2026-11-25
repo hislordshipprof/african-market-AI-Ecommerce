@@ -28,10 +28,10 @@ vi.mock("next/navigation", () => ({
 import { createListingAction, deactivateListingAction, updateListingAction } from "../listing/actions";
 import { acceptOrderAction, markLinePickedAction, markLineShortAction } from "../order/actions";
 import { csvCommitAction } from "../listing/csv-import-actions";
-import { inviteMemberAction, removeMemberAction, resendInviteAction, revokeInviteAction } from "../store-admin/actions";
+import { copyInviteLinkAction, inviteMemberAction, removeMemberAction, resendInviteAction, revokeInviteAction } from "../store-admin/actions";
 import { setEmailSenderForTests } from "../email/send";
 import { ProviderSendError } from "../notifications/provider-error";
-import { setStoreStatus } from "../admin/actions";
+import { copyOwnerInviteLinkAction, setStoreStatus } from "../admin/actions";
 import { approveProduct } from "../admin/catalog-actions";
 import { resolveRefundFailedAction } from "../admin/refund-resolution";
 import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction } from "../db";
@@ -350,6 +350,7 @@ describe("action authorization", () => {
       await expect(inviteMemberAction(form)).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
       await expect(resendInviteAction(inviteId)).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
       await expect(revokeInviteAction(inviteId)).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
+      await expect(copyInviteLinkAction(inviteId)).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
       const invite = await storeScoped(storeB).storeInvite.findUnique({ where: { id: inviteId } });
       const membership = await storeScoped(storeB).storeMembership.findFirst({ where: { userId: ownerB } });
       expect(invite?.email).toBe(`kept-${suffix}@test.example`);
@@ -366,6 +367,7 @@ describe("action authorization", () => {
       expect(removed).toMatchObject({ error: expect.any(String) });
       expect(await resendInviteAction(inviteId)).toEqual({ error: "Invitation not found" });
       expect(await revokeInviteAction(inviteId)).toEqual({ error: "Invitation not found" });
+      expect(await copyInviteLinkAction(inviteId)).toEqual({ error: "Invitation not found" });
       const invite = await storeScoped(storeB).storeInvite.findUnique({ where: { id: inviteId } });
       const membership = await storeScoped(storeB).storeMembership.findFirst({ where: { userId: ownerB } });
       expect(invite?.usedAt).toBeNull();
@@ -383,7 +385,7 @@ describe("action authorization", () => {
         const result = await inviteMemberAction(form);
         expect(result).toMatchObject({
           success: true,
-          warning: "Invite saved, but the email could not be sent. Resend it or share the link.",
+          warning: expect.stringMatching(/copy the link/),
           inviteUrl: expect.stringContaining("/invite/"),
         });
         expect(JSON.stringify(result)).not.toContain("validation_error");
@@ -399,6 +401,16 @@ describe("action authorization", () => {
       headerState.delete("x-store-slug");
       await expect(setStoreStatus(storeB, "suspended")).rejects.toThrow("REDIRECT:/admin/sign-in");
       expect(await storeStatus(storeB)).toBe("active");
+    });
+
+    it("only a platform admin can copy an owner invite link (#839)", async () => {
+      headerState.delete("cookie");
+      headerState.delete("x-store-slug");
+      await expect(copyOwnerInviteLinkAction(storeB)).rejects.toThrow("REDIRECT:/admin/sign-in");
+      asA(slugA, cookiesA);
+      await expect(copyOwnerInviteLinkAction(storeB)).rejects.toThrow("REDIRECT:/admin/sign-in");
+      expect(await storeScoped(storeB).storeInvite.findUnique({ where: { id: inviteId } })).toMatchObject({ tokenHash: `hash-${suffix}` });
+      expect(await storeScoped(storeB).auditLog.count({ where: { action: "invite.link_copied" } })).toBe(0);
     });
 
     it("store A cannot touch store B stores", async () => {
