@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import directory from "@/components/directory/directory.module.css";
 import { PlanComparison } from "@/components/billing/plan-comparison";
-import { PILOT_FREE_MONTHS, PILOT_STORE_CAP, pilotPlacesLeft } from "@/lib/billing/service";
+import { pilotOffer } from "@/lib/billing/service";
 import { SellForm } from "./sell-form";
 import styles from "./sell.module.css";
 
@@ -18,9 +18,7 @@ const STEPS = [
 export default async function SellPage() {
   // The application form lives on the root domain only; a store's own site has no /sell (#554).
   if ((await headers()).get("x-platform-root") !== "1") notFound();
-  const offer = (await pilotPlacesLeft()) > 0
-    ? `Pilot offer: your first ${PILOT_FREE_MONTHS} months free, for the first ${PILOT_STORE_CAP} stores.`
-    : undefined;
+  const offer = await pilotOffer();
 
   return (
     <div className={directory.page}>

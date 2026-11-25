@@ -12,7 +12,7 @@ import { setEmailSenderForTests, type EmailMessage } from "../email/send";
 import { storePlan } from "./plan";
 import { COURIER_NOT_OFFERED, quoteCheckout } from "../checkout/service";
 import { createFakeBillingProvider, PLAN_LOOKUP_KEYS, setBillingProvider } from "./provider";
-import { getStoreBilling, PILOT_STORE_CAP, pilotPlacesLeft, setPilot, startSubscription, syncCheckoutReturn } from "./service";
+import { getStoreBilling, PILOT_STORE_CAP, pilotOffer, pilotPlacesLeft, setPilot, startSubscription, syncCheckoutReturn } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -218,6 +218,7 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     await platformAdmin.storeSubscription.updateMany({ where: { pilot: true }, data: { pilot: false } });
     const room = PILOT_STORE_CAP;
     expect(await pilotPlacesLeft()).toBe(5);
+    expect(await pilotOffer()).toBe("Pilot offer: your first 3 months free, for the first 5 stores.");
     expect(await setPilot(storeB, true, admin)).toEqual({ ok: true });
     expect(await pilotPlacesLeft()).toBe(4);
     const now = new Date();
@@ -235,8 +236,9 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     const sixth = (await raw.store.create({ data: { slug: `sub-p6-${run}`, name: "Pilot 6" } })).id;
     extraStores.push(sixth);
     expect(await setPilot(sixth, true, admin)).toEqual({ ok: false, error: "The pilot offer is limited to 5 stores." });
-    // /sell stops showing the pilot offer here (#838).
+    // /sell and the directory home stop showing the pilot offer here (#838, #863).
     expect(await pilotPlacesLeft()).toBe(0);
+    expect(await pilotOffer()).toBeUndefined();
     for (const id of [storeB, ...extraStores]) await setPilot(id, false, admin);
   });
 
