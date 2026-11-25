@@ -6,7 +6,7 @@ import { CartTrigger } from "./cart-provider";
 import styles from "./cart.module.css";
 const links = [
   { href: "/", label: "Home", icon: Home },
-  { href: "/categories", label: "Categories", icon: LayoutGrid },
+  { href: "/categories", label: "Aisles", icon: LayoutGrid },
   { href: "/search", label: "Search", icon: Search },
   { href: "/account", label: "Account", icon: UserRound },
 ];

@@ -9,12 +9,12 @@ export default async function CategoriesPage() {
   const store = await getStore();
   const categories = await listCategories(store.id);
   return (
-    <StorefrontShell store={store}>
+    <StorefrontShell store={store} pageTitled>
       <div className="sf-container sf-stack">
         <div>
-          <h2 className="sf-page-title">Shop by category</h2>
+          <h1 className="sf-page-title">All aisles</h1>
           <p className="sf-page-intro">
-            Find your everyday staples and the flavors of home.
+            Your everyday staples and the flavors of home.
           </p>
         </div>
         {categories.length ? (

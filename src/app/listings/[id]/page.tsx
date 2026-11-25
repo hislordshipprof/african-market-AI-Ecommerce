@@ -18,12 +18,12 @@ export default async function ListingDetailPage({
     getListingFacts(store.id, id),
   ]);
   return (
-    <StorefrontShell store={store}>
+    <StorefrontShell store={store} pageTitled>
       <div className="sf-container sf-detail-page">
         <nav className="sf-breadcrumb" aria-label="Breadcrumb">
           <Link href="/">Home</Link>
           <span aria-hidden>/</span>
-          <Link href="/categories">Categories</Link>
+          <Link href="/categories">Aisles</Link>
           {related?.category && (
             <>
               <span aria-hidden>/</span>

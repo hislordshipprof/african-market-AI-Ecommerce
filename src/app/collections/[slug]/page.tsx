@@ -17,7 +17,7 @@ export default async function CollectionPage({
   const { collection, listings } = await getCollectionListings(store.id, slug);
   if (!collection) notFound();
   return (
-    <StorefrontShell store={store}>
+    <StorefrontShell store={store} pageTitled>
       <div className="sf-container">
         <nav className="sf-breadcrumb" aria-label="Breadcrumb">
           <Link href="/">Home</Link>
@@ -34,7 +34,7 @@ export default async function CollectionPage({
           />
           <div className="sf-photo-scrim" />
           <div>
-            <h2 className="sf-page-title">{collection.title}</h2>
+            <h1 className="sf-page-title">{collection.title}</h1>
             {collection.subtitle && <p>{collection.subtitle}</p>}
           </div>
         </section>

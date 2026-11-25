@@ -12,9 +12,12 @@ import { AssistantSlot } from "./assistant/assistant-slot";
 
 export function StorefrontShell({
   store,
+  pageTitled,
   children,
 }: {
   store: ValidatedStore;
+  /** The page has its own h1, so the store name in the header is not one. */
+  pageTitled?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -28,7 +31,7 @@ export function StorefrontShell({
         <QuickViewProvider><a href="#main-content" className="sf-skip-link">
           Skip to content
         </a>
-        <StorefrontHeader store={store} />
+        <StorefrontHeader store={store} pageTitled={pageTitled} />
         {/* On phones the AI entry sits here in the flow; pages with their own slot win. */}
         <AssistantSlot label="Shop with AI" phoneOnly />
         <main id="main-content">{children}</main>

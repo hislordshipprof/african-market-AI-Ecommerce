@@ -142,7 +142,7 @@ test("the owner opts in, and each store host's MCP endpoint answers with its own
 
     // A product url an agent hands the shopper opens that product on the storefront.
     await page.goto(atMamaNgozi[0].url);
-    await expect(page.getByRole("heading", { level: 2, name: atMamaNgozi[0].title })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: atMamaNgozi[0].title })).toBeVisible();
 
     // Turning it off takes the endpoint away at once.
     await page.goto(`${mamaNgozi}/store-admin/directory?store=mama-ngozi`);

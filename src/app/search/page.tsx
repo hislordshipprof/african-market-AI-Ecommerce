@@ -33,16 +33,16 @@ export default async function SearchPage({
   if (sort === "price-high") visible.sort((a, b) => b.price - a.price);
   const clearHref = href({ frozen: "", sort: "" });
   return (
-    <StorefrontShell store={store}>
+    <StorefrontShell store={store} pageTitled>
       <div className="sf-container sf-search-page">
         <nav className="sf-breadcrumb" aria-label="Breadcrumb">
           <Link href="/">Home</Link>
           <span>/</span>
           <span>Search</span>
         </nav>
-        <h2 className="sf-page-title">
-          {tooLong ? SEARCH_QUERY_TOO_LONG : q ? `Results for “${q}”` : "What's cooking?"}
-        </h2>
+        <h1 className="sf-page-title">
+          {tooLong ? SEARCH_QUERY_TOO_LONG : q ? `${results.length ? "Results" : "No results"} for “${q}”` : "What's cooking?"}
+        </h1>
         {!q && (
           <p className="sf-page-intro">
             Search the names you know. Ugu, egusi, garri — you’re in the right
@@ -132,7 +132,7 @@ export default async function SearchPage({
               </EmptyState>
             ) : (
               <EmptyState
-                title={`No results for "${q}"`}
+                title="Try another name"
                 description="Try a local or English name, check the spelling, or explore a whole aisle."
               >
                 <div className="sf-search-suggestions">

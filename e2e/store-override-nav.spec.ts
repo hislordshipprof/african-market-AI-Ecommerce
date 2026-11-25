@@ -40,12 +40,12 @@ test.describe("Store override navigation (#56)", () => {
     await searchInput.fill("ugu");
     await searchInput.press("Enter");
     await page.waitForURL(/\/search\?q=/);
-    await expect(page.locator("h2").first()).toContainText("Results for", {
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Results for", {
       timeout: 10000,
     });
     await expect(storeHeader(page)).toHaveText("Mama Ngozi African Market");
 
-    await page.locator("h1 a, a:has(h1)").first().click();
+    await page.locator("a.sf-brand").click();
     await page.waitForURL((url) => url.pathname === "/");
     await expect(storeHeader(page)).toHaveText("Mama Ngozi African Market", {
       timeout: 10000,
