@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { toastActionError } from "../two-factor-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -90,7 +91,7 @@ export function TeamManagement({
     startTransition(async () => {
       const result = await resendInviteAction(invite.id);
       if ("error" in result) {
-        toast.error(result.error);
+        toastActionError(result);
       } else {
         afterSave(invite.email, result, `Invitation sent again to ${invite.email}`);
       }
@@ -101,7 +102,7 @@ export function TeamManagement({
     startTransition(async () => {
       const result = await copyInviteLinkAction(invite.id);
       if ("error" in result) {
-        toast.error(result.error);
+        toastActionError(result);
         return;
       }
       setUnsent({ email: invite.email, warning: "New invite link made. The earlier link no longer works.", inviteUrl: result.inviteUrl });
@@ -114,7 +115,7 @@ export function TeamManagement({
     startTransition(async () => {
       const result = await revokeInviteAction(invite.id);
       if ("error" in result && result.error) {
-        toast.error(result.error);
+        toastActionError(result);
       } else {
         if (unsent?.email === invite.email) setUnsent(null);
         toast.success(`Invitation to ${invite.email} revoked`);
@@ -141,7 +142,7 @@ export function TeamManagement({
     startTransition(async () => {
       const result = await inviteMemberAction(formData);
       if ("error" in result) {
-        toast.error(result.error);
+        toastActionError(result);
       } else {
         afterSave(inviteEmail, result, `Invitation sent to ${inviteEmail}`);
         setInviteEmail("");
@@ -153,7 +154,7 @@ export function TeamManagement({
     startTransition(async () => {
       const result = await removeMemberAction(userId);
       if ("error" in result && result.error) {
-        toast.error(result.error);
+        toastActionError(result);
       } else {
         toast.success(`${name} has been removed`);
         router.refresh();

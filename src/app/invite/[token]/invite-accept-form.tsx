@@ -15,15 +15,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { UserPlus, ShieldCheck } from "lucide-react";
 import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
-import {
-  BackupCodesNotice,
-  CopyRow,
-  QrCode,
-  setupKeyFrom,
-  spacedSetupKey,
-} from "@/app/admin/auth-form-parts";
+import { storeTwoFactorPath } from "@/lib/store-admin/sign-in-path";
 
-type Step = "signup" | "totp-enroll" | "totp-verify" | "accepting" | "backup-codes";
+type Step = "signup" | "totp-verify" | "accepting";
 
 interface Props {
   token: string;
@@ -41,12 +35,11 @@ export function InviteAcceptForm({
   email,
 }: Props) {
   const router = useRouter();
+  const storeAdminHome = `/store-admin?store=${encodeURIComponent(storeSlug)}`;
   const [step, setStep] = useState<Step>("signup");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
-  const [totpUri, setTotpUri] = useState("");
-  const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -83,18 +76,9 @@ export function InviteAcceptForm({
         return;
       }
 
-      const enrollResult = await authClient.twoFactor.enable({ password });
-      if (enrollResult.error) {
-        setError("Failed to set up two-factor authentication");
-        return;
-      }
-
-      const enrolled = enrollResult.data;
-      if (enrolled && "totpURI" in enrolled) {
-        setTotpUri(enrolled.totpURI ?? "");
-        setBackupCodes(enrolled.backupCodes ?? []);
-      }
-      setStep("totp-enroll");
+      // 2FA is optional (#840): join first, then the setup page offers Set up now or Remind me later.
+      if (!(await accept())) return;
+      window.location.assign(storeTwoFactorPath(storeSlug, storeAdminHome));
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -114,18 +98,12 @@ export function InviteAcceptForm({
         return;
       }
       if (!(await accept())) return;
-      // Joined before the codes show, so closing the tab here can't leave 2FA on without the store.
-      if (backupCodes.length > 0) setStep("backup-codes");
-      else goToStoreAdmin();
+      router.push(storeAdminHome);
     } catch {
       setError("Verification failed. Try again.");
     } finally {
       setLoading(false);
     }
-  }
-
-  function goToStoreAdmin() {
-    router.push(`/store-admin?store=${storeSlug}`);
   }
 
   async function accept(): Promise<boolean> {
@@ -149,8 +127,6 @@ export function InviteAcceptForm({
       return false;
     }
   }
-
-  const setupKey = totpUri ? setupKeyFrom(totpUri) : null;
 
   return (
     <StorySurface>
@@ -226,60 +202,6 @@ export function InviteAcceptForm({
             </form>
           )}
 
-          {step === "totp-enroll" && (
-            <form onSubmit={handleTotpSubmit} className="flex flex-col gap-4">
-              <div className="flex items-center gap-2 rounded-md bg-muted p-3">
-                <ShieldCheck className="size-5 shrink-0 text-primary" />
-                <p className="text-sm text-muted-foreground">
-                  Two-factor authentication is required. Scan this QR code with
-                  your authenticator app, or enter the setup key in it, then
-                  enter the 6-digit code below.
-                </p>
-              </div>
-
-              {totpUri && (
-                <div className="flex flex-col gap-3">
-                  <QrCode value={totpUri} />
-                  {/* A phone can't scan its own screen: it opens the app or types the key. */}
-                  <a
-                    href={totpUri}
-                    className="flex h-11 items-center justify-center rounded-full border border-input text-sm font-medium md:hidden"
-                  >
-                    Open in authenticator app
-                  </a>
-                  {setupKey && (
-                    <CopyRow
-                      wrap
-                      label="Setup key"
-                      display={spacedSetupKey(setupKey)}
-                      value={setupKey}
-                    />
-                  )}
-                </div>
-              )}
-
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="totp">Verification code</Label>
-                <Input
-                  id="totp"
-                  type="text"
-                  required
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value)}
-                  className="text-center text-lg tracking-[0.3em]"
-                  autoComplete="one-time-code"
-                />
-              </div>
-
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? "Verifying..." : "Verify & join store"}
-              </Button>
-            </form>
-          )}
-
           {step === "totp-verify" && (
             <form onSubmit={handleTotpSubmit} className="flex flex-col gap-4">
               <div className="flex items-center gap-2 rounded-md bg-muted p-3">
@@ -309,15 +231,6 @@ export function InviteAcceptForm({
                 {loading ? "Verifying..." : "Verify & join store"}
               </Button>
             </form>
-          )}
-
-          {step === "backup-codes" && (
-            <div className="flex flex-col gap-4">
-              <BackupCodesNotice codes={backupCodes} />
-              <Button type="button" onClick={goToStoreAdmin} className="w-full">
-                I&apos;ve saved them. Continue
-              </Button>
-            </div>
           )}
 
           {step === "accepting" && (

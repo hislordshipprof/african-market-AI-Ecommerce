@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatListTime, money } from "@/lib/format";
 import { approveIssueAction, declineIssueAction } from "@/lib/order/actions";
+import { toastActionError } from "../two-factor-error";
 import type { IssueToReview } from "@/lib/order/issue-review";
 import type { IssueType } from "@/lib/order/issue-report";
 
@@ -31,11 +32,11 @@ function ProblemCard({ issue, timeZone }: { issue: IssueToReview; timeZone: stri
   const [reason, setReason] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  function run<T extends { ok: boolean; error?: string }>(action: () => Promise<T>, done: (result: T) => string) {
+  function run<T extends { ok: boolean; error?: string; setupHref?: string }>(action: () => Promise<T>, done: (result: T) => string) {
     startTransition(async () => {
       const result = await action();
       if (!result.ok) {
-        toast.error(result.error ?? "Something went wrong. Try again.");
+        toastActionError(result);
         return;
       }
       toast.success(done(result));

@@ -1,5 +1,6 @@
 "use client";
 
+import { setupHrefOf, TwoFactorSetupLink } from "../two-factor-error";
 import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -84,7 +85,7 @@ export function PayoutsSettings({
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; setupHref?: string } | null>(null);
 
   const config = STATUS_CONFIG[stripeOnboardingStatus] ?? STATUS_CONFIG.not_started;
   const StatusIcon = config.icon;
@@ -103,7 +104,7 @@ export function PayoutsSettings({
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error ?? "Something went wrong");
+        setError({ message: data.error ?? "Something went wrong", setupHref: setupHrefOf(data) });
         return;
       }
 
@@ -112,7 +113,7 @@ export function PayoutsSettings({
         window.location.href = data.url;
       }
     } catch {
-      setError("Could not connect to Stripe. Please try again.");
+      setError({ message: "Could not connect to Stripe. Please try again." });
     } finally {
       setLoading(false);
     }
@@ -177,7 +178,8 @@ export function PayoutsSettings({
 
             {error && (
               <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
+                {error.message}
+                {error.setupHref && <> <TwoFactorSetupLink href={error.setupHref} /></>}
               </div>
             )}
 

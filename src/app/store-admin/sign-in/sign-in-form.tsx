@@ -37,8 +37,11 @@ const ERROR_ID = "store-admin-sign-in-error";
 const DESCRIPTION_ID = "store-admin-sign-in-description";
 const EMAIL_ID = "email";
 const PASSWORD_ID = "password";
-/** `returnTo`: where a finished sign-in leads, worked out on the server (#797). */
-export function StoreAdminSignInForm({ returnTo }: { returnTo: string }) {
+/**
+ * `returnTo`: where a finished sign-in leads, worked out on the server (#797).
+ * `offerTwoFactor`: where a password-only sign-in leads, the 2FA offer (#840).
+ */
+export function StoreAdminSignInForm({ returnTo, offerTwoFactor }: { returnTo: string; offerTwoFactor: string }) {
   const router = useRouter();
   const hydrated = useHydrated();
 
@@ -73,7 +76,7 @@ export function StoreAdminSignInForm({ returnTo }: { returnTo: string }) {
         setStep("totp");
         setLoading(false);
       } else {
-        home();
+        router.push(offerTwoFactor);
       }
     } catch {
       setError(NETWORK_ERROR);
