@@ -20,6 +20,7 @@ vi.mock("next/navigation", () => ({
 import { auth } from "../../auth";
 import { fakeAddressBackend, setAddressProvider } from "../../address/provider";
 import { authPrisma, platformAdmin, platformAdminTransaction } from "../../db";
+import { PILOT_STORE_CAP } from "../../billing/service";
 import { readCourierSettings, type CourierSettings } from "../../delivery/courier-settings";
 import { testSignUp } from "../../test-auth";
 import { testPrismaClient } from "../../test-prisma";
@@ -241,11 +242,18 @@ describe.skipIf(!hasDb)("platform admin assistant drafts at the confirm seam (#8
     signInAs(admin);
     const { cards } = await draft("draft_pilot", { slug, pilot: true });
     expect(cards[0]!.changes).toEqual([{ field: "Pilot offer", from: "Off", to: "On" }]);
+    // The pilot offer has a store cap shared with other test files; at the cap the admin's own function refuses.
+    const full = (await platformAdmin.storeSubscription.count({ where: { pilot: true } })) >= PILOT_STORE_CAP;
     const result = await confirmAdminAssistantDraft({ draftId: cards[0]!.id });
     const pilot = (await platformAdmin.storeSubscription.findUniqueOrThrow({ where: { storeId } })).pilot;
-    // The pilot offer has a store cap; when other stores fill it, the admin's own function refuses and the draft stays pending.
-    if (result.ok) expect(pilot).toBe(true);
-    else expect(result).toMatchObject({ code: "invalid", message: expect.stringContaining("limited") });
+    if (full) {
+      expect(result).toMatchObject({ ok: false, code: "invalid", message: expect.stringContaining("limited") });
+      expect(pilot).toBe(false);
+      expect((await draftRow(cards[0]!.id)).state).toBe("pending");
+    } else {
+      expect(result).toMatchObject({ ok: true });
+      expect(pilot).toBe(true);
+    }
   });
 
   it("puts the store in a metro", async () => {
