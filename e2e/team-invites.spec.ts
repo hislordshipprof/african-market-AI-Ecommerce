@@ -109,9 +109,9 @@ test.describe("team invites (#809)", () => {
       await page.getByLabel("Email address").fill(UNSENT);
       await page.getByRole("button", { name: "Send invite" }).click();
       const notice = page.getByRole("status").filter({ hasText: "Invite saved" });
-      await expect(notice).toContainText("Invite saved, but the email could not be sent. Resend it or share the link.");
+      await expect(notice).toContainText(/Invite saved, but .*copy the link and send it yourself/i);
       await expect(page.getByText("validation_error")).toHaveCount(0);
-      const link = await page.getByLabel(`Invite link for ${UNSENT}`).inputValue();
+      const link = await page.getByLabel(`Invite link for ${UNSENT}`, { exact: true }).inputValue();
       expect(link).toContain("/invite/");
       await shoot(page, "809-team-email-failed");
 
@@ -119,9 +119,21 @@ test.describe("team invites (#809)", () => {
       await invitee.goto(link);
       await expect(invitee.getByLabel("Email")).toHaveValue(UNSENT);
 
+      // #839: the pending row says the email failed and copies a fresh link; the earlier one stops working.
+      await expect(page.getByText("Email not sent")).toBeVisible();
+      await page.getByRole("button", { name: `Copy invite link for ${UNSENT}` }).click();
+      await expect(page.getByRole("status").filter({ hasText: "New invite link made" })).toBeVisible();
+      const fresh = await page.getByLabel(`Invite link for ${UNSENT}`, { exact: true }).inputValue();
+      expect(fresh).not.toBe(link);
+      await shoot(page, "839-team-link-copied");
+      await invitee.goto(link);
+      await expect(invitee.getByText("Invalid invitation link")).toBeVisible();
+      await invitee.goto(fresh);
+      await expect(invitee.getByLabel("Email")).toHaveValue(UNSENT);
+
       await page.getByRole("button", { name: `Revoke invite to ${UNSENT}` }).click();
       await expect(page.getByText(`Invitation to ${UNSENT} revoked`)).toBeVisible();
-      await invitee.goto(link);
+      await invitee.goto(fresh);
       await expect(invitee.getByText("Invalid invitation link")).toBeVisible();
       await shoot(invitee, "809-invite-revoked");
       await invitee.close();

@@ -7,7 +7,7 @@ import {
   lockStoreRow,
   readStorePlanRows,
 } from "../db";
-import { sendEmail } from "../email/send";
+import { emailFromSet, sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
 import { effectivePlan, staffLimit } from "../billing/plan";
 import { auth } from "../auth";
@@ -18,7 +18,12 @@ const TOKEN_BYTES = 32;
 
 export type StoreRole = "owner" | "staff";
 
-export const INVITE_NOT_EMAILED = "Invite saved, but the email could not be sent. Resend it or share the link.";
+/** Why an invite email did not go out (#839), in words the inviter can act on. */
+export function inviteNotEmailed(env: Record<string, string | undefined> = process.env): string {
+  return emailFromSet(env)
+    ? "Invite saved, but the email could not be sent. Copy the link and send it yourself, or resend it later."
+    : "Invite saved, but email isn't set up yet: copy the link and send it yourself.";
+}
 
 export const STAFF_LIMIT_MESSAGE = `The Starter plan includes the owner and ${staffLimit("starter")} staff. Upgrade to Pro for unlimited staff.`;
 
@@ -58,19 +63,26 @@ export async function createInvite(input: CreateInviteInput): Promise<SavedInvit
   return { id: recorded.id, tokenHash: recorded.tokenHash, emailed, inviteUrl: inviteUrl(input, recorded.rawToken) };
 }
 
-async function trySendInviteEmail(input: CreateInviteInput, invite: RecordedInvite): Promise<boolean> {
+/** Sends after the invite commits and records whether it went out, so the admin sees `sent` or `failed`. */
+export async function trySendInviteEmail(input: CreateInviteInput, invite: RecordedInvite): Promise<boolean> {
+  let emailed = true;
   try {
     await sendInviteEmail(input, invite);
-    return true;
   } catch (err) {
+    emailed = false;
     console.error(JSON.stringify({
       event: "invite_email_failed",
       storeId: input.storeId,
       inviteId: invite.id,
       message: err instanceof Error ? err.message : "send failed",
     }));
-    return false;
   }
+  // Only while the link is still this one: a copy or resend in between owns the status.
+  await platformAdmin.storeInvite.updateMany({
+    where: { id: invite.id, tokenHash: invite.tokenHash },
+    data: { emailStatus: emailed ? "sent" : "failed" },
+  });
+  return emailed;
 }
 
 export interface ResendInviteInput {
@@ -83,8 +95,10 @@ export interface ResendInviteInput {
   storeName: string;
 }
 
-/** A new link and a new 72 hours on the same invite; the old link stops working. */
-export async function resendInvite(input: ResendInviteInput): Promise<SavedInvite | { error: string }> {
+type RotateInput = { storeId: string; inviteId: string; actorId: string; actorEmail: string };
+
+/** A new token and a new 72 hours on the same pending invite, with its audit row; the old link stops working. */
+async function rotateInvite(input: RotateInput, action: "invite.resend" | "invite.link_copied") {
   const { raw, hash } = generateToken();
   const invite = await platformAdminTransaction(async (tx) => {
     const pending = await tx.storeInvite.findFirst({
@@ -93,14 +107,18 @@ export async function resendInvite(input: ResendInviteInput): Promise<SavedInvit
     if (!pending) return null;
     await tx.storeInvite.update({
       where: { id: pending.id },
-      data: { tokenHash: hash, expiresAt: new Date(Date.now() + INVITE_EXPIRY_HOURS * 60 * 60 * 1000) },
+      data: {
+        tokenHash: hash,
+        expiresAt: new Date(Date.now() + INVITE_EXPIRY_HOURS * 60 * 60 * 1000),
+        emailStatus: action === "invite.link_copied" ? "copied" : null,
+      },
     });
     await tx.auditLog.create({
       data: {
         storeId: input.storeId,
         actorId: input.actorId,
         actorEmail: input.actorEmail,
-        action: "invite.resend",
+        action,
         entityType: "store_invite",
         entityId: pending.id,
         after: { email: pending.email, role: pending.role },
@@ -108,7 +126,14 @@ export async function resendInvite(input: ResendInviteInput): Promise<SavedInvit
     });
     return pending;
   });
-  if (!invite) return { error: "Invitation not found" };
+  return invite && { invite, rawToken: raw, tokenHash: hash };
+}
+
+/** A new link and a new 72 hours on the same invite; the old link stops working. */
+export async function resendInvite(input: ResendInviteInput): Promise<SavedInvite | { error: string }> {
+  const rotated = await rotateInvite(input, "invite.resend");
+  if (!rotated) return { error: "Invitation not found" };
+  const { invite, rawToken, tokenHash } = rotated;
 
   const sendInput: CreateInviteInput = {
     storeId: input.storeId,
@@ -120,8 +145,40 @@ export async function resendInvite(input: ResendInviteInput): Promise<SavedInvit
     storeSlug: input.storeSlug,
     storeName: input.storeName,
   };
-  const emailed = await trySendInviteEmail(sendInput, { id: invite.id, tokenHash: hash, rawToken: raw });
-  return { id: invite.id, tokenHash: hash, emailed, inviteUrl: inviteUrl(sendInput, raw) };
+  const emailed = await trySendInviteEmail(sendInput, { id: invite.id, tokenHash, rawToken });
+  return { id: invite.id, tokenHash, emailed, inviteUrl: inviteUrl(sendInput, rawToken) };
+}
+
+export type CopyInviteLinkInput = RotateInput & { baseUrl: string; storeSlug: string };
+
+/**
+ * The inviter shares the link by hand when the email cannot reach anyone (#839). Each copy rotates the token, so only
+ * the newest link works; the raw link goes back to the caller once and is never stored or audited.
+ */
+export async function copyInviteLink(input: CopyInviteLinkInput): Promise<{ inviteUrl: string } | { error: string }> {
+  const rotated = await rotateInvite(input, "invite.link_copied");
+  if (!rotated) return { error: "Invitation not found" };
+  return { inviteUrl: `${input.baseUrl}/invite/${rotated.rawToken}?store=${input.storeSlug}` };
+}
+
+export type InviteStatus = "sent" | "failed" | "copied" | "not_sent" | "used" | "expired";
+
+export function inviteStatus(invite: { usedAt: Date | null; expiresAt: Date; emailStatus: string | null }, now = new Date()): InviteStatus {
+  if (invite.usedAt) return "used";
+  if (invite.expiresAt <= now) return "expired";
+  if (invite.emailStatus === "sent" || invite.emailStatus === "failed" || invite.emailStatus === "copied") return invite.emailStatus;
+  return "not_sent";
+}
+
+/** The store's newest owner invite and where it stands, for platform admin (#839). */
+export async function ownerInvite(storeId: string) {
+  const invite = await platformAdmin.storeInvite.findFirst({
+    where: { storeId, role: "owner" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true, email: true, usedAt: true, expiresAt: true, emailStatus: true },
+  });
+  if (!invite) return null;
+  return { id: invite.id, email: invite.email, expiresAt: invite.expiresAt, status: inviteStatus(invite) };
 }
 
 /** Deletes a pending invite so its link stops working; the audit row keeps who it was for. */

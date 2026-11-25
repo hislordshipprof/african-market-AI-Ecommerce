@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  copyInviteLinkAction,
   inviteMemberAction,
   removeMemberAction,
   resendInviteAction,
@@ -44,6 +45,7 @@ interface Invite {
   email: string;
   role: string;
   expiresAt: string;
+  emailFailed: boolean;
 }
 
 interface Props {
@@ -92,6 +94,19 @@ export function TeamManagement({
       } else {
         afterSave(invite.email, result, `Invitation sent again to ${invite.email}`);
       }
+    });
+  }
+
+  function handleCopy(invite: Invite) {
+    startTransition(async () => {
+      const result = await copyInviteLinkAction(invite.id);
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      setUnsent({ email: invite.email, warning: "New invite link made. The earlier link no longer works.", inviteUrl: result.inviteUrl });
+      await copyLink(result.inviteUrl);
+      router.refresh();
     });
   }
 
@@ -311,8 +326,11 @@ export function TeamManagement({
                           Expires{" "}
                           {new Date(invite.expiresAt).toLocaleDateString()}
                         </span>
+                        {invite.emailFailed && (
+                          <span className="text-xs text-destructive">Email not sent</span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">{invite.role}</Badge>
                         <Button
                           variant="outline"
@@ -322,6 +340,16 @@ export function TeamManagement({
                           disabled={isPending}
                         >
                           Resend
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Copy invite link for ${invite.email}`}
+                          onClick={() => handleCopy(invite)}
+                          disabled={isPending}
+                        >
+                          <Copy className="size-4" data-icon="inline-start" />
+                          Copy link
                         </Button>
                         <Button
                           variant="ghost"

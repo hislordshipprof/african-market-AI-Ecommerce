@@ -10,6 +10,8 @@ import { headers } from "next/headers";
 import { storeWebAddress } from "@/lib/directory/links";
 import { StoreForm } from "../store-form";
 import { InviteOwnerForm } from "./invite-owner-form";
+import { OwnerInviteStatus } from "./owner-invite-status";
+import { inviteNotEmailed, ownerInvite } from "@/lib/invite/service";
 import { WhatsAppNumberSection } from "./whatsapp-number-section";
 import { GoLiveSection } from "./go-live-section";
 
@@ -31,7 +33,12 @@ export default async function EditStorePage({
   const { pilotError, courierRetry, override, overrideError, goLive, goLiveError, metro } = await searchParams;
   const store = await getStoreById(id);
   if (!store) notFound();
-  const [subscription, storeNumber, metros] = await Promise.all([getStoreSubscription(store.id), getStoreNumber(store.id), listMetros()]);
+  const [subscription, storeNumber, metros, invite] = await Promise.all([
+    getStoreSubscription(store.id),
+    getStoreNumber(store.id),
+    listMetros(),
+    ownerInvite(store.id),
+  ]);
   const host = (await headers()).get("host");
   const plan = PLAN_NAMES[subscription?.plan ?? "starter"];
 
@@ -145,7 +152,15 @@ export default async function EditStorePage({
         }}
       />
       <StoreForm mode="edit" store={store} webAddress={host ? storeWebAddress(store.slug, host) : null} />
-      <div className="mt-8">
+      <div className="mt-8 flex flex-col gap-6">
+        {invite && (
+          <OwnerInviteStatus
+            storeId={store.id}
+            invite={{ email: invite.email, status: invite.status, expiresAt: invite.expiresAt.toISOString() }}
+            notEmailedReason={inviteNotEmailed()}
+            renewHint="To invite the owner again, send a new invite below."
+          />
+        )}
         <InviteOwnerForm storeId={store.id} />
       </div>
     </div>
