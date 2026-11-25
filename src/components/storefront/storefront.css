@@ -154,6 +154,32 @@
   color: var(--color-ink);
   border-bottom: 1px solid var(--color-line);
 }
+/* Keyboard focus and in-page jumps land below the sticky header (WCAG 2.4.11). */
+html:has(.sf-header) {
+  scroll-padding-top: 152px;
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  html:has(.sf-header) {
+    scroll-padding-top: 192px;
+  }
+}
+@media (max-width: 767px) {
+  html:has(.sf-header) {
+    scroll-padding-top: 124px;
+  }
+  /* Once the page scrolls, the phone header drops its ZIP row so it stays near its old height. */
+  .sf-header[data-compact="true"] {
+    clip-path: inset(0 0 54px 0);
+  }
+  .sf-header[data-compact="true"] .sf-header-window {
+    visibility: hidden;
+  }
+}
+@media (max-width: 767px) and (prefers-reduced-motion: no-preference) {
+  .sf-storefront .sf-header {
+    transition: transform 250ms var(--sf-motion-ease), clip-path 250ms var(--sf-motion-ease);
+  }
+}
 .sf-header-main {
   min-height: 88px;
   display: flex;
@@ -293,6 +319,7 @@
   overflow: auto;
   scrollbar-width: none;
   mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+  padding-right: 48px;
 }
 .sf-category-nav a {
   padding: 15px 8px;
@@ -1086,7 +1113,7 @@
 .sf-breadcrumb {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
   font-size: 13px;
   color: var(--muted-foreground);
   padding-block: 12px;
@@ -1095,6 +1122,13 @@
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+}
+/* Crumbs carry their own side padding (a 44px-wide link), so separators sit evenly between them. */
+.sf-breadcrumb > :not([aria-hidden]) {
+  padding-inline: 6px;
+}
+.sf-breadcrumb > :first-child {
+  margin-left: -6px;
 }
 /* Crumbs stay on one line; a long current page name truncates (it is the heading below). */
 .sf-breadcrumb > * {
@@ -1162,7 +1196,7 @@
   top: 160px;
   align-self: start;
 }
-.sf-sidebar h2 {
+.sf-sidebar-title {
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 12px;
@@ -1285,7 +1319,7 @@
 .sf-variants {
   margin-top: 28px;
 }
-.sf-variants h3 {
+.sf-variants h2 {
   font-size: 15px;
   font-weight: 700;
   margin-bottom: 12px;
@@ -1338,7 +1372,7 @@
   line-height: 1.7;
   color: var(--muted-foreground);
 }
-.sf-detail-description h3 {
+.sf-detail-description h2 {
   font-size: 16px;
   color: var(--color-ink);
   font-weight: 650;

@@ -41,7 +41,7 @@ export default async function SearchPage({
           <span>Search</span>
         </nav>
         <h1 className="sf-page-title">
-          {tooLong ? SEARCH_QUERY_TOO_LONG : q ? `Results for “${q}”` : "What's cooking?"}
+          {tooLong ? SEARCH_QUERY_TOO_LONG : q ? `${results.length ? "Results" : "No results"} for “${q}”` : "What's cooking?"}
         </h1>
         {!q && (
           <p className="sf-page-intro">
@@ -132,7 +132,7 @@ export default async function SearchPage({
               </EmptyState>
             ) : (
               <EmptyState
-                title={`No results for "${q}"`}
+                title="Try another name"
                 description="Try a local or English name, check the spelling, or explore a whole aisle."
               >
                 <div className="sf-search-suggestions">

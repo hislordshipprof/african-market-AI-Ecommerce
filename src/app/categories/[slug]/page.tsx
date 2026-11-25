@@ -98,7 +98,7 @@ export default async function CategoryPage({
         </div>
         <div className="sf-browse">
           <aside className="sf-sidebar">
-            <h2>Shop the aisles</h2>
+            <p className="sf-sidebar-title">Shop the aisles</p>
             <nav aria-label="Aisles">{categoryLinks}</nav>
           </aside>
           <section aria-label={category.name}>

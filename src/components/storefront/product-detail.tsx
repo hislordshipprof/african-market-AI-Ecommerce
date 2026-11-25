@@ -65,7 +65,7 @@ export function ProductDetail({
         />
         {listing.variants.length > 0 && (
           <section className="sf-variants" aria-labelledby="variants-heading">
-            <h3 id="variants-heading">Available sizes</h3>
+            <h2 id="variants-heading">Available sizes</h2>
             <ul>
               {listing.variants.map((v) => (
                 <li key={v.id}>
@@ -141,7 +141,7 @@ export function ProductDetail({
           )}
         </dl>
         <section className="sf-detail-description">
-          <h3>About this product</h3>
+          <h2>About this product</h2>
           <p>
             {listing.description ??
               "A staple from your local market. Check the product packaging for ingredients, allergens and preparation instructions."}

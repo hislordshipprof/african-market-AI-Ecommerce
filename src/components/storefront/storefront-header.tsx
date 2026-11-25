@@ -24,7 +24,7 @@ export async function StorefrontHeader({ store, pageTitled = false }: { store: V
       <div className="sf-header-main sf-container">
         <Link href="/" className="sf-brand">
           <StoreLogo src={store.logoUrl} name={store.name} />
-          <StoreName className="sf-brand-name" data-long={store.name.length > LONG_STORE_NAME || undefined} data-testid="store-name" title={store.name}>{store.name}</StoreName>
+          <StoreName className="sf-brand-name" translate="no" data-long={store.name.length > LONG_STORE_NAME || undefined} data-testid="store-name" title={store.name}>{store.name}</StoreName>
         </Link>
         <div className="sf-header-window">
           <FulfillmentChip
