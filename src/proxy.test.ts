@@ -414,6 +414,20 @@ describe("proxy on the platform root domain (store directory)", () => {
     expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
   });
 
+  it("redirects a state code to the state's page for good, in any case, keeping the query (#810)", () => {
+    for (const [from, to] of [["/stores/tx", "/stores/texas"], ["/stores/TX?ref=x", "/stores/texas?ref=x"], ["/stores/tx/houston", "/stores/texas/houston"]]) {
+      const res = proxy(makeRequest(`http://example.com${from}`));
+      expect(res.status, from).toBe(308);
+      expect(res.headers.get("location"), from).toBe(`http://example.com${to}`);
+    }
+  });
+
+  it("answers a state code with not found on a store host, not a redirect", () => {
+    const res = proxy(makeRequest("http://mama-ngozi.example.com/stores/tx"));
+    expect(res.headers.get("location")).toBeNull();
+    expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/_directory-not-here");
+  });
+
   it("leaves a store's own /stores-like paths alone", () => {
     const res = proxy(makeRequest("http://mama-ngozi.example.com/storesx"));
     expect(res.headers.get("x-middleware-rewrite")).toBeNull();
