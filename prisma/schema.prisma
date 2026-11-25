@@ -2007,6 +2007,8 @@ model PlatformSettings {
   shippingStates                     String[] @default([]) @map("shipping_states")
   /// States the tax advisor signed off (ADR-0008, #577): shown on the metro readiness report, gates nothing yet.
   taxSignedOffStates                 String[] @default([]) @map("tax_signed_off_states")
+  /// The platform admins' daily digest email of what needs an admin (#834); on unless switched off.
+  adminDigestEnabled                 Boolean  @default(true) @map("admin_digest_enabled")
   updatedAt                          DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")

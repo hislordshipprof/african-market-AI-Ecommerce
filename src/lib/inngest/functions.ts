@@ -18,6 +18,7 @@ import { sendNewOrderOwnerEmail } from "../email/new-order-owner";
 import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
+import { adminDailyDigest } from "../admin/assistant/digest";
 import { copilotDailyDigest } from "../copilot/digest";
 import { copilotWeeklyReport } from "../copilot/weekly-report";
 import { deleteExpiredRejectedApplications } from "../store-application/service";
@@ -462,6 +463,7 @@ export const inngestFunctions = [
   supportSlaEscalation,
   copilotOrderStockAlerts,
   copilotDailyDigest,
+  adminDailyDigest,
   copilotWeeklyReport,
   courierAssignmentTimeout,
   courierDispatchOnReady,
