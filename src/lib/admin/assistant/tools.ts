@@ -21,18 +21,21 @@ import { listProductProposals } from "../product-proposals";
 import { listRefundFailedOrders } from "../refund-resolution";
 import { listStoreRequestAreas } from "../store-requests";
 import { ROWS_MAX, type AssistantLink } from "./types";
+import { draftTools } from "./draft-tools";
+import type { PendingAdminDraft } from "./drafts";
 
 const dollars = (cents: number | bigint) => Number(cents) / 100;
 const day = (value: Date | string) => new Date(value).toISOString().slice(0, 10);
 
-/** What one turn's tools read: the links shown under the reply and every result the reply may quote from. */
+/** What one turn's tools read and drafted: the links under the reply, every result the reply may quote from, the draft cards. */
 export interface ReadBook {
   links: AssistantLink[];
   toolResults: string[];
+  drafts: PendingAdminDraft[];
 }
 
 export function createReadBook(): ReadBook {
-  return { links: [], toolResults: [] };
+  return { links: [], toolResults: [], drafts: [] };
 }
 
 export interface ToolContext {
@@ -42,13 +45,13 @@ export interface ToolContext {
   now: Date;
 }
 
-function link(book: ReadBook, label: string, href: string): string {
+export function link(book: ReadBook, label: string, href: string): string {
   if (!book.links.some((item) => item.href === href)) book.links.push({ label, href });
   return href;
 }
 
-/** Writes the audit row before the read runs, so a call is on record even if the turn then fails. */
-async function audited<T>(ctx: ToolContext, name: string, params: Record<string, unknown>, read: () => Promise<T>): Promise<T> {
+/** Writes the audit row before the tool runs, so a call is on record even if the turn then fails. */
+export async function audited<T>(ctx: ToolContext, name: string, params: Record<string, unknown>, read: () => Promise<T>): Promise<T> {
   await platformAdminTransaction((tx) => tx.auditLog.create({
     data: {
       actorId: ctx.actor.id,
@@ -66,10 +69,14 @@ async function audited<T>(ctx: ToolContext, name: string, params: Record<string,
 
 const STORE_STATUSES = ["setup", "active", "suspended"] as const;
 
-/** Every tool reads through the same function the admin screen uses; none of them writes anything but the audit row. */
+/**
+ * Every tool reads through the same function the admin screen uses. The read tools write nothing but the audit row;
+ * the draft tools add a card the admin confirms, and nothing changes before that.
+ */
 export function adminAssistantTools(ctx: ToolContext) {
   const { book } = ctx;
   return {
+    ...draftTools(ctx),
     find_stores: tool({
       description: "Find stores by name or slug and/or status (setup is still onboarding). Each store has its plan, metro, open go-live items and each courier's registration error.",
       inputSchema: z.object({
@@ -229,6 +236,7 @@ export function adminAssistantTools(ctx: ToolContext) {
           incidents: result.rows.slice(0, ROWS_MAX).map((row) => {
             link(book, `Order ${row.orderNumber}, ${row.storeName}`, `/admin/couriers/incidents/${row.orderId}`);
             return {
+              orderId: row.orderId,
               number: row.orderNumber,
               store: row.storeName,
               kinds: row.kinds,
@@ -252,6 +260,7 @@ export function adminAssistantTools(ctx: ToolContext) {
         return {
           applicationsWaiting: pending.length,
           applications: pending.slice(0, ROWS_MAX).map((row) => ({
+            applicationId: row.id,
             business: row.businessName,
             city: row.city,
             state: row.state,
@@ -278,9 +287,11 @@ export function adminAssistantTools(ctx: ToolContext) {
           messages: threads.slice(0, ROWS_MAX).map((thread) => {
             link(book, `Message on order ${thread.orderNumber}, ${thread.storeName}`, `/admin/support?selected=${thread.id}`);
             return {
+              threadId: thread.id,
               order: thread.orderNumber,
               store: thread.storeName,
               topic: thread.topic,
+              lastCustomerMessage: thread.messages.findLast((message) => message.sender === "customer")?.body.slice(0, 500) ?? null,
               reason: thread.escalationReason,
               waitingOnPlatform: thread.waiting,
               ageMinutes: thread.ageMinutes,
@@ -319,7 +330,7 @@ export function adminAssistantTools(ctx: ToolContext) {
           last30Days: spend.spend.days.map((row) => ({ day: row.day, dollars: dollars(row.costMicros / BigInt(10_000)), capAlerted: row.capAlerted })),
           storesNearChatCap: spend.chats.stores.filter((store) => store.nearCap).map((store) => ({ store: store.storeName, chats: store.chats, cap: store.cap })),
           flaggedDay: sample.day,
-          flagged: flagged.map((row) => ({ kind: row.kind, store: row.storeName, reasons: row.reasons })),
+          flagged: flagged.map((row) => ({ conversationId: row.id, kind: row.kind, store: row.storeName, reasons: row.reasons })),
         };
       }),
     }),

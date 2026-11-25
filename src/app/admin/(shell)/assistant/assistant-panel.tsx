@@ -14,8 +14,10 @@ import {
   type BrowserSpeech,
   type SpeechState,
 } from "@/lib/assistant/ui/speech";
-import { sendAdminAssistantMessage } from "@/lib/admin/assistant/actions";
+import { confirmAdminAssistantDraft, rejectAdminAssistantDraft, sendAdminAssistantMessage } from "@/lib/admin/assistant/actions";
+import type { AdminDraftCard } from "@/lib/admin/assistant/drafts";
 import type { AdminAssistantMessage, AssistantLink } from "@/lib/admin/assistant/types";
+import { AdminDraftCardView } from "./draft-card";
 
 type SpeechHost = Window & {
   SpeechRecognition?: new () => BrowserSpeech;
@@ -33,12 +35,15 @@ function plain(text: string): string {
 export function AdminAssistantPanel({
   conversationId: initialConversationId,
   messages: initialMessages,
+  drafts: initialDrafts,
 }: {
   conversationId: string | null;
   messages: AdminAssistantMessage[];
+  drafts: Record<string, AdminDraftCard[]>;
 }) {
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState(initialMessages);
+  const [drafts, setDrafts] = useState(initialDrafts);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [speech, setSpeech] = useState<SpeechState | null>(null);
@@ -106,11 +111,32 @@ export function AdminAssistantPanel({
       speechRef.current = null;
       setSpeech(null);
       setConversationId(result.conversationId);
+      if (result.drafts.length > 0) setDrafts((current) => ({ ...current, [messageId]: result.drafts }));
       setMessages((current) => [
         ...current,
         { role: "admin", text: draft.trim() },
         { role: "assistant", text: result.reply, messageId, links: result.links },
       ]);
+    });
+  }
+
+  function replaceCard(card: AdminDraftCard) {
+    setDrafts((current) => Object.fromEntries(Object.entries(current).map(([key, cards]) => [key, cards.map((item) => (item.id === card.id ? card : item))])));
+  }
+
+  function decide(card: AdminDraftCard, confirm: boolean, text?: string) {
+    startTransition(async () => {
+      const result = confirm
+        ? await confirmAdminAssistantDraft({ draftId: card.id, ...(text !== undefined ? { text } : {}) })
+        : await rejectAdminAssistantDraft({ draftId: card.id });
+      if (result.ok) {
+        setNotice(null);
+        replaceCard(result.draft);
+        return;
+      }
+      setNotice(result.message);
+      if (result.code === "stale" || result.code === "expired") replaceCard({ ...card, state: result.code });
+      if (result.code === "refused" || result.code === "not_found") replaceCard({ ...card, state: "rejected" });
     });
   }
 
@@ -126,6 +152,7 @@ export function AdminAssistantPanel({
           onClick={() => {
             setConversationId(null);
             setMessages([]);
+            setDrafts({});
             setNotice(null);
           }}
         >
@@ -150,6 +177,17 @@ export function AdminAssistantPanel({
                 {plain(message.text)}
               </p>
               {message.links?.length ? <LinkList links={message.links} /> : null}
+              {message.role === "assistant" && message.messageId
+                ? drafts[message.messageId]?.map((card) => (
+                  <AdminDraftCardView
+                    key={`${card.id}-${card.state}`}
+                    card={card}
+                    disabled={pending}
+                    onConfirm={(text) => decide(card, true, text)}
+                    onDismiss={() => decide(card, false)}
+                  />
+                ))
+                : null}
             </div>
           ))}
         </section>
