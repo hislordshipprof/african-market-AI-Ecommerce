@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getStore } from "@/lib/get-store";
-import { searchListings } from "@/lib/storefront/service";
+import { popularSearches, suggestSearch } from "@/lib/storefront/service";
 import { clientIp } from "@/lib/assistant/client-ip";
 import { takeRateLimit } from "@/lib/rate-limit/app-limiter";
 import { parseInput } from "@/lib/security/parse-input";
@@ -27,7 +27,9 @@ export async function GET(request: NextRequest) {
   if (store.status === "suspended") {
     return NextResponse.json({ error: "Store unavailable" }, { status: 404 });
   }
-  if (!trimmed) return NextResponse.json({ results: [] });
+  if (!trimmed) {
+    return NextResponse.json({ results: [], suggestions: [], aisles: [], popular: await popularSearches(store.id) });
+  }
 
   const browser = parseInput(browserId, request.headers.get("x-shop-browser") ?? "");
   const browserKey = browser.ok ? browser.data : "missing";
@@ -44,6 +46,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const results = await searchListings(store.id, trimmed);
-  return NextResponse.json({ results });
+  const { products, suggestions, aisles } = await suggestSearch(store.id, trimmed);
+  return NextResponse.json({ results: products, suggestions, aisles });
 }
