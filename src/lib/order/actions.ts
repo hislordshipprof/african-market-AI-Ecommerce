@@ -256,10 +256,12 @@ export async function buyShippingLabelAction(orderId: string, confirmPostageCent
   return runStaffAction("buyShippingLabel", id.data, () => buyShippingLabel(session.store.id, id.data, {}, confirm.data));
 }
 
-/** Voids the label and refunds the order, only before the carrier's first scan (#568). */
+/** Voids the label and refunds the order, only before the carrier's first scan (#568). The refund needs 2FA (#840). */
 export async function cancelShipmentAction(orderId: string) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const stepUp = await twoFactorStepUp(session);
+  if (stepUp) return { ok: false as const, ...stepUp };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("cancelShipment", id.data, () =>

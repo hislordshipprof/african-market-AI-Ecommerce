@@ -29,7 +29,7 @@ import { authPrisma, storeScoped } from "../db";
 import { requirePlatformAdmin } from "../admin/session";
 import { requireStoreMember } from "./session";
 import { inviteMemberAction, removeMemberAction } from "./actions";
-import { approveIssueAction, markNoShowAction, storeRefundAction, storeRefundPreviewAction } from "../order/actions";
+import { approveIssueAction, cancelShipmentAction, markNoShowAction, storeRefundAction, storeRefundPreviewAction } from "../order/actions";
 import { authPost, collectCookies, testSignUp } from "../test-auth";
 
 const suffix = `${Date.now()}-2fa840`;
@@ -142,6 +142,8 @@ describe("store 2FA is optional, and required before money and team actions (#84
     expect(await storeRefundPreviewAction(ORDER_ID, "whole_order")).toEqual({ ok: false, ...STEP_UP });
     expect(await markNoShowAction(ORDER_ID)).toEqual({ ok: false, ...STEP_UP });
     expect(await approveIssueAction(crypto.randomUUID())).toEqual({ ok: false, ...STEP_UP });
+    // Cancelling a ready ship order refunds the whole capture.
+    expect(await cancelShipmentAction(ORDER_ID)).toEqual({ ok: false, ...STEP_UP });
   });
 
   it("a link back is never to another site", async () => {
