@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeOwnerSignIn } from "./store-owner-auth";
+import { E2E_LISTING_PREFIX } from "../src/lib/storefront/e2e-listings";
 
 const SLUG = "mama-ngozi";
 const SHOTS = process.env.PROOF_DIR ?? "screenshots";
@@ -175,7 +176,8 @@ async function seedOrders(): Promise<{ first: string; second: string; firstId: s
     await tx.supplier.deleteMany({ where: { storeId: store.id } });
     await tx.reorderList.deleteMany({ where: { storeId: store.id } });
     const listings = await tx.listing.findMany({
-      where: { storeId: store.id, active: true, customName: { not: null } },
+      // Seed listings only: "E2E " listings sort first and other specs delete them mid-run.
+      where: { storeId: store.id, active: true, customName: { not: null }, NOT: { customName: { startsWith: E2E_LISTING_PREFIX } } },
       orderBy: { customName: "asc" },
       take: 2,
     });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
 import { resolveHost, isSlugRoutable, isFallbackRoot } from "@/lib/slug";
 import { ATTRIBUTION_COOKIE, ATTRIBUTION_MAX_AGE, DIRECTORY_REF } from "@/lib/directory/attribution";
+import { stateCodePath } from "@/lib/directory/places";
 import { needsNoScriptCsp, newCspNonce, NO_SCRIPT_CSP, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
 const COOKIE_NAME = "store_override";
@@ -85,6 +86,15 @@ function route(request: NextRequest, host: string | null, fallbackRoot: boolean)
   // State and city pages are cached for every host, so only the root domain may reach them (#451).
   if (isDirectoryOnlyPath(request.nextUrl.pathname) && headers.get("x-platform-root") !== "1") {
     const response = NextResponse.rewrite(new URL("/_directory-not-here", request.url), { request: { headers } });
+    stampSecurity(headers, response);
+    return response;
+  }
+
+  const spelledOut = headers.get("x-platform-root") === "1" ? stateCodePath(request.nextUrl.pathname) : null;
+  if (spelledOut) {
+    const target = request.nextUrl.clone();
+    target.pathname = spelledOut;
+    const response = NextResponse.redirect(target, 308);
     stampSecurity(headers, response);
     return response;
   }

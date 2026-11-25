@@ -69,6 +69,42 @@
   outline-offset: 2px;
 }
 
+/* The marketplace footer (#810): quiet, the same column as the bar. */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+  border-top: 1px solid var(--d-line);
+  background: var(--d-surface);
+  padding: 20px max(20px, calc((100% - 1080px) / 2));
+}
+
+.footerLinks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+}
+
+.footerLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  color: var(--d-ink);
+  text-underline-offset: 3px;
+}
+
+.footerLinks a:focus-visible,
+.footer a.wordmark:focus-visible {
+  outline: 2px solid var(--d-primary);
+  outline-offset: 2px;
+}
+
 .main {
   max-width: 1120px;
   margin: 0 auto;
@@ -791,6 +827,11 @@ a.wordmark:focus-visible,
   max-width: 1120px;
   margin: 0 auto;
   padding: 56px 20px;
+}
+
+/* Follows the store list's own section, so its top padding would double the gap. */
+.byState {
+  padding-top: 0;
 }
 
 .section > .results:last-child {

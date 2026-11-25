@@ -78,6 +78,11 @@ test("the root domain serves the Store directory and store hosts still serve the
     await expect(card).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
     await expect(page.getByText("Tante Marie Caribbean Grocer")).toHaveCount(0);
     await expect(page).toHaveTitle(/Store directory/);
+    // #810: every state with a listed store is one tap from the home, and the footer leads there.
+    const byState = page.getByRole("region", { name: "Stores by state" });
+    await expect(byState.getByRole("link", { name: /^Texas/ })).toHaveAttribute("href", "/stores/texas");
+    await expect(page.getByRole("contentinfo").getByRole("link", { name: "Stores by state" })).toHaveAttribute("href", "/#stores-by-state");
+    await shoot(page, "810-home-states", "Stores by state");
 
     await card.click();
     await expect(page).toHaveURL(`http://mama-ngozi.localhost:${port}/?ref=directory`);
@@ -398,7 +403,24 @@ test("state and city pages: cached, GroceryStore JSON-LD, sitemap and robots, 40
     // The second request is served from the ISR cache, not rendered again.
     expect((await request.get(`${root}/stores/texas/houston`)).headers()["x-nextjs-cache"]).toBe("HIT");
 
-    for (const path of ["/stores/texas/austin", "/stores/ohio", "/stores/tx", "/stores/texas/houston-tx"]) {
+    // A state code in any case is the state's page for good (#810).
+    for (const [from, to] of [["/stores/tx", "/stores/texas"], ["/stores/TX", "/stores/texas"], ["/stores/tx/houston", "/stores/texas/houston"]]) {
+      const res = await request.get(`${root}${from}`, { maxRedirects: 0 });
+      expect(res.status(), from).toBe(308);
+      expect(new URL(res.headers().location, root).href, from).toBe(`${root}${to}`);
+    }
+    await page.goto(`${root}/stores/tx`);
+    await expect(page).toHaveURL(`${root}/stores/texas`);
+
+    // The footer of a state page leads to every state from the home (#810).
+    await page.getByRole("contentinfo").getByRole("link", { name: "Stores by state" }).click();
+    await expect(page).toHaveURL(`${root}/#stores-by-state`);
+    const byState = page.getByRole("region", { name: "Stores by state" });
+    await expect(byState).toBeInViewport();
+    await byState.getByRole("link", { name: /^Texas/ }).click();
+    await expect(page).toHaveURL(`${root}/stores/texas`);
+
+    for (const path of ["/stores/texas/austin", "/stores/ohio", "/stores/zz", "/stores/texas/houston-tx"]) {
       expect((await request.get(`${root}${path}`)).status(), path).toBe(404);
     }
     await page.goto(`${root}/stores/texas/austin`);

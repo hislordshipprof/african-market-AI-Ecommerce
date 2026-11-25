@@ -62,7 +62,7 @@ export async function deleteE2eListings(
         ).map((l) => l.id);
         if (ids.length === 0) return { listings: 0, orders: 0, customers: 0 };
 
-        // Variants and collection items cascade. Stock events, cart lines and order lines point at the
+        // Variants and collection items cascade. Stock events, cart, order and purchase order lines point at the
         // listing or its variants without cascade, and other specs (customer journey) can add e2e
         // listings to carts and orders, so those rows go first.
         const variantIds = (
@@ -89,6 +89,7 @@ export async function deleteE2eListings(
               `;
         const touchedOrderIds = [...new Set(deletedLines.map((row) => row.order_id))];
         await tx.stockEvent.deleteMany({ where: { storeId, listingId: { in: ids } } });
+        await tx.purchaseOrderLine.deleteMany({ where: { storeId, listingId: { in: ids } } });
         const listings = await tx.listing.deleteMany({ where: { storeId, id: { in: ids } } });
 
         // Lock the candidate orders before checking they are empty and hold the locks to commit. Inserting
