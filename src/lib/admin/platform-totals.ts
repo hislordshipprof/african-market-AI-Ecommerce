@@ -22,7 +22,7 @@ const BATCH = 10;
 
 /**
  * The store analytics page's figures (#498), added across stores, each store read in its own store days.
- * Only stores with a captured order near the range are read; callers check the platform admin first.
+ * Only stores with a captured order or a succeeded refund near the range are read; callers check the platform admin first.
  */
 export async function platformTotals(from: string, to: string, now: Date = new Date()): Promise<PlatformTotals> {
   if (!validDay(from) || !validDay(to)) return { ok: false, reason: "from and to must be real dates, YYYY-MM-DD" };
@@ -31,17 +31,14 @@ export async function platformTotals(from: string, to: string, now: Date = new D
   if (daySpan(from, to) > MAX_CUSTOM_DAYS) return { ok: false, reason: `at most ${MAX_CUSTOM_DAYS} days` };
 
   // A day either side covers every US store zone; salesRows then applies each store's own day bounds.
-  const [candidates, activeStores] = await platformAdminTransaction(async (tx) => Promise.all([
-    tx.order.groupBy({
-      by: ["storeId"],
-      where: {
-        capturedAmountCents: { gt: 0 },
-        createdAt: { gte: new Date(`${addDays(from, -1)}T00:00:00Z`), lt: new Date(`${addDays(to, 2)}T00:00:00Z`) },
-      },
-    }),
+  const near = { gte: new Date(`${addDays(from, -1)}T00:00:00Z`), lt: new Date(`${addDays(to, 2)}T00:00:00Z`) };
+  // A refund in the range can be on an order placed before it, so its store is read too.
+  const [ordered, refunded, activeStores] = await platformAdminTransaction(async (tx) => Promise.all([
+    tx.order.groupBy({ by: ["storeId"], where: { capturedAmountCents: { gt: 0 }, createdAt: near } }),
+    tx.refundRequest.groupBy({ by: ["storeId"], where: { providerStatus: "succeeded", createdAt: near } }),
     tx.store.count({ where: { status: "active" } }),
   ]));
-  const storeIds = candidates.map((row) => row.storeId);
+  const storeIds = [...new Set([...ordered, ...refunded].map((row) => row.storeId))];
   const zones = await platformAdminTransaction((tx) => tx.store.findMany({ where: { id: { in: storeIds } }, select: { id: true, timezone: true } }));
 
   const range: AnalyticsRange = { preset: "custom", from, to };
