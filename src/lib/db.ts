@@ -345,6 +345,7 @@ export async function appUserQuery<T>(
 const PLATFORM_ADMIN_TX_MODELS = [
   "adminAssistantClientMessage",
   "adminAssistantConversation",
+  "adminAssistantDraft",
   "aiAction",
   "aiConversation",
   "aiReviewFlag",
