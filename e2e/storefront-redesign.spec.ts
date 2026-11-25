@@ -212,7 +212,7 @@ test.describe("Storefront redesign interactions", () => {
     });
     await expect(nav).toBeVisible();
     for (const [label, path] of [
-      ["Categories", "/categories"],
+      ["Aisles", "/categories"],
       ["Search", "/search"],
       ["Account", "/account"],
       ["Home", "/"],

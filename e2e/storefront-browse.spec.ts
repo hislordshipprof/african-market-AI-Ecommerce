@@ -8,7 +8,7 @@ test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
     page,
   }) => {
     await page.goto(`${BASE}/categories/grains-and-flours`);
-    await expect(page.locator("h2").first()).toHaveText("Grains & Flours");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Grains & Flours");
 
     await expect(page.locator("[data-testid='listing-card']").first()).toBeVisible({
       timeout: 10000,
@@ -26,7 +26,7 @@ test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
   }) => {
     await page.goto(`${BASE}/search?q=ugu`);
 
-    await expect(page.locator("h2").first()).toContainText("Results for");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Results for");
     const results = page.locator("ul li a");
     await expect(results.first()).toBeVisible({ timeout: 10000 });
 
