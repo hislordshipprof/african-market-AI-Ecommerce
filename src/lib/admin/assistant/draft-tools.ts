@@ -49,6 +49,12 @@ async function addDraft<K extends AdminDraftKind>(
 
 const refused = (reason: string) => ({ drafted: false, reason });
 
+function threadStatus(thread: { state: string; lastCustomerAt: Date | null; lastReplyAt: Date | null }): string {
+  if (thread.state === "resolved") return "Resolved";
+  if (thread.lastReplyAt && (!thread.lastCustomerAt || thread.lastReplyAt >= thread.lastCustomerAt)) return "Answered, waiting on the customer";
+  return "Waiting on the platform";
+}
+
 /** The draft-and-confirm tools (#832): each reads the record, then adds a card. The confirm calls the admin's own function. */
 export function draftTools(ctx: ToolContext) {
   const { book } = ctx;
@@ -335,7 +341,7 @@ export function draftTools(ctx: ToolContext) {
       execute: (input) => audited(ctx, "draft_support_reply", input, async () => {
         const thread = await platformAdminTransaction((tx) => tx.supportThread.findUnique({
           where: { id: input.threadId },
-          select: { id: true, store: { select: { id: true, name: true } }, order: { select: { number: true } } },
+          select: { id: true, state: true, lastCustomerAt: true, lastReplyAt: true, store: { select: { id: true, name: true } }, order: { select: { number: true } } },
         }));
         if (!thread) return refused("That message thread was not found.");
         const body = input.reply.trim();
@@ -344,7 +350,7 @@ export function draftTools(ctx: ToolContext) {
         return addDraft(ctx, "support_reply", thread.store.id, { threadId: thread.id, body }, {
           title: `Reply to the customer on order ${thread.order.number}`,
           storeName: thread.store.name,
-          changes: [{ field: "Thread", from: "Waiting on the platform", to: "Replied by the platform team" }],
+          changes: [{ field: "Thread", from: threadStatus(thread), to: "Replied by the platform team" }],
           editable: { label: "Reply", text: body, max: 1000 },
           warning: "The customer sees this reply. It cannot be unsent.",
           href,

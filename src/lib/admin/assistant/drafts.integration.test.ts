@@ -315,11 +315,12 @@ describe.skipIf(!hasDb)("platform admin assistant drafts at the confirm seam (#8
     expect(flags.map((flag) => [flag.label, flag.note])).toEqual([["tone", "Too curt."]]);
   });
 
-  it("sends only the reply the admin edited, and goes stale when the customer wrote again", async () => {
+  it("sends only the reply the admin edited, and goes stale when the thread changed", async () => {
     signInAs(admin);
     const later = await draft("draft_support_reply", { threadId: ids.thread, reply: "We are on it." });
     const { cards } = await draft("draft_support_reply", { threadId: ids.thread, reply: "Sorry, we will refund the missing item." });
     expect(cards[0]!.editable).toMatchObject({ label: "Reply", text: "Sorry, we will refund the missing item." });
+    expect(cards[0]!.changes).toEqual([{ field: "Thread", from: "Waiting on the platform", to: "Replied by the platform team" }]);
     expect(await sql((tx) => tx.supportMessage.count({ where: { threadId: ids.thread } }))).toBe(0);
 
     const sent = await confirmAdminAssistantDraft({ draftId: cards[0]!.id, text: "Sorry about that. The store will refund the missing yams today." });
@@ -327,9 +328,20 @@ describe.skipIf(!hasDb)("platform admin assistant drafts at the confirm seam (#8
     const messages = await sql((tx) => tx.supportMessage.findMany({ where: { threadId: ids.thread } }));
     expect(messages.map((message) => [message.sender, message.body])).toEqual([["platform", "Sorry about that. The store will refund the missing yams today."]]);
 
-    await sql((tx) => tx.supportThread.update({ where: { id: ids.thread }, data: { lastCustomerAt: new Date() } }));
     expect(await confirmAdminAssistantDraft({ draftId: later.cards[0]!.id })).toMatchObject({ ok: false, code: "stale" });
     expect(await sql((tx) => tx.supportMessage.count({ where: { threadId: ids.thread } }))).toBe(1);
+
+    const answered = await draft("draft_support_reply", { threadId: ids.thread, reply: "Any update?" });
+    expect(answered.cards[0]!.changes[0]!.from).toBe("Answered, waiting on the customer");
+    await sql((tx) => tx.supportThread.update({ where: { id: ids.thread }, data: { state: "resolved" } }));
+    expect(await confirmAdminAssistantDraft({ draftId: answered.cards[0]!.id })).toMatchObject({ ok: false, code: "stale" });
+
+    const resolved = await draft("draft_support_reply", { threadId: ids.thread, reply: "Checking in." });
+    expect(resolved.cards[0]!.changes[0]!.from).toBe("Resolved");
+    await sql((tx) => tx.supportThread.update({ where: { id: ids.thread }, data: { lastCustomerAt: new Date() } }));
+    expect(await confirmAdminAssistantDraft({ draftId: resolved.cards[0]!.id })).toMatchObject({ ok: false, code: "stale" });
+    expect(await sql((tx) => tx.supportMessage.count({ where: { threadId: ids.thread } }))).toBe(1);
+    expect((await sql((tx) => tx.supportThread.findUniqueOrThrow({ where: { id: ids.thread } }))).state).toBe("resolved");
   });
 
   it("checks new applications, then approves one and rejects one with a reason on confirm", async () => {

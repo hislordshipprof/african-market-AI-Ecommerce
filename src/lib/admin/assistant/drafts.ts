@@ -220,8 +220,12 @@ export const KINDS = {
     params: z.strictObject({ threadId: id, body: z.string().max(1000) }),
     editKey: "body",
     snapshot: async (p) => {
-      const thread = await platformAdminTransaction((tx) => tx.supportThread.findUnique({ where: { id: p.threadId }, select: { lastCustomerAt: true } }));
-      return { lastCustomerAt: thread ? thread.lastCustomerAt?.toISOString() ?? "none" : null };
+      const thread = await platformAdminTransaction((tx) => tx.supportThread.findUnique({
+        where: { id: p.threadId },
+        select: { state: true, lastCustomerAt: true, lastReplyAt: true },
+      }));
+      if (!thread) return { thread: null };
+      return { state: thread.state, lastCustomerAt: thread.lastCustomerAt?.toISOString() ?? "none", lastReplyAt: thread.lastReplyAt?.toISOString() ?? "none" };
     },
     apply: async (p) => {
       const result = await replyAsPlatformAction({ threadId: p.threadId, body: p.body });
