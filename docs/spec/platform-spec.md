@@ -58,7 +58,7 @@ A multi-tenant e-commerce platform for independent African grocery markets in th
 | **Platform admin** | Platform console | Onboard tenants, manage shared catalog, billing, support, disputes, courier settings, AI oversight |
 | **Courier** | External (Uber/DoorDash apps) | Not a user of our system; represented by provider webhooks |
 
-Auth: email magic link / password + optional SMS OTP for customers; store users require 2FA. Customer accounts are **per platform** (one login works across markets) but each store sees only its own customers' orders and marketing consent.
+Auth: email magic link / password + optional SMS OTP for customers; store owners and staff may turn on 2FA, and need it before refunds, payout settings and team changes (ADR-0015, #840); platform admins require 2FA. Customer accounts are **per platform** (one login works across markets) but each store sees only its own customers' orders and marketing consent.
 
 ---
 
@@ -545,7 +545,7 @@ Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choi
 - **Web:** Next.js (App Router, TypeScript) on Vercel Pro, one app for storefront, admin and API; middleware resolves the store from the host name. Tailwind + shadcn/ui; PWA for store staff (ADR-0013).
 - **Custom domains:** Vercel domains API, queued during onboarding (ADR-0013).
 - **DB:** Neon Postgres via its pooled endpoint, branch per PR; Prisma 7; row-level security per store via a transaction-scoped setting (ADR-0014).
-- **Auth:** Better Auth: phone one-time codes for customers, organizations and roles for stores, 2FA for owners and staff, built-in rate limiting (ADR-0015).
+- **Auth:** Better Auth: phone one-time codes for customers, organizations and roles for stores, 2FA for platform admins, and optional for store owners and staff but required before money and team actions, built-in rate limiting (ADR-0015).
 - **Jobs:** Inngest Cloud for timers and retries (substitution timeout, courier failover, confidence decay, digests): the free tier through the early pilot, then Pro (about 36 executions an order, ADR-0012 amendment 2026-11-16) (ADR-0016).
 - **Live updates:** Web Push + SMS alerts, ~10 s polling on open boards, courier tracking pages; self-hosted Centrifugo later if needed (ADR-0016).
 - **Storage:** Cloudflare R2 + Cloudflare image CDN; proof photos in a separate private bucket `R2_PROOF_BUCKET`, read through the token-checked app route `/api/delivery-proof/<tracking token>`, no signed URLs (ADR-0013, amended 2026-11-09).
@@ -567,7 +567,7 @@ Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choi
 - PCI: card data only via Stripe Elements/Checkout (SAQ A).
 - Webhook signature verification (Stripe, Uber `x-uber-signature` HMAC, DoorDash).
 - Tenant isolation tests in CI (attempt cross-tenant reads must fail).
-- Store users: 2FA; least-privilege roles; audit log for price/stock/refund changes.
+- Store users: 2FA is optional (#840). Until it is on, every store-admin page shows a reminder that can be hidden for the visit only. Refunds (whole, lines, no-show, approved problem reports), payout settings and team changes need 2FA on and verified this session, checked on the server in the action; without it the action says so and links to setup, which returns to the same page. A member with 2FA always enters the code at sign-in. Least-privilege roles; audit log for price/stock/refund changes.
 - Privacy: customer data per tenant marketing consent; CCPA-style export/delete; no selling data.
 - Food: stores remain responsible for food safety licensing; platform terms require it. Perishable handling rules (§11.3).
 - SVGs (#124): every `.svg` path on our origin (`public/` logos and banners, `/api/catalog-image`), matched after percent-decoding, carries `Content-Security-Policy: … script-src 'none'; sandbox` and `X-Content-Type-Options: nosniff`, set in the proxy. The proxy also sends that policy on every `/api/catalog-image/` response, whatever the key's extension, because a stored body may be SVG or HTML; Next drops a route handler's own CSP when one is already set. The catalog route adds `Content-Disposition: attachment` on SVG and any non-image body. Static `public/` SVGs stay inline (no attachment): the sandboxed policy already stops their script. Storefront logos render with a plain `<img>`, which never runs SVG script. Logo upload is not built. When it is: store uploads in R2 under an allowlisted key, never under `public/`; sanitise SVGs server-side (strip `<script>`, `on*` handlers, `<foreignObject>`, external references) or rasterise them to PNG/WebP on upload; keep serving through the headers above; and test that an uploaded SVG with `<script>` does not run when its URL is opened directly.
