@@ -173,10 +173,10 @@ export function scriptStep(messages: unknown): ScriptStep {
   if (last.name === "draft_store_create" && isRecord(last.output) && Array.isArray(last.output.missing)) {
     return { kind: "text", text: `To create the store I still need the ${last.output.missing.join(", ")}.` };
   }
-  if ((last.name === "draft_store_create" || last.name === "draft_review_approve") && isRecord(last.output) && last.output.drafted === false) {
+  if (["draft_store_create", "draft_review_approve", "draft_product"].includes(last.name) && isRecord(last.output) && last.output.drafted === false) {
     return { kind: "text", text: `Nothing drafted: ${String(last.output.reason)}` };
   }
-  if (last.name === "draft_store_create" || last.name === "draft_review_approve") {
+  if (last.name === "draft_store_create" || last.name === "draft_review_approve" || last.name === "draft_product") {
     return { kind: "text", text: "I drafted it on one card below. Confirm or dismiss it; nothing changes until you confirm." };
   }
   if (last.name === "draft_store_status") return { kind: "text", text: "I drafted the suspension. Confirm or dismiss the card below; nothing changes until you confirm." };
@@ -262,6 +262,11 @@ function openingStep(lower: string, raw: string, messages: unknown): ScriptStep 
   if (storeFields) {
     const input = Object.fromEntries(storeFields[1]!.split(";").map((pair) => pair.split("=").map((part) => part.trim())).filter((pair) => pair.length === 2 && pair[0]));
     return { kind: "tool", name: "draft_store_create", input };
+  }
+  const productFields = /^create a product: (.+)$/i.exec(raw.trim());
+  if (productFields) {
+    const input = Object.fromEntries(productFields[1]!.split(";").map((pair) => pair.split("=").map((part) => part.trim())).filter((pair) => pair.length === 2 && pair[0]));
+    return { kind: "tool", name: "draft_product", input: { ...input, notDuplicate: true } };
   }
   const storeFor = /^create a store for (.+) in (.+)$/i.exec(raw.trim());
   if (storeFor) return { kind: "tool", name: "draft_store_create", input: { name: storeFor[1], city: storeFor[2] } };

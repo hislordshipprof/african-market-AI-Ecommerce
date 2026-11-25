@@ -14,6 +14,7 @@ const STORE_NAME = "E2E Ade's Market 833";
 const CATEGORY_ID = "e2e-category-833";
 const CATEGORY_NAME = "E2E Grains 833";
 const PRODUCTS = { ofada: "e2e-product-833-ofada", jollof: "e2e-product-833-jollof", basmati: "e2e-product-833-basmati" };
+const NEW_PRODUCT = "E2E Egusi seeds 833";
 const PROOF = process.env.PROOF_DIR;
 
 async function asPlatformAdmin<T>(run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
@@ -66,7 +67,7 @@ async function cleanUp() {
       await tx.store.delete({ where: { id: store.id } });
     }
     await tx.metro.deleteMany({ where: { id: METRO_ID } });
-    await tx.masterProduct.deleteMany({ where: { id: { in: Object.values(PRODUCTS) } } });
+    await tx.masterProduct.deleteMany({ where: { OR: [{ id: { in: Object.values(PRODUCTS) } }, { name: NEW_PRODUCT }] } });
     await tx.category.deleteMany({ where: { id: CATEGORY_ID } });
   });
 }
@@ -134,4 +135,22 @@ test("an admin approves a review-queue batch, sees each product's problems and u
     [PRODUCTS.ofada]: "active", [PRODUCTS.jollof]: "active", [PRODUCTS.basmati]: "needs_review",
   });
   await proof(page, "batch-confirmed");
+});
+
+test("an admin creates a catalogue product on a card and attaches a photo, which goes through the photo upload (#833)", async ({ page }) => {
+  await adminSignIn(page);
+  await page.goto("/admin/assistant");
+
+  await send(page, `Create a product: name=${NEW_PRODUCT}; category=${CATEGORY_NAME}; size=1 lb; description=Ground melon seeds for egusi soup.`);
+  const card = page.getByRole("article", { name: "Create a catalogue product" });
+  await expect(card).toBeVisible();
+  await card.getByLabel(/Product photo/).setInputFiles({ name: "egusi.png", mimeType: "image/png", buffer: Buffer.from("not really a png") });
+  await proof(page, "product-card");
+
+  await card.getByRole("button", { name: "Confirm" }).click();
+  // The e2e server has no photo storage and the file is not an image: the upload's own refusal proves the photo reached it.
+  await expect(card.getByText(/Step 2 did not run: (Upload a JPEG|Photo storage)/)).toBeVisible();
+  const created = await asPlatformAdmin((tx) => tx.masterProduct.findFirstOrThrow({ where: { name: NEW_PRODUCT }, select: { categoryId: true, unit: true, imageUrl: true } }));
+  expect(created).toEqual({ categoryId: CATEGORY_ID, unit: "1 lb", imageUrl: null });
+  await proof(page, "product-confirmed");
 });

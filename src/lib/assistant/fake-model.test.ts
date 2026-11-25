@@ -126,6 +126,7 @@ describe("assistant e2e fake", () => {
     })).json()) as { content: Array<{ name: string; input: unknown }> }).content[0];
     expect(await call("Create a store for Ade's Market in Houston")).toMatchObject({ name: "draft_store_create", input: { name: "Ade's Market", city: "Houston" } });
     expect(await call("Create a store: name=Ade's Market; slug=ade; city=Houston")).toMatchObject({ name: "draft_store_create", input: { name: "Ade's Market", slug: "ade", city: "Houston" } });
+    expect(await call("Create a product: name=Egusi; category=Grains; size=1 lb")).toMatchObject({ name: "draft_product", input: { name: "Egusi", category: "Grains", size: "1 lb", notDuplicate: true } });
     expect(await call("Approve the clean products in the review queue for E2E Grains")).toMatchObject({ name: "draft_review_approve", input: { category: "e2e grains", onlyClean: false } });
   });
 
