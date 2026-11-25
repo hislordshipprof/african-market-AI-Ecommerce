@@ -40,7 +40,14 @@ import {
   UserCheck,
   History,
   XCircle,
+  X,
+  Search,
 } from "lucide-react";
+import { PageHeader } from "../shell/page-header";
+import { filterOrders, orderTabCounts, type OrderTab } from "@/lib/store-admin/order-tabs";
+import { FULFILLMENT_LABELS } from "@/lib/order/status-labels";
+
+const FULFILLMENT_FILTERS = ["pickup", "store-delivery", "courier", "ship"] as const;
 import {
   fetchOrdersAction,
   acceptOrderAction,
@@ -181,7 +188,6 @@ function DisputedBadge() {
 
 interface Props {
   initialOrders: StoreOrderRow[];
-  storeName: string;
   storeSlug: string;
   vapidPublicKey: string | null;
   autoAcceptOrders: boolean;
@@ -193,11 +199,12 @@ interface Props {
   /** Only the owner refunds after capture (#798). */
   isOwner: boolean;
   problems?: React.ReactNode;
+  /** Opens this order's panel: /store-admin/orders/[id] (#860). */
+  initialSelectedId?: string | null;
 }
 
 export function OrderInbox({
   initialOrders,
-  storeName,
   storeSlug,
   vapidPublicKey,
   autoAcceptOrders,
@@ -206,12 +213,16 @@ export function OrderInbox({
   newOrderEmail,
   isOwner,
   problems,
+  initialSelectedId,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [orders, setOrders] = useState(initialOrders);
   // The new-order email links here with ?order= (#785); an order no longer in the inbox opens nothing.
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(() => searchParams.get("order"));
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(() => initialSelectedId ?? searchParams.get("order"));
+  const [tab, setTab] = useState<OrderTab>("all");
+  const [fulfillmentFilter, setFulfillmentFilter] = useState("all");
+  const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState(() => new Date());
@@ -558,29 +569,20 @@ export function OrderInbox({
       )
     : [];
 
+  const newCount = orders.filter((o) => o.status === "AUTHORIZED").length;
+  const tabs = orderTabCounts(orders);
+  const shown = filterOrders(orders, { tab, fulfillment: fulfillmentFilter, query });
+
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <Link
-              href={`/store-admin?store=${storeParam}`}
-              aria-label="Back to dashboard"
-              className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              <ArrowLeft className="size-5" aria-hidden />
-            </Link>
-            <div>
-              <h1 className="text-base font-semibold text-foreground">
-                Orders
-              </h1>
-              <p className="text-xs text-muted-foreground">{storeName}</p>
-            </div>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+    <div>
+      <PageHeader
+        title="Orders"
+        description={`${newCount} new`}
+        actions={
+          <>
             <Link
               href={`/store-admin/orders/past?store=${encodeURIComponent(storeParam)}`}
-              className={buttonVariants({ variant: "outline", size: "sm", className: "min-h-11" })}
+              className={buttonVariants({ variant: "outline", className: "min-h-11 rounded-full" })}
             >
               <History className="size-4" aria-hidden />
               Past orders
@@ -589,7 +591,8 @@ export function OrderInbox({
             {newOrderEmail !== null && <NewOrderEmailToggle initialOn={newOrderEmail} />}
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
+              className="size-11 rounded-full"
               onClick={() => setAudioEnabled(!audioEnabled)}
               aria-label={audioEnabled ? "Mute alerts" : "Enable alerts"}
             >
@@ -599,14 +602,13 @@ export function OrderInbox({
                 <BellOff className="size-4" />
               )}
             </Button>
-            <Badge variant="secondary">
-              {orders.filter((o) => o.status === "AUTHORIZED").length} new
-            </Badge>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      >
+        {problems}
+      </PageHeader>
 
-      <main className="mx-auto max-w-4xl px-4 py-6">
+      <div>
         <UpdatesPaused
           paused={refreshFailed}
           lastUpdated={lastRefreshed}
@@ -614,16 +616,133 @@ export function OrderInbox({
           retrying={isPending}
           onRetry={pollOrders}
         />
-        {selectedOrder ? (
-          <div>
-            <button
-              onClick={() => selectOrder(null)}
-              className="-ml-2 mb-2 flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        <div className={selectedOrder ? "lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6 xl:grid-cols-[minmax(0,1fr)_28rem]" : undefined}>
+        <div className={selectedOrder ? "hidden min-w-0 lg:block" : "min-w-0"}>
+          <BatchPicking orders={orders} storeParam={storeParam} />
+          <div role="tablist" aria-label="Order stages" className="-mx-1 mb-3 flex gap-1 overflow-x-auto border-b border-border px-1">
+            {tabs.map((t) => (
+              <button
+                key={t.tab}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.tab}
+                onClick={() => setTab(t.tab)}
+                className={`-mb-px flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm whitespace-nowrap outline-none focus-visible:ring-3 focus-visible:ring-ring/50 ${
+                  tab === t.tab ? "border-primary font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t.label}
+                <span className="tabular-nums">{t.count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <div className="relative min-w-0 flex-1 basis-60">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Order number or customer…"
+                aria-label="Find an order by number or customer"
+                className="h-11 rounded-lg pl-9"
+              />
+            </div>
+            <select
+              value={fulfillmentFilter}
+              onChange={(event) => setFulfillmentFilter(event.target.value)}
+              aria-label="Fulfilment"
+              className="h-11 rounded-full border border-input bg-card px-4 text-sm font-medium text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <ArrowLeft className="size-4" aria-hidden /> Back to orders
-            </button>
-
-            <Card>
+              <option value="all">All fulfilment</option>
+              {FULFILLMENT_FILTERS.map((f) => (
+                <option key={f} value={f}>{FULFILLMENT_LABELS[f]}</option>
+              ))}
+            </select>
+          </div>
+            {orders.length === 0 ? (
+              <div className="py-20 text-center">
+                <ShoppingBag className="mx-auto mb-4 size-12 text-muted-foreground/50" />
+                <p className="text-sm font-medium text-muted-foreground">
+                  No active orders right now
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground/70">
+                  New orders will appear here automatically
+                </p>
+              </div>
+            ) : shown.length === 0 ? (
+              <p className="rounded-xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">No orders match. Try another stage or clear the search.</p>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border bg-card">
+                <div aria-hidden className="hidden grid-cols-[7rem_minmax(0,1fr)_11rem_6rem] gap-4 border-b border-border bg-muted/40 px-4 py-2.5 text-xs font-semibold text-muted-foreground md:grid">
+                  <span>Order</span>
+                  <span>Customer</span>
+                  <span>Status</span>
+                  <span className="text-right">Total</span>
+                </div>
+                <ul className="divide-y divide-border">
+                {shown.map((order) => {
+                  const config = STATUS_STYLE[order.status];
+                  const StatusIcon = config?.icon ?? ShoppingBag;
+                  const isOpen = order.id === selectedOrderId;
+                  return (
+                    <li key={order.id}>
+                    <button
+                      onClick={() => selectOrder(order.id)}
+                      aria-current={isOpen ? "true" : undefined}
+                      className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 md:grid-cols-[7rem_minmax(0,1fr)_11rem_6rem] ${
+                        isOpen ? "bg-secondary" : "hover:bg-muted/40"
+                      }`}
+                    >
+                      <span className="col-start-1 row-start-2 text-xs text-muted-foreground md:row-start-1 md:text-sm">
+                        <span className="text-sm font-bold tabular-nums text-foreground">#{order.number}</span>
+                        <span className="block tabular-nums">
+                          {formatClockInZone(order.createdAt, timeZone)}, {order.lines.length} item{order.lines.length !== 1 ? "s" : ""}
+                        </span>
+                      </span>
+                      <span className="col-start-1 row-start-1 min-w-0 md:col-start-2">
+                        <span className="block truncate font-semibold text-foreground md:font-medium">{order.customer.name}</span>
+                        <span className="mt-0.5 block text-xs font-medium text-foreground" data-testid="order-card-fulfillment">
+                          {fulfillmentHeadline(order, timeZone)}
+                        </span>
+                      </span>
+                      <span className="col-start-1 row-start-3 flex flex-wrap items-center gap-1.5 md:col-start-3 md:row-start-1">
+                        <Badge variant={config?.variant ?? "outline"}>
+                          <StatusIcon aria-hidden className="size-3" />
+                          {orderStatusLabel(order.status, order.fulfillment)}
+                        </Badge>
+                        {order.disputed && <DisputedBadge />}
+                        {order.hasAccount && <AccountBadge />}
+                      </span>
+                      <span className="col-start-2 row-start-1 text-right font-semibold tabular-nums text-foreground md:col-start-4">
+                        {money(order.totalCents ?? order.subtotalCents)}
+                      </span>
+                    </button>
+                    </li>
+                  );
+                })}
+                </ul>
+              </div>
+            )}
+        </div>
+        {selectedOrder && (
+          <section
+            aria-label={`Order #${selectedOrder.number}`}
+            className="flex flex-col rounded-xl border border-border bg-card lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)]"
+            data-testid="order-panel"
+          >
+            <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
+              <button
+                onClick={() => selectOrder(null)}
+                className="flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <ArrowLeft className="size-4 lg:hidden" aria-hidden />
+                <X className="hidden size-4 lg:block" aria-hidden />
+                Back to orders
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+            <Card className="rounded-none border-0 bg-transparent pb-24 ring-0">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg font-bold tabular-nums">
@@ -774,16 +893,6 @@ export function OrderInbox({
                   </section>
                 )}
 
-                {selectedOrder.status === "AUTHORIZED" && (
-                  <Button
-                    className="mb-4 min-h-12 w-full rounded-full"
-                    onClick={() => handleAcceptClick(selectedOrder.id)}
-                    disabled={isPending}
-                  >
-                    <Check className="mr-2 size-4" /> Accept order
-                  </Button>
-                )}
-
                 <ActionError message={errorFor(selectedOrder.id)} setupHref={setupHrefFor(selectedOrder.id)} className="mb-4" />
 
                 {selectedOrder.status === "PICKING" && (
@@ -867,17 +976,6 @@ export function OrderInbox({
                       </Button>
                     )}
                   </div>
-                )}
-
-                {STORE_CANCELLABLE.includes(selectedOrder.status) && (
-                  <Button
-                    className="mb-4 min-h-12 w-full rounded-full"
-                    variant="destructive"
-                    onClick={() => handleCancelClick(selectedOrder.id)}
-                    disabled={isPending}
-                  >
-                    <XCircle className="mr-2 size-4" /> Cancel order
-                  </Button>
                 )}
 
                 {isOwner && (STORE_REFUNDABLE_FROM as readonly string[]).includes(selectedOrder.status) && (
@@ -979,85 +1077,34 @@ export function OrderInbox({
                 </div>
               </CardContent>
             </Card>
-          </div>
-        ) : (
-          <div>
-            {problems}
-            <BatchPicking orders={orders} storeParam={storeParam} />
-            {orders.length === 0 ? (
-              <div className="py-20 text-center">
-                <ShoppingBag className="mx-auto mb-4 size-12 text-muted-foreground/50" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  No active orders right now
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground/70">
-                  New orders will appear here automatically
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {orders.map((order) => {
-                  const config = STATUS_STYLE[order.status];
-                  return (
-                    <button
-                      key={order.id}
-                      onClick={() => selectOrder(order.id)}
-                      className="group/order w-full rounded-xl text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                    >
-                      <Card className="transition-colors group-hover/order:bg-muted/40 group-hover/order:ring-foreground/25">
-                        <CardContent className="flex items-center gap-4 px-4 py-3.5">
-                          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-                            {config?.icon ? (
-                              <config.icon className="size-5 text-primary" />
-                            ) : (
-                              <ShoppingBag className="size-5 text-primary" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                              <span className="text-sm font-bold tabular-nums text-foreground">
-                                #{order.number}
-                              </span>
-                              <Badge
-                                variant={config?.variant ?? "outline"}
-                              >
-                                {orderStatusLabel(order.status, order.fulfillment)}
-                              </Badge>
-                              {order.disputed && <DisputedBadge />}
-                              {order.hasAccount && <AccountBadge />}
-                            </div>
-                            <div className="mt-0.5 text-xs font-medium text-foreground" data-testid="order-card-fulfillment">
-                              {fulfillmentHeadline(order, timeZone)}
-                            </div>
-                            {/* At phone width the name takes its own line and the time joins the meta line (#737). */}
-                            <div className="mt-0.5 flex flex-col text-xs text-muted-foreground sm:flex-row sm:items-baseline sm:gap-1">
-                              <span className="min-w-0 truncate">
-                                {order.customer.name}
-                              </span>
-                              <span className="shrink-0 whitespace-nowrap tabular-nums">
-                                <span className="hidden sm:inline">&middot; </span>
-                                {order.lines.length} item{order.lines.length !== 1 ? "s" : ""} &middot; {money(order.totalCents ?? order.subtotalCents)}
-                                <span className="sm:hidden">
-                                  {" "}&middot; <Clock className="inline size-3 align-[-0.125em]" />{" "}
-                                  {formatClockInZone(order.createdAt, timeZone)}
-                                </span>
-                              </span>
-                            </div>
-                          </div>
-                          <div className="hidden shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground sm:flex">
-                            <Clock className="size-3" />
-                            {formatClockInZone(order.createdAt, timeZone)}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </button>
-                  );
-                })}
+            </div>
+            {(selectedOrder.status === "AUTHORIZED" || STORE_CANCELLABLE.includes(selectedOrder.status)) && (
+              <div className="sticky bottom-0 flex flex-wrap gap-2 rounded-b-xl border-t border-border bg-card p-3" data-assistant-avoid="">
+                {selectedOrder.status === "AUTHORIZED" && (
+                  <Button
+                    className="min-h-12 flex-1 rounded-full"
+                    onClick={() => handleAcceptClick(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <Check className="mr-2 size-4" /> Accept order
+                  </Button>
+                )}
+                {STORE_CANCELLABLE.includes(selectedOrder.status) && (
+                  <Button
+                    className="min-h-12 flex-1 rounded-full"
+                    variant={selectedOrder.status === "AUTHORIZED" ? "outline" : "destructive"}
+                    onClick={() => handleCancelClick(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <XCircle className="mr-2 size-4" /> Cancel order
+                  </Button>
+                )}
               </div>
             )}
-          </div>
+          </section>
         )}
-      </main>
+        </div>
+      </div>
 
       <Dialog open={shortLine !== null} onOpenChange={(open) => !open && setShortLine(null)}>
         <DialogContent>

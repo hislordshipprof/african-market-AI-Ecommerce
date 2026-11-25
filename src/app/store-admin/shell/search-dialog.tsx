@@ -19,8 +19,15 @@ export function SearchDialog({ open, onOpenChange, storeSlug }: { open: boolean;
   const seq = useRef(0);
   const store = `store=${encodeURIComponent(storeSlug)}`;
 
-  useEffect(() => {
-    const q = query.trim();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  function search(value: string) {
+    setQuery(value);
+    if (timer.current) clearTimeout(timer.current);
+    const q = value.trim();
     const mine = ++seq.current;
     if (!q) {
       setResults(EMPTY);
@@ -28,7 +35,7 @@ export function SearchDialog({ open, onOpenChange, storeSlug }: { open: boolean;
       return;
     }
     setState("loading");
-    const timer = setTimeout(() => {
+    timer.current = setTimeout(() => {
       adminSearchAction(q)
         .then((found) => {
           if (seq.current !== mine) return;
@@ -37,8 +44,7 @@ export function SearchDialog({ open, onOpenChange, storeSlug }: { open: boolean;
         })
         .catch(() => seq.current === mine && setState("failed"));
     }, DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [query]);
+  }
 
   function close() {
     onOpenChange(false);
@@ -58,7 +64,7 @@ export function SearchDialog({ open, onOpenChange, storeSlug }: { open: boolean;
             autoFocus
             type="search"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => search(event.target.value)}
             placeholder="Order number, customer or product"
             aria-label="Search orders, products and customers"
             className="h-14 min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"

@@ -80,8 +80,10 @@ export function storeAdminNav({ role, newOrders, unreadMessages, payoutsAlert }:
       label: group.label,
       items: group.items
         .filter((item) => owner || !item.ownerOnly)
-        .map(({ ownerOnly: _ownerOnly, count: n, alert, ...item }) => ({
-          ...item,
+        .map(({ label, path, icon, count: n, alert }) => ({
+          label,
+          path,
+          icon,
           ...(n !== undefined ? { count: n } : {}),
           ...(alert !== undefined ? { alert } : {}),
         })),
