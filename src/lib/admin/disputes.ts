@@ -11,6 +11,11 @@ export const DISPUTE_QUEUE_LIMIT = 200;
  */
 export async function listOpenDisputes() {
   await requirePlatformAdmin();
+  return readOpenDisputes();
+}
+
+/** The open disputes without the session check, for the admin briefing's daily email (#834). */
+export async function readOpenDisputes() {
   const checkedAt = new Date();
   const found = await platformAdminTransaction((tx) =>
     tx.paymentDispute.findMany({

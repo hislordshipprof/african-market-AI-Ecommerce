@@ -5,7 +5,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { Prisma, platformAdminTransaction } from "../db";
 import { requirePlatformAdmin } from "../admin/session";
 import { parseInput } from "../security/parse-input";
-import { messageBodySchema, orderMessagesTag, PLATFORM_QUEUE_WHERE, type ThreadMessage } from "./thread";
+import { messageBodySchema, orderMessagesTag, PLATFORM_QUEUE_WHERE, platformWaitingWhere, type ThreadMessage } from "./thread";
 
 const QUEUE_LIMIT = 100;
 const THREAD_ID = /^[A-Za-z0-9_-]{1,200}$/;
@@ -56,7 +56,7 @@ export async function listEscalatedThreads(selectedThreadId?: string): Promise<{
     const listed = PLATFORM_QUEUE_WHERE;
     const lastReplyAt = tx.supportThread.fields.lastReplyAt;
     const waiting = await tx.supportThread.findMany({
-      where: { ...listed, OR: [{ state: "escalated" }, { lastReplyAt: null }, { lastCustomerAt: { gt: lastReplyAt } }] },
+      where: platformWaitingWhere(lastReplyAt),
       orderBy: { escalatedAt: "asc" },
       take: QUEUE_LIMIT,
       select: QUEUE_SELECT,
