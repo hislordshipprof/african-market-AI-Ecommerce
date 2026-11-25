@@ -4,7 +4,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { catalogImageUrl } from "../r2";
-import { storeScoped } from "../db";
+import { storeScoped, storeScopedTransaction } from "../db";
 
 import {
   listCategories,
@@ -17,6 +17,7 @@ import {
   getListingsByCategory,
   getFlowCatalog,
   extractStoreProfile,
+  getListingFacts,
 } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -388,6 +389,33 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(detail!.id).toBe(listingAId);
     expect(detail!.displayName).toBe("Fluted Pumpkin Leaves");
     expect(detail!.variants.length).toBe(2);
+  });
+
+  it("the product page gets catering terms, a prepared item's stated allergens and claims, and the stock left (#808)", async () => {
+    const scoped = storeScoped(storeAId);
+    const chinChin = await scoped.listing.create({
+      data: {
+        storeId: storeAId, customName: "Chin Chin 808", price: 599, stockMode: "counted", qty: 3, frozen: false, perishable: false,
+        prepared: "cold", cateringLeadHours: 72, cateringMinQty: 4,
+      },
+    });
+    await scoped.listingVariant.create({ data: { listingId: chinChin.id, label: "8 oz bag", price: 599, weightG: 227 } });
+    await storeScopedTransaction(storeAId, (tx) => tx.listingAttributes.create({
+      data: { listingId: chinChin.id, storeId: storeAId, allergens: ["wheat"], allergensStatus: "known", dietaryClaims: ["vegetarian"], dietaryStatus: "known" },
+    }));
+    const detail = await getListingDetail(storeAId, chinChin.id);
+    expect(detail).toMatchObject({ catering: { leadHours: 72, minQty: 4 }, prepared: "cold" });
+    expect(await getListingFacts(storeAId, chinChin.id)).toEqual({ stockLeft: 3, allergens: ["wheat"], dietary: ["vegetarian"] });
+    const card = (await getActiveListings(storeAId)).find((listing) => listing.id === chinChin.id);
+    expect(card).toMatchObject({ stockLeft: 3, cateringMinQty: 4 });
+    const flow = (await getFlowCatalog(storeAId)).find((item) => item.listingId === chinChin.id);
+    expect(flow).toMatchObject({ stockLeft: 3, cateringMinQty: 4 });
+  });
+
+  it("the product page states nothing for unknown allergens or for grocery, and no stock count outside counted mode (#808)", async () => {
+    expect(await getListingFacts(storeBId, listingBId)).toEqual({ stockLeft: undefined, allergens: null, dietary: null });
+    expect(await getListingFacts(storeAId, listingAId)).toMatchObject({ stockLeft: 20, allergens: null });
+    expect(await getListingFacts(storeBId, listingAId)).toBeNull();
   });
 
   it("listing detail returns null for cross-store access", async () => {

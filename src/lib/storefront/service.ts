@@ -5,12 +5,14 @@ import { listingAvailable, stockBadge, type StockBadge, type StockBadgeInput } f
 import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
-import { effectiveMaxPerOrder } from "../cart/limits";
+import { countedStockLeft, effectiveMaxPerOrder } from "../cart/limits";
+import { listingAttributes } from "../catalog/listing-attributes";
+import type { Allergen, DietaryClaim } from "../catalog/attributes";
 import type { ShopperNeed } from "../catalog/attributes";
 import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 import type { CartAlternative } from "../cart/service";
-import { isPreparedKind } from "../listing/prepared";
+import { isPreparedKind, type PreparedKind } from "../listing/prepared";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
 const notE2eListing = {
@@ -64,10 +66,10 @@ async function readGetFlowCatalog(
       categoryId: aisleOf(listing)?.id ?? "uncategorized",
       frozen: listing.frozen,
       prepared: isPreparedKind(listing.prepared) ? listing.prepared : null,
-      catering: listing.cateringLeadHours != null && listing.cateringMinQty != null
-        ? { leadHours: listing.cateringLeadHours, minQty: listing.cateringMinQty }
-        : null,
+      catering: cateringTerms(listing),
       maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
+      stockLeft: countedStockLeft(listing),
+      cateringMinQty: listing.cateringMinQty ?? undefined,
       available: listingAvailable(listing),
     };
     return variants.length
@@ -162,6 +164,10 @@ export interface StorefrontListing {
   frozen: boolean;
   perishable: boolean;
   maxPerOrder: number;
+  /** Units left on a counted listing (#808). */
+  stockLeft?: number;
+  /** A catering item's minimum, which the first add puts in (#808). */
+  cateringMinQty?: number;
   imageUrl?: string;
   categorySlug?: string;
   variantId?: string;
@@ -199,6 +205,7 @@ export function projectStorefrontListing(listing: {
   frozen: boolean;
   perishable: boolean;
   maxPerOrder?: number | null;
+  cateringMinQty?: number | null;
   imageUrl?: string | null;
   masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
   category?: { slug: string } | null;
@@ -250,6 +257,8 @@ export function projectStorefrontListing(listing: {
     frozen: listing.frozen,
     perishable: listing.perishable,
     maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
+    stockLeft: countedStockLeft(listing),
+    cateringMinQty: listing.cateringMinQty ?? undefined,
   };
 }
 
@@ -294,6 +303,9 @@ export interface StorefrontListingDetail {
   description?: string;
   price: number;
   maxPerOrder: number;
+  prepared: PreparedKind | null;
+  /** Catering (#571): ordered this many hours ahead, at least this many. */
+  catering: { leadHours: number; minQty: number } | null;
   variants: {
     id: string;
     label: string;
@@ -341,12 +353,42 @@ async function readGetListingDetail(
     } satisfies StockBadgeInput),
     frozen: listing.frozen,
     perishable: listing.perishable,
+    prepared: isPreparedKind(listing.prepared) ? listing.prepared : null,
+    catering: cateringTerms(listing),
     variants: orderPacks(listing.variants).map((v) => ({
       id: v.id,
       price: v.price,
       ...shownPack(v),
     })),
   };
+}
+
+function cateringTerms(listing: { cateringLeadHours: number | null; cateringMinQty: number | null }) {
+  return listing.cateringLeadHours != null && listing.cateringMinQty != null
+    ? { leadHours: listing.cateringLeadHours, minQty: listing.cateringMinQty }
+    : null;
+}
+
+export interface ListingFacts {
+  stockLeft?: number;
+  /** A prepared item's allergens and dietary claims as stated; null when unknown or not prepared food. */
+  allergens: Allergen[] | null;
+  dietary: DietaryClaim[] | null;
+}
+
+/**
+ * What the product page must never show stale (#808), read outside the storefront cache:
+ * an order moves counted stock and an owner corrects allergens without revalidating it.
+ */
+export async function getListingFacts(storeId: string, listingId: string): Promise<ListingFacts | null> {
+  const [listing, attributes] = await Promise.all([
+    storeScoped(storeId).listing.findUnique({ where: { id: listingId }, select: { stockMode: true, qty: true, prepared: true } }),
+    listingAttributes(storeId, listingId),
+  ]);
+  if (!listing || !attributes) return null;
+  const stated = <T>(group: { status: string; values: T[] }) =>
+    listing.prepared != null && group.status !== "unknown" ? group.values : null;
+  return { stockLeft: countedStockLeft(listing), allergens: stated(attributes.allergens), dietary: stated(attributes.dietary) };
 }
 
 export interface SearchResult {

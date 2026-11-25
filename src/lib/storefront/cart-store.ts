@@ -16,6 +16,10 @@ export interface CartItem {
   maxPerOrder?: number;
   /** False when the server says the listing is no longer sold or is out of stock (#717 AC2). */
   available?: boolean;
+  /** Units left on a counted listing; steppers stop there and the page says "Only N left" (#808). */
+  stockLeft?: number;
+  /** A catering item's minimum: the first add puts this many in (#808). */
+  cateringMinQty?: number;
 }
 export interface CartLine extends CartItem {
   quantity: number;
