@@ -26,8 +26,10 @@ test.describe("Order inbox", () => {
     await expect(page.locator("text=Adaeze Chukwu").first()).toBeVisible();
 
     const firstCard = page.locator("button", { hasText: "#1001" });
-    await expect(firstCard.locator("text=/\\d+ items?/")).toBeVisible();
-    const itemText = await firstCard.locator("text=/\\d+ items?/").textContent();
+    // The row carries its item count twice, one for a wide list and one for a stacked list.
+    const itemCount = firstCard.locator("text=/\\d+ items?/").filter({ visible: true });
+    await expect(itemCount).toBeVisible();
+    const itemText = await itemCount.textContent();
     const count = parseInt(itemText?.match(/(\d+)/)?.[1] ?? "0", 10);
     expect(count).toBeGreaterThan(0);
   });
