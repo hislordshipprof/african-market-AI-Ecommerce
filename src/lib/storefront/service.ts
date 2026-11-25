@@ -107,12 +107,18 @@ export async function readCartAlternatives(
 ): Promise<Map<string, CartAlternative[]>> {
   const result = new Map<string, CartAlternative[]>();
   if (!wanted.length) return result;
+  // A line's category may be a subcategory; the picks come from its whole aisle (#861).
+  const categories = await platform.category.findMany({
+    where: { id: { in: [...new Set(wanted.map((entry) => entry.categoryId))] } },
+    select: { id: true, parentId: true },
+  });
+  const aisleIdOf = new Map(categories.map((category) => [category.id, category.parentId ?? category.id]));
   const listings = await storeScoped(storeId).listing.findMany({
     where: {
       active: true,
       ...notE2eListing,
       id: { notIn: excludeListingIds },
-      ...inAisle({ in: [...new Set(wanted.map((entry) => entry.categoryId))] }),
+      ...inAisle({ in: [...new Set(aisleIdOf.values())] }),
     },
     include: { masterProduct: { include: { category: withAisle } }, category: withAisle, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
@@ -120,10 +126,11 @@ export async function readCartAlternatives(
   });
   const inStock = listings.filter((listing) => listingAvailable(listing) && listing.variants.length > 0);
   for (const { lineId, categoryId } of wanted) {
+    const aisleId = aisleIdOf.get(categoryId) ?? categoryId;
     result.set(
       lineId,
       inStock
-        .filter((listing) => aisleOf(listing)?.id === categoryId)
+        .filter((listing) => aisleOf(listing)?.id === aisleId)
         .slice(0, perLine)
         .map((listing) => {
           const card = projectStorefrontListing(listing);
