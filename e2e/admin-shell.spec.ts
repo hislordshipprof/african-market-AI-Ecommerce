@@ -133,6 +133,28 @@ test.describe("Platform admin shell, design A (#859)", () => {
     await expect(page).toHaveURL(/\/admin\/orders\/search\/[^/]+$/, { timeout: 15000 });
   });
 
+  test("⌘K right after Esc keeps what the admin types in the reopened palette", async ({ page }) => {
+    const palette = page.getByRole("dialog", { name: "Go to" });
+    await expect(async () => {
+      await page.keyboard.press("ControlOrMeta+k");
+      await expect(palette).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 15000 });
+    // Close, reopen with ⌘K and type in one task, so the browser's queued close event lands after the typing,
+    // as it does when the main thread is busy.
+    await page.evaluate(() => {
+      const dialog = document.querySelector<HTMLDialogElement>("dialog[aria-label='Go to']")!;
+      dialog.close();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, ctrlKey: true }));
+      const input = dialog.querySelector("input")!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "courier");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    await expect(palette).toBeVisible();
+    await expect(palette.getByRole("combobox")).toHaveValue("courier");
+    await expect(palette.getByRole("option")).toHaveText([/Courier incidents/, /Courier settings/]);
+  });
+
   test("Home shows real counts and today's sales", async ({ page }) => {
     const [stores, active, disputes] = await asAdmin((tx) => Promise.all([
       tx.store.count(),

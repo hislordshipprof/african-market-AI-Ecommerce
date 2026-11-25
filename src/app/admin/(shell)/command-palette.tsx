@@ -38,9 +38,13 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // The dialog is opened and closed directly, never from state, so a close and a quick ⌘K cannot race.
+  // Cleared on open, not on close: the close event is queued and can land after a quick ⌘K and typing.
   function show() {
-    if (dialog.current && !dialog.current.open) dialog.current.showModal();
+    if (!dialog.current || dialog.current.open) return;
+    setQuery("");
+    setFound(null);
+    setActive(0);
+    dialog.current.showModal();
   }
 
   const searchable = parsePaletteQuery(query).text !== "";
@@ -94,11 +98,6 @@ export function CommandPalette() {
       <dialog
         ref={dialog}
         aria-label="Go to"
-        onClose={() => {
-          setQuery("");
-          setFound(null);
-          setActive(0);
-        }}
         onClick={(event) => {
           if (event.target === dialog.current) dialog.current.close();
         }}
