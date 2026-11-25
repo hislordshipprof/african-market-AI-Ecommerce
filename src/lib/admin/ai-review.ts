@@ -151,7 +151,7 @@ export function copilotTranscript(messages: unknown, asker: "owner" | "admin" = 
         if (names.length > 0) parts.push({ kind: "choices", names });
       }
     }
-    out.push({ id: String(index), role, parts });
+    out.push({ id: String(index), role: role === "assistant" ? "assistant" : asker, parts });
   });
   return out;
 }
