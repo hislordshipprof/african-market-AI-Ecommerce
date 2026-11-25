@@ -1,10 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftRight, BellRing, Camera, Landmark, MapPin, Palette, Plus, Smartphone, Sparkles, Store, Truck, UserRound,
 } from "lucide-react";
-import { PlanComparison } from "@/components/billing/plan-comparison";
 import { cuisineChips } from "@/lib/directory/cuisine-filter";
 import { SELL_STEPS } from "@/lib/store-application/steps";
 import ordersScreen from "../../../public/images/directory/store-admin-orders.webp";
@@ -20,7 +20,7 @@ import styles from "./directory.module.css";
  * The Store directory home, design B2 (#863): the shopper's search first, then what the platform gives
  * shoppers and store owners. Plans, the pilot offer and the fee note come from code, never this page.
  */
-export function DirectoryHome({ stores, states, offer, feeNote }: { stores: CardStore[]; states: StateGroup[]; offer?: string; feeNote: string }) {
+export function DirectoryHome({ stores, states, plans, feeNote }: { stores: CardStore[]; states: StateGroup[]; plans: ReactNode; feeNote: ReactNode }) {
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
@@ -51,7 +51,7 @@ export function DirectoryHome({ stores, states, offer, feeNote }: { stores: Card
           figure={<HeroFigure />}
         />
         <ForShoppers feeNote={feeNote} />
-        <ForOwners offer={offer} />
+        <ForOwners plans={plans} />
         {states.length > 0 ? <ByState states={states} /> : null}
         <section aria-labelledby="close-title" className={styles.section}>
           <div className={styles.closing}>
@@ -143,7 +143,7 @@ const SHOPPING_STEPS = [
   { title: "Pay that market directly", body: "The market is the seller, so its name is on your card statement. It packs your order for pickup or delivery." },
 ];
 
-function ForShoppers({ feeNote }: { feeNote: string }) {
+function ForShoppers({ feeNote }: { feeNote: ReactNode }) {
   return (
     <section id="shoppers" aria-labelledby="shoppers-title" className={styles.section}>
       <div className={styles.split}>
@@ -181,7 +181,7 @@ const OWNER_BENEFITS: Benefit[] = [
   { icon: Landmark, title: "Paid through Stripe", body: "Customers pay by card at checkout, and Stripe pays your sales into your bank." },
 ];
 
-function ForOwners({ offer }: { offer?: string }) {
+function ForOwners({ plans }: { plans: ReactNode }) {
   return (
     <section id="sell" aria-labelledby="owners-title" className={styles.section}>
       <div className={styles.owners}>
@@ -222,7 +222,7 @@ function ForOwners({ offer }: { offer?: string }) {
           <p className={styles.note}>Any independent US grocery or food store can apply. Restaurants cannot join yet.</p>
         </div>
         <div className={styles.planTheme}>
-          <PlanComparison offer={offer} recommend />
+          {plans}
         </div>
       </div>
     </section>
@@ -245,7 +245,10 @@ function Steps({ steps, columns }: { steps: readonly { title: string; body: stri
   );
 }
 
-/** Every state with a listed store and its cities, one tap from home (#810); footers link here. */
+/**
+ * Every state with a listed store and its cities, one tap from home (#810); footers link here.
+ * No prefetch: up to fifty state and city pages would render on every home view.
+ */
 function ByState({ states }: { states: StateGroup[] }) {
   return (
     <section aria-labelledby={STATES_ANCHOR} className={styles.section}>
@@ -253,7 +256,7 @@ function ByState({ states }: { states: StateGroup[] }) {
       <ul className={styles.stateCards}>
         {states.map((state) => (
           <li key={state.code} className={styles.stateCard}>
-            <Link href={state.href} className={styles.stateLink}>
+            <Link href={state.href} className={styles.stateLink} prefetch={false}>
               {state.name}
               <span className={styles.placeCount}>{state.count === 1 ? "1 market" : `${state.count} markets`}</span>
             </Link>
@@ -261,7 +264,7 @@ function ByState({ states }: { states: StateGroup[] }) {
               <ul className={styles.cityLinks}>
                 {state.cities.map((city) => (
                   <li key={city.href}>
-                    <Link href={city.href}>
+                    <Link href={city.href} prefetch={false}>
                       <span>{city.name}</span>
                       <span className={styles.placeCount}>{city.count}</span>
                     </Link>

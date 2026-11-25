@@ -12,7 +12,7 @@ import { DirectoryPlace } from "./directory-place";
 
 const TEXAS = { code: "TX", name: "Texas", href: "/stores/texas", count: 1, cities: [{ name: "Houston", href: "/stores/texas/houston", count: 1 }] };
 
-const home = (states: (typeof TEXAS)[]) => renderToStaticMarkup(createElement(DirectoryHome, { stores: [], states, feeNote: "Prices are the market's own." }));
+const home = (states: (typeof TEXAS)[]) => renderToStaticMarkup(createElement(DirectoryHome, { stores: [], states, plans: null, feeNote: "Prices are the market's own." }));
 const footer = (html: string) => /<footer[^>]*>([\s\S]*)<\/footer>/.exec(html)?.[1] ?? "";
 
 // State and city pages are reachable without a search or the sitemap (#810).

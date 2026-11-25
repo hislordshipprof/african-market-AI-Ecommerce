@@ -20,6 +20,8 @@ import { MarketMarquee } from "@/components/storefront/marquee";
 import { ReviewsCarousel } from "@/components/storefront/reviews-carousel";
 import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
 import { headers } from "next/headers";
+import { Suspense } from "react";
+import { PlanComparison } from "@/components/billing/plan-comparison";
 import { listDirectoryStores } from "@/lib/directory/stores";
 import { storefrontUrl } from "@/lib/directory/links";
 import { DirectoryHome } from "@/components/directory/directory-home";
@@ -27,6 +29,16 @@ import { statePages } from "@/lib/directory/places";
 import { feeNote } from "@/lib/directory/fee-note";
 import { pilotOffer } from "@/lib/billing/service";
 import { readServiceFeeSettings } from "@/lib/order/service-fee-settings";
+
+// The pilot offer and the fee note read the database, so they stream in on their own and the rest of the
+// home renders in one pass: a /#stores-by-state link then lands on the list (#810, #863).
+async function DirectoryPlans() {
+  return <PlanComparison offer={await pilotOffer()} recommend />;
+}
+
+async function DirectoryFeeNote() {
+  return feeNote(await readServiceFeeSettings());
+}
 
 export default async function StorefrontPage() {
   const headerList = await headers();
@@ -44,8 +56,14 @@ export default async function StorefrontPage() {
       count: stores.length,
       cities: cities.map((city) => ({ name: city.name, href: `/stores/${slug}/${city.slug}`, count: city.stores.length })),
     }));
-    const [offer, fees] = await Promise.all([pilotOffer(), readServiceFeeSettings()]);
-    return <DirectoryHome stores={stores} states={states} offer={offer} feeNote={feeNote(fees)} />;
+    return (
+      <DirectoryHome
+        stores={stores}
+        states={states}
+        plans={<Suspense fallback={<PlanComparison recommend />}><DirectoryPlans /></Suspense>}
+        feeNote={<Suspense fallback={null}><DirectoryFeeNote /></Suspense>}
+      />
+    );
   }
   const { store, suspended } = await getStoreWithStatus();
   const checkout = checkCheckoutReady(store);
