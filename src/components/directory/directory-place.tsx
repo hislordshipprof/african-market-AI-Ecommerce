@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { groceryStoreJsonLd, jsonLdHtml } from "@/lib/directory/json-ld";
+import { DirectoryFooter } from "./directory-footer";
 import { StoreCard, type CardStore } from "./store-card";
 import styles from "./directory.module.css";
 
@@ -47,6 +48,7 @@ export function DirectoryPlace({ crumbs, title, lede, stores, places }: {
         </section>
         {places && places.links.length > 0 ? <PlaceLinks {...places} /> : null}
       </main>
+      <DirectoryFooter />
     </div>
   );
 }
