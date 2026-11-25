@@ -155,6 +155,7 @@ function SearchInput({ storeId }: { storeId: string }) {
     ...suggestions.map((s, i) => searchRow("suggestion", s.text, i)),
     ...aisles.map((a, i) => ({ id: `sf-search-aisle-${i}`, href: `/categories/${a.slug}`, remember: typed })),
     ...products.map((p, i) => ({ id: `sf-search-product-${i}`, href: `/listings/${p.id}`, remember: typed })),
+    ...(products.length ? [{ id: "sf-search-all", href: `/search?q=${encodeURIComponent(typed)}`, remember: typed }] : []),
   ];
   const rowById = new Map(rows.map((row, i) => [row.id, i]));
   const activeId = rows[active]?.id;
@@ -348,14 +349,7 @@ function SearchInput({ storeId }: { storeId: string }) {
           )),
         )}
         {products.length > 0 && (
-          <Link
-            className="sf-suggest-all"
-            href={`/search?q=${encodeURIComponent(typed)}`}
-            onClick={() => {
-              rememberSearch(storeId, typed);
-              setOpen(false);
-            }}
-          >
+          <Link className="sf-suggest-all" {...optionProps("sf-search-all")}>
             See all results <ArrowUpRight size={16} />
           </Link>
         )}

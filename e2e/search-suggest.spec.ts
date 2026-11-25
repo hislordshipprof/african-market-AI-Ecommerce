@@ -27,7 +27,7 @@ test.describe("search box suggests as you type (#835)", () => {
     await expect(search).toHaveAttribute("aria-activedescendant", (await palmOil.getAttribute("id"))!);
     await expect(palmOil).toHaveAttribute("aria-selected", "true");
     await search.press("ArrowUp");
-    await expect(products.getByRole("option").last()).toHaveAttribute("aria-selected", "true");
+    await expect(box.getByRole("option", { name: "See all results" })).toHaveAttribute("aria-selected", "true");
     await search.press("Escape");
     await expect(search).toHaveAttribute("aria-expanded", "false");
 

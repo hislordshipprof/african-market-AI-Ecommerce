@@ -404,6 +404,11 @@ html:has(.sf-header) {
 .sf-search-dropdown a[data-active="true"] {
   background: var(--color-soft);
 }
+/* The keyboard row also gets a ring, so the highlight never rests on colour alone. */
+.sf-search-dropdown a[data-active="true"] {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
 .sf-suggest-group + .sf-suggest-group {
   margin-top: 4px;
   padding-top: 8px;
