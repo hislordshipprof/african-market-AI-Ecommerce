@@ -341,7 +341,7 @@ async function readGetListingDetail(
     ...names,
     altName: names.altName ?? localNameFor(names.displayName),
     imageUrl: listingImage(listing),
-    description: photo?.description,
+    description: listing.description ?? photo?.description,
     categorySlug: aisleOf(listing)?.slug,
     price: listing.price,
     maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),

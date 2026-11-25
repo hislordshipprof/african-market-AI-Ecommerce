@@ -76,7 +76,7 @@ export default async function CopilotPage() {
             chatAllowed ? undefined : (
               <PlanLocked
                 title={FEATURE_LABELS["store-assistant"]}
-                description="Ask how sales went this week or what sold most, and tell it what came in or sold at the counter. It answers from your own orders and drafts stock changes, coupons, price changes and one-day hours or delivery changes for you to confirm. Your past chats stay here to read."
+                description="Ask how sales went this week or what sold most, and tell it what came in or sold at the counter. It answers from your own orders, lists the listings that need fixing, and drafts stock changes, coupons, price changes, one-day hours or delivery changes and product descriptions for you to confirm. Your past chats stay here to read."
                 storeSlug={session.store.slug}
               />
             )

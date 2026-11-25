@@ -62,14 +62,27 @@ export interface ChoiceCard extends ListingChoice {
   open: boolean;
 }
 
+/** What an active listing lacks for shoppers (#820). */
+export const LISTING_GAPS = ["photo", "aisle", "description", "allergens"] as const;
+export type ListingGap = (typeof LISTING_GAPS)[number];
+
+/** One listing to fix, with the link that opens its form. Stored on the assistant message that listed it. */
+export interface ListingFix {
+  listingId: string;
+  name: string;
+  missing: ListingGap[];
+  href: string;
+}
+
 export interface PanelMessage {
   role: "owner" | "assistant";
   text: string;
   messageId?: string;
   choices?: ChoiceCard[];
+  fixes?: ListingFix[];
 }
 
-export const DRAFT_KINDS = ["coupon", "price", "store_change"] as const;
+export const DRAFT_KINDS = ["coupon", "price", "store_change", "description"] as const;
 export type DraftKind = (typeof DRAFT_KINDS)[number];
 /** Coupon, price and store-change drafts wait this long for the owner (#819); stock proposals keep 60 minutes. */
 export const DRAFT_HOURS = 24;
@@ -109,7 +122,9 @@ export type DraftCard =
   /** `applied` lists the lines the owner kept ticked, once confirmed. */
   | (DraftCardBase & { kind: "price"; lines: PriceLine[]; applied: string[] | null })
   /** `ends` is when it stops applying, in the store's zone, such as "the end of today, Tue Nov 24". */
-  | (DraftCardBase & { kind: "store_change"; text: string; endsAt: string; ends: string });
+  | (DraftCardBase & { kind: "store_change"; text: string; endsAt: string; ends: string })
+  /** A product description (#820); the owner can edit `text` before confirming. */
+  | (DraftCardBase & { kind: "description"; listingId: string; name: string; text: string });
 
 export type DraftConfirmResult =
   | { ok: true; draft: DraftCard }
@@ -132,6 +147,7 @@ export type SendResult =
     proposals: StockProposalCard[];
     choices: ChoiceCard[];
     drafts: DraftCard[];
+    fixes: ListingFix[];
   }
   | { ok: false; code: SendCode; message: string; retryAfter?: number };
 

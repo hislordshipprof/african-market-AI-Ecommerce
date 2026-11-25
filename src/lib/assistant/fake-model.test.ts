@@ -16,6 +16,7 @@ function basketRequest(): RequestInit & { url: string } {
     body: JSON.stringify({
       model: "claude-haiku-5-5",
       max_tokens: 256,
+      stream: true,
       messages: [{ role: "user", content: "show my basket" }],
     }),
   };
@@ -82,5 +83,17 @@ describe("assistant e2e fake", () => {
     const restartedId = restarted[0]?.id ?? "";
     expect(ID_SHAPE.test(restartedId)).toBe(true);
     expect(ids).not.toContain(restartedId);
+  });
+  it("answers a non-streamed call (the store chat's reply suggestion) with one JSON message (#820)", async () => {
+    const { url, ...init } = basketRequest();
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    const response = await scriptedAssistantFetch(url, {
+      ...init,
+      body: JSON.stringify({ ...body, stream: undefined, messages: [{ role: "user", content: "<order>{}</order>\n<thread>[]</thread>" }] }),
+    });
+    expect(response.headers.get("content-type")).toMatch(/application\/json/);
+    const message = (await response.json()) as { type: string; content: Array<{ type: string; text: string }>; stop_reason: string };
+    expect(message).toMatchObject({ type: "message", stop_reason: "end_turn" });
+    expect(message.content[0]?.text).toMatch(/checking your order/);
   });
 });

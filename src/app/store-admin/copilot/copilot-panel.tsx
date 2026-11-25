@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type KeyboardEvent, type ReactNode } from "react";
+import Link from "next/link";
 import { CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +12,7 @@ import {
   rejectStockProposal,
   sendCopilotMessage,
 } from "@/lib/copilot/actions";
-import type { ChoiceCard, CouponFields, DraftCard, PanelMessage, StockProposalCard } from "@/lib/copilot/types";
+import type { ChoiceCard, CouponFields, DraftCard, ListingFix, PanelMessage, StockProposalCard } from "@/lib/copilot/types";
 import { DraftCardView } from "./draft-card";
 
 const KIND: Record<StockProposalCard["kind"], string> = {
@@ -106,7 +107,7 @@ export function CopilotPanel({
       setMessages((current) => [
         ...current,
         { role: "owner", text: draft.trim() },
-        { role: "assistant", text: result.reply, messageId, choices: result.choices },
+        { role: "assistant", text: result.reply, messageId, choices: result.choices, fixes: result.fixes },
       ]);
       setProposals((current) => [...result.proposals, ...current]);
       setDrafts((current) => [...result.drafts, ...current]);
@@ -188,7 +189,7 @@ export function CopilotPanel({
     });
   }
 
-  function decideDraft(draftId: string, action: "confirm" | "dismiss", edits: { coupon?: CouponFields; variantIds?: string[] } = {}) {
+  function decideDraft(draftId: string, action: "confirm" | "dismiss", edits: { coupon?: CouponFields; variantIds?: string[]; description?: string } = {}) {
     setBusy({ kind: action, id: draftId });
     startTransition(async () => {
       if (action === "dismiss") {
@@ -343,6 +344,7 @@ export function CopilotPanel({
                     <span className="mb-1 block text-[0.8125rem] font-semibold">{message.role === "owner" ? "You" : "Copilot"}</span>
                     {plain(message.text)}
                   </p>
+                  {message.fixes?.length ? <FixList fixes={message.fixes} /> : null}
                   {message.messageId && message.choices?.map((choice) => {
                     const messageId = message.messageId!;
                     const chosen = choice.candidates.find((candidate) => candidate.listingId === choice.chosenListingId);
@@ -481,6 +483,36 @@ export function CopilotPanel({
           )}
         </form>
       </div>
+    </section>
+  );
+}
+
+const GAP_LABELS: Record<ListingFix["missing"][number], string> = {
+  photo: "photo",
+  aisle: "aisle",
+  description: "description",
+  allergens: "allergens",
+};
+
+/** The listings a "what needs fixing" reply named (#820), each a link to its form. */
+function FixList({ fixes }: { fixes: ListingFix[] }) {
+  return (
+    <section aria-label="Listings to fix" className="max-w-[65ch] rounded-xl border border-border bg-card px-4 py-2">
+      <ul className="flex flex-col divide-y divide-border">
+        {fixes.map((fix) => (
+          <li key={fix.listingId}>
+            <Link
+              href={fix.href}
+              className="flex min-h-11 flex-wrap items-baseline justify-between gap-x-3 py-2 text-base text-foreground underline-offset-4 hover:underline focus-visible:underline"
+            >
+              <span className="font-semibold">{fix.name}</span>
+              <span className="text-sm text-muted-foreground">
+                No {fix.missing.map((gap) => GAP_LABELS[gap]).join(", no ")}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

@@ -7,6 +7,7 @@ import { revalidateStorefront } from "../storefront/cache";
 import { chooseListing } from "./choices";
 import { answerAlert, confirmProposal, rejectProposal, type AnswerResult } from "./confirm";
 import { sendCopilotTurn } from "./turn";
+import { suggestReply, type ReplySuggestion } from "./reply-draft";
 import { DRAFT_MAKERS, confirmDraft, rejectDraft, storeSite } from "./drafts";
 import { revalidateStore } from "../get-store";
 import { PAYOUTS_SHOWN, storePayouts } from "../payouts/service";
@@ -54,6 +55,7 @@ const draftConfirmSchema = z.strictObject({
   draftId: z.string().min(1).max(200),
   coupon: couponFieldsSchema.optional(),
   variantIds: z.array(z.string().min(1).max(200)).min(1).max(20).optional(),
+  description: z.string().max(2000).optional(),
 });
 
 const draftSchema = z.strictObject({ draftId: z.string().min(1).max(200) });
@@ -161,7 +163,7 @@ export async function answerCopilotAlert(input: unknown): Promise<AnswerResult> 
   }
 }
 
-/** The owner confirms a coupon, price or store-change draft (#819), with the coupon terms or price lines as edited on the card. */
+/** The owner confirms a coupon, price, store-change (#819) or description (#820) draft, with the terms, price lines or text as edited on the card. */
 export async function confirmCopilotDraft(input: unknown): Promise<DraftConfirmResult> {
   const session = await requireStoreOwner();
   const parsed = parseInput(draftConfirmSchema, input);
@@ -169,7 +171,7 @@ export async function confirmCopilotDraft(input: unknown): Promise<DraftConfirmR
   const { draftId, ...edits } = parsed.data;
   try {
     const result = await confirmDraft(session.store.id, draftId, { id: session.user.id, email: session.user.email }, edits);
-    if (result.ok && result.draft.kind === "price") revalidateStorefront(session.store.id);
+    if (result.ok && (result.draft.kind === "price" || result.draft.kind === "description")) revalidateStorefront(session.store.id);
     if (result.ok && result.draft.kind === "store_change") {
       const site = await storeSite(session.store.id);
       if (site) revalidateStore(site);
@@ -190,5 +192,20 @@ export async function rejectCopilotDraft(input: unknown): Promise<RejectResult> 
   } catch (error) {
     console.error("[copilot] draft dismiss failed", { errorType: error instanceof Error ? error.name : "Error" });
     return { ok: false, code: "not_found" };
+  }
+}
+
+const replySchema = z.strictObject({ threadId: z.string().min(1).max(200) });
+
+/** A suggested reply to a customer thread (#820), for the owner to edit and send; it sends nothing. Owner only. */
+export async function suggestThreadReply(input: unknown): Promise<ReplySuggestion> {
+  const session = await requireStoreOwner();
+  const parsed = parseInput(replySchema, input);
+  if (!parsed.ok) return { ok: false, message: "Thread not found" };
+  try {
+    return await suggestReply(session.store.id, session.user.id, parsed.data.threadId);
+  } catch (error) {
+    console.error("[copilot] reply suggestion failed", { errorType: error instanceof Error ? error.name : "Error" });
+    return { ok: false, message: FIXED_ERROR };
   }
 }

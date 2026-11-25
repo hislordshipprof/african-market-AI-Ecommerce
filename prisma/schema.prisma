@@ -647,6 +647,8 @@ model Listing {
   categoryId          String?  @map("category_id")
   /// #787: the store's own photo; overrides the master product's photo for this listing only.
   imageUrl            String?  @map("image_url")
+  /// #820: the store's own words for the product page; the catalogue blurb shows when this is empty.
+  description         String?
   price               Int
   stockMode           String   @map("stock_mode")
   qty                 Int?

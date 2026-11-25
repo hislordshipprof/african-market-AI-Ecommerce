@@ -1,4 +1,4 @@
-import { HISTORY_MAX, isProposalKind, type ChoiceCandidate, type ListingChoice } from "./types";
+import { HISTORY_MAX, LISTING_GAPS, isProposalKind, type ChoiceCandidate, type ListingChoice, type ListingFix, type ListingGap } from "./types";
 
 export interface StoredMessage {
   role: "owner" | "assistant";
@@ -6,6 +6,8 @@ export interface StoredMessage {
   /** The owner's client message id for the turn this reply answers. */
   messageId?: string;
   choices?: ListingChoice[];
+  /** Listings this reply said need fixing (#820). */
+  fixes?: ListingFix[];
   /** What this reply cost, for AI oversight (#544). Never sent to the panel. */
   costMicros?: number;
 }
@@ -39,6 +41,19 @@ function parseChoice(value: unknown): ListingChoice | null {
   };
 }
 
+function parseFix(value: unknown): ListingFix | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Record<string, unknown>;
+  const listingId = str(item.listingId);
+  const name = str(item.name);
+  const href = str(item.href);
+  const missing = Array.isArray(item.missing)
+    ? item.missing.filter((gap): gap is ListingGap => (LISTING_GAPS as readonly unknown[]).includes(gap))
+    : [];
+  if (!listingId || !name || !href?.startsWith("/store-admin/listings?") || missing.length === 0) return null;
+  return { listingId, name, missing, href };
+}
+
 export function parseStoredMessages(value: unknown): StoredMessage[] {
   if (!Array.isArray(value)) return [];
   const messages: StoredMessage[] = [];
@@ -53,11 +68,14 @@ export function parseStoredMessages(value: unknown): StoredMessage[] {
     const choices = Array.isArray(rawChoices)
       ? rawChoices.map(parseChoice).filter((choice): choice is ListingChoice => choice !== null)
       : [];
+    const rawFixes = (item as { fixes?: unknown }).fixes;
+    const fixes = Array.isArray(rawFixes) ? rawFixes.map(parseFix).filter((fix): fix is ListingFix => fix !== null) : [];
     messages.push({
       role,
       text,
       ...(messageId ? { messageId } : {}),
       ...(choices.length > 0 ? { choices } : {}),
+      ...(fixes.length > 0 ? { fixes } : {}),
       ...(typeof costMicros === "number" && Number.isFinite(costMicros) ? { costMicros } : {}),
     });
   }

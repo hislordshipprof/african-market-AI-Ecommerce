@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { money } from "@/lib/format";
 import { Switch } from "@/components/ui/switch";
@@ -121,6 +122,8 @@ interface Listing {
   cateringMinQty: number | null;
   active: boolean;
   maxPerOrder: number | null;
+  /** #820: the store's own words; null shows the catalogue blurb. */
+  description: string | null;
   variants: Variant[];
 }
 
@@ -195,6 +198,8 @@ interface ListingFormFields {
   cateringUnit: string;
   cateringMinQty: string;
   maxPerOrder: string;
+  /** Sent only on update (#820). */
+  description: string;
   masterProductId: string | null;
   categoryId: string;
 }
@@ -227,6 +232,7 @@ function buildListingFormData(
   }
   // Update always sends maxPerOrder so clearing it works; create omits it when blank.
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
+  if (listingId) fd.set("description", fields.description);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
   else if (listingId) fd.set("masterProductId", "");
   fd.set("categoryId", fields.categoryId === NO_AISLE ? "" : fields.categoryId);
@@ -249,7 +255,9 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
   const [isPending, startTransition] = useTransition();
   const [createOpen, setCreateOpen] = useState(false);
   const [editListing, setEditListing] = useState<Listing | null>(null);
-  const [attributesListing, setAttributesListing] = useState<Listing | null>(null);
+  const [attributesListing, setAttributesListing] = useState<Listing | null>(() => (
+    canManage ? listings.find((listing) => listing.id === searchParams.get("allergens")) ?? null : null
+  ));
   const [stockListing, setStockListing] = useState<StockListing | null>(null);
   const [query, setQuery] = useState("");
 
@@ -267,6 +275,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
   const [cateringUnit, setCateringUnit] = useState("days");
   const [cateringMinQty, setCateringMinQty] = useState("1");
   const [maxPerOrder, setMaxPerOrder] = useState("");
+  const [description, setDescription] = useState("");
   const [masterProductId, setMasterProductId] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState(NO_AISLE);
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
@@ -390,6 +399,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
     setCateringLead(String(leadHours == null ? 1 : leadHours % 24 === 0 ? leadHours / 24 : leadHours));
     setCateringMinQty(String(listing.cateringMinQty ?? 1));
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
+    setDescription(listing.description ?? "");
     setMasterProductId(listing.masterProductId);
     setCategoryId(listing.categoryId ?? NO_AISLE);
     setVariants(listing.variants.map(loadedVariantRow));
@@ -403,6 +413,16 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
     selectedMasterNameRef.current = currentMaster?.name ?? null;
     setEditListing({ ...listing, qty: loadedQty });
   }
+
+  // The store chat's "what needs fixing" links open a listing's form (#820); the allergens link sets the state above.
+  useEffect(() => {
+    const target = canManage ? listings.find((listing) => listing.id === searchParams.get("edit")) : undefined;
+    if (!target) return;
+    const timer = setTimeout(() => openEdit(target));
+    return () => clearTimeout(timer);
+    // Once, from the link the page loaded with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function addVariantRow() {
     setVariants((prev) => [...prev, emptyVariantRow()]);
@@ -439,6 +459,7 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
     cateringUnit,
     cateringMinQty,
     maxPerOrder,
+    description,
     masterProductId,
     categoryId,
   };
@@ -585,6 +606,23 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
           required
         />
       </div>
+
+      {editListing && (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="listing-description">Description</Label>
+          <Textarea
+            id="listing-description"
+            value={description}
+            maxLength={600}
+            rows={3}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What it is, where it comes from, how it is used"
+          />
+          <p className="text-xs text-muted-foreground">
+            Shown on the product page. Leave it empty to show the catalogue description, if there is one.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <Label>Photo</Label>

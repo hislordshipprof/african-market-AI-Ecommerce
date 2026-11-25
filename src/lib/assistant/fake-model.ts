@@ -234,6 +234,8 @@ function retriedFailure(messages: unknown, needle: string): boolean {
 }
 
 function openingStep(lower: string, raw: string, messages: unknown): ScriptStep {
+  // The store chat's reply suggestion (#820) sends the order and thread as data.
+  if (lower.includes("<thread>")) return { kind: "text", text: "Thanks for your message. We are checking your order now and will update you here shortly." };
   if (lower.includes("overload") || lower.includes("mid-stream")) {
     const needle = lower.includes("mid-stream") ? "mid-stream" : "overload";
     if (retriedFailure(messages, needle)) return { kind: "text", text: "Recovered after the interruption." };
@@ -366,6 +368,22 @@ export const scriptedAssistantFetch: typeof fetch = async (input, init) => {
   const step = scriptStep(body?.messages);
   if (step.kind === "text" && step.delayMs) await new Promise((resolve) => setTimeout(resolve, step.delayMs));
   const model = String(body?.model ?? "");
+  // generateText sends no stream flag and reads one JSON message; only a text step is scripted that way.
+  if (body?.stream !== true) {
+    if (step.kind !== "text") {
+      return Response.json({ type: "error", error: { type: "overloaded_error", message: "Overloaded" }, request_id: "req_fake" }, { status: 529 });
+    }
+    return Response.json({
+      id: "msg_fake",
+      type: "message",
+      role: "assistant",
+      model,
+      content: [{ type: "text", text: step.text }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 12, output_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    });
+  }
   return new Response(sse(eventsFor(step, model)), {
     status: 200,
     headers: { "content-type": "text/event-stream" },

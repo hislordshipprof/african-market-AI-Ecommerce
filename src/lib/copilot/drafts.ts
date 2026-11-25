@@ -3,7 +3,7 @@ import { addDays, validDay } from "../analytics/range";
 import { parseCouponForm, type CouponInput } from "../coupon/form";
 import { storeLocalToUtc, utcToStoreLocal } from "../store-local-time";
 import { couponError, insertCoupon } from "../coupon/service";
-import { updateListingInTransaction } from "../listing/service";
+import { DESCRIPTION_MAX, updateListingInTransaction } from "../listing/service";
 import { normalizedSearchQuery } from "../storefront/search-query";
 import { storeChangeBefore, storeChangeError, writeStoreChange, type StoreChange } from "../store-settings/store-change";
 import { readWeeklyHours, WEEK_DAYS } from "../store-settings/weekly-hours";
@@ -13,6 +13,8 @@ import {
   DraftError,
   cardOf,
   type CouponDraftInput,
+  type DescriptionDraftInput,
+  type DescriptionFacts,
   type DraftMakers,
   type PendingDraft,
   type PriceDraftInput,
@@ -167,9 +169,36 @@ export function draftStoreChange(
   return { kind: "store_change", payload: change, before: storeChangeBefore(store, change) };
 }
 
+const HEALTH_CLAIM = /\b(cures?|heal\w*|health\w*|boost\w*|immun\w*|detox\w*|prevent\w*|treat\w*|remed\w*|medic\w*|disease|diabet\w*|cancer|cholesterol|blood pressure|weight loss|lose weight|superfood|nutritious|nutrients?|antioxidant\w*|vitamins?|rich in|good for you|wellness|energy)\b/i;
+const PRICE_WORDS = /\$|\b(price\w*|cheap\w*|discount\w*|sale|deal|bargain|cents?|dollars?|free)\b/i;
+const STOCK_WORDS = /\b(in stock|out of stock|sold out|back in|restock\w*|limited|while (stocks?|supplies) last|left|hurry|available now|plenty)\b/i;
+const DIGITS = /\d+(?:\.\d+)?/g;
+
+/**
+ * A description from the listing's facts only (#820): no health claims, prices or stock, and no number the facts do
+ * not hold, so the model cannot invent a size. The owner edits and confirms it on the card.
+ */
+export function draftDescription(input: DescriptionDraftInput, facts: DescriptionFacts): PendingDraft & { kind: "description" } {
+  const text = input.text.replace(/\s+/g, " ").trim();
+  if (input.listingId !== facts.listingId) throw new DraftError("call listing_facts for this listing first");
+  if (text.length < 20 || text.length > DESCRIPTION_MAX) throw new DraftError(`write 20 to ${DESCRIPTION_MAX} characters`);
+  if (HEALTH_CLAIM.test(text)) throw new DraftError("no health or nutrition claims; say what it is and how it is used");
+  if (PRICE_WORDS.test(text)) throw new DraftError("no prices or offers in a description");
+  if (STOCK_WORDS.test(text)) throw new DraftError("no stock or availability in a description");
+  const known = new Set(facts.text.match(DIGITS) ?? []);
+  if ((text.match(DIGITS) ?? []).some((number) => !known.has(number))) throw new DraftError("use only sizes and numbers from listing_facts");
+  return {
+    kind: "description",
+    payload: { listingId: facts.listingId, name: facts.name, text },
+    before: { description: facts.currentDescription },
+  };
+}
+
 export interface DraftEdits {
   coupon?: CouponFields;
   variantIds?: string[];
+  /** The description as the owner edited it on the card (#820). */
+  description?: string;
 }
 
 const NOT_FOUND: DraftConfirmResult = { ok: false, code: "not_found", message: "That draft is no longer waiting. Ask again if you still need it." };
@@ -278,6 +307,19 @@ export async function confirmDraft(storeId: string, draftId: string, actor: Copi
           return STALE;
         }
         payload = { lines, applied: ticked.map((line) => line.variantId) };
+      } else if (row.kind === "description") {
+        const draft = row.payload as { listingId: string; name: string; text: string };
+        const text = (edits.description ?? draft.text).replace(/\s+/g, " ").trim();
+        if (!text) return invalid("Write a description, or dismiss the draft.");
+        if (text.length > DESCRIPTION_MAX) return invalid(`Description must be ${DESCRIPTION_MAX} characters or fewer.`);
+        await lockListingRow(tx, draft.listingId);
+        const current = await tx.listing.findUnique({ where: { id: draft.listingId }, select: { description: true, active: true } });
+        if (!current?.active || current.description !== (row.before as { description: string | null }).description) {
+          await settle(tx, draftId, "expired", null);
+          return STALE;
+        }
+        await updateListingInTransaction(tx, { storeId, listingId: draft.listingId, description: text, actor });
+        payload = { ...draft, text };
       } else {
         const change = row.payload as StoreChange;
         const current = storeChangeBefore(store, change);
@@ -328,4 +370,4 @@ export async function storeSite(storeId: string) {
 }
 
 /** The page's draft makers for the turn; WhatsApp gets none. */
-export const DRAFT_MAKERS: DraftMakers = { coupon: draftCoupon, prices: draftPrices, storeChange: draftStoreChange };
+export const DRAFT_MAKERS: DraftMakers = { coupon: draftCoupon, prices: draftPrices, storeChange: draftStoreChange, description: draftDescription };

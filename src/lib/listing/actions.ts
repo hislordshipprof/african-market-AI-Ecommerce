@@ -43,6 +43,7 @@ const listingFormSchema = z.strictObject({
   cateringLeadUnit: z.string().max(10).nullable(),
   cateringMinQty: z.string().max(20).nullable(),
   maxPerOrder: z.string().max(20).nullable(),
+  description: z.string().max(2000).nullable(),
   variants: z.string().max(200_000).nullable(),
   listingId: z.string().max(200).nullable(),
 });
@@ -64,6 +65,7 @@ const LISTING_FIELDS = [
   "cateringLeadUnit",
   "cateringMinQty",
   "maxPerOrder",
+  "description",
   "variants",
   "listingId",
 ] as const;
@@ -295,6 +297,7 @@ export async function updateListingAction(formData: FormData) {
       ...prepared?.value,
       ...catering?.value,
       ...(maxPerOrder && { maxPerOrder: maxPerOrder.value }),
+      ...(fields.description !== null && { description: fields.description }),
       actor: toActor(session.user),
       variants: parsedVariants,
     });

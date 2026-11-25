@@ -7,8 +7,9 @@ import { MOVEMENT_DAYS, SALES_FLOOR, inventoryReport, type MovementRow } from ".
 import { reorderSuggestions, type ReorderSuggestions } from "./reorder";
 import { SALES_PERIODS, salesSummary, type PayoutReader, type SalesFigures } from "./sales-summary";
 import { searchListingMatches, type ListingSearch } from "./search";
-import { DraftError, draftToolResult, type DraftMakers, type PendingDraft } from "./draft-rows";
-import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ProposalKind } from "./types";
+import { DraftError, draftToolResult, type DescriptionFacts, type DraftMakers, type PendingDraft } from "./draft-rows";
+import { listingFacts, listingFixes, type ListingFacts } from "./listing-help";
+import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ListingFix, type ProposalKind } from "./types";
 
 const CHECK_FAILED = "could not check that listing";
 const NOT_FOUND = "listing not found";
@@ -50,6 +51,10 @@ export interface DraftBook {
   sales: SalesFigures[];
   /** Coupon, price and store-change drafts this turn (#819). */
   copilotDrafts: PendingDraft[];
+  /** Listings `listings_to_fix` returned this turn, for the links card (#820); null when it was not called. */
+  fixes: ListingFix[] | null;
+  /** Listing facts read this turn, by listing id: a description is drafted only from these (#820). */
+  facts: Map<string, DescriptionFacts>;
   /** Listings already drafted or offered in a choice this turn; each appears in one card or choice only. */
   listingIds: Set<string>;
   run<T>(fn: () => Promise<T>): Promise<T>;
@@ -65,6 +70,8 @@ export function createDraftBook(): DraftBook {
     report: [],
     sales: [],
     copilotDrafts: [],
+    fixes: null,
+    facts: new Map(),
     listingIds: new Set(),
     run(fn) {
       const next = chain.then(fn, fn);
@@ -183,6 +190,15 @@ const storeChangeSchema = z.object({
   until: z.string().max(16).optional(),
 });
 
+const factsSchema = z.object({
+  query: z.string().max(200),
+});
+
+const descriptionSchema = z.object({
+  listingId: z.string().min(1).max(200),
+  text: z.string().max(2000),
+});
+
 const proposeSchema = z.object({
   listingId: z.string().min(1).max(200),
   kind: z.enum(["restock", "counter_sale", "recount", "set_status"]),
@@ -259,6 +275,27 @@ export function copilotTools(storeId: string, book: DraftBook, options: ToolOpti
   const payouts = options.payouts ?? null;
   return {
     ...(options.drafts ? draftTools(storeId, book, options.drafts.ownerText, options.drafts.make) : {}),
+    listings_to_fix: tool({
+      description:
+        "This store's active listings that need fixing before shoppers see them well: missing a photo, an aisle, a description, or, for prepared food, owner-stated allergens. Returns the total and at most 20 listings with what each is missing. The page shows a link to edit each. Read only.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        let result: Awaited<ReturnType<typeof listingFixes>>;
+        try {
+          result = await listingFixes(storeId);
+        } catch {
+          throw new Error("could not read listings");
+        }
+        book.fixes = result.fixes;
+        return recorded(book, {
+          total: result.total,
+          listings: result.fixes.map((fix) => ({ name: fix.name, missing: fix.missing })),
+          note: options.drafts
+            ? "The owner sees a link to edit each listing below your reply. Do not write links."
+            : "This channel shows no links. Name each listing and say the owner can fix it under Products in store admin.",
+        });
+      },
+    }),
     find_listings: tool({
       description:
         "Search this store's active listings by item name. Returns outcome one, several, did_you_mean or none, and at most 5 listings. Does not change stock.",
@@ -444,6 +481,53 @@ function draftTools(storeId: string, book: DraftBook, ownerText: string, make: D
       execute: (input) => book.run(async () => {
         const { timezone } = await store();
         return drafting(book, timezone, () => make.prices(storeId, input, ownerText));
+      }),
+    }),
+    listing_facts: tool({
+      description:
+        "The facts about one listing for a description: name, catalogue name, aisle, origin, sizes, storage, frozen, prepared, allergens (null when not stated) and the current description. query is the item as the owner named it. Call it before draft_description. Read only.",
+      inputSchema: factsSchema,
+      execute: async ({ query }) => {
+        let found: ListingSearch;
+        try {
+          found = await searchListingMatches(storeId, query);
+        } catch {
+          throw new Error("could not search listings");
+        }
+        if (found.outcome !== "one") {
+          return recorded(book, {
+            found: false,
+            listings: found.listings.map((listing) => listing.name),
+            note: found.outcome === "none" ? "No listing matches. Ask the owner which item." : "Several listings match. Ask the owner which one.",
+          });
+        }
+        let facts: ListingFacts | null;
+        try {
+          facts = await listingFacts(storeId, found.listings[0].id);
+        } catch {
+          throw new Error(CHECK_FAILED);
+        }
+        if (!facts) throw new Error(NOT_FOUND);
+        const result = recorded(book, { found: true, ...facts });
+        book.facts.set(facts.listingId, {
+          listingId: facts.listingId,
+          name: facts.name,
+          currentDescription: facts.currentDescription,
+          // Without the id: its digits are not a size the description may quote.
+          text: JSON.stringify({ ...facts, listingId: undefined }),
+        });
+        return result;
+      },
+    }),
+    draft_description: tool({
+      description:
+        "Draft a product description for a listing id that listing_facts returned in this turn, for the owner to edit and confirm on screen. Two or three short sentences, using only those facts: what it is, where it comes from, its size, how it is used. No health claims, prices, stock or availability. Changes nothing.",
+      inputSchema: descriptionSchema,
+      execute: (input) => book.run(async () => {
+        const facts = book.facts.get(input.listingId);
+        if (!facts) throw new Error("call listing_facts for this item first");
+        const { timezone } = await store();
+        return drafting(book, timezone, () => make.description(input, facts));
       }),
     }),
     draft_store_change: tool({

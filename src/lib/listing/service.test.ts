@@ -1065,4 +1065,27 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     const counted = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } });
     expect(counted).toMatchObject({ qty: 12, confidence: 1 });
   });
+  it("saves the owner's description, audits it, and refuses one over 600 characters (#820)", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "Egusi 1 lb",
+      price: 699,
+      stockMode: "status",
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1 lb", price: 699, weightG: 454 }],
+      actor,
+    });
+    await updateListing({ storeId, listingId: listing.id, description: "  Ground melon seeds for egusi soup.  ", actor });
+    const saved = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } });
+    expect(saved.description).toBe("Ground melon seeds for egusi soup.");
+    const logs = await storeScoped(storeId).auditLog.findMany({ where: { entityId: listing.id, action: "listing.description_change" } });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].before).toEqual({ description: null });
+
+    await updateListing({ storeId, listingId: listing.id, description: "   ", actor });
+    expect((await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } })).description).toBeNull();
+    await expect(updateListing({ storeId, listingId: listing.id, description: "x".repeat(601), actor })).rejects.toThrow(/600/);
+  });
 });

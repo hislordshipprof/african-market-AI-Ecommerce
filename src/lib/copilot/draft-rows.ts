@@ -38,11 +38,27 @@ export interface StoreChangeDraftInput {
   until?: string;
 }
 
+export interface DescriptionDraftInput {
+  listingId: string;
+  text: string;
+}
+
 /** The page's draft makers, passed into the turn so the copilot modules WhatsApp reaches never import them. */
 export interface DraftMakers {
   coupon(input: CouponDraftInput, timeZone: string): PendingDraft;
   prices(storeId: string, input: PriceDraftInput, ownerText: string): Promise<PendingDraft>;
   storeChange(input: StoreChangeDraftInput, store: { hours: unknown; timezone: string; deliveryPausedUntil: Date | null }, now: Date): PendingDraft;
+  /** `facts` is the listing_facts result the model read this turn (#820). */
+  description(input: DescriptionDraftInput, facts: DescriptionFacts): PendingDraft;
+}
+
+/** What a description draft is checked against: the listing's facts as the model read them. */
+export interface DescriptionFacts {
+  listingId: string;
+  name: string;
+  currentDescription: string | null;
+  /** The facts as JSON; a number in the draft must appear here. */
+  text: string;
 }
 
 /**
@@ -52,7 +68,8 @@ export interface DraftMakers {
 export type PendingDraft =
   | { kind: "coupon"; payload: CouponFields; before: Record<string, never> }
   | { kind: "price"; payload: { lines: PriceLine[]; applied?: string[] }; before: Record<string, number> }
-  | { kind: "store_change"; payload: StoreChange; before: Record<string, string | null> };
+  | { kind: "store_change"; payload: StoreChange; before: Record<string, string | null> }
+  | { kind: "description"; payload: { listingId: string; name: string; text: string }; before: { description: string | null } };
 
 /** A draft the tool refused; its message goes back to the model. */
 export class DraftError extends Error {}
@@ -94,6 +111,7 @@ export function draftToolResult(draft: PendingDraft, timeZone: string, now: Date
       note: `${note} The owner can untick lines.`,
     };
   }
+  if (draft.kind === "description") return { drafted: true, listing: draft.payload.name, description: draft.payload.text, note };
   return { drafted: true, change: storeChangeText(draft.payload, timeZone, now), note };
 }
 
@@ -114,6 +132,10 @@ export function cardOf(row: DraftRow, timeZone: string, now: Date): DraftCard {
   if (row.kind === "price") {
     const payload = row.payload as { lines: PriceLine[]; applied?: string[] };
     return { ...base, kind: "price", lines: payload.lines, applied: payload.applied ?? null };
+  }
+  if (row.kind === "description") {
+    const payload = row.payload as { listingId: string; name: string; text: string };
+    return { ...base, kind: "description", listingId: payload.listingId, name: payload.name, text: payload.text };
   }
   const change = row.payload as StoreChange;
   const endsAt = storeChangeEndsAt(change, timeZone);
