@@ -168,10 +168,11 @@ html:has(.sf-header) {
     scroll-padding-top: 124px;
   }
   /* Once the page scrolls, the phone header drops its ZIP row so it stays near its old height. */
-  .sf-header[data-compact="true"] {
+  /* Never while the ZIP form is open: a scroll must not hide it mid-entry. */
+  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover)) {
     clip-path: inset(0 0 54px 0);
   }
-  .sf-header[data-compact="true"] .sf-header-window {
+  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover)) .sf-header-window {
     visibility: hidden;
   }
 }
@@ -1432,11 +1433,13 @@ html:has(.sf-header) {
   .sf-header-main {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto auto;
-    grid-template-areas: "brand . signin cart" "window search search search";
+    grid-template-areas: "brand brand signin cart" "window search search search";
     gap: 12px 16px;
     padding-block: 12px;
   }
-  .sf-brand { grid-area: brand; }
+  /* Row 1 has room, so a long store name uses it instead of clamping. */
+  .sf-brand { grid-area: brand; max-width: 440px; }
+  .sf-brand-name { max-width: 320px; }
   .sf-header-window { grid-area: window; }
   .sf-header-search { grid-area: search; min-width: 0; }
   .sf-header-signin { grid-area: signin; }
