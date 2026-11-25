@@ -5,6 +5,8 @@ import { approveAttributeProposal, approveProduct } from "../catalog-actions";
 import { createCategory, updateCategory } from "../catalog-categories";
 import { mergeDuplicatePair } from "../catalog-duplicates";
 import { addProductSynonym } from "../product-synonyms";
+import { getMasterProductEditor, saveMasterProduct, uploadMasterProductImage } from "../master-catalog";
+import { saveRecipe } from "../recipe-base-admin";
 import { setStoreMetro } from "../metros";
 import { VALID_US_TIMEZONES } from "../timezone";
 import type { Kind } from "./drafts";
@@ -69,6 +71,31 @@ const categoryParams = batch({
   parentId: id.nullable(),
 });
 
+const productParams = z.strictObject({
+  /** Null creates the product. */
+  productId: id.nullable(),
+  /** The editor's version the edit was drafted against; null for a new product. */
+  version: z.string().max(200).nullable(),
+  name: z.string().min(1).max(200),
+  categoryId: id.nullable(),
+  subcategory: z.string().max(100).nullable(),
+  description: z.string().max(5000).nullable(),
+  unit: z.string().max(40).nullable(),
+  weightG: z.number().int().nullable(),
+  frozen: z.boolean(),
+  perishable: z.boolean(),
+  storage: z.string().max(20).nullable(),
+  status: z.string().max(20),
+  synonyms: z.array(z.strictObject({ term: z.string().max(100), language: z.string().max(10) })).max(BATCH_MAX),
+});
+
+const recipeParams = z.strictObject({
+  name: z.string().min(1).max(200),
+  aliases: z.array(z.string().max(200)).max(20),
+  servings: z.number().int().nullable(),
+  ingredients: z.array(z.strictObject({ name: z.string().max(100), masterProductId: id.nullable(), qty: z.string().max(12), unit: z.string().max(20) })).min(1).max(50),
+});
+
 const storeCreateParams = z.strictObject({
   name: z.string().min(1).max(200),
   slug: z.string().min(1).max(80),
@@ -119,6 +146,66 @@ export const WORKFLOW_KINDS = {
       ]);
     },
   } satisfies Kind<z.infer<typeof storeCreateParams>>,
+  product_save: {
+    params: productParams,
+    snapshot: async (p) => (p.productId ? { version: (await getMasterProductEditor(p.productId))?.product.version ?? null } : {}),
+    apply: async (p, _actor, extras) => {
+      let productId = p.productId ?? "";
+      return runSteps([
+        {
+          done: p.productId ? "the product was saved" : "the product was created",
+          run: async () => {
+            const result = await saveMasterProduct({}, form({
+              productId,
+              version: p.version ?? "",
+              name: p.name,
+              categoryId: p.categoryId ?? "",
+              subcategory: p.subcategory ?? "",
+              description: p.description ?? "",
+              unit: p.unit ?? "",
+              weightG: p.weightG === null ? "" : String(p.weightG),
+              storage: p.storage ?? "",
+              status: p.status,
+              ...(p.frozen ? { frozen: "on" } : {}),
+              ...(p.perishable ? { perishable: "on" } : {}),
+            }));
+            if (!result.ok) return stateStep(result);
+            productId ||= result.productId ?? "";
+            return { ok: true };
+          },
+        },
+        ...p.synonyms.map((synonym) => ({
+          done: `the synonym ${synonym.term} was added`,
+          run: async () => stateStep(await addProductSynonym({}, form({ productId, term: synonym.term, language: synonym.language, languageOther: "", region: "" }))),
+        })),
+        ...(extras.image ? [{
+          done: "the photo was uploaded",
+          run: async () => {
+            const data = form({ productId });
+            data.set("image", extras.image!);
+            return stateStep(await uploadMasterProductImage({}, data));
+          },
+        }] : []),
+      ]);
+    },
+  } satisfies Kind<z.infer<typeof productParams>>,
+  recipe_save: {
+    params: recipeParams,
+    // saveRecipe refuses a name or other name another dish answers to, before anything is written.
+    snapshot: async () => ({}),
+    apply: async (p) => {
+      const data = form({ recipeId: "", version: "", name: p.name, aliases: p.aliases.join("\n"), servings: p.servings === null ? "" : String(p.servings) });
+      for (const row of p.ingredients) {
+        data.append("ingredientName", row.name);
+        data.append("ingredientProduct", row.masterProductId ?? "");
+        data.append("ingredientQty", row.qty);
+        data.append("ingredientUnit", row.unit);
+      }
+      const result = await saveRecipe({}, data);
+      if (!result.ok) return { ok: false, error: Object.values(result.fieldErrors ?? {})[0] ?? result.message ?? "The dish could not be saved." };
+      return { ok: true, outcome: "The dish is in the recipe base, not curated. Mark it curated on its page once you have checked it." };
+    },
+  } satisfies Kind<z.infer<typeof recipeParams>>,
   // Each batch kind's admin function re-checks its item under a lock (status, pending, open pair, category exists), so
   // the card keeps no snapshot of its own and a changed item is reported as not done.
   review_approve: {

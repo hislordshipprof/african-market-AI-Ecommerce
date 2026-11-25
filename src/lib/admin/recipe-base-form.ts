@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { dishKey } from "../assistant/recipe-base";
 
-/** "curated" for the seeded base and dishes an admin marked curated, "lookup" for a dish saved from an online lookup. */
-export const RECIPE_ORIGINS = ["curated", "lookup"] as const;
+/**
+ * "curated" for the seeded base and dishes an admin marked curated, "lookup" for a dish saved from an online lookup,
+ * "drafted" for a dish the admin assistant added on the admin's confirm (#833). Only curated is preferred by get_recipe.
+ */
+export const RECIPE_ORIGINS = ["curated", "lookup", "drafted"] as const;
 export type RecipeOrigin = (typeof RECIPE_ORIGINS)[number];
 
-export const RECIPE_ORIGIN_LABELS: Record<RecipeOrigin, string> = { curated: "Curated", lookup: "Looked up" };
+export const RECIPE_ORIGIN_LABELS: Record<RecipeOrigin, string> = { curated: "Curated", lookup: "Looked up", drafted: "Drafted" };
 
 export const RECIPE_PAGE_SIZE = 25;
 export const MAX_RECIPE_INGREDIENTS = 50;
@@ -31,7 +34,7 @@ export function recipeFiltersFromSearchParams(params: Record<string, string | st
   const q = one("q");
   if (q && q.trim().length <= 200) filters.q = q;
   const origin = one("origin");
-  if (origin === "curated" || origin === "lookup") filters.origin = origin;
+  if ((RECIPE_ORIGINS as readonly string[]).includes(origin ?? "")) filters.origin = origin as RecipeOrigin;
   const page = Number.parseInt(one("page") ?? "", 10);
   if (Number.isInteger(page) && page >= 1 && page <= 100_000) filters.page = page;
   return filters;
@@ -51,8 +54,9 @@ const ingredientSchema = z.strictObject({
 
 export const recipeFormSchema = z
   .strictObject({
-    recipeId: z.string().min(1).max(200),
-    version: z.string().min(1).max(200),
+    /** Empty adds a new dish (the admin assistant's recipe card, #833). */
+    recipeId: z.string().max(200).transform((value) => value || null),
+    version: z.string().max(200),
     name: z
       .string()
       .trim()

@@ -23,6 +23,7 @@ import { authPrisma, platformAdmin, platformAdminTransaction } from "../../db";
 import { testSignUp } from "../../test-auth";
 import { testPrismaClient } from "../../test-prisma";
 import { confirmAdminAssistantDraft } from "./actions";
+import { getRecipeEditor, listRecipeBase } from "../recipe-base-admin";
 import { insertAdminDrafts, type AdminDraftCard } from "./drafts";
 import { adminAssistantTools, createReadBook } from "./tools";
 
@@ -97,7 +98,6 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       const [a, b] = [await make("Garri white", { status: "active" }), await make("White garri", { status: "active" })].sort();
       product.dupA = a!;
       product.dupB = b!;
-      pairId = (await tx.catalogDuplicatePair.create({ data: { productAId: a!, productBId: b!, nameSimilarity: 0.8, sharedTerms: 1, score: 0.9, verdict: "same" } })).id;
       proposalId = (await tx.attributeProposal.create({
         data: { productId: product.clean1, ingredientsRead: true, ingredients: ["rice"], allergensRead: true, allergens: [], dietaryRead: false },
       })).id;
@@ -127,6 +127,7 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       await tx.$executeRaw`DELETE FROM master_product_ingredients WHERE product_id = ANY(${ids})`;
       await tx.masterProduct.deleteMany({ where: { id: { in: ids } } });
       await tx.masterProduct.deleteMany({ where: { name: { contains: RUN } } });
+      await tx.recipe.deleteMany({ where: { name: { contains: RUN } } });
       await tx.category.deleteMany({ where: { name: { contains: RUN }, parentId: { not: null } } });
       await tx.category.deleteMany({ where: { name: { contains: RUN } } });
     });
@@ -242,6 +243,12 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
 
     it("merges a duplicate pair into the product the admin keeps", async () => {
       signInAs(admin);
+      // Made here, not in beforeAll: a duplicate scan in another test file replaces the open pairs, or finds this one.
+      pairId = (await sql((tx) => tx.catalogDuplicatePair.upsert({
+        where: { productAId_productBId: { productAId: product.dupA, productBId: product.dupB } },
+        create: { productAId: product.dupA, productBId: product.dupB, nameSimilarity: 0.8, sharedTerms: 1, score: 0.9, verdict: "same" },
+        update: { status: "open", verdict: "same" },
+      }))).id;
       const { cards } = await draft("draft_duplicate_merge", { merges: [{ pairId, keepProductId: product.dupA }] });
       expect(cards[0]!.items).toEqual([{ key: pairId, label: `Keep Garri white ${RUN}, merge White garri ${RUN} into it`, problems: [] }]);
       expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true });
@@ -260,6 +267,73 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       const child = await platformAdmin.category.findUniqueOrThrow({ where: { id: cat.child } });
       expect(child).toMatchObject({ name: `Rice and grains ${RUN}`, parentId: cat.parent });
       expect(await platformAdmin.category.findFirst({ where: { name: `Flours ${RUN}`, parentId: cat.parent } })).not.toBeNull();
+    });
+  });
+
+  describe("catalogue products", () => {
+    it("offers the existing product instead of drafting a duplicate", async () => {
+      signInAs(admin);
+      const { result, cards } = await draft("draft_product", { name: `Ofada rice ${RUN}`, category: `Rice ${RUN}`, size: "5 lb" });
+      expect(cards).toEqual([]);
+      expect(result).toMatchObject({ drafted: false, existing: expect.arrayContaining([expect.objectContaining({ id: product.clean1, name: `Ofada rice ${RUN}` })]) });
+    });
+
+    it("refuses a description with a health claim, a price or an origin the product data does not give", async () => {
+      signInAs(admin);
+      for (const description of ["Egusi seeds that boost your immune system.", "Egusi seeds, only $4.99 a bag.", "Egusi seeds grown in Ghana."]) {
+        const { result, cards } = await draft("draft_product", { name: `Egusi seeds ${RUN}`, category: `Grains ${RUN}`, size: "1 lb", description, notDuplicate: true });
+        expect(cards, description).toEqual([]);
+        expect(result, description).toMatchObject({ drafted: false, reason: expect.stringContaining("The description has") });
+      }
+    });
+
+    it("creates a product with its synonyms on confirm, and sends an attached photo through the photo upload", async () => {
+      signInAs(admin);
+      const name = `Egusi seeds ${RUN}`;
+      const { cards } = await draft("draft_product", {
+        name, category: `Grains ${RUN}`, size: "1 lb", description: "Ground melon seeds for egusi soup.", synonyms: [{ term: "agusi", language: "tw" }], notDuplicate: true,
+      });
+      expect(cards[0]).toMatchObject({ title: "Create a catalogue product", acceptsPhoto: true });
+      expect(cards[0]!.steps).toEqual(["Save the product", "Add 1 synonym", "Upload the photo, if you attach one"]);
+
+      const data = new FormData();
+      data.set("draftId", cards[0]!.id);
+      data.set("image", new File([new Uint8Array([1, 2, 3])], "egusi.jpg", { type: "image/jpeg" }));
+      const result = await confirmAdminAssistantDraft(data);
+      expect(result).toMatchObject({ ok: true, draft: { state: "confirmed" } });
+      const created = await platformAdmin.masterProduct.findFirstOrThrow({ where: { name }, include: { synonyms: true } });
+      expect(created).toMatchObject({ categoryId: cat.parent, unit: "1 lb", description: "Ground melon seeds for egusi soup.", status: "active" });
+      expect(created.synonyms.map((row) => row.term)).toEqual(["agusi"]);
+      // No photo storage in tests: the upload's own refusal shows that the photo went through it.
+      expect((result as { draft: AdminDraftCard }).draft.outcome).toMatch(/Step 3 did not run: (Upload a JPEG|Photo storage)/);
+      expect(await platformAdmin.auditLog.count({ where: { entityId: created.id, action: "catalog.product_create", actorId: admin.id } })).toBe(1);
+    });
+
+    it("edits a product, and goes stale when someone else saved it first", async () => {
+      signInAs(admin);
+      const { cards } = await draft("draft_product", { productId: product.clean2, description: "A seasoning mix for jollof rice." });
+      expect(cards[0]!.changes).toContainEqual({ field: "Description", from: "Jollof rice mix, 5 lb bag.", to: "A seasoning mix for jollof rice." });
+      const stale = await draft("draft_product", { productId: product.clean2, size: "2 lb" });
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true });
+      expect((await platformAdmin.masterProduct.findUniqueOrThrow({ where: { id: product.clean2 } })).description).toBe("A seasoning mix for jollof rice.");
+      expect(await confirmAdminAssistantDraft({ draftId: stale.cards[0]!.id })).toMatchObject({ ok: false, code: "stale" });
+    });
+  });
+
+  describe("recipes", () => {
+    it("drafts a recipe into the recipe base, not curated until the admin marks it", async () => {
+      signInAs(admin);
+      const name = `Ofada stew ${RUN}`;
+      const { cards } = await draft("draft_recipe", {
+        name, servings: 4, ingredients: [{ name: "Ofada rice", product: `Ofada rice ${RUN}`, qty: "2", unit: "cup" }, { name: "Palm oil", qty: "0.5", unit: "cup" }],
+      });
+      expect(cards[0]!.title).toBe("Add a recipe");
+      expect(await confirmAdminAssistantDraft({ draftId: cards[0]!.id })).toMatchObject({ ok: true });
+      const { recipes } = await listRecipeBase({ q: name });
+      const saved = recipes.find((row) => row.name === name)!;
+      expect(saved.origin).not.toBe("curated");
+      const editor = await getRecipeEditor(saved.id);
+      expect(editor!.recipe.ingredients.map((row) => [row.name, row.masterProductId, row.qty])).toEqual([["Ofada rice", product.clean1, "2"], ["Palm oil", null, "0.5"]]);
     });
   });
 });

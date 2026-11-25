@@ -40,6 +40,8 @@ export interface DraftView {
   href: string | null;
   /** A workflow's steps, run in this order on confirm (#833). */
   steps?: string[];
+  /** The card takes a photo the admin attaches before confirming (#833). */
+  acceptsPhoto?: boolean;
   /** A batch's items, each with its problems; the admin unticks any to leave out (#833). */
   items?: DraftItem[];
 }
@@ -71,7 +73,7 @@ export interface Kind<P> {
   /** The params key the card's editable text goes into. */
   editKey?: keyof P & string;
   snapshot(params: P): Promise<Json>;
-  apply(params: P, actor: Actor): Promise<{ ok: true; outcome?: string } | { ok: false; error: string }>;
+  apply(params: P, actor: Actor, extras: { image?: File }): Promise<{ ok: true; outcome?: string } | { ok: false; error: string }>;
 }
 
 const id = z.string().min(1).max(200);
@@ -382,7 +384,7 @@ const BUSY = { ok: false, code: "busy", message: "This draft is being applied." 
  * 24 hours, of a kind the assistant cannot make, or drafted against values that have changed since (it goes stale).
  * The caller has checked the platform admin session, 2FA included.
  */
-export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { text?: string; keep?: string[] } = {}): Promise<AdminDraftResult> {
+export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { text?: string; keep?: string[]; image?: File } = {}): Promise<AdminDraftResult> {
   const now = new Date();
   const checked = await platformAdminTransaction(async (tx): Promise<AdminDraftResult | { row: Row & { storeId: string | null; before: unknown }; params: Record<string, unknown>; kind: Kind<Record<string, unknown>> }> => {
     const row = await tx.adminAssistantDraft.findUnique({ where: { id: draftId } });
@@ -430,7 +432,7 @@ export async function confirmAdminDraft(draftId: string, actor: Actor, edits: { 
 
   let applied: Awaited<ReturnType<Kind<Record<string, unknown>>["apply"]>>;
   try {
-    applied = await kind.apply(params, actor);
+    applied = await kind.apply(params, actor, { image: edits.image });
   } catch (error) {
     await platformAdminTransaction((tx) => tx.adminAssistantDraft.update({ where: { id: draftId }, data: { state: "pending", decidedById: null, decidedAt: null } }));
     throw error;

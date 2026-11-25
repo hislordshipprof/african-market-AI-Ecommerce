@@ -6,10 +6,11 @@ import { listAttributeProposals, listReviewProducts, type ReviewProduct } from "
 import { listCategoryTree, type CategoryNode } from "../catalog-categories";
 import { listDuplicatePairs } from "../catalog-duplicates";
 import { languageLabel } from "../catalog-structure-form";
-import { getMasterProductEditor, listMasterCatalog } from "../master-catalog";
+import { getMasterProductEditor, listCatalogCategories, listMasterCatalog } from "../master-catalog";
 import { listMetros } from "../metros";
 import { timezoneForAddress } from "../timezone";
 import { addDraft, refused } from "./draft-tools";
+import { descriptionProblems } from "./description-check";
 import type { DraftItem } from "./drafts";
 import { BATCH_MAX } from "./workflow-kinds";
 import { audited, link, type ToolContext } from "./tools";
@@ -256,6 +257,137 @@ export function workflowTools(ctx: ToolContext) {
         }
         link(book, "Categories", "/admin/catalog/categories");
         return addDraft(ctx, "category_change", null, { items: rows }, batchCard("Category changes", "/admin/catalog/categories", rows.map(({ key, label }) => ({ key, label, problems: [] }))));
+      }),
+    }),
+
+    draft_product: tool({
+      description: "Draft creating a master catalogue product, or editing one by productId: name, category (by name), size (such as 5 lb), weightG, description and synonyms. A new product is first checked against the catalogue; when one like it exists, offer that one to the admin instead. Write the description only from what the admin or the product data says: what it is, its size and its use; no health claims, prices or origins the data does not give. The admin can attach a photo on the card.",
+      inputSchema: z.object({
+        productId: z.string().max(200).optional(),
+        name: z.string().max(200).optional(),
+        category: z.string().max(60).optional(),
+        size: z.string().max(40).optional(),
+        weightG: z.number().int().min(1).max(100_000).optional(),
+        description: z.string().max(2000).optional(),
+        synonyms: z.array(z.object({ term: z.string().min(1).max(100), language: z.string().max(3).optional() })).max(BATCH_MAX).optional(),
+        notDuplicate: z.boolean().optional().describe("True only when the admin said the product is different from the existing ones offered."),
+      }),
+      execute: (input) => audited(ctx, "draft_product", input, async () => {
+        const editor = input.productId ? await getMasterProductEditor(input.productId) : null;
+        if (input.productId && !editor) return refused("No master product has that id.");
+        if (editor?.product.status === "merged") return refused("That product was merged into another one; edit that one instead.");
+        const current = editor?.product;
+        const name = input.name?.trim() || current?.name || "";
+        if (!name) return { drafted: false, missing: ["name"], reason: "Ask the admin for the product's name." };
+
+        if (!current && !input.notDuplicate) {
+          const { products } = await listMasterCatalog({ q: name.slice(0, 200) });
+          const existing = products.filter((row) => row.status !== "merged" && row.status !== "rejected").slice(0, 5);
+          if (existing.length > 0) {
+            for (const row of existing) link(book, row.name, `/admin/catalog/products/${row.id}`);
+            return {
+              drafted: false,
+              existing: existing.map((row) => ({ id: row.id, name: row.name, category: row.categoryName, size: row.unit, status: row.status })),
+              reason: "The catalogue already has products like this. Offer them to the admin: draft an edit of one, or draft again with notDuplicate only if the admin says it is a different product.",
+            };
+          }
+        }
+
+        const categories = await listCatalogCategories();
+        const category = input.category ? categories.find((row) => row.name.toLowerCase() === input.category!.trim().toLowerCase()) : null;
+        if (input.category && !category) return refused(`No category is called ${input.category}. Categories: ${categories.map((row) => row.name).join(", ")}.`);
+        const categoryId = category?.id ?? current?.categoryId ?? null;
+        if (!categoryId) return { drafted: false, missing: ["category"], reason: "Ask the admin which category it goes in." };
+        const description = input.description?.trim() ?? current?.description ?? null;
+        if (input.description) {
+          const problems = descriptionProblems(input.description, { originCountries: current?.originCountries ?? null });
+          if (problems.length > 0) return refused(`The description has ${problems.join(" and ")}. Write only what the product data says.`);
+        }
+        const next = {
+          name,
+          categoryId,
+          subcategory: current?.subcategory ?? null,
+          description: description || null,
+          unit: input.size?.trim() || current?.unit || null,
+          weightG: input.weightG ?? current?.weightG ?? null,
+          frozen: current?.frozen ?? false,
+          perishable: current?.perishable ?? false,
+          storage: current?.storage ?? null,
+          status: current?.status ?? "active",
+        };
+        const synonyms = (input.synonyms ?? []).map((row) => ({ term: row.term.trim().replace(/\s+/g, " "), language: row.language?.trim().toLowerCase() ?? "" }));
+        const categoryName = (value: string | null) => categories.find((row) => row.id === value)?.name ?? "None";
+        const shown: Array<[string, string | null, string | null]> = [
+          ["Name", current?.name ?? null, next.name],
+          ["Category", current ? categoryName(current.categoryId) : null, categoryName(next.categoryId)],
+          ["Size", current?.unit ?? null, next.unit],
+          ["Weight", current?.weightG ? `${current.weightG} g` : null, next.weightG ? `${next.weightG} g` : null],
+          ["Description", current?.description ?? null, next.description],
+        ];
+        const changes = shown.filter(([, from, to]) => !current || from !== to).filter(([, , to]) => to !== null)
+          .map(([field, from, to]) => ({ field, from: from ?? "None", to: to ?? "None" }));
+        for (const synonym of synonyms) changes.push({ field: "Synonym", from: "None", to: synonym.language ? `${synonym.term} (${languageLabel(synonym.language)})` : synonym.term });
+        if (current && changes.length === 0) return refused("Those are the product's details already.");
+
+        const href = current ? `/admin/catalog/products/${current.id}` : "/admin/catalog/products";
+        link(book, current ? current.name : "Catalog", href);
+        return addDraft(ctx, "product_save", null, { productId: current?.id ?? null, version: current?.version ?? null, ...next, synonyms }, {
+          title: current ? "Edit a catalogue product" : "Create a catalogue product",
+          storeName: null,
+          changes,
+          editable: null,
+          warning: current ? "Stores that list this product show the change." : null,
+          href,
+          steps: [current ? "Save the product" : "Save the product", ...(synonyms.length ? [`Add ${synonyms.length} synonym${synonyms.length === 1 ? "" : "s"}`] : []), "Upload the photo, if you attach one"],
+          acceptsPhoto: true,
+        });
+      }),
+    }),
+
+    draft_recipe: tool({
+      description: "Draft adding a dish to the recipe base: name, other names, servings and ingredients (name, optional catalogue product by exact name or id, quantity and unit). It is saved not curated; the admin marks it curated on its page after checking it.",
+      inputSchema: z.object({
+        name: z.string().min(1).max(200),
+        aliases: z.array(z.string().max(200)).max(20).optional(),
+        servings: z.number().int().min(1).max(100).optional(),
+        ingredients: z.array(z.object({
+          name: z.string().min(1).max(100),
+          product: z.string().max(200).optional(),
+          qty: z.string().max(12).optional(),
+          unit: z.string().max(20).optional(),
+        })).min(1).max(50),
+      }),
+      execute: (input) => audited(ctx, "draft_recipe", input, async () => {
+        const ingredients = [];
+        for (const row of input.ingredients) {
+          const product = row.product ? await findProduct(row.product) : null;
+          if (row.product && !product) return refused(`No catalogue product is called ${row.product}. Leave the product out or find it first.`);
+          ingredients.push({ name: row.name.trim(), masterProductId: product?.id ?? null, qty: row.qty?.trim() ?? "", unit: row.unit?.trim() ?? "", productName: product?.name ?? null });
+        }
+        link(book, "Recipes", "/admin/catalog/recipes");
+        const name = input.name.trim();
+        return addDraft(ctx, "recipe_save", null, {
+          name,
+          aliases: input.aliases ?? [],
+          servings: input.servings ?? null,
+          ingredients: ingredients.map(({ productName: _, ...row }) => row),
+        }, {
+          title: "Add a recipe",
+          storeName: null,
+          changes: [
+            { field: "Dish", from: "None", to: name },
+            ...(input.servings ? [{ field: "Servings", from: "None", to: String(input.servings) }] : []),
+            ...ingredients.map((row, index) => ({
+              field: `Ingredient ${index + 1}`,
+              from: "None",
+              to: [row.qty, row.unit, row.name].filter(Boolean).join(" ") + (row.productName ? `, catalogue: ${row.productName}` : ", not linked to a catalogue product"),
+            })),
+            { field: "Curated", from: "None", to: "No, until you mark it" },
+          ],
+          editable: null,
+          warning: null,
+          href: "/admin/catalog/recipes",
+        });
       }),
     }),
   };
