@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { requireStoreMember } from "@/lib/store-admin/session";
 import { getStoreOrder } from "@/lib/order/service";
 import { CANCELLABLE_AFTER_CAPTURE, STORE_REFUNDABLE_FROM } from "@/lib/order/constants";
@@ -11,6 +9,7 @@ import { CANCEL_REASON_LABELS } from "@/lib/analytics/queries";
 import { formatListTime, money } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { RefundOrder } from "../../refund-order";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 const signed = (cents: number) => (cents < 0 ? `−${money(-cents)}` : money(cents));
 
@@ -29,28 +28,18 @@ export default async function PastOrderPage({ params }: { params: Promise<{ id: 
   const owner = session.membership.role === "owner";
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <Link
-            href={`/store-admin/orders/past?store=${slug}`}
-            aria-label="Back to past orders"
-            className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-          >
-            <ArrowLeft className="size-5" aria-hidden />
-          </Link>
-          <div className="min-w-0">
-            <h1 className="flex flex-wrap items-center gap-2 text-base font-semibold text-foreground">
-              Order #{order.number}
-              <Badge variant="outline">{orderStatusLabel(order.status, order.fulfillment)}</Badge>
-            </h1>
-            <p className="truncate text-xs text-muted-foreground">
-              {order.customer.name} · {formatListTime(order.createdAt, tz)} · {FULFILLMENT_LABELS[order.fulfillment] ?? "Delivery"}
-            </p>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto max-w-2xl space-y-6 px-4 py-6">
+    <>
+      <PageHeader
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            Order #{order.number}
+            <Badge variant="outline">{orderStatusLabel(order.status, order.fulfillment)}</Badge>
+          </span>
+        }
+        description={`${order.customer.name} · ${formatListTime(order.createdAt, tz)} · ${FULFILLMENT_LABELS[order.fulfillment] ?? "Delivery"}`}
+        parent={{ href: `/store-admin/orders/past?store=${slug}`, label: "Past orders" }}
+      />
+      <div className="max-w-3xl space-y-6">
         {order.cancelReason && (
           <p className="text-sm text-foreground" data-testid="cancel-reason">
             Cancelled: {CANCEL_REASON_LABELS[order.cancelReason.reason] ?? "Other (store)"}
@@ -130,7 +119,7 @@ export default async function PastOrderPage({ params }: { params: Promise<{ id: 
               </div>
             ))}
         </section>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
