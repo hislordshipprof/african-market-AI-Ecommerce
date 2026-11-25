@@ -131,7 +131,7 @@ test("the owner lists the store, writes the blurb and picks cuisines; the direct
     await page.goto(`${store}/store-admin?store=mama-ngozi`);
     // #454: the dashboard counts the orders the directory sent.
     await expect(page.getByTestId("this-month")).toContainText(/Orders from the directory\s*\d+/);
-    await shoot(page, "454-dashboard", "Dashboard");
+    await shoot(page, "454-dashboard", "Needs you now");
     await page.getByRole("complementary", { name: "Store admin" }).getByRole("link", { name: "Directory listing" }).click();
     await expect(page).toHaveURL(/\/store-admin\/directory/);
     await expect(page.getByRole("heading", { name: "Directory listing" })).toBeVisible();
