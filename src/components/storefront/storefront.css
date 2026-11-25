@@ -168,11 +168,11 @@ html:has(.sf-header) {
     scroll-padding-top: 124px;
   }
   /* Once the page scrolls, the phone header drops its ZIP row so it stays near its old height. */
-  /* Never while the ZIP form is open: a scroll must not hide it mid-entry. */
-  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover)) {
+  /* Never while the ZIP form or search results are open: a scroll must not hide them mid-entry. */
+  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover, .sf-search-dropdown)) {
     clip-path: inset(0 0 54px 0);
   }
-  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover)) .sf-header-window {
+  .sf-header[data-compact="true"]:not(:has(.sf-zip-popover, .sf-search-dropdown)) .sf-header-window {
     visibility: hidden;
   }
 }

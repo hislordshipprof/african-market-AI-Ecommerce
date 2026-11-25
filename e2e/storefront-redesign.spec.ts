@@ -149,6 +149,31 @@ test.describe("Storefront redesign interactions", () => {
     );
   });
 
+  test("folded phone header keeps search results and the ZIP form usable", async ({
+    page,
+  }) => {
+    // clip-path hides and un-hits an overlay without failing toBeVisible, so hit-test its centre.
+    const hitInside = (selector: string) =>
+      page.locator(selector).evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !!hit && el.contains(hit);
+      });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${BASE}/categories/grains-and-flours`, { waitUntil: "networkidle" });
+    const header = page.getByTestId("storefront-header");
+
+    await page.locator(".sf-window-chip").click();
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect(header).toHaveAttribute("data-compact", "true");
+    await expect.poll(() => hitInside("#delivery-zip")).toBe(true);
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    await page.locator("#storefront-search").fill("egusi");
+    await expect(page.getByTestId("instant-results")).toBeVisible();
+    await expect.poll(() => hitInside("[data-testid='instant-results']")).toBe(true);
+  });
+
   test("pack selection changes displayed price and cart pack", async ({
     page,
   }) => {
