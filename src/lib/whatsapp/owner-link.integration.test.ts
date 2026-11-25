@@ -168,6 +168,7 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     await asPlatformAdmin(async (tx) => {
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${id}, ${name}, ${slug}, 'active', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${id}, ${ada}, 'owner', now())`;
+      await tx.storeSubscription.create({ data: { storeId: id, plan: "pro", status: "active" } });
     });
     headerState.set("cookie", cookiesA);
     headerState.set("x-store-slug", slug);
@@ -208,6 +209,8 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeB}, 'Bola Market', ${slugB}, 'active', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeA}, ${ada}, 'owner', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeB}, ${ownerB}, 'owner', now())`;
+      // The chat is Pro (#818); WhatsApp runs the same chat.
+      await tx.storeSubscription.createMany({ data: [storeA, storeB].map((storeId) => ({ storeId, plan: "pro", status: "active" })) });
     });
   }, 90_000);
 
@@ -235,6 +238,7 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
       await tx.$executeRaw`DELETE FROM owner_whatsapp_links WHERE store_id IN (${Prisma.join(stores)})`;
       await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id IN (${Prisma.join(stores)}) OR actor_id IN (${ada}, ${ownerB})`;
       await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${Prisma.join(stores)})`;
+      await tx.$executeRaw`DELETE FROM store_subscriptions WHERE store_id IN (${Prisma.join(stores)})`;
       for (const userId of [ada, ownerB]) {
         await tx.$executeRaw`DELETE FROM two_factors WHERE user_id = ${userId}`;
         await tx.$executeRaw`DELETE FROM sessions WHERE user_id = ${userId}`;

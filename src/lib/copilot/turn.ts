@@ -26,6 +26,7 @@ import {
   takeCopilotLease,
 } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
+import { storeMayUse } from "../billing/plan";
 import { loadProposalCards } from "./cards";
 import { choiceCards } from "./choices";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
@@ -186,6 +187,9 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
   await storeScopedTransaction(storeId, (tx) => deleteEmptyCopilotConversation(tx, conversationId));
 }
 
+/** A Starter store, or a Pro store that dropped to Starter, keeps its chat history but cannot send (#818). */
+export const PLAN_LOCKED_MESSAGE = "The store assistant is on the Pro plan. Upgrade on the Plan page to send messages.";
+
 export const NOTHING_DRAFTED = "Nothing was drafted.";
 export const NUMBER_REFUSED =
   "I can only give numbers from your stock records, and that answer had one I could not check. See Stock movement on this page.";
@@ -274,6 +278,9 @@ export async function sendCopilotTurn(input: {
   }
   const replay = await readReplay(input.storeId, input.userId, input.messageId);
   if (replay) return replay;
+  if (!(await storeMayUse(input.storeId, "store-assistant"))) {
+    return { ok: false, code: "plan_locked", message: PLAN_LOCKED_MESSAGE };
+  }
   const refused = await copilotGate(`copilot:${input.storeId}:${input.userId}`);
   if (refused) return refused;
 

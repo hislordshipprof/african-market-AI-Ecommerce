@@ -40,7 +40,7 @@ import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, reject
 import { makeFakeStep } from "../inngest/fake-step";
 import { runConfirmRequestSteps } from "./alert-functions";
 import { FIXED_ERROR } from "./types";
-import { NOTHING_DRAFTED, NUMBER_REFUSED } from "./turn";
+import { NOTHING_DRAFTED, NUMBER_REFUSED, loadCopilotPanel } from "./turn";
 import { saveReorder, updateReorderDays } from "./reorder-actions";
 import { loadReorderList } from "./reorder-list";
 import { authPost, testSignUp } from "../test-auth";
@@ -88,6 +88,16 @@ async function enableTwoFactor(email: string): Promise<string> {
 function asStore(slug: string, cookies: string): void {
   headerState.set("cookie", cookies);
   headerState.set("x-store-slug", slug);
+}
+
+/** Pro by default: the chat is a Pro feature (#818). Null removes the subscription, which is Starter. */
+async function setPlan(storeId: string, plan: "pro" | null): Promise<void> {
+  await authPrisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    await tx.storeSubscription.deleteMany({ where: { storeId } });
+    if (plan) await tx.storeSubscription.create({ data: { storeId, plan, status: "active" } });
+  });
 }
 
 function script(steps: FakeAnthropicStep[]) {
@@ -141,6 +151,9 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeBId}, ${ownerBId}, 'owner', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeAId}, ${staffId}, 'staff', now())`;
     });
+
+    await setPlan(storeAId, "pro");
+    await setPlan(storeBId, "pro");
 
     const old = new Date("2020-01-01T00:00:00.000Z");
     const counted = async (name: string, qty: number) => {
@@ -278,6 +291,36 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       where: { action: "listing.stock_change", entityId: gariId },
     })).toBe(1);
   }, 60_000);
+
+  it("the chat is Pro: a Starter store keeps its history and pending changes but cannot send (#818)", async () => {
+    const cassavaId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Cassava", price: 500, stockMode: "counted", qty: 5, confidence: 1 },
+    })).id;
+    let fake = script([
+      { kind: "tool", toolName: "find_listings", toolInput: { query: "cassava" } },
+      { kind: "tool", toolName: "propose_stock_change", toolInput: { listingId: cassavaId, kind: "restock", quantity: 3 } },
+      { kind: "text", text: "Cassava can go up by 3." },
+    ]);
+    const sent = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "got 3 cassava" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+
+    await setPlan(storeAId, null);
+    try {
+      fake = script([{ kind: "text", text: "Should not run." }]);
+      const refused = await sendCopilotMessage({ conversationId: sent.conversationId, messageId: crypto.randomUUID(), text: "got 2 cassava" });
+      expect(refused).toMatchObject({ ok: false, code: "plan_locked" });
+      expect(fake.requests).toHaveLength(0);
+
+      const panel = await loadCopilotPanel(storeAId, ownerAId);
+      expect(panel.messages.map((message) => message.text)).toContain("got 3 cassava");
+      expect(panel.messages.map((message) => message.text)).not.toContain("got 2 cassava");
+      expect(await confirmStockProposal({ proposalId: sent.proposals[0].id })).toMatchObject({ ok: true, listing: { qty: 8 } });
+    } finally {
+      await setPlan(storeAId, "pro");
+      await storeScoped(storeAId).listing.update({ where: { id: cassavaId }, data: { active: false } });
+    }
+  });
 
   it("a repeated message id returns the stored turn without a second model call", async () => {
     const messageId = crypto.randomUUID();
@@ -721,21 +764,12 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     });
     const before = await stock();
 
-    // Starter: the tool says locked and the actions refuse.
-    let fake = script([
-      { kind: "tool", toolName: "reorder_suggestions", toolInput: {} },
-      { kind: "text", text: "Reorder suggestions are on the Pro plan." },
-    ]);
-    await ask();
-    expect(toolResult(fake)).toContain(String.raw`{\"locked\":true`);
+    // Starter: the actions refuse. The chat itself is Pro (#818), so the tool's locked answer is not reachable from it.
+    await setPlan(storeAId, null);
     expect(await saveReorder({ lines: [{ listingId: beansId, quantity: 5 }] })).toEqual({ ok: false, message: "Reorder suggestions are on the Pro plan." });
     expect(await updateReorderDays({ leadDays: 3, coverDays: 7 })).toEqual({ ok: false, message: "Reorder suggestions are on the Pro plan." });
-
-    await authPrisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.storeSubscription.create({ data: { storeId: storeAId, plan: "pro", status: "active" } });
-    });
+    await setPlan(storeAId, "pro");
+    let fake: ReturnType<typeof script>;
     try {
       // Staff are refused even on Pro.
       asStore(storeASlug, cookiesStaff);
@@ -766,11 +800,6 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
 
       expect(await stock()).toEqual(before);
     } finally {
-      await authPrisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        await tx.storeSubscription.delete({ where: { storeId: storeAId } });
-      });
       await storeScoped(storeAId).listing.update({ where: { id: beansId }, data: { active: false } });
     }
   });

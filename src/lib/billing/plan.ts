@@ -12,7 +12,8 @@ export type PlanFeature =
   | "copilot-reports"
   | "reorder-suggestions"
   | "whatsapp"
-  | "analytics-dashboard";
+  | "analytics-dashboard"
+  | "store-assistant";
 
 export const PRO_FEATURES: readonly PlanFeature[] = [
   "own-domain",
@@ -21,6 +22,7 @@ export const PRO_FEATURES: readonly PlanFeature[] = [
   "reorder-suggestions",
   "whatsapp",
   "analytics-dashboard",
+  "store-assistant",
 ];
 
 export const FEATURE_LABELS: Record<PlanFeature, string> = {
@@ -30,6 +32,7 @@ export const FEATURE_LABELS: Record<PlanFeature, string> = {
   "reorder-suggestions": "Reorder suggestions",
   whatsapp: "WhatsApp for copilot and alerts",
   "analytics-dashboard": "Analytics dashboard",
+  "store-assistant": "Store assistant (AI chat)",
 };
 
 /** Sold on the plan page but not built yet; every place that lists a feature marks these "coming soon". */
