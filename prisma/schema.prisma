@@ -838,6 +838,7 @@ model AdminAssistantConversation {
   user     User                          @relation(fields: [userId], references: [id], onDelete: Restrict)
   receipts AdminAssistantClientMessage[]
   drafts   AdminAssistantDraft[]
+  flags    AiReviewFlag[]
 
   @@index([userId, lastMessageAt])
   @@map("admin_assistant_conversations")
@@ -1509,22 +1510,26 @@ model AiConversation {
 /// Deleted with its conversation, and after 90 days by the assistant retention job.
 model AiReviewFlag {
   id                    String   @id @default(cuid())
-  storeId               String   @map("store_id")
+  /// Null only on a platform admin assistant chat's flag (#856), which belongs to no store.
+  storeId               String?  @map("store_id")
   aiConversationId      String?  @map("ai_conversation_id")
   copilotConversationId String?  @map("copilot_conversation_id")
+  adminAssistantConversationId String? @map("admin_assistant_conversation_id")
   label                 String
   note                  String   @default("")
   createdById           String   @map("created_by_id")
   createdAt             DateTime @default(now()) @map("created_at")
 
-  store               Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  store               Store?               @relation(fields: [storeId], references: [id], onDelete: Restrict)
   aiConversation      AiConversation?      @relation(fields: [aiConversationId, storeId], references: [id, storeId], onDelete: Cascade)
   copilotConversation CopilotConversation? @relation(fields: [copilotConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  adminAssistantConversation AdminAssistantConversation? @relation(fields: [adminAssistantConversationId], references: [id], onDelete: Cascade)
   createdBy           User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([storeId])
   @@index([aiConversationId])
   @@index([copilotConversationId])
+  @@index([adminAssistantConversationId])
   @@index([createdById])
   @@index([createdAt])
   @@map("ai_review_flags")
