@@ -1,5 +1,7 @@
 "use server";
 
+import { z } from "zod";
+import { parseInput } from "@/lib/security/parse-input";
 import { requireStoreMember } from "@/lib/store-admin/session";
 import { searchStoreAdmin, type AdminSearchResults } from "@/lib/store-admin/search";
 import { shellCounts, type ShellCounts } from "./shell-data";
@@ -12,5 +14,6 @@ export async function shellCountsAction(): Promise<ShellCounts> {
 
 export async function adminSearchAction(query: string): Promise<AdminSearchResults> {
   const session = await requireStoreMember();
-  return searchStoreAdmin(session.store.id, typeof query === "string" ? query : "");
+  const parsed = parseInput(z.string(), query);
+  return searchStoreAdmin(session.store.id, parsed.ok ? parsed.data : "");
 }
