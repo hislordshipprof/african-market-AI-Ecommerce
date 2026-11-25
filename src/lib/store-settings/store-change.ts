@@ -1,7 +1,7 @@
 import { lockStoreRow, platform, storeScopedTransaction, updateStoreOneOff } from "../db";
 import { revalidateStore } from "../get-store";
 import { addDays, storeToday, validDay } from "../analytics/range";
-import { storeLocalToUtc } from "../coupon/form";
+import { storeLocalToUtc } from "../store-local-time";
 import { parseTimeMinutes } from "../order/store-hours";
 import { activeDeliveryPause, pauseEndLabel } from "../delivery/delivery-pause";
 import { twelveHour, WEEK_DAYS } from "./weekly-hours";

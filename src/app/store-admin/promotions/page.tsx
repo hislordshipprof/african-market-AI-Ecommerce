@@ -1,6 +1,6 @@
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { listCoupons } from "@/lib/coupon/service";
-import { utcToStoreLocal } from "@/lib/coupon/form";
+import { utcToStoreLocal } from "@/lib/store-local-time";
 import { formatInZone } from "@/lib/format";
 import { Promotions } from "./promotions";
 

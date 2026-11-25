@@ -7,7 +7,7 @@ import { revalidateStorefront } from "../storefront/cache";
 import { chooseListing } from "./choices";
 import { answerAlert, confirmProposal, rejectProposal, type AnswerResult } from "./confirm";
 import { sendCopilotTurn } from "./turn";
-import { confirmDraft, rejectDraft, storeSite } from "./drafts";
+import { DRAFT_MAKERS, confirmDraft, rejectDraft, storeSite } from "./drafts";
 import { revalidateStore } from "../get-store";
 import { PAYOUTS_SHOWN, storePayouts } from "../payouts/service";
 import {
@@ -89,7 +89,7 @@ export async function sendCopilotMessage(input: unknown): Promise<SendResult> {
       messageId: parsed.data.messageId,
       text: parsed.data.text,
       payouts: { shown: PAYOUTS_SHOWN, list: storePayouts },
-      drafts: true,
+      drafts: DRAFT_MAKERS,
     });
   } catch (error) {
     console.error("[copilot] send failed", { errorType: error instanceof Error ? error.name : "Error" });

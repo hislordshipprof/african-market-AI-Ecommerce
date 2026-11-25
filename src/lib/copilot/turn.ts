@@ -32,7 +32,7 @@ import { choiceCards } from "./choices";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
 import { COPILOT_SYSTEM_PROMPT, NO_DRAFTS_HERE } from "./prompt";
 import { databaseClock, insertProposalRows } from "./proposals";
-import { insertDraftRows, loadDraftCards, type PendingDraft } from "./drafts";
+import { insertDraftRows, loadDraftCards, type DraftMakers, type PendingDraft } from "./draft-rows";
 import { copilotTools, createDraftBook, type DraftBook, type Draft, type PendingChoice } from "./tools";
 import { estimateText, storeTimeZone } from "./inventory-report";
 import { storeToday } from "../analytics/range";
@@ -281,8 +281,8 @@ export async function sendCopilotTurn(input: {
   text: string;
   /** The store admin page's payout reader; without it a sales answer says the payout is not known. */
   payouts?: PayoutReader;
-  /** The page shows coupon, price and store-change draft cards (#819); WhatsApp does not, so it gets no draft tools. */
-  drafts?: boolean;
+  /** The page's coupon, price and store-change draft makers (#819); WhatsApp shows no cards, so it passes none. */
+  drafts?: DraftMakers;
 }): Promise<SendResult> {
   const text = input.text.trim();
   if (!text || input.text.trim().length > MESSAGE_MAX) {
@@ -327,7 +327,7 @@ export async function sendCopilotTurn(input: {
       messages: [...modelHistory(history), { role: "user", content: text }],
       tools: copilotTools(input.storeId, book, {
         payouts: input.payouts ?? null,
-        ...(input.drafts ? { drafts: { ownerText: text } } : {}),
+        ...(input.drafts ? { drafts: { ownerText: text, make: input.drafts } } : {}),
       }),
       stopWhen: stepCountIs(STEP_CAP),
       maxRetries: 0,

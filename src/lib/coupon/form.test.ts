@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseCouponForm, storeLocalToUtc, utcToStoreLocal } from "./form";
+import { parseCouponForm } from "./form";
+import { storeLocalToUtc, utcToStoreLocal } from "../store-local-time";
 
 function form(fields: Record<string, string>): FormData {
   const data = new FormData();

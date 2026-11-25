@@ -7,14 +7,7 @@ import { MOVEMENT_DAYS, SALES_FLOOR, inventoryReport, type MovementRow } from ".
 import { reorderSuggestions, type ReorderSuggestions } from "./reorder";
 import { SALES_PERIODS, salesSummary, type PayoutReader, type SalesFigures } from "./sales-summary";
 import { searchListingMatches, type ListingSearch } from "./search";
-import {
-  DraftError,
-  draftCoupon,
-  draftPrices,
-  draftStoreChange,
-  draftToolResult,
-  type PendingDraft,
-} from "./drafts";
+import { DraftError, draftToolResult, type DraftMakers, type PendingDraft } from "./draft-rows";
 import { PROPOSAL_MAX, QUANTITY_MAX, STOCK_STATUSES, type ChoiceCandidate, type ProposalKind } from "./types";
 
 const CHECK_FAILED = "could not check that listing";
@@ -258,14 +251,14 @@ function recorded<T>(book: DraftBook, result: T): T {
 /** Where the turn came from: the page shows draft cards; WhatsApp does not, so it gets no draft tools. */
 export interface ToolOptions {
   payouts?: PayoutReader | null;
-  /** The owner's message, for the price draft's check that the owner named the item. */
-  drafts?: { ownerText: string };
+  /** The page's draft makers, and the owner's message for the price draft's check that the owner named the item. */
+  drafts?: { ownerText: string; make: DraftMakers };
 }
 
 export function copilotTools(storeId: string, book: DraftBook, options: ToolOptions = {}) {
   const payouts = options.payouts ?? null;
   return {
-    ...(options.drafts ? draftTools(storeId, book, options.drafts.ownerText) : {}),
+    ...(options.drafts ? draftTools(storeId, book, options.drafts.ownerText, options.drafts.make) : {}),
     find_listings: tool({
       description:
         "Search this store's active listings by item name. Returns outcome one, several, did_you_mean or none, and at most 5 listings. Does not change stock.",
@@ -429,7 +422,7 @@ async function drafting(book: DraftBook, timeZone: string, make: () => Promise<P
   return recorded(book, draftToolResult(draft, timeZone, new Date()));
 }
 
-function draftTools(storeId: string, book: DraftBook, ownerText: string) {
+function draftTools(storeId: string, book: DraftBook, ownerText: string, make: DraftMakers) {
   const store = () => platform.store.findUniqueOrThrow({
     where: { id: storeId },
     select: { hours: true, timezone: true, deliveryPausedUntil: true },
@@ -441,7 +434,7 @@ function draftTools(storeId: string, book: DraftBook, ownerText: string) {
       inputSchema: couponSchema,
       execute: (input) => book.run(async () => {
         const { timezone } = await store();
-        return drafting(book, timezone, () => draftCoupon(input, timezone));
+        return drafting(book, timezone, () => make.coupon(input, timezone));
       }),
     }),
     draft_price_change: tool({
@@ -450,7 +443,7 @@ function draftTools(storeId: string, book: DraftBook, ownerText: string) {
       inputSchema: priceSchema,
       execute: (input) => book.run(async () => {
         const { timezone } = await store();
-        return drafting(book, timezone, () => draftPrices(storeId, input, ownerText));
+        return drafting(book, timezone, () => make.prices(storeId, input, ownerText));
       }),
     }),
     draft_store_change: tool({
@@ -459,7 +452,7 @@ function draftTools(storeId: string, book: DraftBook, ownerText: string) {
       inputSchema: storeChangeSchema,
       execute: (input) => book.run(async () => {
         const row = await store();
-        return drafting(book, row.timezone, () => draftStoreChange(input, row, new Date()));
+        return drafting(book, row.timezone, () => make.storeChange(input, row, new Date()));
       }),
     }),
   };
