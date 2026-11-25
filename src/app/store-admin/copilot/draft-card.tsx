@@ -118,7 +118,7 @@ export function DraftCardView({
       {card.kind === "store_change" ? (
         <>
           <p className="mt-2 text-base leading-6 text-foreground">{card.text}</p>
-          <p className="mt-1 text-sm font-semibold text-foreground">Ends {card.ends}</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">Until {card.ends}</p>
         </>
       ) : null}
 
