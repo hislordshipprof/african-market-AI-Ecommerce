@@ -1,11 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { storeScoped } from "../db";
+import { heroPhotos } from "./editorial";
 
 const hasDb = !!process.env.DATABASE_URL;
 const hasDirectUrl =
   !!process.env.DATABASE_URL_UNPOOLED || !!process.env.DIRECT_URL;
 
 describe.skipIf(!hasDb)("Demo catalog seed", () => {
+  it("both demo stores open on grocery photographs, never the plated dish (#836)", async () => {
+    const { platform } = await import("../db");
+    const heroes = new Set(Object.values(heroPhotos).map((p) => p.src));
+    for (const slug of ["mama-ngozi", "tante-marie"]) {
+      const store = await platform.store.findUnique({ where: { slug } });
+      const banners = await storeScoped(store!.id).storeBanner.findMany({ where: { active: true } });
+      expect(banners.length, slug).toBeGreaterThanOrEqual(3);
+      for (const b of banners) expect(heroes.has(b.imageUrl), `${slug} ${b.imageUrl}`).toBe(true);
+    }
+  });
+
   it("mama-ngozi has seeded listings visible through RLS", async () => {
     const store = await import("../db").then((m) =>
       m.platform.store.findUnique({ where: { slug: "mama-ngozi" } }),
