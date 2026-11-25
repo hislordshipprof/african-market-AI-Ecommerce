@@ -20,6 +20,7 @@ const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visi
 const SETTINGS_HREF = "/admin/settings/ai-onboarding";
 
 const dayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const fullDayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 const timeFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" });
 
 function dayText(day: string): string {
@@ -65,7 +66,7 @@ export default async function AiConversationsPage({ searchParams }: { searchPara
   const next = inbox.rows[at + 1] ?? null;
   const prev = at > 0 ? inbox.rows[at - 1] ?? null : null;
   const following = openKey ? nextUnlabelled(inbox.rows, openKey) : null;
-  const range = inbox.day ? `${dayText(inbox.day)} (UTC)` : `Last 7 days, ${dayText(inbox.from)} to ${dayText(inbox.to)} (UTC)`;
+  const range = inbox.day ? `${fullDayFormat.format(new Date(`${inbox.day}T00:00:00.000Z`))} (UTC)` : `Last 7 days, ${dayText(inbox.from)} to ${dayText(inbox.to)} (UTC)`;
 
   return (
     <div className="mx-auto max-w-[90rem] px-4 py-8 sm:px-6 lg:py-10">
@@ -86,7 +87,7 @@ export default async function AiConversationsPage({ searchParams }: { searchPara
             Change the sample size
           </Link>
         </p>
-        <InboxFilters state={state} counts={inbox.counts} stores={inbox.stores} />
+        <InboxFilters state={state} counts={inbox.counts} stores={inbox.stores} dayOnly={inbox.total === 0} />
       </div>
 
       {inbox.total === 0 ? (
@@ -159,16 +160,14 @@ function Row({ row, href, current }: { row: InboxRow; href: string; current: boo
       className={`block px-1 py-3 hover:bg-muted focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring lg:px-4 ${current ? "bg-secondary hover:bg-secondary" : ""}`}
     >
       <span className="flex items-baseline justify-between gap-3 text-xs text-muted-foreground">
-        <span className="min-w-0 truncate">
-          <span className="font-semibold text-foreground">{row.storeName ?? "Platform"}</span> · {KIND_TEXT[row.kind]}
-        </span>
+        <span className="min-w-0 truncate font-semibold text-foreground">{row.storeName ?? "Platform"}</span>
         <time dateTime={row.lastMessageAt} className="shrink-0 tabular-nums">{timeFormat.format(new Date(row.lastMessageAt))}</time>
       </span>
       <span className="mt-1 line-clamp-2 break-words text-sm text-foreground">
         {row.firstQuestion || <span className="text-muted-foreground">No question in text</span>}
       </span>
-      {(row.reasons.length > 0 || row.labels.length > 0) && (
-        <span className="mt-2 flex flex-wrap gap-1.5">
+      <span className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-xs text-muted-foreground">{KIND_TEXT[row.kind]} assistant</span>
           {row.reasons.map((reason) => (
             <span key={reason} className="rounded-full border border-input px-2 py-0.5 text-xs font-medium text-foreground">
               {FLAG_REASON_TEXT[reason]}
@@ -179,8 +178,7 @@ function Row({ row, href, current }: { row: InboxRow; href: string; current: boo
               Labelled: {REVIEW_LABEL_TEXT[label]}
             </span>
           ))}
-        </span>
-      )}
+      </span>
     </Link>
   );
 }

@@ -36,8 +36,10 @@ function Chip({ name, value, type, checked, onChange, children }: {
 }
 
 /** Filters apply on change, as the subscription filters do (#837): each change submits the GET form. */
-export function InboxFilters({ state, counts, stores }: {
+export function InboxFilters({ state, counts, stores, dayOnly }: {
   state: InboxFilterState;
+  /** With nothing in the range, only the day box: every other count would be 0. */
+  dayOnly: boolean;
   counts: { kind: Record<"all" | ConversationKind, number>; store: Record<string, number>; flagged: number; unlabelled: number };
   stores: Array<{ id: string; name: string }>;
 }) {
@@ -64,7 +66,7 @@ export function InboxFilters({ state, counts, stores }: {
 
   return (
     <Form action="/admin/ai/conversations" className="mt-5 grid gap-3" aria-label="Filter chats">
-      <fieldset className="flex flex-wrap gap-2">
+      <fieldset className={dayOnly ? "hidden" : "flex flex-wrap gap-2"}>
         <legend className="sr-only">Assistant</legend>
         <Chip name="assistant" value="" type="radio" checked={chosen.assistant === ""} onChange={apply}>
           All assistants <span className="tabular-nums text-muted-foreground">{counts.kind.all}</span>
@@ -76,19 +78,23 @@ export function InboxFilters({ state, counts, stores }: {
         ))}
       </fieldset>
       <div className="flex flex-wrap items-end gap-2">
-        <Chip name="flagged" value="1" type="checkbox" checked={chosen.flagged} onChange={apply}>
-          Flagged only <span className="tabular-nums text-muted-foreground">{counts.flagged}</span>
-        </Chip>
-        <Chip name="unlabelled" value="1" type="checkbox" checked={chosen.unlabelled} onChange={apply}>
-          Unlabelled only <span className="tabular-nums text-muted-foreground">{counts.unlabelled}</span>
-        </Chip>
-        <label className="sr-only" htmlFor="filter-store">Store</label>
-        <select id="filter-store" name="store" value={chosen.store} onChange={apply} className={`${FIELD} max-w-full sm:max-w-64`}>
-          <option value="">All stores ({counts.store.all})</option>
-          {storeOptions.map((store) => (
-            <option key={store.id} value={store.id}>{store.name} ({counts.store[store.id] ?? 0})</option>
-          ))}
-        </select>
+        {!dayOnly && (
+          <>
+            <Chip name="flagged" value="1" type="checkbox" checked={chosen.flagged} onChange={apply}>
+              Flagged only <span className="tabular-nums text-muted-foreground">{counts.flagged}</span>
+            </Chip>
+            <Chip name="unlabelled" value="1" type="checkbox" checked={chosen.unlabelled} onChange={apply}>
+              Unlabelled only <span className="tabular-nums text-muted-foreground">{counts.unlabelled}</span>
+            </Chip>
+            <label className="sr-only" htmlFor="filter-store">Store</label>
+            <select id="filter-store" name="store" value={chosen.store} onChange={apply} className={`${FIELD} max-w-full sm:max-w-64`}>
+              <option value="">All stores ({counts.store.all})</option>
+              {storeOptions.map((store) => (
+                <option key={store.id} value={store.id}>{store.name} ({counts.store[store.id] ?? 0})</option>
+              ))}
+            </select>
+          </>
+        )}
         <div className="flex items-center gap-2">
           <label htmlFor="filter-day" className="text-sm font-medium text-foreground">Day (UTC)</label>
           <input id="filter-day" type="date" name="day" value={chosen.day} onChange={apply} className={FIELD} />
