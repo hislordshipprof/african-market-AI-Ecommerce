@@ -1,39 +1,57 @@
+import { cache } from "react";
+import { platformAdminTransaction } from "../db";
+import { requestsByArea } from "../directory/store-requests";
 import { listStores } from "./actions";
 import { getReviewStats } from "./catalog-actions";
 import { listOrdersToCheck } from "./orders-to-check";
 import { listRefundFailedOrders } from "./refund-resolution";
 import { listEscalatedThreads } from "../support/platform-actions";
 import { listStoreApplications, PENDING_APPLICATIONS_LISTED } from "../store-application/service";
+import { findCourierIncidents } from "./courier-incidents-query";
+import { readOpenDisputes } from "./disputes";
+
+/** Courier incidents read for the open count, as the admin briefing reads them (#834). */
+const INCIDENTS_READ = 200;
 
 /** `incomplete` means the list behind the count was capped, so the real count is at least `count`. */
 export type QueueCount = { count: number; incomplete: boolean };
 
-/** A null count means its query failed; the home page shows that tile as not loaded. */
+/** A null count means its query failed; the home page and the menu badge show it as not loaded. */
 export type AdminHomeCounts = {
-  stores: { active: number; suspended: number } | null;
+  stores: { total: number; active: number; setup: number; suspended: number } | null;
   refunds: QueueCount | null;
   ordersToCheck: QueueCount | null;
   messages: QueueCount | null;
   catalogReview: QueueCount | null;
   applications: QueueCount | null;
+  storeRequests: QueueCount | null;
+  courierIncidents: QueueCount | null;
+  disputes: QueueCount | null;
 };
 
-/** Counts for the admin home page, read through each queue's own page query. The page checks the admin first. */
-export async function getAdminHomeCounts(): Promise<AdminHomeCounts> {
-  const [stores, refunds, orders, messages, review, applications] = await Promise.allSettled([
+/**
+ * Counts for the admin home page and the menu badges, read through each queue's own page query. The caller checks the
+ * admin first. Cached per request, so the shell and Home share one read.
+ */
+export const getAdminHomeCounts = cache(async (): Promise<AdminHomeCounts> => {
+  const [stores, refunds, orders, messages, review, applications, requests, incidents, disputes] = await Promise.allSettled([
     listStores(),
     listRefundFailedOrders(),
     listOrdersToCheck(),
     listEscalatedThreads(),
     getReviewStats(),
     listStoreApplications(),
+    requestsByArea(),
+    platformAdminTransaction((tx) => findCourierIncidents(tx, {}, INCIDENTS_READ)),
+    readOpenDisputes(),
   ]);
   return {
-    stores: settled(stores, (list) => {
-      const active = list.filter((store) => store.status === "active").length;
-      const suspended = list.filter((store) => store.status === "suspended").length;
-      return { active, suspended };
-    }),
+    stores: settled(stores, (list) => ({
+      total: list.length,
+      active: list.filter((store) => store.status === "active").length,
+      setup: list.filter((store) => store.status === "setup").length,
+      suspended: list.filter((store) => store.status === "suspended").length,
+    })),
     refunds: settled(refunds, (list) => ({ count: list.length, incomplete: false })),
     ordersToCheck: settled(orders, (queues) => ({
       count: queues.stuck.length + queues.alerts.length,
@@ -50,8 +68,18 @@ export async function getAdminHomeCounts(): Promise<AdminHomeCounts> {
       count: pending.length,
       incomplete: pending.length >= PENDING_APPLICATIONS_LISTED,
     })),
+    // Shoppers waiting for a store near them, as the briefing counts them.
+    storeRequests: settled(requests, (areas) => ({
+      count: areas.flatMap((area) => area.zips).reduce((sum, zip) => sum + zip.waiting, 0),
+      incomplete: false,
+    })),
+    courierIncidents: settled(incidents, ({ rows, nextCursor }) => ({
+      count: rows.filter((row) => row.state === "open").length,
+      incomplete: nextCursor !== null,
+    })),
+    disputes: settled(disputes, ({ rows, more }) => ({ count: rows.length, incomplete: more })),
   };
-}
+});
 
 function settled<T, R>(result: PromiseSettledResult<T>, count: (value: T) => R): R | null {
   if (result.status === "fulfilled") return count(result.value);

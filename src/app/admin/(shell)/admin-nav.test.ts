@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ADMIN_NAV, currentNavHref } from "./admin-nav";
+import { ADMIN_NAV, ADMIN_NAV_GROUPS, currentNavHref, type AdminNavItem } from "./admin-nav";
 
 describe("currentNavHref", () => {
   it("marks the section a nested page belongs to, not a lookalike path", () => {
@@ -32,5 +32,38 @@ describe("ADMIN_NAV", () => {
 
   it("has no Assistant entry: the assistant opens from the floating button on every page (#855)", () => {
     expect(ADMIN_NAV.map((entry) => entry.href)).not.toContain("/admin/assistant");
+  });
+});
+
+describe("ADMIN_NAV_GROUPS", () => {
+  it("groups the menu under the headings of design A (#859), in order", () => {
+    expect(ADMIN_NAV_GROUPS.map((group) => [group.label, group.items.map((item) => item.label)])).toEqual([
+      [null, ["Home"]],
+      ["Stores", ["Stores", "Applications", "Store requests", "Subscriptions"]],
+      ["Catalogue", ["Products", "Categories", "Recipes", "Catalog review", "Duplicates"]],
+      ["Orders and money", ["Refunds", "Orders to check", "Search orders", "Disputes", "Fee ledger"]],
+      ["Delivery", ["Courier incidents", "Courier settings", "Metros"]],
+      ["Support", ["Messages"]],
+      ["AI", ["AI conversations", "AI eval and spend"]],
+      ["Settings", ["AI and onboarding"]],
+    ]);
+  });
+
+  it("is the flat menu, each page in exactly one group", () => {
+    expect(ADMIN_NAV_GROUPS.flatMap((group): readonly AdminNavItem[] => group.items)).toEqual([...ADMIN_NAV]);
+  });
+
+  it("names the queue count each badge shows", () => {
+    const counted = Object.fromEntries(ADMIN_NAV.flatMap((item) => ("count" in item ? [[item.label, item.count]] : [])));
+    expect(counted).toEqual({
+      Applications: "applications",
+      "Store requests": "storeRequests",
+      "Catalog review": "catalogReview",
+      Refunds: "refunds",
+      "Orders to check": "ordersToCheck",
+      Disputes: "disputes",
+      "Courier incidents": "courierIncidents",
+      Messages: "messages",
+    });
   });
 });

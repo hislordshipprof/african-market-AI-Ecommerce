@@ -15,6 +15,10 @@ export type PlatformTotals =
     storesWithOrders: number;
     /** Stores live now, not over the range. */
     activeStores: number;
+    /** Each store day in the range, added across stores. */
+    days: Array<{ day: string; orders: number; goodsCents: number }>;
+    /** Each store read (one with an order or a refund near the range); `today` is its last day, `to`. */
+    stores: Array<{ storeId: string; orders: number; goodsCents: number; today: { orders: number; goodsCents: number } }>;
   }
   | { ok: false; reason: string };
 
@@ -43,18 +47,33 @@ export async function platformTotals(from: string, to: string, now: Date = new D
 
   const range: AnalyticsRange = { preset: "custom", from, to };
   const totals = { orders: 0, goodsCents: 0, refundsCents: 0, netCents: 0, storesWithOrders: 0 };
+  const days = new Map<string, { day: string; orders: number; goodsCents: number }>();
+  const stores: Extract<PlatformTotals, { ok: true }>["stores"] = [];
   for (let start = 0; start < zones.length; start += BATCH) {
     const views = await Promise.all(zones.slice(start, start + BATCH).map(async (store) => {
       const zone = isValidTimezone(store.timezone) ? store.timezone : "UTC";
-      return salesView(await salesRows(store.id, range, zone), range).totals;
+      return { storeId: store.id, view: salesView(await salesRows(store.id, range, zone), range) };
     }));
-    for (const view of views) {
+    for (const { storeId, view: { totals: view, days: storeDays } } of views) {
       totals.orders += view.orders;
       totals.goodsCents += view.goodsCents;
       totals.refundsCents += view.refundsCents;
       totals.netCents += view.netCents;
       if (view.orders > 0) totals.storesWithOrders += 1;
+      for (const { day, orders, goodsCents } of storeDays) {
+        const sum = days.get(day) ?? { day, orders: 0, goodsCents: 0 };
+        sum.orders += orders;
+        sum.goodsCents += goodsCents;
+        days.set(day, sum);
+      }
+      const last = storeDays.find((row) => row.day === to);
+      stores.push({ storeId, orders: view.orders, goodsCents: view.goodsCents, today: { orders: last?.orders ?? 0, goodsCents: last?.goodsCents ?? 0 } });
     }
   }
-  return { ok: true, from, to, ...totals, activeStores };
+  const everyDay = Array.from({ length: daySpan(from, to) }, (_, index) => addDays(from, index));
+  return {
+    ok: true, from, to, ...totals, activeStores,
+    days: everyDay.map((day) => days.get(day) ?? { day, orders: 0, goodsCents: 0 }),
+    stores,
+  };
 }
