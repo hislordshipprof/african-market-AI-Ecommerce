@@ -20,6 +20,12 @@ import { getBillingProvider, planForLookupKey } from "./provider";
 export const PILOT_STORE_CAP = 5;
 export const PILOT_FREE_MONTHS = 3;
 
+/** Pilot places not yet given to a store; /sell shows the pilot offer while any remain (#838). */
+export async function pilotPlacesLeft(): Promise<number> {
+  const taken = await platformAdmin.storeSubscription.count({ where: { pilot: true } });
+  return Math.max(0, PILOT_STORE_CAP - taken);
+}
+
 export interface Actor {
   id: string;
   email: string;

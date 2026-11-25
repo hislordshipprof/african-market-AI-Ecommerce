@@ -12,9 +12,22 @@ export function storeTypeLabel(value: string): string {
   return STORE_TYPES.find((type) => type.value === value)?.label ?? value;
 }
 
+/** "Which plan are you interested in?" on /sell (#838). Interest only: it charges and binds no one. */
+export const PLAN_CHOICES = [
+  { value: "starter", label: "Starter" },
+  { value: "pro", label: "Pro" },
+  { value: "undecided", label: "Not sure yet" },
+] as const;
+
+export type PlanChoice = (typeof PLAN_CHOICES)[number]["value"];
+
+export function planChoiceLabel(value: string): string {
+  return PLAN_CHOICES.find((choice) => choice.value === value)?.label ?? value;
+}
+
 export const APPLICATION_FIELDS = [
   "businessName", "storeType", "addressLine1", "city", "state", "zip",
-  "ownerName", "email", "phone", "website", "offersPickup", "offersDelivery",
+  "ownerName", "email", "phone", "website", "offersPickup", "offersDelivery", "planChoice",
   // Honeypot: hidden from people, so only a bot fills it.
   "fax",
 ] as const;

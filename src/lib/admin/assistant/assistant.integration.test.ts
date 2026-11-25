@@ -186,6 +186,26 @@ describe.skipIf(!hasDb)("platform admin assistant (#831)", () => {
     expect(await call("store_detail", { slug: `stuck-${RUN}` })).toMatchObject({ courierRegistrationErrors: errors });
   });
 
+  it("gives the plan each applicant said they wanted, on waiting applications and on the store they became (#838)", async () => {
+    signInAs(admin);
+    const applicant = { storeType: "african", addressLine1: "1 Main St", city: "Houston", state: "TX", zip: "77001", ownerName: "Ada", phone: "+17135550100" };
+    const [waiting, approved] = await platformAdminTransaction((tx) => Promise.all([
+      tx.storeApplication.create({ data: { ...applicant, businessName: `Waiting ${RUN}`, email: `waiting-${RUN}@example.com`, planChoice: "pro", createdAt: new Date("2000-01-01T00:00:00.000Z") } }),
+      tx.storeApplication.create({ data: { ...applicant, businessName: storeName, email: `approved-${RUN}@example.com`, planChoice: "starter", status: "approved", decidedAt: new Date(), storeId } }),
+    ]));
+    try {
+      const tools = adminAssistantTools({ actor: admin, conversationId: crypto.randomUUID(), book: createReadBook(), now: new Date() });
+      const call = (name: keyof typeof tools, input: object) =>
+        (tools[name].execute as (input: object, options: object) => Promise<unknown>)(input, { toolCallId: name, messages: [] });
+
+      const queue = await call("applications_waiting", {}) as { applications: Array<Record<string, unknown>> };
+      expect(queue.applications).toContainEqual(expect.objectContaining({ applicationId: waiting.id, planWanted: "Pro" }));
+      expect(await call("store_detail", { slug: `stuck-${RUN}` })).toMatchObject({ planWantedWhenApplying: "Starter" });
+    } finally {
+      await platformAdminTransaction((tx) => tx.storeApplication.deleteMany({ where: { id: { in: [waiting.id, approved.id] } } }));
+    }
+  });
+
   it("refuses anyone who is not a platform admin", async () => {
     signInAs(admin, "customer");
     script([{ kind: "text", text: "hi" }]);

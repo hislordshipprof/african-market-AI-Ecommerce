@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { CircleAlert } from "lucide-react";
 import { submitStoreApplicationAction, type SellFormState } from "@/lib/store-application/actions";
-import { STORE_TYPES } from "@/lib/store-application/fields";
+import { PLAN_CHOICES, STORE_TYPES } from "@/lib/store-application/fields";
 import { USPS_STATE_CODES } from "@/lib/customer-account/address-validation";
 import styles from "./sell.module.css";
 
@@ -18,7 +18,9 @@ export function SellForm() {
   // After a rejected submit, focus goes to the first flagged field, or to the summary when no field is flagged (#728).
   useEffect(() => {
     if (state.status !== "error") return;
-    const first = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    const flagged = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    // A flagged radio group takes focus on its first option.
+    const first = flagged?.getAttribute("role") === "radiogroup" ? flagged.querySelector<HTMLElement>("input") : flagged;
     (first ?? summaryRef.current)?.focus();
   }, [state]);
 
@@ -122,6 +124,32 @@ export function SellForm() {
           <input type="checkbox" name="offersDelivery" defaultChecked={values.offersDelivery === "on"} />
           Delivery
         </label>
+      </fieldset>
+
+      <fieldset
+        className={styles.fieldset}
+        role="radiogroup"
+        aria-labelledby="planChoice-legend"
+        aria-describedby={errors.planChoice ? "planChoice-hint planChoice-error" : "planChoice-hint"}
+        aria-invalid={errors.planChoice ? true : undefined}
+      >
+        <legend id="planChoice-legend" className={styles.label}>Which plan are you interested in?</legend>
+        <p id="planChoice-hint" className={styles.hint}>
+          You choose and pay only after we approve your store. <a href="#plans" className={styles.inlineLink}>Compare the plans</a>
+        </p>
+        {PLAN_CHOICES.map((choice) => (
+          <label key={choice.value} className={styles.check}>
+            <input
+              type="radio"
+              name="planChoice"
+              value={choice.value}
+              required
+              defaultChecked={values.planChoice === choice.value}
+            />
+            {choice.label}
+          </label>
+        ))}
+        {errors.planChoice && <FieldError id="planChoice-error" text={errors.planChoice} />}
       </fieldset>
 
       {/* Honeypot: people never see or reach it, so only a bot fills it in. */}

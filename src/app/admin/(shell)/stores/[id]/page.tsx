@@ -14,6 +14,8 @@ import { OwnerInviteStatus } from "./owner-invite-status";
 import { inviteNotEmailed, ownerInvite } from "@/lib/invite/service";
 import { WhatsAppNumberSection } from "./whatsapp-number-section";
 import { GoLiveSection } from "./go-live-section";
+import { applicantPlanChoice } from "@/lib/store-application/service";
+import { planChoiceLabel } from "@/lib/store-application/fields";
 
 function courierState(id: string | null, error: string | null): string {
   if (id) return `Registered · ${id}`;
@@ -33,10 +35,11 @@ export default async function EditStorePage({
   const { pilotError, courierRetry, override, overrideError, goLive, goLiveError, metro } = await searchParams;
   const store = await getStoreById(id);
   if (!store) notFound();
-  const [subscription, storeNumber, metros, invite] = await Promise.all([
+  const [subscription, storeNumber, metros, applied, invite] = await Promise.all([
     getStoreSubscription(store.id),
     getStoreNumber(store.id),
     listMetros(),
+    applicantPlanChoice(store.id),
     ownerInvite(store.id),
   ]);
   const host = (await headers()).get("host");
@@ -55,6 +58,11 @@ export default async function EditStorePage({
           {subscription?.trialEndsAt && ` · trial ends ${subscription.trialEndsAt.toISOString().slice(0, 10)}`}
           {subscription?.paymentFailedAt && " · last payment failed"}
         </p>
+        {applied && (
+          <p className="mt-1 text-sm text-muted-foreground" data-testid="plan-choice">
+            {applied === "undecided" ? "Not sure of a plan when applying" : `Chose ${planChoiceLabel(applied)} when applying`}
+          </p>
+        )}
         <form action={setPilotAction} className="mt-4 flex flex-wrap items-center gap-3">
           <input type="hidden" name="storeId" value={store.id} />
           <input type="hidden" name="pilot" value={subscription?.pilot ? "false" : "true"} />

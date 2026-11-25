@@ -115,6 +115,46 @@ export function supportLevel(plan: Plan): string {
   return SUPPORT[plan];
 }
 
+/** One row of the Starter vs Pro comparison: true or false is included or not, a string is that plan's own value. */
+export interface PlanComparisonRow {
+  label: string;
+  starter: boolean | string;
+  pro: boolean | string;
+  comingSoon?: boolean;
+}
+
+export const PLANS: readonly Plan[] = ["starter", "pro"];
+
+function perPlan(value: (plan: Plan) => boolean | string): Pick<PlanComparisonRow, Plan> {
+  return { starter: value("starter"), pro: value("pro") };
+}
+
+/**
+ * The one list of what each plan gives (#838): /sell and the store-admin plan page both render it,
+ * so no other page keeps its own list of features.
+ */
+export function planComparisonRows(): PlanComparisonRow[] {
+  return [
+    { label: "Branded store, catalog, orders, refunds and payouts", ...perPlan(() => true) },
+    { label: "Allergy and diet rules, swap or refund prompts", ...perPlan(() => true) },
+    { label: "Pickup and your own delivery", ...perPlan(() => true) },
+    { label: "Shopping-assistant chats a month", ...perPlan((plan) => assistantChatCap(plan).toLocaleString("en-US")) },
+    {
+      label: "Staff",
+      ...perPlan((plan) => {
+        const staff = staffLimit(plan);
+        return staff === null ? "Unlimited staff" : `Owner + ${staff} staff`;
+      }),
+    },
+    { label: "Support", ...perPlan(supportLevel) },
+    ...PRO_FEATURES.map((feature) => ({
+      label: FEATURE_LABELS[feature],
+      ...perPlan((plan) => planAllows(plan, feature)),
+      ...(featureLive(feature) ? {} : { comingSoon: true }),
+    })),
+  ];
+}
+
 export async function storePlan(storeId: string): Promise<Plan> {
   const [row] = await storeScopedTransaction(storeId, (tx) => readStorePlanRows(tx, [storeId]));
   return effectivePlan(row);

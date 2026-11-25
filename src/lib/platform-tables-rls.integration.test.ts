@@ -24,7 +24,7 @@ describe.skipIf(!hasDb)("store applications and the recipe base: a store-scoped 
     const phone = `555${String(Date.now()).slice(-7)}`;
     const submitted = await submitStoreApplication({
       businessName: `RLS Apply ${stamp}`, storeType: "african", addressLine1: "1 Main St", city: "Houston", state: "TX", zip: "77002",
-      ownerName: "Ada", email, phone, website: "", offersPickup: "on",
+      ownerName: "Ada", email, phone, website: "", offersPickup: "on", planChoice: "undecided",
     }, `192.0.2.1-${stamp}`);
     expect(submitted).toEqual({ ok: true });
     recipeId = await platformAdminTransaction(async (tx) => (await tx.recipe.create({
