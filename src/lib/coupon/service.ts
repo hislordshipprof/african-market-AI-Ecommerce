@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { lockStoreRow, storeScopedTransaction } from "../db";
+import { couponShareRefundedCents } from "../order/refund-requests";
 import type { CouponInput } from "./form";
 
 export interface CouponActor {
@@ -38,17 +39,28 @@ function isUniqueViolation(err: unknown): boolean {
 export async function listCoupons(storeId: string) {
   return storeScopedTransaction(storeId, async (tx) => {
     const coupons = await tx.storeCoupon.findMany({ orderBy: [{ active: "desc" }, { createdAt: "desc" }] });
-    const usage = await tx.order.groupBy({
-      by: ["couponId"],
+    const orders = await tx.order.findMany({
       where: { couponId: { not: null }, status: { notIn: RELEASED_STATUSES } },
-      _count: { _all: true },
-      _sum: { discountCents: true },
+      select: {
+        couponId: true,
+        discountCents: true,
+        taxCents: true,
+        lines: { select: { id: true, status: true, qtyOrdered: true, qtyPicked: true, unitPriceCents: true, substitutedUnitPriceCents: true, discountCents: true, taxCents: true } },
+        refundRequests: { where: { lines: { not: Prisma.DbNull } }, select: { state: true, providerStatus: true, lines: true } },
+      },
     });
-    const byCoupon = new Map(usage.map((u) => [u.couponId, u]));
+    const usage = new Map<string, { uses: number; givenCents: number }>();
+    for (const order of orders) {
+      const row = usage.get(order.couponId!) ?? { uses: 0, givenCents: 0 };
+      row.uses += 1;
+      // A refunded item takes its coupon share back, so the store no longer gives it (#806).
+      row.givenCents += order.discountCents - couponShareRefundedCents(order, order.refundRequests);
+      usage.set(order.couponId!, row);
+    }
     return coupons.map((c) => ({
       ...c,
-      usesSoFar: byCoupon.get(c.id)?._count._all ?? 0,
-      discountGivenCents: byCoupon.get(c.id)?._sum.discountCents ?? 0,
+      usesSoFar: usage.get(c.id)?.uses ?? 0,
+      discountGivenCents: usage.get(c.id)?.givenCents ?? 0,
     }));
   });
 }

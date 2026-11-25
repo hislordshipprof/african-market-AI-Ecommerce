@@ -18,7 +18,7 @@ import type { TaxReversalPlan } from "../tax/calculator";
 import { reverseRefundTax } from "../tax/capture-tax";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
-import { refundedUnits, type RequestLine } from "./request-lines";
+import { refundedUnits, requestLines, type RequestLine } from "./request-lines";
 import { STORE_REFUNDABLE_FROM } from "./constants";
 
 /** Inside Stripe's 24h idempotency window. Coordinator default, pending owner confirmation. */
@@ -115,6 +115,25 @@ export function refundedLines(
   const goodsCents = lines.reduce((sum, line) => sum + line.amountCents, 0);
   const exact = order.taxCents === 0 || order.lines.some((line) => line.taxCents > 0);
   return { goodsCents, lineTax: exact ? { goodsCents, taxCents: lines.reduce((sum, line) => sum + line.taxCents, 0) } : null, lines };
+}
+
+/**
+ * The coupon share that refunds of lines, not known to have failed, gave back with the goods (#806): each refund's
+ * lines through refundedLines, so the share is the one that refund took off.
+ */
+export function couponShareRefundedCents(
+  order: { taxCents: number; lines: RefundedLine[] },
+  rows: Array<{ state: string; providerStatus: string | null; lines: Prisma.JsonValue | null }>,
+): number {
+  const unitPrice = new Map(order.lines.map((line) => [line.id, line.unitPriceCents]));
+  let cents = 0;
+  for (const row of counted(rows)) {
+    const picks = requestLines(row.lines).map(({ lineId, qty }) => ({ lineId, qty }));
+    const lines = refundedLines(order, picks);
+    if (!lines) continue;
+    cents += picks.reduce((sum, pick) => sum + pick.qty * (unitPrice.get(pick.lineId) ?? 0), 0) - lines.goodsCents;
+  }
+  return cents;
 }
 
 /** The request's lines: its amount split over them by their goods and tax, so a capped or lowered amount still sums. */
