@@ -7,7 +7,7 @@ test("store carts remain separate during pending recovery and navigation", async
   const mama = storeUrl("mama-ngozi");
   const tante = storeUrl("tante-marie");
 
-  await page.goto(`${mama}/categories/grains-and-flours`);
+  await page.goto(`${mama}/categories/fufu-flours-and-swallow`);
   const card = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
   await card.getByTestId("quick-add-btn").click();
   await expect(card.getByTestId("stepper-qty")).toHaveText("1");
@@ -36,7 +36,7 @@ test("store carts remain separate during pending recovery and navigation", async
   await card.getByTestId("stepper-plus").click();
   await expect.poll(() => held).toBe(true);
 
-  await page.goto(`${tante}/categories/grains-and-flours`);
+  await page.goto(`${tante}/categories/fufu-flours-and-swallow`);
   await expect(page.getByTestId("store-name")).toHaveText("Tante Marie Caribbean Grocer");
   const tanteCard = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
   await expect(tanteCard.getByTestId("quick-add-btn")).toBeVisible();
@@ -49,7 +49,7 @@ test("store carts remain separate during pending recovery and navigation", async
 
   await page.goto(`${storeUrl()}/?store=mama-ngozi`);
   await expect(page.getByTestId("store-name")).toHaveText("Mama Ngozi African Market");
-  await page.goto(`${storeUrl()}/categories/grains-and-flours`);
+  await page.goto(`${storeUrl()}/categories/fufu-flours-and-swallow`);
   const sameOrigin = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
   await sameOrigin.getByTestId("quick-add-btn").click();
   await expect(sameOrigin.getByTestId("stepper-qty")).toHaveText("1");
@@ -75,7 +75,7 @@ test("store carts remain separate during pending recovery and navigation", async
   await expect.poll(() => heldSame).toBe(true);
   await page.goto(`${storeUrl()}/?store=tante-marie`);
   await expect(page.getByTestId("store-name")).toHaveText("Tante Marie Caribbean Grocer");
-  await page.goto(`${storeUrl()}/categories/grains-and-flours`);
+  await page.goto(`${storeUrl()}/categories/fufu-flours-and-swallow`);
   const switched = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
   await expect(switched.getByTestId("quick-add-btn")).toBeVisible();
   await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("0");
@@ -87,7 +87,7 @@ test("store carts remain separate during pending recovery and navigation", async
 test("same-document store switch keeps both carts and drops the other store's pending recovery", async ({ page }) => {
   test.setTimeout(90_000);
   await page.goto(`${storeUrl()}/?store=mama-ngozi`);
-  await page.goto(`${storeUrl()}/categories/grains-and-flours`);
+  await page.goto(`${storeUrl()}/categories/fufu-flours-and-swallow`);
   const mamaCard = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
   await mamaCard.getByTestId("quick-add-btn").click();
   await expect(mamaCard.getByTestId("stepper-qty")).toHaveText("1");
@@ -158,7 +158,7 @@ test("an http custom host keeps the cart after add and reload", async () => {
   const browser = await chromium.launch({ args: [`--host-resolver-rules=MAP ${host} 127.0.0.1`] });
   try {
     const page = await browser.newPage();
-    await page.goto(`http://${host}:${E2E_PORT}/categories/grains-and-flours`);
+    await page.goto(`http://${host}:${E2E_PORT}/categories/fufu-flours-and-swallow`);
     const card = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
     await card.getByTestId("quick-add-btn").click();
     await expect(card.getByTestId("stepper-qty")).toHaveText("1");

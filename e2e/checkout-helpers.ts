@@ -4,7 +4,7 @@ import { storeUrl } from "./urls";
 const base = storeUrl("mama-ngozi");
 
 export async function addItemToCart(page: Page) {
-  await page.goto(`${base}/categories/grains-and-flours`);
+  await page.goto(`${base}/categories/fufu-flours-and-swallow`);
   const count = page.getByTestId("storefront-header").getByTestId("cart-count");
   const card = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
   await card.getByTestId("quick-add-btn").click();

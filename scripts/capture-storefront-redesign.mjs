@@ -11,9 +11,9 @@ const screens = [
   ["home-top", "/", "[data-testid=hero-carousel]"],
   ["home-mid", "/", "[data-testid=product-rail]"],
   ["home-bottom", "/", ".sf-footer"],
-  ["category", "/categories/grains-and-flours", "[data-testid=listing-card]"],
+  ["category", "/categories/fufu-flours-and-swallow", "[data-testid=listing-card]"],
   ["product", "/listings/mn_egusi", "[data-testid=product-detail]"],
-  ["quick-view", "/categories/grains-and-flours", "[data-testid=listing-card]"],
+  ["quick-view", "/categories/fufu-flours-and-swallow", "[data-testid=listing-card]"],
   ["404", "/c/grains-flours", "[data-testid=page-not-found]"],
 ];
 const scopedURL = path => {
