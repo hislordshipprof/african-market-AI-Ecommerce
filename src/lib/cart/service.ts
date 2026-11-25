@@ -283,6 +283,15 @@ export async function runCartMutation<T>(
   });
 }
 
+/** Units the listing's other pack lines in this cart hold; one counted stock backs them all (#808). */
+export async function otherPacksQty(tx: CartWriteTx, cartId: string, listingId: string, variantId: string): Promise<number> {
+  const others = await tx.cartLine.aggregate({
+    where: { cartId, variantId: { not: variantId }, variant: { listingId } },
+    _sum: { qty: true },
+  });
+  return others._sum.qty ?? 0;
+}
+
 export async function applyAddLine(
   tx: CartWriteTx,
   storeId: string,
@@ -311,11 +320,13 @@ export async function applyAddLine(
   const existing = await lockCartLineByVariant(tx, cartId, variantId);
   // #571: a catering item goes in at its minimum quantity.
   const minQty = variant.listing.cateringMinQty ?? 1;
+  const stockLeft = countedStockLeft(variant.listing);
   const decision = decideAddQty({
     existingQty: existing?.qty ?? 0,
     addQty: Math.max(qty, minQty - (existing?.qty ?? 0)),
     maxPerOrder: variant.listing.maxPerOrder,
-    stockLeft: countedStockLeft(variant.listing),
+    stockLeft,
+    otherPacksQty: stockLeft === undefined ? 0 : await otherPacksQty(tx, cartId, variant.listing.id, variantId),
     clampToMax: options?.clampToMax === true,
   });
   if (!decision.ok) {
@@ -435,7 +446,9 @@ export async function updateLineQty(
 
     const minQty = line.variant.listing.cateringMinQty;
     if (minQty != null && qty < minQty) throw new CartError(cateringMinMessage(minQty), "MIN_QTY");
-    const decision = decideLineQty(qty, line.variant.listing.maxPerOrder, countedStockLeft(line.variant.listing));
+    const stockLeft = countedStockLeft(line.variant.listing);
+    const others = stockLeft === undefined ? 0 : await otherPacksQty(tx, cartId, line.variant.listingId, line.variantId);
+    const decision = decideLineQty(qty, line.variant.listing.maxPerOrder, stockLeft, others);
     if (!decision.ok) throw new CartError(overCapMessage(decision), "MAX_PER_ORDER");
 
     await tx.cartLine.update({

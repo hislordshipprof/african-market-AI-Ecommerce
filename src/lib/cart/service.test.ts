@@ -736,6 +736,17 @@ describe.skipIf(!hasDb)("Cart service", () => {
       await expect(updateLineQty(storeId, cartId, cart!.lines[0].id, 5)).rejects.toMatchObject({ message: "Only 4 left" });
     });
 
+    it("caps two pack variants of one counted listing at the listing's stock together", async () => {
+      const bunch = await stockedVariant({ stockMode: "counted", qty: 4, status: null });
+      const single = await storeScoped(storeId).listingVariant.create({ data: { listingId: bunch.listingId, label: "Single", price: 99, weightG: 100 } });
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, bunch.id, 3);
+      await expect(addLine(storeId, cartId, single.id, 2)).rejects.toMatchObject({ code: "MAX_PER_ORDER", message: "Only 4 left" });
+      await addLine(storeId, cartId, single.id, 1);
+      const singleLine = (await getCartWithLines(storeId, cartId))!.lines.find((line) => line.variant.id === single.id)!;
+      await expect(updateLineQty(storeId, cartId, singleLine.id, 2)).rejects.toMatchObject({ message: "Only 4 left" });
+    });
+
     it("lets the assistant's clamped add stop at the counted stock", async () => {
       const oxtail = await stockedVariant({ stockMode: "counted", qty: 3, status: null });
       const cartId = await getOrCreateCart(storeId, null, null);

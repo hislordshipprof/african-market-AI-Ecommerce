@@ -93,6 +93,11 @@ describe("what blocks Pay in checkout (#708 P1)", () => {
     expect(checkoutBasketBlock([], [{ ...line, quantity: 3, maxPerOrder: 2 }])?.lineKeys).toEqual([GARRI]);
   });
 
+  it("two packs of one listing over its stock left block Pay (#808)", () => {
+    const single = { ...line, variantId: "variant-single", quantity: 2, stockLeft: 4 };
+    expect(checkoutBasketBlock([], [{ ...line, quantity: 3, stockLeft: 4 }, single])?.lineKeys).toHaveLength(2);
+  });
+
   it("a basket problem from the quote still blocks, with the server's reason and the known lines", () => {
     const block = checkoutBasketBlock(
       [{ code: "minimum-order", message: "Minimum order is $50." }],

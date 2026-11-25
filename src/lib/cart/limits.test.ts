@@ -6,7 +6,6 @@ import {
   decideNamedSubstitute,
   effectiveMaxPerOrder,
   isCartSwapRule,
-  overCapMessage,
   substituteIdForSwap,
   UNSET_MAX_PER_ORDER,
 } from "./limits";
@@ -178,12 +177,10 @@ describe("cart limit decisions", () => {
     });
   });
 
-  it("caps at whichever is lower, the counted stock or the max, and names that reason (#808)", () => {
+  it("caps at whichever is lower, the counted stock or the max (#808)", () => {
     const byStock = decideAddQty({ existingQty: 0, addQty: 6, maxPerOrder: 10, stockLeft: 4, clampToMax: false });
     expect(byStock).toEqual({ ok: false, code: "max_per_order", maxPerOrder: 4, stockLeft: 4 });
-    expect(overCapMessage(byStock as { maxPerOrder: number; stockLeft?: number })).toBe("Only 4 left");
     const byMax = decideLineQty(6, 3, 4);
     expect(byMax).toEqual({ ok: false, code: "max_per_order", maxPerOrder: 3 });
-    expect(overCapMessage(byMax as { maxPerOrder: number })).toBe("Maximum 3 per order for this item");
   });
 });

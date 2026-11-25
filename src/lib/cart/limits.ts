@@ -30,10 +30,12 @@ export function countedStockLeft(listing: { stockMode: string; qty: number | nul
 /** `stockLeft` is set when the counted stock, not the per-order max, is what stops the line (#808). */
 type OverCap = { ok: false; code: "max_per_order"; maxPerOrder: number; stockLeft?: number };
 
-function lineCap(maxPerOrder: number | null | undefined, stockLeft: number | undefined) {
+/** `otherPacksQty` is what the listing's other pack lines in the cart already take of `stockLeft`. */
+function lineCap(maxPerOrder: number | null | undefined, stockLeft: number | undefined, otherPacksQty = 0) {
   const max = effectiveMaxPerOrder(maxPerOrder);
-  const over: OverCap = stockLeft !== undefined && stockLeft < max
-    ? { ok: false, code: "max_per_order", maxPerOrder: stockLeft, stockLeft }
+  const room = stockLeft === undefined ? undefined : Math.max(0, stockLeft - otherPacksQty);
+  const over: OverCap = room !== undefined && room < max
+    ? { ok: false, code: "max_per_order", maxPerOrder: room, stockLeft }
     : { ok: false, code: "max_per_order", maxPerOrder: max };
   return { cap: over.maxPerOrder, over };
 }
@@ -45,8 +47,9 @@ export function decideLineQty(
   qty: number,
   maxPerOrder: number | null | undefined,
   stockLeft?: number,
+  otherPacksQty?: number,
 ): LineQtyDecision {
-  const { cap, over } = lineCap(maxPerOrder, stockLeft);
+  const { cap, over } = lineCap(maxPerOrder, stockLeft, otherPacksQty);
   return qty > cap ? over : { ok: true };
 }
 
@@ -59,9 +62,10 @@ export function decideAddQty(input: {
   addQty: number;
   maxPerOrder: number | null | undefined;
   stockLeft?: number;
+  otherPacksQty?: number;
   clampToMax: boolean;
 }): AddQtyDecision {
-  const { cap, over } = lineCap(input.maxPerOrder, input.stockLeft);
+  const { cap, over } = lineCap(input.maxPerOrder, input.stockLeft, input.otherPacksQty);
   const total = input.existingQty + input.addQty;
   if (total <= cap) return { ok: true, nextQty: total, added: input.addQty };
   if (!input.clampToMax) return over;

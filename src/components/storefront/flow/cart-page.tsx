@@ -19,7 +19,7 @@ import { ListingCard } from "../listing-card";
 import { RailScroller } from "../rail-scroller";
 import { Sheet } from "../sheet";
 import { AssistantSlot } from "../assistant/assistant-slot";
-import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
+import { cartItemKey, otherPacksQuantity, type CartLine } from "@/lib/storefront/cart-store";
 import type {
   CheckoutQuote,
   FlowCatalogItem,
@@ -172,14 +172,16 @@ export function CartPage({
   // The minimum is on goods after the store's code, as checkout checks it (#806).
   const goods = quote ? quote.subtotalCents - quote.discountCents : subtotal;
   const minimum = minimumOrderGate(goods, settings.minimumOrderCents);
+  // Every pack of a counted listing draws on its one stock (#808).
+  const overStock = (line: CartLine) =>
+    line.stockLeft !== undefined && line.quantity + otherPacksQuantity(lines, line) > line.stockLeft;
   const invalid = lines.some((line) => {
     const item = catalog.find(
       (item) => cartItemKey(item) === cartItemKey(line),
     );
     // The cart line's own fields come from the latest server read; the catalog is the page's copy.
-    const stockLeft = line.stockLeft ?? item?.stockLeft;
     return line.available === false || !item?.available || line.quantity > (line.maxPerOrder ?? item.maxPerOrder)
-      || (stockLeft !== undefined && line.quantity > stockLeft);
+      || overStock(line);
   });
   // The phone bar names every reason Checkout is off, not only the minimum (#708 P1).
   const blockedReason = invalid
@@ -260,7 +262,7 @@ export function CartPage({
                 {lines.map((line) => {
                   const key = cartItemKey(line),
                     item = catalog.find((item) => cartItemKey(item) === key),
-                    stockLeft = line.stockLeft ?? item?.stockLeft;
+                    stockLeft = line.stockLeft;
                   return (
                     <li className={styles.line} key={key} aria-busy={pendingKeys.has(key) || undefined}>
                       <div className={styles.photo}>
@@ -287,7 +289,7 @@ export function CartPage({
                             Maximum {item.maxPerOrder} per order. Reduce the
                             quantity.
                           </p>
-                        ) : stockLeft !== undefined && line.quantity > stockLeft ? (
+                        ) : overStock(line) ? (
                           <p className={styles.error}>
                             Only {stockLeft} left. Reduce the quantity.
                           </p>

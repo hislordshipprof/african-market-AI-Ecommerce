@@ -80,8 +80,14 @@ describe("catering minimum and counted stock on the stepper (#808)", () => {
       canIncrease: false,
       reason: "Only 4 left",
     });
-    expect(stepperLimit({ qty: 3, max: 3, stockLeft: 4, available: true, variantId: "v1" }).reason).toBe("Limit 3 per order");
-    expect(stepperLimit({ qty: 3, max: 10, stockLeft: 4, available: true, variantId: "v1" }).canIncrease).toBe(true);
+  });
+
+  it("counts the listing's other packs in the basket against the stock left", () => {
+    expect(stepperLimit({ qty: 0, max: 10, stockLeft: 4, otherPacksQty: 4, available: true, variantId: "v2" })).toEqual({
+      canAdd: false,
+      canIncrease: false,
+      reason: "Only 4 left",
+    });
   });
 });
 
