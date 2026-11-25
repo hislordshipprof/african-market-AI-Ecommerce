@@ -21,6 +21,21 @@ export function planForLookupKey(key: string | null): Plan | null {
   return null;
 }
 
+/** Stripe puts the Checkout Session id where the template is; the plan page reads it on return (#841). */
+export function checkoutSuccessUrl(returnUrl: string): string {
+  return `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}session_id={CHECKOUT_SESSION_ID}`;
+}
+
+/** What the plan page needs from a Checkout the owner came back from. */
+export interface CheckoutSessionState {
+  /** Stripe's `status`: "open", "complete" or "expired". */
+  status: string;
+  /** Stripe's `payment_status`: "unpaid", "paid", or "no_payment_required" (a free trial). */
+  paymentStatus: string;
+  customerId: string | null;
+  subscriptionId: string | null;
+}
+
 /** The Portal configuration that allows switching between the two plans; found by this metadata key. */
 const PORTAL_CONFIG_KEY = "store_plans_v1";
 
@@ -37,6 +52,7 @@ export interface BillingProvider {
     successUrl: string;
     cancelUrl: string;
   }): Promise<{ id: string; url: string }>;
+  getCheckoutSession(sessionId: string): Promise<CheckoutSessionState>;
   /** Expires a Checkout that is still open. "complete" means the owner already paid in it. */
   closeCheckoutSession(sessionId: string): Promise<"closed" | "complete">;
   /** Customer Portal: switch between Starter and Pro (prorated), change card, or cancel. */
@@ -152,11 +168,22 @@ export const stripeBillingProvider: BillingProvider & { portalConfiguration(): P
         ...(trialEnd ? { trial_end: trialEnd } : {}),
       },
       payment_method_collection: "always",
-      success_url: successUrl,
+      success_url: checkoutSuccessUrl(successUrl),
       cancel_url: cancelUrl,
     });
     if (!session.url) throw new Error("Stripe Checkout returned no URL");
     return { id: session.id, url: session.url };
+  },
+
+  async getCheckoutSession(sessionId) {
+    const session = await getStripeClient().checkout.sessions.retrieve(sessionId);
+    const idOf = (v: string | { id: string } | null) => (typeof v === "string" ? v : (v?.id ?? null));
+    return {
+      status: session.status ?? "open",
+      paymentStatus: session.payment_status,
+      customerId: idOf(session.customer),
+      subscriptionId: session.mode === "subscription" ? idOf(session.subscription) : null,
+    };
   },
 
   async closeCheckoutSession(sessionId) {
@@ -214,8 +241,17 @@ export function createFakeBillingProvider() {
     addSubscription(id: string): void;
     setSubscription(sub: WebhookSubscription): void;
     trialEndOf(id: string): number | "now" | undefined;
-    completeCheckout(id: string): void;
-    checkouts: { id: string; status: "open" | "complete" | "expired"; customerId: string; plan: Plan; storeId: string; trialEnd: number | null }[];
+    /** The owner pays: Stripe creates the subscription. Returns its id. */
+    completeCheckout(id: string): string | undefined;
+    checkouts: {
+      id: string;
+      status: "open" | "complete" | "expired";
+      customerId: string;
+      plan: Plan;
+      storeId: string;
+      trialEnd: number | null;
+      subscriptionId?: string;
+    }[];
     canceled: Set<string>;
   } = {
     checkouts: [],
@@ -229,7 +265,20 @@ export function createFakeBillingProvider() {
     },
     completeCheckout(id) {
       const checkout = provider.checkouts.find((c) => c.id === id);
-      if (checkout) checkout.status = "complete";
+      if (!checkout) return undefined;
+      checkout.status = "complete";
+      checkout.subscriptionId = `sub_fake_${checkout.storeId}_${++seq}`;
+      provider.setSubscription({
+        id: checkout.subscriptionId,
+        customerId: checkout.customerId,
+        status: checkout.trialEnd ? "trialing" : "active",
+        lookupKey: PLAN_LOOKUP_KEYS[checkout.plan],
+        storeId: checkout.storeId,
+        trialEnd: checkout.trialEnd,
+        currentPeriodEnd: checkout.trialEnd ?? Math.floor(Date.now() / 1000) + 30 * 86_400,
+        cancelAtPeriodEnd: false,
+      });
+      return checkout.subscriptionId;
     },
     trialEndOf(id) {
       return trialEnds.get(id);
@@ -252,6 +301,16 @@ export function createFakeBillingProvider() {
       const id = `cs_fake_${++seq}`;
       provider.checkouts.push({ id, status: "open", customerId: input.customerId, plan: input.plan, storeId: input.storeId, trialEnd: input.trialEnd });
       return { id, url: `https://checkout.stripe.test/c/${seq}` };
+    },
+    async getCheckoutSession(id) {
+      const checkout = provider.checkouts.find((c) => c.id === id);
+      if (!checkout) throw missing("checkout session", id);
+      return {
+        status: checkout.status,
+        paymentStatus: checkout.status !== "complete" ? "unpaid" : checkout.trialEnd ? "no_payment_required" : "paid",
+        customerId: checkout.customerId,
+        subscriptionId: checkout.subscriptionId ?? null,
+      };
     },
     async closeCheckoutSession(id) {
       const checkout = provider.checkouts.find((c) => c.id === id);
