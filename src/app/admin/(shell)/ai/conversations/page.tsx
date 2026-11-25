@@ -1,165 +1,206 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { listConversationSample, type SampleRow } from "@/lib/admin/ai-oversight";
-import { FLAG_REASON_TEXT, REVIEW_LABEL_TEXT } from "@/lib/admin/ai-review";
+import { ChevronLeft, Inbox } from "lucide-react";
+import { listReviewInbox, readTranscript, type InboxRow } from "@/lib/admin/ai-oversight";
+import {
+  chatKey,
+  CONVERSATION_KINDS,
+  FLAG_REASON_TEXT,
+  KIND_TEXT,
+  nextUnlabelled,
+  parseChatKey,
+  REVIEW_LABEL_TEXT,
+} from "@/lib/admin/ai-review";
+import { InboxFilters, type InboxFilterState } from "./filters";
+import { InboxKeys } from "./review-controls";
+import { TranscriptPane } from "./transcript-pane";
 
 export const metadata = { title: "AI conversations — Platform Admin" };
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+const SETTINGS_HREF = "/admin/settings/ai-onboarding";
 
-function shiftDay(day: string, by: number): string {
-  return new Date(Date.parse(`${day}T00:00:00.000Z`) + by * 86_400_000).toISOString().slice(0, 10);
+const dayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const fullDayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const timeFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" });
+
+function dayText(day: string): string {
+  return dayFormat.format(new Date(`${day}T00:00:00.000Z`));
 }
 
-function dayLabel(day: string): string {
-  return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
-    .format(new Date(`${day}T00:00:00.000Z`));
-}
-
-function query(day: string, storeId: string | null): string {
-  const params = new URLSearchParams({ day });
-  if (storeId) params.set("store", storeId);
-  return `?${params.toString()}`;
+/** The list URL with these filters, and a chat open when one is given. */
+function inboxHref(state: InboxFilterState, chat?: string): string {
+  const params = new URLSearchParams();
+  if (state.day) params.set("day", state.day);
+  if (state.assistant) params.set("assistant", state.assistant);
+  if (state.store) params.set("store", state.store);
+  if (state.flagged) params.set("flagged", "1");
+  if (state.unlabelled) params.set("unlabelled", "1");
+  if (chat) params.set("chat", chat);
+  const query = params.toString();
+  return `/admin/ai/conversations${query ? `?${query}` : ""}`;
 }
 
 export default async function AiConversationsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const one = (value: string | string[] | undefined) => (typeof value === "string" && value ? value : undefined);
-  const sample = await listConversationSample({ day: one(params.day), storeId: one(params.store) });
-  const { day, storeId } = sample;
+  const day = one(params.day);
+  const inbox = await listReviewInbox({
+    day: day && /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(Date.parse(day)) ? day : undefined,
+    kind: CONVERSATION_KINDS.find((kind) => kind === params.assistant),
+    storeId: one(params.store),
+    flagged: params.flagged === "1",
+    unlabelled: params.unlabelled === "1",
+  });
+  const state: InboxFilterState = {
+    day: inbox.day ?? "",
+    assistant: inbox.filters.kind ?? "",
+    store: inbox.filters.storeId ?? "",
+    flagged: inbox.filters.flagged,
+    unlabelled: inbox.filters.unlabelled,
+  };
+
+  const open = parseChatKey(one(params.chat));
+  const openKey = open ? `${open.kind}:${open.id}` : null;
+  const transcript = open ? await readTranscript(open) : null;
+  const at = openKey ? inbox.rows.findIndex((row) => chatKey(row) === openKey) : -1;
+  const next = inbox.rows[at + 1] ?? null;
+  const prev = at > 0 ? inbox.rows[at - 1] ?? null : null;
+  const following = openKey ? nextUnlabelled(inbox.rows, openKey) : null;
+  const range = inbox.day ? `${fullDayFormat.format(new Date(`${inbox.day}T00:00:00.000Z`))} (UTC)` : `Last 7 days, ${dayText(inbox.from)} to ${dayText(inbox.to)} (UTC)`;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
-      <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">AI conversations</h1>
-      <p className="mt-1 max-w-prose text-muted-foreground">
-        {sample.samplePerStore > 0
-          ? `Up to ${sample.samplePerStore} random shopper chats and ${sample.samplePerStore} random copilot chats per store for each UTC day, plus every chat that was flagged.`
-          : "Every chat that was flagged for each UTC day. Random sampling is set to 0."}{" "}
-        <Link href="/admin/settings/ai-onboarding" className={`rounded-sm text-foreground underline underline-offset-2 ${FOCUS}`}>
-          Change the sample size or cost flag
-        </Link>
-      </p>
+    <div className="mx-auto max-w-[90rem] px-4 py-8 sm:px-6 lg:py-10">
+      <InboxKeys
+        nextHref={next ? inboxHref(state, chatKey(next)) : null}
+        prevHref={prev ? inboxHref(state, chatKey(prev)) : null}
+      />
+      <div className={open ? "hidden lg:block" : undefined}>
+        <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">AI conversations</h1>
+        <p className="mt-1 max-w-prose text-foreground">
+          Check what the AI told shoppers and stores, and label its mistakes so they get fixed.
+        </p>
+        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+          {inbox.samplePerStore > 0
+            ? `Each day, up to ${inbox.samplePerStore} random chats per store from each assistant, ${inbox.samplePerStore} from the platform admin assistant, and every flagged chat.`
+            : "Each day, every flagged chat. Random sampling is set to 0."}{" "}
+          <Link href={SETTINGS_HREF} className={`rounded-sm text-foreground underline underline-offset-2 ${FOCUS}`}>
+            Change the sample size
+          </Link>
+        </p>
+        <InboxFilters state={state} counts={inbox.counts} stores={inbox.stores} dayOnly={inbox.total === 0} />
+      </div>
 
-      <form method="get" className="mt-6 grid gap-3 rounded-xl border border-border bg-card p-4 sm:flex sm:flex-wrap sm:items-end">
-        <label className="grid gap-1 text-sm font-medium text-foreground">
-          Day (UTC)
-          <input
-            type="date"
-            name="day"
-            defaultValue={day}
-            className={`min-h-11 rounded-md border border-input bg-background px-3 text-base text-foreground ${FOCUS}`}
-          />
-        </label>
-        <label className="grid min-w-0 gap-1 text-sm font-medium text-foreground sm:w-72">
-          Store
-          <select
-            name="store"
-            defaultValue={storeId ?? ""}
-            className={`min-h-11 w-full rounded-md border border-input bg-background px-3 text-base text-foreground ${FOCUS}`}
+      {inbox.total === 0 ? (
+        <EmptyRange range={range} picked={!!inbox.day} />
+      ) : (
+        <div className="mt-6 grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start">
+          <section
+            aria-labelledby="list-title"
+            className={`${open ? "hidden lg:block" : ""} lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto lg:rounded-xl lg:border lg:border-border lg:bg-card`}
           >
-            <option value="">All stores</option>
-            {sample.stores.map((store) => (
-              <option key={store.id} value={store.id}>{store.name}</option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" className={`min-h-11 w-fit rounded-full border border-input px-5 text-sm font-medium text-foreground hover:bg-muted ${FOCUS}`}>
-          Show
-        </button>
-      </form>
+            <div className="flex items-baseline justify-between gap-3 border-b border-border px-1 pb-2 lg:px-4 lg:pt-3">
+              <h2 id="list-title" className="text-sm font-semibold text-foreground">{range}</h2>
+              <p className="shrink-0 text-sm tabular-nums text-muted-foreground" data-testid="inbox-count">
+                {inbox.rows.length + inbox.hidden} {inbox.rows.length + inbox.hidden === 1 ? "chat" : "chats"}
+              </p>
+            </div>
+            {inbox.rows.length === 0 ? (
+              <p className="px-1 py-6 text-sm text-muted-foreground lg:px-4">
+                No chats match these filters.{" "}
+                <Link href={inboxHref({ ...state, assistant: "", store: "", flagged: false, unlabelled: false })} className={`rounded-sm text-foreground underline underline-offset-2 ${FOCUS}`}>
+                  Show every chat in this range
+                </Link>
+              </p>
+            ) : (
+              <ul data-inbox-list className="divide-y divide-border">
+                {inbox.rows.map((row) => (
+                  <li key={chatKey(row)}>
+                    <Row row={row} href={inboxHref(state, chatKey(row))} current={chatKey(row) === openKey} />
+                  </li>
+                ))}
+              </ul>
+            )}
+            {inbox.hidden > 0 && (
+              <p className="px-1 py-3 text-sm text-muted-foreground lg:px-4">{inbox.hidden} more not shown. Narrow the filters to see them.</p>
+            )}
+            <p className="hidden px-4 py-3 text-xs text-muted-foreground lg:block">Press J for the next chat and K for the previous one.</p>
+          </section>
 
-      <nav aria-label="Day" className="mt-4 flex items-center justify-between gap-2 text-sm">
-        <Link href={query(shiftDay(day, -1), storeId)} className={`inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-muted-foreground hover:bg-muted hover:text-foreground ${FOCUS}`}>
-          <ChevronLeft aria-hidden className="size-4" /> Previous day
-        </Link>
-        <span className="font-medium text-foreground" data-testid="sample-day">{dayLabel(day)}</span>
-        <Link href={query(shiftDay(day, 1), storeId)} className={`inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-muted-foreground hover:bg-muted hover:text-foreground ${FOCUS}`}>
-          Next day <ChevronRight aria-hidden className="size-4" />
-        </Link>
-      </nav>
-
-      <Section title="Shopper assistant" kindLabel="shopper chats" rows={sample.shopper} hidden={sample.hidden.shopper} testId="shopper-sample" />
-      <Section title="Store copilot" kindLabel="copilot chats" rows={sample.copilot} hidden={sample.hidden.copilot} testId="copilot-sample" />
+          <section aria-label="Chat" className={open ? "" : "hidden lg:block"}>
+            {open && (
+              <Link
+                href={inboxHref(state)}
+                className={`mb-4 inline-flex min-h-11 items-center gap-1 rounded-full pr-3 text-sm font-medium text-foreground lg:hidden ${FOCUS}`}
+              >
+                <ChevronLeft aria-hidden className="size-4" /> Back to the list
+              </Link>
+            )}
+            {transcript ? (
+              <TranscriptPane transcript={transcript} nextUnlabelledHref={following ? inboxHref(state, chatKey(following)) : null} />
+            ) : (
+              <p className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
+                {open ? "That chat is no longer stored. Chats are deleted after 90 days." : "Pick a chat from the list to read it here."}
+              </p>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
 
-function Section({ title, kindLabel, rows, hidden, testId }: { title: string; kindLabel: string; rows: SampleRow[]; hidden: number; testId: string }) {
-  const groups: Array<{ storeId: string; storeName: string; rows: SampleRow[] }> = [];
-  for (const row of rows) {
-    const last = groups.at(-1);
-    if (last && last.storeId === row.storeId) last.rows.push(row);
-    else groups.push({ storeId: row.storeId, storeName: row.storeName, rows: [row] });
-  }
-  const flagged = rows.filter((row) => row.reasons.length > 0).length;
-
+function Row({ row, href, current }: { row: InboxRow; href: string; current: boolean }) {
   return (
-    <section className="mt-10" aria-labelledby={`${testId}-title`} data-testid={testId}>
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4">
-        <h2 id={`${testId}-title`} className="text-lg font-semibold text-foreground">{title}</h2>
-        <p className="text-sm text-muted-foreground">
-          {rows.length} {rows.length === 1 ? "chat" : "chats"}, {flagged} flagged
-        </p>
-      </div>
-      {groups.length === 0 ? (
-        <p className="rounded-xl border border-border bg-card p-8 text-center text-muted-foreground">No {kindLabel} on this day.</p>
-      ) : (
-        <div className="grid gap-6">
-          {groups.map((group) => (
-            <div key={group.storeId}>
-              <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{group.storeName}</h3>
-              <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-                {group.rows.map((row) => (
-                  <li key={row.id}>
-                    <ConversationLink row={row} />
-                  </li>
-                ))}
-              </ul>
-            </div>
+    <Link
+      href={href}
+      scroll={false}
+      prefetch={false}
+      aria-current={current ? "true" : undefined}
+      data-testid={`conversation-${row.id}`}
+      className={`block px-1 py-3 hover:bg-muted focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring lg:px-4 ${current ? "bg-secondary hover:bg-secondary" : ""}`}
+    >
+      <span className="flex items-baseline justify-between gap-3 text-xs text-muted-foreground">
+        <span className="min-w-0 truncate font-semibold text-foreground">{row.storeName ?? "Platform"}</span>
+        <time dateTime={row.lastMessageAt} className="shrink-0 tabular-nums">{timeFormat.format(new Date(row.lastMessageAt))}</time>
+      </span>
+      <span className="mt-1 line-clamp-2 break-words text-sm text-foreground">
+        {row.firstQuestion || <span className="text-muted-foreground">No question in text</span>}
+      </span>
+      <span className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-xs text-muted-foreground">{KIND_TEXT[row.kind]} assistant</span>
+          {row.reasons.map((reason) => (
+            <span key={reason} className="rounded-full border border-input px-2 py-0.5 text-xs font-medium text-foreground">
+              {FLAG_REASON_TEXT[reason]}
+            </span>
           ))}
-        </div>
-      )}
-      {hidden > 0 && (
-        <p className="mt-3 text-sm text-muted-foreground">
-          {hidden} more not shown. Pick a store to see all of its chats.
-        </p>
-      )}
-    </section>
+          {row.labels.map((label, index) => (
+            <span key={`${label}-${index}`} className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+              Labelled: {REVIEW_LABEL_TEXT[label]}
+            </span>
+          ))}
+      </span>
+    </Link>
   );
 }
 
-function ConversationLink({ row }: { row: SampleRow }) {
-  const time = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })
-    .format(new Date(row.lastMessageAt));
+function EmptyRange({ range, picked }: { range: string; picked: boolean }) {
   return (
-    <Link
-      href={`/admin/ai/conversations/${row.kind}/${encodeURIComponent(row.id)}`}
-      prefetch={false}
-      data-testid={`conversation-${row.id}`}
-      className="group flex min-h-16 items-center gap-4 px-4 py-3 hover:bg-muted focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring sm:px-5"
-    >
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm text-foreground">
-          <span className="font-medium">Last message {time} UTC</span>
-          <span className="text-muted-foreground"> · {row.messageCount} {row.messageCount === 1 ? "message" : "messages"}</span>
-          {row.sampled && <span className="text-muted-foreground"> · In sample</span>}
-        </span>
-        {(row.reasons.length > 0 || row.labels.length > 0) && (
-          <span className="mt-1.5 flex flex-wrap gap-1.5">
-            {row.reasons.map((reason) => (
-              <span key={reason} className="rounded-full border border-border px-2 py-0.5 text-xs font-medium text-foreground">
-                {FLAG_REASON_TEXT[reason]}
-              </span>
-            ))}
-            {row.labels.map((label, index) => (
-              <span key={`${label}-${index}`} className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-foreground">
-                Labelled: {REVIEW_LABEL_TEXT[label]}
-              </span>
-            ))}
-          </span>
+    <section aria-labelledby="empty-title" className="mt-8 flex max-w-xl flex-col items-start gap-3 rounded-xl border border-border bg-card p-6" data-testid="inbox-empty">
+      <Inbox aria-hidden className="size-6 text-muted-foreground" />
+      <h2 id="empty-title" className="text-lg font-semibold text-foreground">Nothing to review</h2>
+      <p className="text-muted-foreground">
+        No chats were sampled or flagged for {range}. The sample takes a few random chats each day; a bigger sample gives you more to check.
+      </p>
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        <Link href={SETTINGS_HREF} className={`inline-flex min-h-11 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground ${FOCUS}`}>
+          Change the sample size
+        </Link>
+        {picked && (
+          <Link href="/admin/ai/conversations" className={`inline-flex min-h-11 items-center rounded-sm px-2 text-sm text-foreground underline underline-offset-4 ${FOCUS}`}>
+            Show the last 7 days
+          </Link>
         )}
-      </span>
-      <ChevronRight aria-hidden className="size-5 shrink-0 text-muted-foreground group-hover:text-foreground" />
-    </Link>
+      </div>
+    </section>
   );
 }

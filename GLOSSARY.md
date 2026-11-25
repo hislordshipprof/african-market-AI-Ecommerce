@@ -256,7 +256,7 @@ Order status messages a customer gets on WhatsApp from the Store WhatsApp number
 The store's own WhatsApp Business number, which customers message (ADR-0010). Linked by the owner or a platform admin through Meta's Embedded Signup (in test mode, ids typed into a form); "Live" once registered. By default the store keeps the WhatsApp Business app on it (coexistence). Not the Linked WhatsApp number, which is the owner's personal number.
 
 **Daily sample**:
-The AI conversations a platform admin reviews for one UTC day (#544): up to N random Shopper assistant chats and N random Store copilot chats per store whose last message fell on that day, plus every auto-flagged chat. N is an AI and onboarding setting, 5 by default; 0 shows only auto-flagged chats. The same day always shows the same sample.
+The AI conversations a platform admin reviews for each UTC day (#544, #856): up to N random Shopper assistant chats and N random Store copilot chats per store whose last message fell on that day, N random Platform admin assistant chats across the platform, plus every auto-flagged chat. N is an AI and onboarding setting, 5 by default; 0 shows only auto-flagged chats. The same day always shows the same sample. The review page shows the last 7 days of samples by default.
 
 **Auto-flag**:
 A reason the platform marks an AI chat for review without a person: the grounder removed an amount, a tool refused a made-up id, a constraint or Cannot confirm refusal, `forward_to_store`, or a turn over the cost threshold (an AI and onboarding setting, 2 cents by default). A shopper turn is marked when it is saved, so a later threshold change applies from the next turn; copilot chats and transcript views use the threshold in force when viewed.

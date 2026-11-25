@@ -5,67 +5,77 @@ import { readAiOnboardingSettings, turnCostFlagMicros } from "./ai-onboarding-se
 import { requirePlatformAdmin } from "./session";
 import {
   actionFlagReasons,
+  chatKey,
+  CONVERSATION_KINDS,
   copilotTranscript,
+  filterInbox,
   FLAG_REASONS,
+  inboxCounts,
+  orderInbox,
   shopperTranscript,
+  type ConversationKind,
   type FlagReason,
+  type InboxFilters,
+  type InboxRow,
   type ReviewLabel,
   type TranscriptMessage,
 } from "./ai-review";
 
-/** Rows shown per kind; a store filter narrows the rest. */
+/** Rows shown at once; the filters narrow the rest. */
 export const LIST_CAP = 300;
 
-export type ConversationKind = "shopper" | "copilot";
+export type { ConversationKind, InboxRow } from "./ai-review";
 
-export interface SampleRow {
-  kind: ConversationKind;
-  id: string;
-  storeId: string;
-  storeName: string;
-  lastMessageAt: string;
-  messageCount: number;
-  sampled: boolean;
-  reasons: FlagReason[];
-  labels: ReviewLabel[];
-}
-
-export interface ConversationSample {
-  day: string;
-  storeId: string | null;
-  shopper: SampleRow[];
-  copilot: SampleRow[];
-  hidden: { shopper: number; copilot: number };
-  /** Random chats per store per kind, from the platform setting (#561). */
+export interface ReviewInbox {
+  /** The single UTC day picked, or null for the default last 7 days. */
+  day: string | null;
+  /** First and last UTC day shown, inclusive. */
+  from: string;
+  to: string;
+  filters: InboxFilters;
+  /** The filtered list, flagged first then newest, at most LIST_CAP rows. */
+  rows: InboxRow[];
+  hidden: number;
+  /** Every chat to review in the range, before the filters. */
+  total: number;
+  counts: ReturnType<typeof inboxCounts>;
+  /** Random chats per store (and per day for the platform admin assistant), from the platform setting (#561). */
   samplePerStore: number;
   /** Every store, for the store filter. */
   stores: Array<{ id: string; name: string }>;
 }
 
 const dayPattern = /^\d{4}-\d{2}-\d{2}$/;
-const sampleInput = z.object({
+const inboxInput = z.object({
   day: z.string().regex(dayPattern).refine((day) => new Date(`${day}T00:00:00.000Z`).toISOString().startsWith(day)).optional(),
+  kind: z.enum(CONVERSATION_KINDS).optional(),
   storeId: z.string().min(1).max(200).optional(),
+  flagged: z.boolean().optional(),
+  unlabelled: z.boolean().optional(),
 });
+
+/** The default range: the last 7 UTC days, today included. */
+export const RANGE_DAYS = 7;
 
 /** Today's date in UTC, YYYY-MM-DD. */
 export function todayUtc(now = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
-function nextDay(day: string): string {
-  return new Date(Date.parse(`${day}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
+function shiftDay(day: string, by: number): string {
+  return new Date(Date.parse(`${day}T00:00:00.000Z`) + by * 86_400_000).toISOString().slice(0, 10);
 }
 
 interface DbRow {
   id: string;
-  storeId: string;
-  storeName: string;
+  storeId: string | null;
+  storeName: string | null;
   lastMessageAt: Date;
   messageCount: number;
+  firstQuestion: string | null;
 }
 
-function toRow(kind: ConversationKind, row: DbRow, sampled: boolean, reasons: FlagReason[]): SampleRow {
+function toRow(kind: ConversationKind, row: DbRow, sampled: boolean, reasons: FlagReason[]): InboxRow {
   return {
     kind,
     id: row.id,
@@ -76,47 +86,61 @@ function toRow(kind: ConversationKind, row: DbRow, sampled: boolean, reasons: Fl
     sampled,
     reasons,
     labels: [],
+    firstQuestion: row.firstQuestion ?? "",
   };
 }
 
-/** Store name, then flagged before quiet, then newest first. */
-function ordered(rows: SampleRow[]): SampleRow[] {
-  return rows.sort((a, b) =>
-    a.storeName.localeCompare(b.storeName)
-    || a.storeId.localeCompare(b.storeId)
-    || Number(b.reasons.length > 0) - Number(a.reasons.length > 0)
-    || b.lastMessageAt.localeCompare(a.lastMessageAt)
-    || a.id.localeCompare(b.id));
-}
+/** The first { role, text } turn from the asker, for copilot and platform admin assistant chats. */
+const firstTextTurn = (asker: string) => Prisma.sql`(
+  SELECT left(m.msg ->> 'text', 200) FROM jsonb_array_elements(c.messages) WITH ORDINALITY m(msg, i)
+  WHERE m.msg ->> 'role' = ${asker} AND coalesce(m.msg ->> 'text', '') <> '' ORDER BY m.i LIMIT 1
+)`;
+
+/** A chat's UTC day, the key its sample is drawn under. */
+const chatDay = Prisma.sql`to_char(c.last_message_at, 'YYYY-MM-DD')`;
 
 /**
- * The day's review list: up to N random shopper and N random copilot chats per store whose last message falls on the
- * UTC day, plus every shopper chat with an auto-flagged action that day and every copilot chat on the day with a
- * turn over the cost threshold. N and the threshold are platform settings (#561), read on each call. The order inside
- * a store is md5(id || day), so a reload shows the same sample.
+ * The review inbox (#856): for each UTC day in the range, up to N random shopper and N random copilot chats per store
+ * whose last message falls on that day, and N random platform admin assistant chats, plus every shopper chat with an
+ * auto-flagged action in the range and every copilot or platform admin chat with a turn over the cost threshold. N and
+ * the threshold are platform settings (#561), read on each call. The order inside a store and day is
+ * md5(id || day), so a reload shows the same sample. The range is one picked UTC day, or the last 7.
  */
-export async function listConversationSample(input: { day?: string; storeId?: string }): Promise<ConversationSample> {
+export async function listReviewInbox(input: {
+  day?: string;
+  kind?: ConversationKind;
+  storeId?: string;
+  flagged?: boolean;
+  unlabelled?: boolean;
+}): Promise<ReviewInbox> {
   await requirePlatformAdmin();
-  const parsed = parseInput(sampleInput, input);
-  const day = parsed.ok && parsed.data.day ? parsed.data.day : todayUtc();
-  const storeId = parsed.ok ? parsed.data.storeId ?? null : null;
+  const parsed = parseInput(inboxInput, input);
+  const data = parsed.ok ? parsed.data : {};
+  const day = data.day ?? null;
+  const to = day ?? todayUtc();
+  const from = day ?? shiftDay(to, 1 - RANGE_DAYS);
+  const filters: InboxFilters = {
+    kind: data.kind ?? null,
+    storeId: data.storeId ?? null,
+    flagged: data.flagged ?? false,
+    unlabelled: data.unlabelled ?? false,
+  };
   // Naive UTC bounds against timestamp(3) columns, as the retention job does.
-  const lo = `${day} 00:00:00`;
-  const hi = `${nextDay(day)} 00:00:00`;
+  const lo = `${from} 00:00:00`;
+  const hi = `${shiftDay(to, 1)} 00:00:00`;
+  const inRange = Prisma.sql`c.last_message_at >= ${lo}::timestamp AND c.last_message_at < ${hi}::timestamp
+    AND jsonb_typeof(c.messages) = 'array' AND jsonb_array_length(c.messages) > 0`;
 
   return platformAdminTransaction(async (tx) => {
     const settings = await readAiOnboardingSettings(tx);
     const samplePerStore = settings.dailySamplePerStore;
     const costFlagMicros = turnCostFlagMicros(settings);
-    const inStore = (column: Prisma.Sql) => (storeId ? Prisma.sql`AND ${column} = ${storeId}` : Prisma.empty);
 
     const sampledIds = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
       SELECT id FROM (
-        SELECT c.id, row_number() OVER (PARTITION BY c.store_id ORDER BY md5(c.id || ${day}), c.id) AS rn
+        SELECT c.id, row_number() OVER (PARTITION BY c.store_id, ${chatDay} ORDER BY md5(c.id || ${chatDay}), c.id) AS rn
         FROM ai_conversations c
-        WHERE c.last_message_at >= ${lo}::timestamp AND c.last_message_at < ${hi}::timestamp
-          AND jsonb_typeof(c.messages) = 'array' AND jsonb_array_length(c.messages) > 0
-          ${inStore(Prisma.sql`c.store_id`)}
+        WHERE ${inRange}
       ) ranked
       WHERE rn <= ${samplePerStore}
     `);
@@ -125,7 +149,6 @@ export async function listConversationSample(input: { day?: string; storeId?: st
       SELECT a.conversation_id AS "conversationId", a.tool, a.ok, a.output
       FROM ai_actions a
       WHERE a.created_at >= ${lo}::timestamp AND a.created_at < ${hi}::timestamp
-        ${inStore(Prisma.sql`a.store_id`)}
         AND (
           a.tool IN ('grounding_strip', 'forward_to_store')
           OR NOT a.ok
@@ -148,58 +171,90 @@ export async function listConversationSample(input: { day?: string; storeId?: st
     const shopperIds = [...new Set([...sampled, ...reasonsOf.keys()])];
     const shopperRows = shopperIds.length === 0 ? [] : await txQuery<DbRow[]>(tx, Prisma.sql`
       SELECT c.id, c.store_id AS "storeId", s.name AS "storeName", c.last_message_at AS "lastMessageAt",
-             jsonb_array_length(c.messages)::int AS "messageCount"
+             jsonb_array_length(c.messages)::int AS "messageCount",
+             (
+               SELECT left(p.part ->> 'text', 200)
+               FROM jsonb_array_elements(c.messages) WITH ORDINALITY m(msg, i)
+               CROSS JOIN LATERAL jsonb_array_elements(
+                 CASE WHEN jsonb_typeof(m.msg -> 'parts') = 'array' THEN m.msg -> 'parts' ELSE '[]'::jsonb END
+               ) WITH ORDINALITY p(part, j)
+               WHERE m.msg ->> 'role' = 'user' AND p.part ->> 'type' = 'text' AND coalesce(p.part ->> 'text', '') <> ''
+               ORDER BY m.i, p.j LIMIT 1
+             ) AS "firstQuestion"
       FROM ai_conversations c JOIN stores s ON s.id = c.store_id
       WHERE c.id IN (${Prisma.join(shopperIds)})
     `);
-    const shopper = ordered(shopperRows.map((row) => {
+    const rows: InboxRow[] = shopperRows.map((row) => {
       const reasons = reasonsOf.get(row.id);
       return toRow("shopper", row, sampled.has(row.id), reasons ? FLAG_REASONS.filter((reason) => reasons.has(reason)) : []);
-    }));
+    });
 
+    const costly = Prisma.sql`jsonb_path_exists(c.messages, '$[*] ? (@.costMicros > $t)', jsonb_build_object('t', ${costFlagMicros}::int))`;
     const copilotRows = await txQuery<Array<DbRow & { sampled: boolean; costly: boolean }>>(tx, Prisma.sql`
       SELECT ranked.id, ranked.store_id AS "storeId", s.name AS "storeName", ranked.last_message_at AS "lastMessageAt",
-             ranked.message_count AS "messageCount", ranked.rn <= ${samplePerStore} AS sampled, ranked.costly
+             ranked.message_count AS "messageCount", ranked.rn <= ${samplePerStore} AS sampled, ranked.costly,
+             ranked.first_question AS "firstQuestion"
       FROM (
         SELECT c.id, c.store_id, c.last_message_at, jsonb_array_length(c.messages)::int AS message_count,
-               row_number() OVER (PARTITION BY c.store_id ORDER BY md5(c.id || ${day}), c.id) AS rn,
-               jsonb_path_exists(c.messages, '$[*] ? (@.costMicros > $t)', jsonb_build_object('t', ${costFlagMicros}::int)) AS costly
+               row_number() OVER (PARTITION BY c.store_id, ${chatDay} ORDER BY md5(c.id || ${chatDay}), c.id) AS rn,
+               ${costly} AS costly, ${firstTextTurn("owner")} AS first_question
         FROM copilot_conversations c
-        WHERE c.last_message_at >= ${lo}::timestamp AND c.last_message_at < ${hi}::timestamp
-          AND jsonb_typeof(c.messages) = 'array' AND jsonb_array_length(c.messages) > 0
-          ${inStore(Prisma.sql`c.store_id`)}
+        WHERE ${inRange}
       ) ranked JOIN stores s ON s.id = ranked.store_id
       WHERE ranked.rn <= ${samplePerStore} OR ranked.costly
     `);
-    const copilot = ordered(copilotRows.map((row) => toRow("copilot", row, row.sampled, row.costly ? ["costly_turn"] : [])));
+    for (const row of copilotRows) rows.push(toRow("copilot", row, row.sampled, row.costly ? ["costly_turn"] : []));
 
-    const shown = { shopper: shopper.slice(0, LIST_CAP), copilot: copilot.slice(0, LIST_CAP) };
-    const flags = await tx.aiReviewFlag.findMany({
+    const adminRows = await txQuery<Array<DbRow & { sampled: boolean; costly: boolean }>>(tx, Prisma.sql`
+      SELECT ranked.id, NULL AS "storeId", NULL AS "storeName", ranked.last_message_at AS "lastMessageAt",
+             ranked.message_count AS "messageCount", ranked.rn <= ${samplePerStore} AS sampled, ranked.costly,
+             ranked.first_question AS "firstQuestion"
+      FROM (
+        SELECT c.id, c.last_message_at, jsonb_array_length(c.messages)::int AS message_count,
+               row_number() OVER (PARTITION BY ${chatDay} ORDER BY md5(c.id || ${chatDay}), c.id) AS rn,
+               ${costly} AS costly, ${firstTextTurn("admin")} AS first_question
+        FROM admin_assistant_conversations c
+        WHERE ${inRange}
+      ) ranked
+      WHERE ranked.rn <= ${samplePerStore} OR ranked.costly
+    `);
+    for (const row of adminRows) rows.push(toRow("admin", row, row.sampled, row.costly ? ["costly_turn"] : []));
+
+    const idsOf = (kind: ConversationKind) => rows.filter((row) => row.kind === kind).map((row) => row.id);
+    const flags = rows.length === 0 ? [] : await tx.aiReviewFlag.findMany({
       where: {
         OR: [
-          { aiConversationId: { in: shown.shopper.map((row) => row.id) } },
-          { copilotConversationId: { in: shown.copilot.map((row) => row.id) } },
+          { aiConversationId: { in: idsOf("shopper") } },
+          { copilotConversationId: { in: idsOf("copilot") } },
+          { adminAssistantConversationId: { in: idsOf("admin") } },
         ],
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: { label: true, aiConversationId: true, copilotConversationId: true },
+      select: { label: true, aiConversationId: true, copilotConversationId: true, adminAssistantConversationId: true },
     });
     const labelsOf = new Map<string, ReviewLabel[]>();
     for (const flag of flags) {
-      const id = flag.aiConversationId ?? flag.copilotConversationId;
-      if (!id) continue;
-      labelsOf.set(id, [...(labelsOf.get(id) ?? []), flag.label as ReviewLabel]);
+      const key = flag.aiConversationId ? `shopper:${flag.aiConversationId}`
+        : flag.copilotConversationId ? `copilot:${flag.copilotConversationId}`
+        : `admin:${flag.adminAssistantConversationId}`;
+      labelsOf.set(key, [...(labelsOf.get(key) ?? []), flag.label as ReviewLabel]);
     }
-    for (const row of [...shown.shopper, ...shown.copilot]) row.labels = labelsOf.get(row.id) ?? [];
+    for (const row of rows) row.labels = labelsOf.get(chatKey(row)) ?? [];
 
+    const all = orderInbox(rows);
+    const shown = filterInbox(all, filters);
     const stores = await tx.store.findMany({ select: { id: true, name: true }, orderBy: [{ name: "asc" }, { id: "asc" }] });
     return {
       day,
-      storeId,
-      stores,
+      from,
+      to,
+      filters,
+      rows: shown.slice(0, LIST_CAP),
+      hidden: Math.max(0, shown.length - LIST_CAP),
+      total: all.length,
+      counts: inboxCounts(all, filters),
       samplePerStore,
-      ...shown,
-      hidden: { shopper: shopper.length - shown.shopper.length, copilot: copilot.length - shown.copilot.length },
+      stores,
     };
   });
 }
@@ -235,9 +290,12 @@ export interface TranscriptFlag {
 export interface Transcript {
   kind: ConversationKind;
   id: string;
-  storeId: string;
-  storeName: string;
+  /** Null for a platform admin assistant chat, which belongs to no store; its times show in UTC. */
+  storeId: string | null;
+  storeName: string | null;
   storeTimezone: string;
+  /** The platform admin who asked, on a platform admin assistant chat. */
+  askedBy: string | null;
   model: string;
   costMicros: number;
   createdAt: string;
@@ -249,7 +307,7 @@ export interface Transcript {
 }
 
 const transcriptInput = z.strictObject({
-  kind: z.enum(["shopper", "copilot"]),
+  kind: z.enum(CONVERSATION_KINDS),
   id: z.string().min(1).max(200),
 });
 
@@ -280,7 +338,7 @@ export async function readTranscript(input: { kind: ConversationKind; id: string
 
   return platformAdminTransaction(async (tx) => {
     const costFlagMicros = turnCostFlagMicros(await readAiOnboardingSettings(tx));
-    const audit = (storeId: string, entityType: string) => tx.auditLog.create({
+    const audit = (storeId: string | null, entityType: string) => tx.auditLog.create({
       data: {
         storeId,
         actorId: session.user.id,
@@ -315,6 +373,7 @@ export async function readTranscript(input: { kind: ConversationKind; id: string
         storeId: row.storeId,
         storeName: row.store.name,
         storeTimezone: row.store.timezone,
+        askedBy: null,
         model: row.model,
         costMicros: Number(row.costMicros),
         createdAt: row.createdAt.toISOString(),
@@ -329,6 +388,40 @@ export async function readTranscript(input: { kind: ConversationKind; id: string
           createdAt: action.createdAt.toISOString(),
           reasons: actionFlagReasons(action, costFlagMicros),
         })),
+        proposals: [],
+        flags: flagRows(row.flags),
+      };
+    }
+
+    if (kind === "admin") {
+      const row = await tx.adminAssistantConversation.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          model: true,
+          costMicros: true,
+          createdAt: true,
+          lastMessageAt: true,
+          messages: true,
+          user: { select: { email: true } },
+          flags: FLAG_SELECT,
+        },
+      });
+      if (!row) return null;
+      await audit(null, "admin_assistant_conversation");
+      return {
+        kind,
+        id: row.id,
+        storeId: null,
+        storeName: null,
+        storeTimezone: "UTC",
+        askedBy: row.user.email,
+        model: row.model,
+        costMicros: Number(row.costMicros),
+        createdAt: row.createdAt.toISOString(),
+        lastMessageAt: row.lastMessageAt.toISOString(),
+        messages: copilotTranscript(row.messages, "admin"),
+        actions: [],
         proposals: [],
         flags: flagRows(row.flags),
       };
@@ -367,6 +460,7 @@ export async function readTranscript(input: { kind: ConversationKind; id: string
       storeId: row.storeId,
       storeName: row.store.name,
       storeTimezone: row.store.timezone,
+      askedBy: null,
       model: row.model,
       costMicros: Number(row.costMicros),
       createdAt: row.createdAt.toISOString(),
