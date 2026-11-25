@@ -19,6 +19,14 @@ export function stateSlug(code: StateCode): string {
   return placeSlug(STATE_NAMES[code]);
 }
 
+/** "/stores/tx/houston" → "/stores/texas/houston": a state code in any case, spelled out (#810). Null for any other path. */
+export function stateCodePath(pathname: string): string | null {
+  const match = /^\/stores\/([a-z]{2})(\/[^/]*\/?)?$/i.exec(pathname);
+  const code = match?.[1].toUpperCase();
+  if (!code || !isStateCode(code)) return null;
+  return `/stores/${stateSlug(code)}${match![2] ?? ""}`;
+}
+
 /** Every state with a listed store, A to Z, each with its cities A to Z (the state and city pages, #451). */
 export function statePages<T extends Placed>(stores: T[]): StateGroupPage<T>[] {
   const states = new Map<StateCode, StateGroupPage<T>>();

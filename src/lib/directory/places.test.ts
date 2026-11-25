@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cityPage, placeSlug, statePage, statePages } from "./places";
+import { cityPage, placeSlug, stateCodePath, statePage, statePages } from "./places";
 
 const store = (slug: string, city: string | null, state: string | null) => ({ slug, name: slug, city, state });
 
@@ -57,5 +57,21 @@ describe("statePages", () => {
       ["maryland", ["silver-spring"]],
       ["texas", ["dallas", "houston"]],
     ]);
+  });
+});
+
+describe("stateCodePath", () => {
+  it("spells out a state code in any case, keeping the city (#810)", () => {
+    expect(stateCodePath("/stores/tx")).toBe("/stores/texas");
+    expect(stateCodePath("/stores/TX")).toBe("/stores/texas");
+    expect(stateCodePath("/stores/Dc/")).toBe("/stores/district-of-columbia/");
+    expect(stateCodePath("/stores/tx/houston")).toBe("/stores/texas/houston");
+  });
+
+  it("is null for a full name, an unknown code or a deeper path", () => {
+    expect(stateCodePath("/stores/texas")).toBeNull();
+    expect(stateCodePath("/stores/zz")).toBeNull();
+    expect(stateCodePath("/stores/tx/houston/more")).toBeNull();
+    expect(stateCodePath("/storesx/tx")).toBeNull();
   });
 });

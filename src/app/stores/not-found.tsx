@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DirectoryFooter } from "@/components/directory/directory-footer";
 import styles from "@/components/directory/directory.module.css";
 
 /** A state or city with no listed store (#451). */
@@ -16,6 +17,7 @@ export default function DirectoryNotFound() {
           </p>
         </section>
       </main>
+      <DirectoryFooter />
     </div>
   );
 }

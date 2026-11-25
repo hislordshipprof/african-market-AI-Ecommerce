@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../src/lib/system-actor";
+import { shownPack } from "../src/lib/storefront/pack-order";
 
 const E2E_COUPON = "E2ESAVE";
 
@@ -366,8 +367,8 @@ export async function insertRecoveryOrder(input: { number: number; token: string
       take: 3,
     });
     if (listings.length < 3) throw new Error("mama-ngozi needs more listings");
-    // What the customer reads for each line: product name, then pack (#743).
-    const names = listings.slice(0, 2).map((listing) => [listing.customName ?? listing.masterProduct?.name, listing.variants[0].label].filter(Boolean).join(" · "));
+    // What the customer reads for each line: product name, then the pack the page shows (#743, #752).
+    const names = listings.slice(0, 2).map((listing) => [listing.customName ?? listing.masterProduct?.name, shownPack(listing.variants[0]).label].filter(Boolean).join(" · "));
     const [first, second, swap] = listings.map((listing) => listing.variants[0]);
     const order = await tx.order.create({
       data: {
