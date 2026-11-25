@@ -204,6 +204,16 @@ test.describe("store subscriptions (#494)", () => {
     await shoot(page, "494-plan-choose");
   });
 
+  test("back from Stripe with a session id Stripe does not confirm: the plan stays and the waiting note shows (#841)", async ({ page }) => {
+    await setBilling({ plan: "starter", status: "none", paymentFailed: false });
+    await storeOwnerSignIn(page);
+    await page.goto(`/store-admin/plan?store=${SLUG}&session_id=cs_test_not_this_store`);
+    await expect(page.getByRole("heading", { name: "Starter plan" })).toBeVisible();
+    await expect(page.getByRole("status")).toContainText("Your plan shows here within a minute");
+    await expect(page.getByRole("button", { name: "Choose Pro" })).toBeVisible();
+    await shoot(page, "841-plan-return-unconfirmed");
+  });
+
   test("the plan the applicant chose is preselected after approval (#838)", async ({ page }) => {
     await setBilling({ plan: "starter", status: "none", paymentFailed: false });
     await setApplicationChoice("starter");
