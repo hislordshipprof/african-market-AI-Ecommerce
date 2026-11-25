@@ -4,6 +4,11 @@
  * store theme set for light and dark, so the sheet follows the page it sits on.
  */
 
+/* The last row of any page can scroll clear of the floating button. */
+:global(body):has(.launcher) {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+}
+
 .launcher {
   position: fixed;
   z-index: 30;
@@ -25,6 +30,21 @@
   cursor: pointer;
 }
 
+.launcher,
+.sheet {
+  touch-action: manipulation;
+}
+
+.launcher:hover,
+.send:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+}
+
+.tool:hover:not(:disabled),
+.jump:hover {
+  background: var(--muted);
+}
+
 .launcher:focus-visible {
   outline: 3px solid var(--ring);
   outline-offset: 3px;
@@ -44,6 +64,8 @@
 }
 
 .sheet {
+  /* Edges of the composer, chips and tools: at least 3:1 on the card in both themes, whatever the store's line colour. */
+  --dock-edge: color-mix(in oklab, var(--foreground) 50%, var(--card));
   position: fixed;
   inset: 0 0 0 auto;
   margin: 0;
@@ -338,7 +360,7 @@
   bottom: calc(100% + 8px);
   min-height: 40px;
   padding: 0 14px;
-  border: 1px solid var(--input);
+  border: 1px solid var(--dock-edge);
   border-radius: 999px;
   background: var(--card);
   color: var(--foreground);
@@ -419,7 +441,7 @@
   min-height: 44px;
   max-width: 100%;
   padding: 0 14px;
-  border: 1px solid var(--input);
+  border: 1px solid var(--dock-edge);
   border-radius: 999px;
   background: var(--card);
   color: var(--foreground);
@@ -476,7 +498,7 @@
   align-items: end;
   gap: 8px;
   padding: 6px;
-  border: 1px solid var(--input);
+  border: 1px solid var(--dock-edge);
   border-radius: 22px;
   background: var(--background);
 }
@@ -531,7 +553,7 @@
 }
 
 .tool {
-  border: 1px solid var(--input);
+  border: 1px solid var(--dock-edge);
   background: var(--card);
   color: var(--foreground);
 }

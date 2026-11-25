@@ -81,6 +81,7 @@ export function StoreAssistantDock({ storeId, lockedTitle }: { storeId: string; 
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
+  const [announce, setAnnounce] = useState("");
   const [busy, setBusy] = useState<null | { kind: "confirm" | "dismiss"; id: string } | { kind: "choose"; key: string }>(null);
   const [pending, startTransition] = useTransition();
   const waiting = proposals.filter((card) => card.state === "pending");
@@ -121,6 +122,7 @@ export function StoreAssistantDock({ storeId, lockedTitle }: { storeId: string; 
         return;
       }
       setNotice(null);
+      setAnnounce(result.reply);
       setConversationId(result.conversationId);
       setMessages((current) => [
         ...current,
@@ -252,6 +254,7 @@ export function StoreAssistantDock({ storeId, lockedTitle }: { storeId: string; 
       <DockThread
         follow={follow}
         working={sending !== null}
+        announce={announce}
         foot={chatAllowed ? (
           <Composer
             id="copilot-report"
@@ -259,7 +262,7 @@ export function StoreAssistantDock({ storeId, lockedTitle }: { storeId: string; 
             onChange={setText}
             onSend={() => send()}
             busy={pending || !loaded}
-            placeholder="Got 20 bags of gari"
+            placeholder="Got 20 bags of gari…"
             notice={notice}
             onNotice={setNotice}
           />

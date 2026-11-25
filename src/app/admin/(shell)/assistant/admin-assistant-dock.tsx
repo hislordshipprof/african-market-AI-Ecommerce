@@ -48,6 +48,7 @@ export function AdminAssistantDock() {
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
+  const [announce, setAnnounce] = useState("");
   const [pending, startTransition] = useTransition();
 
   function load() {
@@ -81,6 +82,7 @@ export function AdminAssistantDock() {
         return;
       }
       setNotice(null);
+      setAnnounce(result.reply);
       setConversationId(result.conversationId);
       if (result.drafts.length > 0) setDrafts((current) => ({ ...current, [messageId]: result.drafts }));
       setMessages((current) => [
@@ -132,6 +134,7 @@ export function AdminAssistantDock() {
       <DockThread
         follow={`${messages.length}:${Object.values(drafts).flat().map((card) => card.state).join()}`}
         working={sending !== null}
+        announce={announce}
         foot={
           <Composer
             id="admin-assistant-message"
@@ -139,7 +142,7 @@ export function AdminAssistantDock() {
             onChange={setText}
             onSend={() => send()}
             busy={pending || !loaded}
-            placeholder="Ask about stores, orders, refunds or the catalogue"
+            placeholder="Ask about stores, orders, refunds or the catalogue…"
             notice={notice}
             onNotice={setNotice}
           />

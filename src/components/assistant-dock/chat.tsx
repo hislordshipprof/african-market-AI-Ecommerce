@@ -24,11 +24,14 @@ import styles from "./dock.module.css";
 export function DockThread({
   follow,
   working,
+  announce,
   children,
   foot,
 }: {
   follow: unknown;
   working: boolean;
+  /** The newest reply, read out once it arrives. */
+  announce: string;
   children: ReactNode;
   foot: ReactNode;
 }) {
@@ -49,6 +52,7 @@ export function DockThread({
 
   return (
     <>
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{working ? "" : announce}</p>
       <div
         ref={log}
         className={styles.log}
