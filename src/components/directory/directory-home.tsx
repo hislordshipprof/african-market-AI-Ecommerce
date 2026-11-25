@@ -5,6 +5,7 @@ import { BODIJA_MARKET, POSTER_MID_MEDIA, POSTER_WIDE_MEDIA } from "@/components
 import { cuisineChips } from "@/lib/directory/cuisine-filter";
 import { directoryCounts, ownerQuotes, type OwnerQuote } from "@/lib/directory/home-story";
 import ordersScreen from "../../../public/images/directory/store-admin-orders.webp";
+import { DirectoryFooter, STATES_ANCHOR } from "./directory-footer";
 import { NearMe, type StateGroup } from "./near-me";
 import type { CardStore } from "./store-card";
 import styles from "./directory.module.css";
@@ -33,10 +34,12 @@ export function DirectoryHome({ stores, states }: { stores: CardStore[]; states:
           )}
           counts={<Counts {...directoryCounts(stores)} />}
         />
+        {states.length > 0 ? <StoresByState states={states} /> : null}
         <HowItWorks />
         {quotes.length > 0 ? <OwnerStories quotes={quotes} /> : null}
         <ForOwners />
       </main>
+      <DirectoryFooter />
     </div>
   );
 }
@@ -70,6 +73,25 @@ function Counts({ markets, cities, states }: { markets: number; cities: number; 
     <ul className={styles.counts} aria-label="Listed today">
       {parts.map((part) => <li key={part}>{part}</li>)}
     </ul>
+  );
+}
+
+/** Every state with a listed store, so its page is one tap from home (#810); each state page links its cities. */
+function StoresByState({ states }: { states: StateGroup[] }) {
+  return (
+    <section aria-labelledby={STATES_ANCHOR} className={styles.section}>
+      <h2 id={STATES_ANCHOR} className={styles.sectionTitle}>Stores by state</h2>
+      <ul className={styles.placeLinks}>
+        {states.map((state) => (
+          <li key={state.code}>
+            <Link href={state.href} className={styles.placeLink}>
+              {state.name}
+              <span className={styles.placeCount}>{state.stores.length}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
