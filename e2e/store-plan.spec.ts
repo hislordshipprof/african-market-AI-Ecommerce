@@ -204,7 +204,7 @@ test.describe("store subscriptions (#494)", () => {
     await shoot(page, "494-plan-choose");
   });
 
-  test("back from Stripe with a session id Stripe does not confirm: the plan stays and the waiting note shows (#841)", async ({ page }) => {
+  test("back from Checkout with a session id that cannot be confirmed: the plan stays and the waiting note shows (#841)", async ({ page }) => {
     await setBilling({ plan: "starter", status: "none", paymentFailed: false });
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin/plan?store=${SLUG}&session_id=cs_test_not_this_store`);
