@@ -829,6 +829,11 @@ a.wordmark:focus-visible,
   padding: 56px 20px;
 }
 
+/* Follows the store list's own section, so its top padding would double the gap. */
+.byState {
+  padding-top: 0;
+}
+
 .section > .results:last-child {
   margin-bottom: 0;
 }

@@ -407,7 +407,7 @@ test("state and city pages: cached, GroceryStore JSON-LD, sitemap and robots, 40
     for (const [from, to] of [["/stores/tx", "/stores/texas"], ["/stores/TX", "/stores/texas"], ["/stores/tx/houston", "/stores/texas/houston"]]) {
       const res = await request.get(`${root}${from}`, { maxRedirects: 0 });
       expect(res.status(), from).toBe(308);
-      expect(res.headers().location, from).toBe(`${root}${to}`);
+      expect(new URL(res.headers().location, root).href, from).toBe(`${root}${to}`);
     }
     await page.goto(`${root}/stores/tx`);
     await expect(page).toHaveURL(`${root}/stores/texas`);

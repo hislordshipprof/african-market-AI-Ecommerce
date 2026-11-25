@@ -79,7 +79,7 @@ function Counts({ markets, cities, states }: { markets: number; cities: number; 
 /** Every state with a listed store, so its page is one tap from home (#810); each state page links its cities. */
 function StoresByState({ states }: { states: StateGroup[] }) {
   return (
-    <section aria-labelledby={STATES_ANCHOR} className={styles.section}>
+    <section aria-labelledby={STATES_ANCHOR} className={`${styles.section} ${styles.byState}`}>
       <h2 id={STATES_ANCHOR} className={styles.sectionTitle}>Stores by state</h2>
       <ul className={styles.placeLinks}>
         {states.map((state) => (

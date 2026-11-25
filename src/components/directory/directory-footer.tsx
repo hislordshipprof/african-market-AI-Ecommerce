@@ -10,7 +10,8 @@ export function DirectoryFooter() {
       <Link href="/" className={styles.wordmark}>African Markets</Link>
       <nav aria-label="Marketplace">
         <ul className={styles.footerLinks}>
-          <li><Link href={`/#${STATES_ANCHOR}`}>Stores by state</Link></li>
+          {/* A full load: the home streams behind its loading screen, so a client navigation lands at the top, not on the list. */}
+          <li><a href={`/#${STATES_ANCHOR}`}>Stores by state</a></li>
           <li><Link href="/sell">Sell on African Markets</Link></li>
         </ul>
       </nav>
