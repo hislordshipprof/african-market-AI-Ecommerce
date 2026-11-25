@@ -190,7 +190,7 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
 }
 
 /** A Starter store, or a Pro store that dropped to Starter, keeps its chat history but cannot send (#818). */
-export const PLAN_LOCKED_MESSAGE = "The store assistant is on the Pro plan. Upgrade on the Plan page to send messages.";
+export const PLAN_LOCKED_MESSAGE = "Store assistant (AI chat) is on the Pro plan. Upgrade on the Plan page to send messages.";
 
 export const NOTHING_DRAFTED = "Nothing was drafted.";
 export const NUMBER_REFUSED =
