@@ -174,6 +174,18 @@ describe.skipIf(!hasDb)("platform admin assistant (#831)", () => {
     });
   });
 
+  it("gives each courier's registration error, Uber's as well as DoorDash's", async () => {
+    await platformAdminTransaction((tx) => tx.store.update({ where: { id: storeId }, data: { uberRegistrationError: "Uber address rejected" } }));
+    const tools = adminAssistantTools({ actor: admin, conversationId: crypto.randomUUID(), book: createReadBook(), now: new Date() });
+    const call = (name: keyof typeof tools, input: object) =>
+      (tools[name].execute as (input: object, options: object) => Promise<unknown>)(input, { toolCallId: name, messages: [] });
+    const errors = { doordash: "Address rejected", uber: "Uber address rejected" };
+
+    const found = await call("find_stores", { query: `stuck-${RUN}` }) as { stores: Array<Record<string, unknown>> };
+    expect(found.stores[0]).toMatchObject({ courierRegistrationErrors: errors });
+    expect(await call("store_detail", { slug: `stuck-${RUN}` })).toMatchObject({ courierRegistrationErrors: errors });
+  });
+
   it("refuses anyone who is not a platform admin", async () => {
     signInAs(admin, "customer");
     script([{ kind: "text", text: "hi" }]);

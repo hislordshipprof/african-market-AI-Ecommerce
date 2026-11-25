@@ -71,7 +71,7 @@ export function adminAssistantTools(ctx: ToolContext) {
   const { book } = ctx;
   return {
     find_stores: tool({
-      description: "Find stores by name or slug and/or status (setup is still onboarding). Each store has its plan, metro, open go-live items and courier registration error.",
+      description: "Find stores by name or slug and/or status (setup is still onboarding). Each store has its plan, metro, open go-live items and each courier's registration error.",
       inputSchema: z.object({
         query: z.string().max(100).optional(),
         status: z.enum(STORE_STATUSES).optional(),
@@ -96,7 +96,7 @@ export function adminAssistantTools(ctx: ToolContext) {
             goLiveOpen: checklist
               ? checklist.items.filter((item) => !item.done).map((item) => `${goLiveItemLabel(item.key, checklist.floor)}: ${item.detail}`)
               : null,
-            courierRegistrationError: store.doordashRegistrationError,
+            courierRegistrationErrors: { doordash: store.doordashRegistrationError, uber: store.uberRegistrationError },
             created: day(store.createdAt),
           };
         }));
@@ -128,7 +128,7 @@ export function adminAssistantTools(ctx: ToolContext) {
           payouts: store.stripeOnboardingStatus,
           doordashRegistered: Boolean(store.doordashStoreId),
           uberRegistered: Boolean(store.uberLocationId),
-          courierRegistrationError: store.doordashRegistrationError,
+          courierRegistrationErrors: { doordash: store.doordashRegistrationError, uber: store.uberRegistrationError },
           goLive: checklist?.items.map((item) => ({ item: goLiveItemLabel(item.key, checklist.floor), done: item.done, detail: item.detail })) ?? [],
           created: day(store.createdAt),
         };
