@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ADMIN_NAV, ADMIN_NAV_GROUPS, currentNavHref, type AdminNavItem } from "./admin-nav";
+import { ADMIN_NAV, ADMIN_NAV_GROUPS, currentNavHref, matchNavPages, type AdminNavItem } from "./admin-nav";
 
 describe("currentNavHref", () => {
   it("marks the section a nested page belongs to, not a lookalike path", () => {
@@ -65,5 +65,21 @@ describe("ADMIN_NAV_GROUPS", () => {
       "Courier incidents": "courierIncidents",
       Messages: "messages",
     });
+  });
+});
+
+describe("matchNavPages", () => {
+  it("finds pages by any word of their label or group, ignoring case", () => {
+    expect(matchNavPages("dup").map((page) => page.label)).toEqual(["Duplicates"]);
+    expect(matchNavPages("COURIER").map((page) => page.label)).toEqual(["Courier incidents", "Courier settings"]);
+    expect(matchNavPages("delivery").map((page) => page.label)).toEqual(["Courier incidents", "Courier settings", "Metros"]);
+    expect(matchNavPages("ai spend").map((page) => page.label)).toEqual(["AI eval and spend"]);
+  });
+
+  it("lists every page for an empty query, each with its group", () => {
+    const all = matchNavPages("  ");
+    expect(all).toHaveLength(ADMIN_NAV.length);
+    expect(all.find((page) => page.label === "Metros")?.group).toBe("Delivery");
+    expect(all[0]).toMatchObject({ label: "Home", group: "Go to" });
   });
 });

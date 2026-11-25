@@ -91,3 +91,11 @@ export function currentNavHref(pathname: string): AdminNavHref {
   }
   return match;
 }
+
+/** The ⌘K palette's pages (#859): every word of the query appears in the page's label or group. */
+export function matchNavPages(query: string): Array<{ href: AdminNavHref; label: string; group: string; icon: AdminNavItem["icon"] }> {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return ADMIN_NAV_GROUPS.flatMap((group) =>
+    group.items.map((item) => ({ href: item.href, label: item.label, group: group.label ?? "Go to", icon: item.icon })),
+  ).filter((page) => words.every((word) => `${page.label} ${page.group}`.toLowerCase().includes(word)));
+}
