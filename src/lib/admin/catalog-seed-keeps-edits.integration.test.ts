@@ -39,7 +39,7 @@ import { resolveDirectUrl } from "../env";
 import { authPost, testSignUp, collectCookies } from "../test-auth";
 import { testPrismaClient } from "../test-prisma";
 import { seedMasterCatalog } from "../../../prisma/seed-master-catalog";
-import { seedCategoryMetadata, type SeedCategory } from "../../../prisma/seed";
+import { seedCategoryMetadata, type SeedCategory } from "../../../prisma/seed-categories";
 import { upsertMasterProduct } from "../../../prisma/master-catalog-upsert";
 import { seedRecipeBase, type SeedRecipe } from "../assistant/recipe-base";
 import { deleteCategory, moveCategory, updateCategory, uploadCategoryImage } from "./catalog-categories";

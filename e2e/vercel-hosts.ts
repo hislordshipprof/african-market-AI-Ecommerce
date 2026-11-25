@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import type { BrowserContext } from "@playwright/test";
+import type { BrowserContext, Route } from "@playwright/test";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 
 // #766: until PLATFORM_ROOT_DOMAIN is set, the production alias serves the marketplace and stores by ?store=.
@@ -13,25 +13,35 @@ export async function serveVercelHostsFrom(context: BrowserContext, port: number
   await context.route(
     (url) => url.hostname.endsWith(".vercel.app"),
     async (route) => {
-      const url = new URL(route.request().url());
-      const response = await route.fetch({
-        url: `http://127.0.0.1:${port}${url.pathname}${url.search}`,
-        headers: { ...route.request().headers(), host: url.hostname, "x-forwarded-proto": "https" },
-        maxRedirects: 0,
-      });
-      // Chromium sends the target of a fulfilled redirect to the network, past the route, so the redirect
-      // is replayed as a page that moves on; its cookies are kept.
-      const location = response.headers().location;
-      if (response.status() >= 300 && response.status() < 400 && location) {
-        const target = new URL(location, url).toString();
-        const headers = response.headers();
-        delete headers.location;
-        await route.fulfill({ status: 200, headers: { ...headers, "content-type": "text/html" }, body: `<meta http-equiv="refresh" content="0;url=${target}">` });
-        return;
+      try {
+        await answerFromLocal(route, port);
+      } catch (error) {
+        // A prefetch still in flight when the test ends: its context is gone, so there is nothing left to answer.
+        if (/context disposed|Target .*closed|has been closed/i.test(String(error))) return;
+        throw error;
       }
-      await route.fulfill({ response });
     },
   );
+}
+
+async function answerFromLocal(route: Route, port: number) {
+  const url = new URL(route.request().url());
+  const response = await route.fetch({
+    url: `http://127.0.0.1:${port}${url.pathname}${url.search}`,
+    headers: { ...route.request().headers(), host: url.hostname, "x-forwarded-proto": "https" },
+    maxRedirects: 0,
+  });
+  // Chromium sends the target of a fulfilled redirect to the network, past the route, so the redirect
+  // is replayed as a page that moves on; its cookies are kept.
+  const location = response.headers().location;
+  if (response.status() >= 300 && response.status() < 400 && location) {
+    const target = new URL(location, url).toString();
+    const headers = response.headers();
+    delete headers.location;
+    await route.fulfill({ status: 200, headers: { ...headers, "content-type": "text/html" }, body: `<meta http-equiv="refresh" content="0;url=${target}">` });
+    return;
+  }
+  await route.fulfill({ response });
 }
 
 /** `next start` configured as production's single vercel.app address. `authSecret` encrypts 2FA secrets there. */

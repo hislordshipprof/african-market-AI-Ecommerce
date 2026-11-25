@@ -49,7 +49,9 @@ const MAX_RETRIES = 5;
 
 export type CatalogPruneExecution =
   | { kind: "cli" }
-  | { kind: "harness"; mode: "off" | "dry-run" | "delete" };
+  | { kind: "harness"; mode: "off" | "dry-run" | "delete" }
+  /** A production deploy (#802): never prunes, and a photo or R2 failure never fails the load. */
+  | { kind: "production" };
 
 export type WriterGate = { exclusive(): boolean };
 
@@ -213,6 +215,8 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
   let mode: "off" | "dry-run" | "delete";
   if (execution.kind === "harness") {
     mode = execution.mode;
+  } else if (execution.kind === "production") {
+    mode = "off";
   } else {
     const decision = await decideCliCatalogPrune(process.env, () => observePrisma(prisma));
     if ("refused" in decision) throw new CatalogPruneRefusal(decision.refused);
@@ -223,7 +227,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     mode = decision.mode;
   }
 
-  if (mode === "off") {
+  if (mode === "off" && execution.kind !== "production") {
     log(
       "Catalog prune skipped (SEED_PRUNE_R2 is unset). Request a dry-run with SEED_PRUNE_R2=dry-run, or a delete with SEED_PRUNE_R2 set to the R2_BUCKET value.",
     );
@@ -237,8 +241,8 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     relax_column_count: true,
   });
 
-  const useRealR2 = execution.kind !== "harness" && !deps.r2 && hasAllR2Keys(process.env);
-  const listClient: R2SendClient | null = deps.r2 ?? (useRealR2 ? getS3Client() : null);
+  let useRealR2 = execution.kind !== "harness" && !deps.r2 && hasAllR2Keys(process.env);
+  let listClient: R2SendClient | null = deps.r2 ?? (useRealR2 ? getS3Client() : null);
   const bucket = process.env.R2_BUCKET;
 
   const highRows = rows.filter((row) => row.confidence.trim() === "high");
@@ -253,10 +257,19 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
   const upsertedIds: string[] = [];
   let adminKept = 0;
 
-  const existingR2Keys =
-    listClient && bucket
-      ? new Set((await listCatalogObjects(listClient, bucket)).map((object) => object.key))
-      : new Set<string>();
+  let photoSkipReason = listClient && bucket ? null : "R2 is not configured";
+  let existingR2Keys = new Set<string>();
+  if (listClient && bucket) {
+    try {
+      existingR2Keys = new Set((await listCatalogObjects(listClient, bucket)).map((object) => object.key));
+    } catch (error) {
+      if (execution.kind !== "production") throw error;
+      log(`R2 listing failed, so catalogue photos are skipped: ${formatR2UploadCause(error)}`);
+      photoSkipReason = "R2 listing failed";
+      useRealR2 = false;
+      listClient = null;
+    }
+  }
 
   const withImages = highRows.filter((row) => row.image_url?.trim());
   let processed = 0;
@@ -342,7 +355,10 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     upsertedIds.push(row.id);
   }
 
-  const imageRowCount = highRows.filter((row) => row.image_url?.trim()).length;
+  const imageRowCount = withImages.length;
+  if (photoSkipReason && !deps.uploadImage && imageRowCount > 0) {
+    log(`Catalogue photos skipped: ${imageRowCount} (${photoSkipReason})`);
+  }
   const coveragePct = imageRowCount > 0
     ? (((imageUploads + imageExisting) / imageRowCount) * 100).toFixed(1)
     : "N/A";
