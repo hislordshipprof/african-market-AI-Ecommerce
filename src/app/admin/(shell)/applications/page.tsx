@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { listStoreApplications } from "@/lib/store-application/service";
-import { storeTypeLabel, suggestSlug } from "@/lib/store-application/fields";
+import { planChoiceLabel, storeTypeLabel, suggestSlug } from "@/lib/store-application/fields";
 import { ApproveForm, RejectForm, ResendRejectionForm } from "./decision-forms";
 
 export const metadata = { title: "Applications — Platform Admin" };
@@ -97,6 +97,10 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
                   </dd>
                   <dt className="text-muted-foreground">Offers today</dt>
                   <dd className="text-foreground">{offers(application.offersPickup, application.offersDelivery)}</dd>
+                  <dt className="text-muted-foreground">Plan wanted</dt>
+                  <dd className="text-foreground" data-testid="plan-choice">
+                    {application.planChoice ? planChoiceLabel(application.planChoice) : "Not asked"}
+                  </dd>
                 </dl>
                 <div className="mt-4 flex flex-col gap-4 border-t border-border pt-4">
                   <ApproveForm

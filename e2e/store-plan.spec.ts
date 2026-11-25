@@ -5,7 +5,7 @@ import { storeOwnerSignIn } from "./store-owner-auth";
 import { generateTOTP } from "./totp";
 
 const SLUG = "mama-ngozi";
-const SHOTS = "screenshots";
+const SHOTS = process.env.PROOF_DIR ?? "screenshots";
 
 function db() {
   const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
@@ -61,6 +61,31 @@ async function clearBilling() {
       prisma.storeSubscription.deleteMany({ where: { storeId: store.id } }),
       prisma.assistantChatMonth.deleteMany({ where: { storeId: store.id } }),
     ]);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+const APPLICATION_ID = "e2e-838-application";
+
+/** The application this store was approved from, with the plan its applicant chose (#838). */
+async function setApplicationChoice(planChoice: string | null) {
+  const prisma = db();
+  try {
+    const store = await prisma.store.findUniqueOrThrow({ where: { slug: SLUG } });
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.storeApplication.deleteMany({ where: { id: APPLICATION_ID } });
+      if (!planChoice) return;
+      await tx.storeApplication.create({
+        data: {
+          id: APPLICATION_ID, businessName: "Mama Ngozi", storeType: "african", addressLine1: "1 Main St", city: "Houston",
+          state: "TX", zip: "77002", ownerName: "Ngozi", email: "owner@mama-ngozi.test", phone: "+17135550838",
+          planChoice, status: "approved", decidedAt: new Date(), storeId: store.id,
+        },
+      });
+    });
   } finally {
     await prisma.$disconnect();
   }
@@ -157,17 +182,33 @@ test.describe("store subscriptions (#494)", () => {
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin/plan?store=${SLUG}`);
     await expect(page.getByRole("button", { name: "Start Pro, 3 months free" })).toBeVisible();
-    // A feature that is not live reads the same in the Pro card and the feature list (#809).
-    const proCard = page.locator("form").filter({ has: page.getByRole("heading", { name: "Pro", exact: true }) });
-    const featureList = page.locator("section").filter({ has: page.getByRole("heading", { name: "Pro features" }) });
+    // One comparison, the same one /sell shows (#838); a feature that is not live says so (#809).
+    const table = page.getByRole("table", { name: "Starter and Pro compared" });
     for (const label of ["Your own domain", "WhatsApp for copilot and alerts", "Analytics dashboard"]) {
-      await expect(proCard.getByText(`${label} (coming soon)`, { exact: true })).toBeVisible();
-      await expect(featureList.getByText(`${label} (coming soon)`, { exact: true })).toBeVisible();
+      await expect(table.getByRole("rowheader", { name: `${label} (coming soon)` })).toBeVisible();
     }
-    await expect(proCard.getByText("Store assistant (AI chat)", { exact: true })).toBeVisible();
-    await expect(featureList.getByText("Store assistant (AI chat)", { exact: true })).toBeVisible();
-    await expect(proCard.getByText("Courier delivery", { exact: true })).toBeVisible();
+    await expect(table.getByRole("row", { name: /Courier delivery/ })).toContainText("Not included on StarterIncluded on Pro");
+    await expect(table.getByRole("row", { name: /Store assistant \(AI chat\)/ })).toContainText("Not included on StarterIncluded on Pro");
+    await expect(page.getByRole("heading", { name: "Pro features" })).toHaveCount(0);
     await shoot(page, "494-plan-choose");
+  });
+
+  test("the plan the applicant chose is preselected after approval (#838)", async ({ page }) => {
+    await setBilling({ plan: "starter", status: "none", paymentFailed: false });
+    await setApplicationChoice("starter");
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(`/store-admin/plan?store=${SLUG}`);
+      const starterCard = page.locator("form").filter({ has: page.getByRole("heading", { name: "Starter", exact: true }) });
+      await expect(starterCard.getByText("You chose Starter when you applied.")).toBeVisible();
+      await expect(page.getByText("when you applied")).toHaveCount(1);
+      await shoot(page, "838-plan-preselected");
+      await setApplicationChoice("undecided");
+      await page.reload();
+      await expect(page.getByText("when you applied")).toHaveCount(0);
+    } finally {
+      await setApplicationChoice(null);
+    }
   });
 
   test("Pro owner: features included and nothing locked", async ({ page }) => {
@@ -175,7 +216,8 @@ test.describe("store subscriptions (#494)", () => {
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin/plan?store=${SLUG}`);
     await expect(page.getByRole("heading", { name: "Pro plan" })).toBeVisible();
-    await expect(page.getByText("Priority, same day", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Pro plan" }).getByText("Priority, same day", { exact: true })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: /Pro.*Your plan/ })).toBeVisible();
     await shoot(page, "494-plan-pro");
     await page.goto(`/store-admin?store=${SLUG}`);
     await expect(page.getByRole("link", { name: "Upgrade to Pro" })).toHaveCount(0);

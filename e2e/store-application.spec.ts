@@ -22,7 +22,7 @@ async function shoot(page: Page, name: string) {
   await page.setViewportSize({ width: 1280, height: 1000 });
 }
 
-async function apply(page: Page, root: string, name: string, email: string, phone: string) {
+async function apply(page: Page, root: string, name: string, email: string, phone: string, plan: "Starter" | "Pro" | "Not sure yet") {
   await page.goto(`${root}/sell`);
   await page.getByLabel("Store name").fill(name);
   await page.getByLabel("Kind of store").selectOption("african");
@@ -35,6 +35,7 @@ async function apply(page: Page, root: string, name: string, email: string, phon
   await page.getByLabel("Phone").fill(phone);
   await page.getByLabel("Website or social page").fill("instagram.com/adasmarket");
   await page.getByLabel("Pickup at the store").check();
+  await page.getByRole("radio", { name: plan, exact: true }).check();
   await page.getByRole("button", { name: "Send application" }).click();
   await expect(page.getByRole("heading", { name: "Thanks, we have your application" })).toBeVisible();
 }
@@ -78,8 +79,15 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await page.getByRole("banner").getByRole("link", { name: "Sell on African Markets" }).click();
     await expect(page).toHaveURL(`${root}/sell`);
     await expect(page.getByRole("heading", { level: 1, name: "Sell on African Markets" })).toBeVisible();
-    // #780: the monthly fee shows before applying, beside "No commission".
-    await expect(page.getByText(/No commission on your sales\. Plans are Starter at \$\d+ a month or Pro at \$\d+ a month\./)).toBeVisible();
+    // #838: what each plan gives and costs shows before applying, from the plan module.
+    const plans = page.getByRole("table", { name: "Starter and Pro compared" });
+    await expect(plans.getByRole("columnheader", { name: /Starter\s*\$49/ })).toBeVisible();
+    await expect(plans.getByRole("columnheader", { name: /Pro\s*\$99/ })).toBeVisible();
+    await expect(plans.getByRole("row", { name: /Courier delivery/ })).toContainText("Not included on StarterIncluded on Pro");
+    await expect(plans.getByRole("row", { name: /^Staff/ })).toContainText("Owner + 2 staffUnlimited staff");
+    const question = page.getByRole("radiogroup", { name: "Which plan are you interested in?" });
+    await expect(question).toContainText("You choose and pay only after we approve your store.");
+    await expect(question.getByRole("link", { name: "Compare the plans" })).toHaveAttribute("href", "#plans");
     await shoot(page, "sell-form");
 
     await page.getByRole("button", { name: "Send application" }).click();
@@ -96,6 +104,7 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await page.getByLabel("Your name").fill("Ada Obi");
     await page.getByLabel("Email").fill(`approve-${run}@example.com`);
     await page.getByLabel("Phone").fill(`713555${digits.slice(-4)}`);
+    await page.getByRole("radio", { name: "Pro", exact: true }).check();
     await page.getByRole("button", { name: "Send application" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "Check the highlighted fields." })).toBeVisible();
     await expect(page.getByLabel("ZIP")).toBeFocused();
@@ -103,11 +112,11 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await expect(page.getByLabel("ZIP")).toHaveAccessibleDescription(/5-digit ZIP code/);
     await shoot(page, "sell-rejected");
 
-    await apply(page, root, approveName, `approve-${run}@example.com`, `713555${digits.slice(-4)}`);
+    await apply(page, root, approveName, `approve-${run}@example.com`, `713555${digits.slice(-4)}`, "Pro");
     // #728: the thank-you leads back to the directory.
     await expect(page.getByRole("link", { name: "Return to directory" })).toHaveAttribute("href", "/");
     await shoot(page, "sell-thanks");
-    await apply(page, root, rejectName, `reject-${run}@example.com`, `832555${digits.slice(-4)}`);
+    await apply(page, root, rejectName, `reject-${run}@example.com`, `832555${digits.slice(-4)}`, "Not sure yet");
 
     await page.setExtraHTTPHeaders({});
     await page.goto(`${root}/admin/sign-in`);
@@ -131,6 +140,8 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     const approveCard = page.getByRole("article", { name: approveName });
     await expect(approveCard.getByText("Pickup", { exact: true })).toBeVisible();
     await expect(approveCard.getByRole("link", { name: "https://instagram.com/adasmarket" })).toBeVisible();
+    await expect(approveCard.getByTestId("plan-choice")).toHaveText("Pro");
+    await expect(page.getByRole("article", { name: rejectName }).getByTestId("plan-choice")).toHaveText("Not sure yet");
     await shoot(page, "admin-applications");
 
     const slug = `e2e-approve-${run}`;
@@ -151,6 +162,9 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     await page.getByRole("listitem").filter({ hasText: approveName }).getByRole("link", { name: "Open store" }).click();
     await expect(page.getByLabel("Slug")).toHaveValue(slug);
     await expect(page.getByTestId("store-status")).toContainText("Setup");
+    // #838: the plan the applicant wanted sits next to the plan in force.
+    await expect(page.getByTestId("plan-choice")).toHaveText("Chose Pro when applying");
+    await shoot(page, "838-admin-store");
   } finally {
     await running.stop();
   }

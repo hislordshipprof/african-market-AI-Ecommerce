@@ -38,6 +38,7 @@ Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro 
 | Directory (Phase 2) | Listed | Same |
 | Support | Email, next business day | **Priority**, same day |
 
+- **The store chooses its plan (decision 2026-11-25-02, #838):** like Shopify, the store picks Starter or Pro itself; the platform does not assign it. The comparison has one home, `planComparisonRows()` in `src/lib/billing/plan.ts`, drawn by `src/components/billing/plan-comparison.tsx` on `/sell` (with the pilot offer while pilot places remain) and on `/store-admin/plan`. The application asks which plan the store is interested in (Starter, Pro, Not sure yet); that answer binds no one, the admin sees it on the application and the store page, and the plan page preselects it.
 - **Locked features:** a Starter store sees each Pro feature locked, with an upgrade link.
 - **Downgrade:** a downgrade never breaks an order in flight. New orders follow the new plan. Staff over the limit keep read-only access until the owner removes them. The owner keeps reading past copilot chats and can still confirm or dismiss changes already drafted, but cannot send (#818).
 - **Assistant cap:** past the monthly cap, the assistant tells the shopper it is unavailable and the store keeps selling by browsing. The owner is warned at 80%.
