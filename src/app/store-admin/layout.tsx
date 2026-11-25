@@ -6,6 +6,7 @@ import { TwoFactorReminder } from "./two-factor-reminder";
 import { StoreAssistantHost } from "./store-assistant-host";
 import { AdminShell } from "./shell/admin-shell";
 import { loadShell } from "./shell/shell-data";
+import { ShellRefresh } from "./shell/shell-refresh";
 
 /** The store admin installs as its own app, scoped to /store-admin (#563). */
 export async function generateMetadata(): Promise<Metadata> {
@@ -25,6 +26,7 @@ export default async function StoreAdminLayout({ children }: { children: React.R
         </AdminShell>
       ) : (
         <>
+          <ShellRefresh />
           <TwoFactorReminder />
           {children}
         </>

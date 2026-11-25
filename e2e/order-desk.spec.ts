@@ -71,18 +71,14 @@ async function openBatch(page: Page, [older, newer]: number[]) {
 }
 
 test.describe("Order desk (#725)", () => {
-  test("the dashboard's first daily links are Orders, Messages, Products", async ({ page }) => {
+  test("Home's first action is Open orders, and the sidebar leads with Home, then Orders and Products (#725, #860)", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(DASHBOARD_URL);
-    const links = page.getByRole("main").getByRole("link");
-    await expect(links.first()).toBeVisible();
-    // Payment and plan warnings (alert/status boxes) and the store's View store link (new tab) sit above the cards.
-    const cards = await links.evaluateAll((els) =>
-      els
-        .filter((el) => !el.closest("[role=alert],[role=status]") && el.getAttribute("target") !== "_blank")
-        .map((el) => new URL((el as HTMLAnchorElement).href).pathname),
-    );
-    expect(cards.slice(0, 3)).toEqual(["/store-admin/orders", "/store-admin/messages", "/store-admin/listings"]);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("link", { name: "Open orders" })).toHaveAttribute("href", /\/store-admin\/orders\?/);
+    const sidebar = page.getByRole("complementary", { name: "Store admin" }).getByRole("link");
+    const paths = await sidebar.evaluateAll((els) => els.map((el) => new URL((el as HTMLAnchorElement).href).pathname));
+    expect(paths.slice(0, 3)).toEqual(["/store-admin", "/store-admin/orders", "/store-admin/listings"]);
   });
 
   test("a failed inbox refresh keeps the orders and says Updates paused until the next good poll", async ({ page }) => {
@@ -142,8 +138,8 @@ test.describe("Order desk (#725)", () => {
       await storeOwnerSignIn(page);
       await page.goto(ORDERS_URL);
 
-      const back = page.getByRole("link", { name: "Back to dashboard" });
-      expect(await height(back)).toBeGreaterThanOrEqual(44);
+      const menu = page.getByRole("button", { name: "Open menu" });
+      expect(await height(menu)).toBeGreaterThanOrEqual(44);
 
       await page.locator("button", { hasText: "#1001" }).click();
       expect(await height(page.getByRole("button", { name: "Accept order" }))).toBeGreaterThanOrEqual(48);

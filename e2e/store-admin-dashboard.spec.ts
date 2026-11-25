@@ -97,7 +97,10 @@ test.describe.serial("Store admin dashboard (#784)", () => {
     await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
 
     await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
-    await page.getByRole("link", { name: /Products/ }).click();
+    // Staff see only the pages their role opens (#860).
+    const staffNav = page.getByRole("complementary", { name: "Store admin" }).getByRole("navigation").getByRole("link");
+    expect(await staffNav.evaluateAll((els) => els.map((el) => el.querySelector("span")?.textContent))).toEqual(["Home", "Orders", "Products", "Messages"]);
+    await page.getByRole("complementary", { name: "Store admin" }).getByRole("link", { name: "Products" }).click();
     await expect(page.locator("h1")).toHaveText("Products");
     await expect(page.getByRole("button", { name: "Add listing" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /Import CSV/ })).toHaveCount(0);
@@ -124,10 +127,10 @@ test.describe.serial("Store admin dashboard (#784)", () => {
   test("the owner sees the store's address, confirms Go live, and the store is live and listed", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin?store=${slug}`);
-    await expect(page.getByRole("heading", { level: 1, name: "E2E Lagos Corner" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Store admin" }).getByText("E2E Lagos Corner")).toBeVisible();
 
     const address = `http://localhost:${E2E_PORT}/?store=${slug}`;
-    await expect(page.getByRole("link", { name: "View store" })).toHaveAttribute("href", address);
+    await expect(page.getByTestId("address-view-store")).toHaveAttribute("href", address);
     await expect(page.getByText(address.replace("http://", ""))).toBeVisible();
     await expect(page.getByText(/place one small order/)).toHaveCount(0);
     await expect(page.locator("#go-live-hint")).toContainText("$35.00");
