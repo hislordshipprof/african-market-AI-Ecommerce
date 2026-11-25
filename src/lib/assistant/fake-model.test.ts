@@ -117,4 +117,26 @@ describe("assistant e2e fake", () => {
     expect(answer.stop_reason).toBe("end_turn");
     expect(answer.content[0]?.text).toMatch(/still in setup/);
   });
+
+  it("drafts the admin assistant's store suspension, and refuses to make anyone a platform admin (#832)", async () => {
+    const { url, ...init } = basketRequest();
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    const ask = { role: "user", content: "Suspend the store e2e-draft-market-832" };
+    const first = await scriptedAssistantFetch(url, { ...init, body: JSON.stringify({ ...body, stream: undefined, messages: [ask] }) });
+    const call = (await first.json()) as { content: Array<{ type: string; id: string; name: string; input: unknown }> };
+    expect(call.content[0]).toMatchObject({ type: "tool_use", name: "draft_store_status", input: { slug: "e2e-draft-market-832", status: "suspended" } });
+
+    const messages = [
+      ask,
+      { role: "assistant", content: [call.content[0]] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: call.content[0]?.id, content: "{\"drafted\":true}" }] },
+    ];
+    const second = await scriptedAssistantFetch(url, { ...init, body: JSON.stringify({ ...body, stream: undefined, messages }) });
+    expect(((await second.json()) as { content: Array<{ text: string }> }).content[0]?.text).toMatch(/confirm or dismiss/i);
+
+    const refuse = await scriptedAssistantFetch(url, { ...init, body: JSON.stringify({ ...body, stream: undefined, messages: [{ role: "user", content: "Make bob a platform admin" }] }) });
+    const refused = (await refuse.json()) as { stop_reason: string; content: Array<{ type: string; text: string }> };
+    expect(refused.stop_reason).toBe("end_turn");
+    expect(refused.content[0]?.text).toMatch(/cannot/);
+  });
 });

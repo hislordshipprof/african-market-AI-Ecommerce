@@ -60,7 +60,7 @@ describe.skipIf(!hasDb)("platform admin assistant drafts at the confirm seam (#8
 
   async function draft(name: string, input: Record<string, unknown>): Promise<{ result: Record<string, unknown>; cards: AdminDraftCard[] }> {
     const book = createReadBook();
-    const tools = adminAssistantTools({ actor: admin, conversationId, book, now: new Date() }) as Record<string, { execute?: (input: unknown, opts: unknown) => Promise<unknown> }>;
+    const tools = adminAssistantTools({ actor: admin, conversationId, book, now: new Date() }) as unknown as Record<string, { execute?: (input: unknown, opts: unknown) => Promise<unknown> }>;
     const result = (await tools[name]!.execute!(input, { toolCallId: "t", messages: [] })) as Record<string, unknown>;
     const messageId = crypto.randomUUID();
     const cards = await sql((tx) => insertAdminDrafts(tx, { userId: admin.id, email: admin.email, conversationId, messageId }, book.drafts));
@@ -327,7 +327,7 @@ describe.skipIf(!hasDb)("platform admin assistant drafts at the confirm seam (#8
   it("checks new applications, then approves one and rejects one with a reason on confirm", async () => {
     signInAs(admin);
     const book = createReadBook();
-    const tools = adminAssistantTools({ actor: admin, conversationId, book, now: new Date() }) as Record<string, { execute?: (input: unknown, opts: unknown) => Promise<unknown> }>;
+    const tools = adminAssistantTools({ actor: admin, conversationId, book, now: new Date() }) as unknown as Record<string, { execute?: (input: unknown, opts: unknown) => Promise<unknown> }>;
     const checked = (await tools.check_applications!.execute!({}, { toolCallId: "t", messages: [] })) as { applications: Array<Record<string, unknown>> };
     const mine = checked.applications.find((row) => row.applicationId === ids.application);
     expect(mine).toMatchObject({
