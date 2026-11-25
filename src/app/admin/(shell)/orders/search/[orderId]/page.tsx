@@ -96,7 +96,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
 
   return (
     <AuditedView key={order.viewId} viewId={order.viewId}>
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
+      <div className="px-4 py-6 sm:px-6 lg:px-8">
         <Link href="/admin/orders/search" className={`inline-flex min-h-11 items-center gap-1 rounded-md text-sm font-medium text-primary hover:underline ${FOCUS}`}>
           <ChevronLeft aria-hidden className="size-4" />
           Search orders

@@ -49,7 +49,7 @@ export default async function FeeLedgerPage({ searchParams }: { searchParams: Pr
   const lastSecond = new Date(ledger.month.endsAt.getTime() - 1000);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:py-12">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">Fee ledger</h1>
       <p className="mt-1 max-w-2xl text-muted-foreground">
         What the platform keeps on each captured order, and the fee it returns on refunds, from our order records.

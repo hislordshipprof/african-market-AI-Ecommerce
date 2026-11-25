@@ -12,7 +12,7 @@ export default async function MetrosPage() {
   const [metros, platform] = await Promise.all([listMetros(), readCourierSettings()]);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
+    <div className="max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 className="font-heading text-[28px] font-bold leading-tight text-foreground">Metros</h1>
       <p className="mt-1 max-w-prose text-muted-foreground">
         A metro groups stores for operations: its own courier settings and a readiness report. Shoppers never see it.

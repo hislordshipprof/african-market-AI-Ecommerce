@@ -1,6 +1,7 @@
 import { requirePlatformAdmin } from "@/lib/admin/session";
+import { getAdminHomeCounts } from "@/lib/admin/home-counts";
 import { Suspense } from "react";
-import { AdminNav } from "./admin-nav-menu";
+import { AdminShell } from "./admin-nav-menu";
 import { AdminAssistantDock } from "./assistant/admin-assistant-dock";
 import styles from "./admin-shell.module.css";
 
@@ -15,10 +16,10 @@ export default async function AdminShellLayout({ children }: { children: React.R
       >
         Skip to content
       </a>
-      <AdminNav email={session.user.email} />
-      <main id="admin-main" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
+      {/* Not awaited: the menu badges stream in when the queue counts are read. */}
+      <AdminShell email={session.user.email} counts={getAdminHomeCounts()}>
         {children}
-      </main>
+      </AdminShell>
       <Suspense fallback={null}>
         <AdminAssistantDock />
       </Suspense>

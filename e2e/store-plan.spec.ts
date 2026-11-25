@@ -260,7 +260,7 @@ test.describe("store subscriptions (#494)", () => {
     await shoot(page, "494-admin-stores");
 
     await setBilling({ plan: "starter", status: "none", paymentFailed: false });
-    await page.getByRole("row", { name: /Mama Ngozi/ }).getByRole("link", { name: "Edit" }).click();
+    await page.getByRole("row", { name: /Mama Ngozi/ }).getByRole("link", { name: /Mama Ngozi/ }).click();
     await page.getByRole("button", { name: "Make a pilot store (3 months free)" }).click();
     await expect(page.getByText("This store is a pilot store.")).toBeVisible();
     await shoot(page, "494-admin-store-pilot");
