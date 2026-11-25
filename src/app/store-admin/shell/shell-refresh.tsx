@@ -18,8 +18,10 @@ export function ShellRefresh({ shellUserId }: { shellUserId: string | null }) {
   const sessionUserId = data?.user.id ?? null;
 
   useEffect(() => {
-    if (!sessionUserId || sessionUserId === shellUserId || isBarePath(pathname) || refreshedFor.current === pathname) return;
-    refreshedFor.current = pathname;
+    // Once per page and member: the next member to sign in on this tab may land on the same page.
+    const key = `${sessionUserId} ${pathname}`;
+    if (!sessionUserId || sessionUserId === shellUserId || isBarePath(pathname) || refreshedFor.current === key) return;
+    refreshedFor.current = key;
     router.refresh();
   }, [sessionUserId, shellUserId, pathname, router]);
 

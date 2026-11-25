@@ -5,6 +5,7 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
 import { storeOwnerSignIn } from "./store-owner-auth";
+import { generateTOTP } from "./totp";
 import { E2E_PORT } from "./urls";
 
 const SHOTS = process.env.PROOF_DIR ?? "screenshots";
@@ -125,8 +126,14 @@ test.describe.serial("Store admin dashboard (#784)", () => {
   });
 
   test("when the owner's session ends and staff sign in on the same tab, the shell shows the staff member, not the owner", async ({ page }) => {
-    await storeOwnerSignIn(page);
-    await page.goto(`/store-admin?store=${slug}`);
+    // Signed in without a full load afterwards, as a member does it.
+    await page.goto(`/store-admin/sign-in?store=${slug}`);
+    await page.getByLabel("Email").fill("owner@mama-ngozi.test");
+    await page.getByLabel("Password").fill(process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!");
+    await page.click("button[type='submit']");
+    await page.getByLabel("Verification code").fill(generateTOTP(process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP"));
+    await page.click("button[type='submit']");
+    await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
     const shell = page.getByRole("complementary", { name: "Store admin" });
     await expect(shell.getByRole("link", { name: "Payouts" })).toBeVisible();
 
