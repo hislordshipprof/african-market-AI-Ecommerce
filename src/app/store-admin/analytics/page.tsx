@@ -205,7 +205,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     <>
       <PageHeader title="Analytics" description={`${store.name} · ${fmtDay(range.from)} to ${fmtDay(range.to)}, store time`} />
 
-      <div className="sticky top-0 z-10 -mx-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="sticky top-16 z-10 -mx-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <nav aria-label="Analytics sections" className="flex gap-1 overflow-x-auto py-2 text-sm">
           {(["sales", "products", "customers", "operations", "assistant"] as const).map((view) => (
             <a key={view} href={`#${view}`} className="inline-flex min-h-11 shrink-0 items-center rounded-full px-3 font-medium capitalize text-foreground hover:bg-muted">
