@@ -675,7 +675,7 @@ BEGIN
       ('mp_cameroon_pepper', 'sub_dried_peppers'),
       ('mp_ground_crayfish', 'sub_crayfish_shrimp_dried'),
       ('mp_curry_powder', 'sub_ground_spices'),
-      ('mp_thyme', 'sub_dried_leaves_vegetables'),
+      ('mp_thyme', 'sub_ground_spices'),
       ('mp_ehuru', 'sub_whole_spices'),
       ('mp_palm_oil', 'sub_palm_oil'),
       ('mp_shea_butter', 'sub_shea_natural_butters'),

@@ -8,7 +8,7 @@ test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
     page,
   }) => {
     await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Grains & Flours");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Fufu, Flours & Swallow");
 
     await expect(page.locator("[data-testid='listing-card']").first()).toBeVisible({
       timeout: 10000,

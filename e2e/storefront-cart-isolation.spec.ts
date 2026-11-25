@@ -131,7 +131,7 @@ test("same-document store switch keeps both carts and drops the other store's pe
   await page.getByRole("link", { name: "Mama Ngozi African Market" }).click();
   await expect(page.getByTestId("store-name")).toHaveText("Tante Marie Caribbean Grocer");
   expect(await page.evaluate(() => (window as unknown as { __sameDoc?: number }).__sameDoc)).toBe(1);
-  await page.getByRole("link", { name: "Grains & Flours" }).first().click();
+  await page.getByRole("link", { name: "Fufu, Flours & Swallow" }).first().click();
   const tanteCard = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
   await expect(tanteCard.getByTestId("quick-add-btn")).toBeVisible();
   release();

@@ -136,7 +136,7 @@ export const PRODUCTS: CatalogProduct[] = [
   {
     id: "mp_thyme",
     name: "Thyme",
-    categoryId: "sub_dried_leaves_vegetables",
+    categoryId: "sub_ground_spices",
     synonyms: [{ term: "dried thyme" }],
   },
   {
