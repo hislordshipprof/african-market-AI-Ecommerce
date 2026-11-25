@@ -1869,7 +1869,7 @@ model DriverRoute {
   tokenHash   String    @unique @map("token_hash")
   expiresAt   DateTime  @map("expires_at")
   revokedAt   DateTime? @map("revoked_at")
-  /// Set once the SMS is accepted. A route never sent does not hold its orders.
+  /// Set once the link is handed over: the SMS accepted, or the link shown to the owner to send (#811). A route never handed over does not hold its orders.
   sentAt      DateTime? @map("sent_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 

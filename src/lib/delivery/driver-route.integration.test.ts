@@ -32,6 +32,7 @@ import {
   assignDriverRoute,
   driverMarkDelivered,
   driverMarkOutForDelivery,
+  driverRouteBoard,
   hashRouteToken,
   readDriverRoute,
   revokeDriverRoute,
@@ -215,19 +216,45 @@ describe.skipIf(!hasDb)("own-driver route link", () => {
     expect(await storeScoped(storeId).driverRoute.count()).toBe(0);
   });
 
-  it("a failed SMS revokes the route and frees its orders for another driver", async () => {
+  it("a failed SMS keeps the route live and hands the owner the link to send another way, with the same expiry and revoke", async () => {
     const a = await order();
     const failing: SmsSender = { send: async () => { throw new ProviderSendError(503, "http_503"); } };
     setSmsSenderForTests(failing);
-    expect(await assign()).toMatchObject({ ok: false });
-    const [route] = await storeScoped(storeId).driverRoute.findMany({});
-    expect(route.revokedAt).toBeInstanceOf(Date);
-    expect(route.sentAt).toBeNull();
+    const result = await assign();
+    if (!result.ok) throw new Error(`assign failed: ${result.error}`);
+    expect(result).toMatchObject({ count: 1, texted: false });
+    const token = tokenFrom(result.link!);
 
+    const [route] = await storeScoped(storeId).driverRoute.findMany({});
+    expect(route.revokedAt).toBeNull();
+    expect(route.expiresAt).toEqual(DAY_END);
+    expect((await readDriverRoute(storeId, token, NOW))!.stops.map((s) => s.orderId)).toEqual([a.id]);
+    expect(await readDriverRoute(storeId, token, DAY_END)).toBeNull();
+
+    expect(await revokeDriverRoute(storeId, result.routeId, NOW)).toEqual({ ok: true });
+    expect(await readDriverRoute(storeId, token, NOW)).toBeNull();
     setSmsSenderForTests(null);
     expect(await assign()).toMatchObject({ ok: true, count: 1 });
-    const live = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: a.id } });
-    expect(live.driverRouteId).not.toBe(route.id);
+  });
+
+  it("a texted route does not hand the link back", async () => {
+    await order();
+    const result = await assign();
+    expect(result).toMatchObject({ ok: true, texted: true });
+    expect(result).not.toHaveProperty("link");
+  });
+
+  it("an order sent out for delivery with no driver stays on the board, and the next route picks it up", async () => {
+    const out = await order({ status: "OUT_FOR_DELIVERY" });
+    const ready = await order();
+    const before = await driverRouteBoard(storeId, "America/Chicago", NOW);
+    expect(before).toMatchObject([{ slot: SLOT, waiting: 2, routes: [] }]);
+
+    expect(await assign()).toMatchObject({ ok: true, count: 2 });
+    const after = await driverRouteBoard(storeId, "America/Chicago", NOW);
+    expect(after).toMatchObject([{ slot: SLOT, waiting: 0, routes: [{ orders: 2 }] }]);
+    const token = tokenFrom(getTestSentSms()[0].text);
+    expect((await readDriverRoute(storeId, token, NOW))!.stops.map((s) => s.orderId).sort()).toEqual([out.id, ready.id].sort());
   });
 
   it("an order on a live route is not taken by a second assignment", async () => {

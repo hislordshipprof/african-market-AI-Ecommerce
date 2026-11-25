@@ -27,6 +27,27 @@ test.describe("Own-driver route link", () => {
     }
   });
 
+  test("the board shows a delivery that turned Ready while an order was open, on Back to orders (#811)", async ({ page }) => {
+    const slot = "2031-06-07T18:00:00.000Z";
+    const numbers = [56631];
+    await deleteDriverRouteOrders(numbers, slot);
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto("/store-admin/orders?store=mama-ngozi");
+      const panel = page.locator("[aria-labelledby='driver-routes-title']");
+      await expect(page.getByText("Sat, Jun 7")).toHaveCount(0);
+      await insertDriverRouteOrders({ numbers, slot });
+      // The inbox's poll brings the order in; the page itself is not reloaded.
+      const orderButton = page.getByRole("button", { name: /#56631/ });
+      await expect(orderButton).toBeVisible({ timeout: 15000 });
+      await orderButton.click();
+      await page.getByRole("button", { name: "Back to orders" }).click();
+      await expect(panel.locator("li", { hasText: "Sat, Jun 7" }).getByText("1 delivery waiting for a driver")).toBeVisible({ timeout: 5000 });
+    } finally {
+      await deleteDriverRouteOrders(numbers, slot);
+    }
+  });
+
   test("the driver's link lists stops nearest-next, needs no login, is not indexable, and marks out for delivery", async ({ page }) => {
     const slot = "2031-06-04T18:00:00.000Z";
     const numbers = [56611, 56612];

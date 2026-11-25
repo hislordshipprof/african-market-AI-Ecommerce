@@ -125,3 +125,78 @@ test("a heavy cart books a scheduled store delivery slot, and a slot that fills 
     await prisma.$disconnect();
   }
 });
+
+test("a closed store's checkout names the chosen delivery time, not the queue (#811)", async ({ page }) => {
+  test.setTimeout(90_000);
+  const slug = `closed-${Date.now().toString(36)}`;
+  const name = `Closed Yam ${slug}`;
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  // Closed all of today in Houston, open all day the rest of the week: tomorrow has delivery times.
+  const today = new Date().toLocaleString("en-US", { timeZone: "America/Chicago", weekday: "short" }).toLowerCase();
+  const hours = Object.fromEntries(["sun", "mon", "tue", "wed", "thu", "fri", "sat"].map((day) => [day, day === today ? "closed" : "00:00-23:59"]));
+  const store = await prisma.store.create({
+    data: {
+      slug, name: "Closed Lane", themePreset: "palm-and-shea", stripeOnboardingStatus: "complete",
+      stripeAccountId: `acct_${slug.replace(/[^a-z0-9]/g, "").slice(0, 20)}`, timezone: "America/Chicago", hours,
+      pickupEnabled: true, storeDeliveryEnabled: true, storeDeliveryFeeCents: 500, deliveryRadiusMi: 8, minimumOrderCents: 0,
+      addressLine1: "8400 Park Place Blvd", city: "Houston", state: "TX", zip: "77017", lat: 29.693857800118, lng: -95.266257879374,
+      storeDeliverySlotSettings: { slotMinutes: 60, leadMinutes: 120, capacity: 5, daysAhead: 2, closedDates: [], windows: [ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY, ALL_DAY] },
+    },
+  });
+  const asStore = <T>(run: (tx: Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]) => Promise<T>) =>
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      return run(tx);
+    });
+  try {
+    await asStore(async (tx) => {
+      const listing = await tx.listing.create({
+        data: { storeId: store.id, customName: name, price: 4000, stockMode: "unlimited", frozen: false, perishable: false },
+      });
+      await tx.listingVariant.create({ data: { listingId: listing.id, label: "Sack", price: 4000, weightG: 25_000 } });
+    });
+    await page.context().addCookies([{ name: "e2e_stripe_harness", value: "1", url: `http://localhost:${process.env.E2E_PORT || "3000"}` }]);
+    const addButton = page.getByRole("button", { name: `Add ${name} to basket` });
+    await expect(async () => {
+      await page.goto(`/?store=${slug}`);
+      await expect(addButton).toBeVisible();
+    }).toPass({ timeout: 20_000 });
+    await addButton.click();
+    await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
+    await expect(async () => {
+      await page.goto(`/checkout?store=${slug}`);
+      await expect(page.getByRole("button", { name: /Store delivery/ })).toBeVisible();
+    }).toPass({ timeout: 20_000 });
+    await page.getByRole("button", { name: /Store delivery/ }).click();
+    await page.getByLabel("Full name").fill("Ada Buyer");
+    await page.getByLabel("Phone number (required)").fill("2025550100");
+    await page.getByLabel("Email (required)").fill(`ada-${slug}@example.com`);
+    const deliveryTime = page.getByLabel("Delivery time");
+    await expect(deliveryTime).toBeVisible({ timeout: 15_000 });
+    const second = deliveryTime.locator("option").nth(1);
+    const label = await second.textContent();
+    await deliveryTime.selectOption({ index: 1 });
+
+    const card = page.locator("section.flow-card", { has: page.getByRole("heading", { name: "When works for you?" }) });
+    await expect(card.getByText(`Delivery ${label}`)).toBeVisible();
+    await expect(page.getByText("Order now to join the queue")).toHaveCount(0);
+    if (process.env.PROOF_DIR) {
+      await card.screenshot({ path: `${process.env.PROOF_DIR}/ac3-closed-store-slot-1280.png` });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await card.screenshot({ path: `${process.env.PROOF_DIR}/ac3-closed-store-slot-390.png` });
+    }
+  } finally {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.cartLine.deleteMany({ where: { storeId: store.id } });
+      await tx.cart.deleteMany({ where: { storeId: store.id } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
+      await tx.listing.deleteMany({ where: { storeId: store.id } });
+      await tx.auditLog.deleteMany({ where: { storeId: store.id } });
+    });
+    await prisma.store.delete({ where: { id: store.id } });
+    await prisma.$disconnect();
+  }
+});
