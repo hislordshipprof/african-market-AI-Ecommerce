@@ -113,7 +113,7 @@ test.describe("Order inbox", () => {
 
     await expect(page.locator("text=Order marked ready")).toBeVisible({ timeout: 15000 });
 
-    const awaitingBadge = page.getByText("Ready for pickup", { exact: true });
+    const awaitingBadge = page.getByTestId("order-panel").getByText("Ready for pickup", { exact: true });
     await expect(awaitingBadge).toBeVisible({ timeout: 15000 });
 
     const handOffBtn = page.getByRole("button", { name: "Hand off" });

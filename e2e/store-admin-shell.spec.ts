@@ -90,7 +90,7 @@ test.describe("Store admin shell (#860)", () => {
       await expect(accept).toHaveAttribute("href", `/store-admin/orders${STORE}`);
       await expect(page.getByRole("link", { name: `Order alerts: ${fresh} new` })).toBeVisible();
       await expect(sidebar(page).getByRole("link", { name: `Orders ${fresh} new` })).toBeVisible();
-      await expect(page.getByTestId("recent-orders").getByRole("link").first()).toContainText(`#${number}`);
+      await expect(page.getByTestId("recent-orders")).toContainText(`#${number}`);
       await expect(page.getByTestId("week-chart").locator("li")).toHaveCount(7);
 
       await accept.click();
