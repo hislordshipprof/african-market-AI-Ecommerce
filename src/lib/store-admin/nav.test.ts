@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { storeAdminAddress, storeAdminNav } from "./nav";
+import { payoutsAlert, storeAdminAddress, storeAdminNav } from "./nav";
 
-const counts = { newOrders: 2, unreadMessages: 3, payoutsNeedInfo: true };
+const counts = { newOrders: 2, unreadMessages: 3, payoutsAlert: "Needs info" };
 
 function shape(role: string) {
   return storeAdminNav({ role, ...counts }).map((group) => [group.label, group.items.map((item) => item.label)]);
@@ -35,7 +35,7 @@ describe("storeAdminNav (#860)", () => {
   });
 
   it("shows no count when there is nothing new", () => {
-    const items = storeAdminNav({ role: "owner", newOrders: 0, unreadMessages: 0, payoutsNeedInfo: false }).flatMap((group) => group.items);
+    const items = storeAdminNav({ role: "owner", newOrders: 0, unreadMessages: 0, payoutsAlert: null }).flatMap((group) => group.items);
     expect(items.every((item) => item.count === undefined && item.alert === undefined)).toBe(true);
   });
 
@@ -54,5 +54,14 @@ describe("storeAdminAddress (#860 store switcher)", () => {
 
   it("keeps ?store= where the host has no store subdomains", () => {
     expect(storeAdminAddress("ade-foods", "localhost:3000", {})).toBe("http://localhost:3000/store-admin?store=ade-foods");
+  });
+});
+
+describe("payoutsAlert (#860)", () => {
+  it("says what Stripe set-up still needs, and nothing once it is complete", () => {
+    expect(payoutsAlert("restricted")).toBe("Needs info");
+    expect(payoutsAlert("pending")).toBe("Pending");
+    expect(payoutsAlert("not_started")).toBe("Not set up");
+    expect(payoutsAlert("complete")).toBeNull();
   });
 });

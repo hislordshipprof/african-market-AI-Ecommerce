@@ -24,12 +24,19 @@ export interface NavInput {
   role: string;
   newOrders: number;
   unreadMessages: number;
-  payoutsNeedInfo: boolean;
+  /** Set while Stripe set-up is unfinished: what the Payouts item says. */
+  payoutsAlert: string | null;
 }
 
 type Entry = NavItem & { ownerOnly?: boolean };
 
-export function storeAdminNav({ role, newOrders, unreadMessages, payoutsNeedInfo }: NavInput): NavGroup[] {
+/** What the Payouts item says until Stripe set-up is complete (the dashboard's old Payouts badge). */
+export function payoutsAlert(stripeOnboardingStatus: string): string | null {
+  if (stripeOnboardingStatus === "complete") return null;
+  return { not_started: "Not set up", pending: "Pending", restricted: "Needs info" }[stripeOnboardingStatus] ?? "Not set up";
+}
+
+export function storeAdminNav({ role, newOrders, unreadMessages, payoutsAlert }: NavInput): NavGroup[] {
   const owner = role === "owner";
   const count = (n: number) => (n > 0 ? n : undefined);
   const groups: { label: string | null; items: Entry[] }[] = [
@@ -55,7 +62,7 @@ export function storeAdminNav({ role, newOrders, unreadMessages, payoutsNeedInfo
     {
       label: "Money",
       items: [
-        { label: "Payouts", path: "/store-admin/payouts", icon: "payouts", ownerOnly: true, alert: payoutsNeedInfo ? "Needs info" : undefined },
+        { label: "Payouts", path: "/store-admin/payouts", icon: "payouts", ownerOnly: true, alert: payoutsAlert ?? undefined },
         { label: "Plan", path: "/store-admin/plan", icon: "plan", ownerOnly: true },
       ],
     },
