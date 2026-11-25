@@ -180,7 +180,7 @@ describe.skipIf(!hasDb)("assistant checkout handoff tools (#247)", () => {
   it("names the minimum order and an empty cart, but not the contact entered at checkout", async () => {
     await storeScoped(storeA).cartLine.update({ where: { id: lineId }, data: { qty: 1 } });
     const card = await runner()("prepare_checkout", {});
-    expect(card.problems).toEqual(["Minimum order is $10.00."]);
+    expect(card.problems).toEqual(["$1.00 more to reach the $10.00 minimum"]);
     await storeScoped(storeA).cartLine.update({ where: { id: lineId }, data: { qty: 2 } });
     expect(await runner({ storeId: storeB, cartId: cartB, conversationId: conversationB })("prepare_checkout", {}))
       .toMatchObject({ ok: false, code: "cart_empty" });

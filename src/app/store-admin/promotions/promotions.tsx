@@ -54,7 +54,7 @@ function valueLabel(c: CouponRow): string {
 
 function rulesLabel(c: CouponRow): string {
   const rules = [
-    c.minGoodsCents > 0 ? `Goods over ${money(c.minGoodsCents)}` : "No minimum",
+    c.minGoodsCents > 0 ? `Goods of at least ${money(c.minGoodsCents)}` : "No minimum",
     c.usesPerCustomer === null ? "Any number per customer" : `${c.usesPerCustomer} per customer`,
   ];
   if (c.firstOrderOnly) rules.push("First order only");

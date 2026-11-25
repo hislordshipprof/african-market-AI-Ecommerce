@@ -118,6 +118,8 @@ describe.skipIf(!hasDb)("store coupons (real auth, lane database)", () => {
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.$executeRaw`DELETE FROM orders WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM customers WHERE store_id IN (${storeA}, ${storeB})`;
+      await tx.$executeRaw`DELETE FROM listing_variants WHERE listing_id IN (SELECT id FROM listings WHERE store_id IN (${storeA}, ${storeB}))`;
+      await tx.$executeRaw`DELETE FROM listings WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM store_coupons WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${storeA}, ${storeB})`;
@@ -191,6 +193,29 @@ describe.skipIf(!hasDb)("store coupons (real auth, lane database)", () => {
     });
     const coupon = (await listCoupons(storeA)).find((c) => c.id === idA);
     expect([coupon?.usesSoFar, coupon?.discountGivenCents]).toEqual([2, 650]);
+  });
+
+  it("discount given is net of the coupon share that refunds of lines took back (#806)", async () => {
+    const idA = await couponId(storeA, "SAVE10");
+    const scoped = storeScoped(storeA);
+    const listing = await scoped.listing.create({ data: { storeId: storeA, customName: "Yam", price: 1499, stockMode: "unlimited", frozen: false, perishable: false } });
+    const variant = await scoped.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 1499, weightG: 200 } });
+    const order = await scoped.order.create({
+      data: { storeId: storeA, number: 5, customerId: customerA, status: "PARTIALLY_REFUNDED", subtotalCents: 3597, bufferCents: 0, totalAuthorizedCents: 3237, couponId: idA, discountCents: 360 },
+    });
+    const line = (unitPriceCents: number, discountCents: number) => scoped.orderLine.create({
+      data: { storeId: storeA, orderId: order.id, listingVariantId: variant.id, qtyOrdered: 1, qtyPicked: 1, unitPriceCents, status: "picked", discountCents },
+    });
+    const yam = await line(1499, 150);
+    const oil = await line(2098, 210);
+    const refund = (key: string, lineId: string, providerStatus: string) => scoped.refundRequest.create({
+      data: { storeId: storeA, orderId: order.id, paymentIntentId: "pi_806", key, amountCents: 1390, refundApplicationFee: false, state: "CREATED", providerStatus, lines: [{ lineId, qty: 1, amountCents: 1390 }] },
+    });
+    await refund(`r806-yam-${RUN}`, yam.id, "succeeded");
+    // A failed refund gave nothing back, so its share still counts as given.
+    await refund(`r806-oil-${RUN}`, oil.id, "failed");
+    const coupon = (await listCoupons(storeA)).find((c) => c.id === idA);
+    expect([coupon?.usesSoFar, coupon?.discountGivenCents]).toEqual([3, 650 + 360 - 150]);
   });
 
   it("a used code cannot change its type or value, but other edits are saved and audited", async () => {

@@ -313,8 +313,17 @@ describe("computeQuote", () => {
       expect(q.coupon).toEqual({ code: "SAVE20", discountCents: 0, message: "Add $5.00 more to use SAVE20." });
     });
 
-    it("checks the store minimum order on goods before the discount", () => {
-      const q = computeQuote(5000, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, SAVE20);
+    // Decision 2026-11-24-07 (#806): the store funds both, so the minimum protects what it takes after its coupon.
+    it("checks the store minimum order on goods after the discount and says how much more to add", () => {
+      const TEN10 = { code: "TEN10", coupon: { id: "c3", kind: "percent" as const, percentOff: 10, amountOffCents: null, minGoodsCents: 0 } };
+      const q = computeQuote(3500, [{ price: 3597, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, TEN10);
+      expect(q.discountCents).toBe(360);
+      expect(q.problems).toEqual([{ code: "minimum-order", message: "$2.63 more to reach the $35.00 minimum" }]);
+    });
+
+    it("meets the store minimum when goods after the discount equal it", () => {
+      const q = computeQuote(4000, [{ price: 2500, qty: 2, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE, null, null, SAVE20);
+      expect(q.discountCents).toBe(1000);
       expect(q.problems.some((p) => p.code === "minimum-order")).toBe(false);
     });
 

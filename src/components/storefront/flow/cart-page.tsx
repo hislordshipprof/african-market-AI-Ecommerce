@@ -168,7 +168,9 @@ export function CartPage({
   const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
   const [, startTransition] = useTransition();
-  const minimum = minimumOrderGate(subtotal, settings.minimumOrderCents);
+  // The minimum is on goods after the store's code, as checkout checks it (#806).
+  const goods = quote ? quote.subtotalCents - quote.discountCents : subtotal;
+  const minimum = minimumOrderGate(goods, settings.minimumOrderCents);
   const invalid = lines.some((line) => {
     const item = catalog.find(
       (item) => cartItemKey(item) === cartItemKey(line),
@@ -390,7 +392,7 @@ export function CartPage({
                   <progress
                     className={styles.progress}
                     max={settings.minimumOrderCents}
-                    value={Math.min(subtotal, settings.minimumOrderCents)}
+                    value={Math.min(goods, settings.minimumOrderCents)}
                     aria-label="Minimum order progress"
                   />
                   <p className={styles.muted}>
