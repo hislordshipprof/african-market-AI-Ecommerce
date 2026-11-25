@@ -19,7 +19,7 @@ export default async function AssistantActivityPage({ searchParams }: { searchPa
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <p className="text-base">
-        <Link href="/admin/assistant" className="font-semibold text-foreground underline underline-offset-4">Assistant</Link>
+        <Link href="/admin?assistant=open" className="font-semibold text-foreground underline underline-offset-4">Assistant</Link>
       </p>
       <h1 className="mt-2 text-2xl font-bold text-foreground">Assistant activity</h1>
       <p className="mt-2 max-w-[65ch] text-base leading-6 text-muted-foreground">

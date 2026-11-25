@@ -6,7 +6,9 @@ import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { chooseListing } from "./choices";
 import { answerAlert, confirmProposal, rejectProposal, type AnswerResult } from "./confirm";
-import { sendCopilotTurn } from "./turn";
+import { loadCopilotPanel, sendCopilotTurn } from "./turn";
+import { listOpenAlerts, type AlertView } from "./alerts";
+import { storeMayUse } from "../billing/plan";
 import { suggestReply, type ReplySuggestion } from "./reply-draft";
 import { DRAFT_MAKERS, confirmDraft, rejectDraft, storeSite } from "./drafts";
 import { revalidateStore } from "../get-store";
@@ -77,6 +79,19 @@ const invalidRequest: SendResult = {
   code: "invalid_request",
   message: "Write a message of 1,000 characters or less.",
 };
+
+/** What the store assistant sheet shows when it first opens (#855): this owner's chat, the store's open alerts, and the plan lock. */
+export async function loadStoreAssistant(): Promise<
+  Awaited<ReturnType<typeof loadCopilotPanel>> & { alerts: AlertView[]; chatAllowed: boolean; storeSlug: string }
+> {
+  const session = await requireStoreOwner();
+  const [panel, alerts, chatAllowed] = await Promise.all([
+    loadCopilotPanel(session.store.id, session.user.id),
+    listOpenAlerts(session.store.id),
+    storeMayUse(session.store.id, "store-assistant"),
+  ]);
+  return { ...panel, alerts, chatAllowed, storeSlug: session.store.slug };
+}
 
 export async function sendCopilotMessage(input: unknown): Promise<SendResult> {
   const session = await requireStoreOwner();

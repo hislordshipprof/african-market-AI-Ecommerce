@@ -327,7 +327,7 @@ export function PackingScreen({ initial, storeParam, timeZone }: { initial: Pick
       </main>
 
       {!batch.packingStarted && (
-        <div className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-card/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
+        <div data-assistant-avoid className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-card/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
           <div className="mx-auto max-w-2xl">
             <ActionError message={errorFor("start")} className="mb-2" />
             <Button
