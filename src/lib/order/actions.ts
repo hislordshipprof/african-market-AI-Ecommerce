@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { READ_ONLY_MESSAGE, requireStoreMember, requireStoreOwner, requireStoreWriter } from "../store-admin/session";
+import { READ_ONLY_MESSAGE, requireStoreMember, requireStoreOwner, requireStoreWriter, twoFactorStepUp } from "../store-admin/session";
 import {
   markNoShow,
   NO_SHOW_WRONG_STATUS,
@@ -392,6 +392,8 @@ const storeRefundSchema = z.strictObject({
 /** Owner only (#798): refund lines or the whole order after capture. The submission id makes a resubmit refund once. */
 export async function storeRefundAction(orderId: string, input: unknown) {
   const session = await requireStoreOwner();
+  const stepUp = await twoFactorStepUp(session);
+  if (stepUp) return { ok: false as const, ...stepUp };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: STORE_REFUND_NOT_FOUND };
   const parsed = parseInput(storeRefundSchema, input);
@@ -404,6 +406,8 @@ export async function storeRefundAction(orderId: string, input: unknown) {
 /** Owner only (#806): what the refund would return, shown in the dialog before the owner confirms. */
 export async function storeRefundPreviewAction(orderId: string, picks: unknown) {
   const session = await requireStoreOwner();
+  const stepUp = await twoFactorStepUp(session);
+  if (stepUp) return { ok: false as const, ...stepUp };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: STORE_REFUND_NOT_FOUND };
   const parsed = parseInput(storeRefundSchema.shape.picks, picks);
@@ -414,6 +418,8 @@ export async function storeRefundPreviewAction(orderId: string, picks: unknown) 
 /** Owner only (#798): a pickup the customer never collected is cancelled and refunded in full. */
 export async function markNoShowAction(orderId: string, note?: string | null) {
   const session = await requireStoreOwner();
+  const stepUp = await twoFactorStepUp(session);
+  if (stepUp) return { ok: false as const, ...stepUp };
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: STORE_REFUND_NOT_FOUND };
   const parsed = parseInput(z.string().max(2_000).nullish(), note);
@@ -426,10 +432,12 @@ export async function markNoShowAction(orderId: string, note?: string | null) {
 const issueAmountSchema = z.number().int().min(1).max(10_000_000).optional();
 const declineReasonSchema = z.string().trim().min(1).max(500);
 
-/** Any member with write access (owner decision 2). No amount refunds the whole issue. */
+/** Any member with write access (owner decision 2) and 2FA, as it refunds (#840). No amount refunds the whole issue. */
 export async function approveIssueAction(issueId: string, amountCents?: number) {
   const session = await requireStoreWriter();
   if (!session) return { ok: false as const, error: READ_ONLY_MESSAGE };
+  const stepUp = await twoFactorStepUp(session);
+  if (stepUp) return { ok: false as const, ...stepUp };
   const id = parseInput(issueIdSchema, issueId);
   if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
   const amount = parseInput(issueAmountSchema, amountCents);

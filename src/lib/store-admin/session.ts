@@ -4,7 +4,7 @@ import { auth, type Session } from "../auth";
 import { getStore, type ValidatedStore } from "../get-store";
 import { storeScoped } from "../db";
 import { readOnlyStaffIds, storePlan } from "../billing/plan";
-import { storeSignInPath } from "./sign-in-path";
+import { storeAdminReturnPath, storeSignInPath, storeTwoFactorPath } from "./sign-in-path";
 
 export interface StoreSession {
   user: Session["user"];
@@ -32,7 +32,8 @@ export async function requireStoreMember(): Promise<StoreSession> {
     redirect(signIn);
   }
 
-  if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
+  // 2FA is optional for store members (#840, ADR-0015), but once on it is never skipped.
+  if (session.user.twoFactorEnabled && !session.session.twoFactorVerified) {
     redirect(signIn);
   }
 
@@ -71,4 +72,24 @@ export async function requireStoreOwner(): Promise<StoreSession> {
   }
 
   return storeSession;
+}
+
+export const TWO_FACTOR_REQUIRED_MESSAGE =
+  "Turn on two-factor sign-in to do this. It keeps your store's money and team safe.";
+
+/** What a gated action returns without 2FA: the message, and a setup link that comes back to this page. */
+export type TwoFactorRequired = { error: string; setupHref: string };
+
+export function hasVerifiedTwoFactor(storeSession: Pick<StoreSession, "user" | "session">): boolean {
+  return storeSession.user.twoFactorEnabled === true && storeSession.session.twoFactorVerified === true;
+}
+
+/**
+ * Step-up for money and team actions (#840): null when 2FA is on and verified this session.
+ * Call it inside the action, after the role check; hiding a button is not the gate.
+ */
+export async function twoFactorStepUp(storeSession: StoreSession): Promise<TwoFactorRequired | null> {
+  if (hasVerifiedTwoFactor(storeSession)) return null;
+  const back = storeAdminReturnPath((await headers()).get("x-request-path"), storeSession.store.slug);
+  return { error: TWO_FACTOR_REQUIRED_MESSAGE, setupHref: storeTwoFactorPath(storeSession.store.slug, back) };
 }
