@@ -1,9 +1,10 @@
 import { Suspense } from "react";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
+import { FEATURE_LABELS } from "@/lib/billing/plan";
 import { storeScoped } from "@/lib/db";
 import { findStoreForHeaders } from "@/lib/get-store";
-import { StoreAssistantDock } from "./copilot/store-assistant-dock";
+import { StoreAssistantGate } from "./store-assistant-gate";
 
 /**
  * The store assistant's button, for a signed-in owner of this store only (#855). It never redirects:
@@ -12,16 +13,17 @@ import { StoreAssistantDock } from "./copilot/store-assistant-dock";
 export async function StoreAssistantHost() {
   const headerList = await headers();
   const [store, session] = await Promise.all([findStoreForHeaders(headerList), auth.api.getSession({ headers: headerList })]);
-  if (!store || !session) return null;
-  if (session.user.twoFactorEnabled && !session.session.twoFactorVerified) return null;
-  const membership = await storeScoped(store.id).storeMembership.findUnique({
-    where: { storeId_userId: { storeId: store.id, userId: session.user.id } },
-    select: { role: true },
-  });
-  if (membership?.role !== "owner") return null;
+  if (!store) return null;
+  const verified = session && !(session.user.twoFactorEnabled && !session.session.twoFactorVerified);
+  const membership = verified
+    ? await storeScoped(store.id).storeMembership.findUnique({
+      where: { storeId_userId: { storeId: store.id, userId: session.user.id } },
+      select: { role: true },
+    })
+    : null;
   return (
     <Suspense fallback={null}>
-      <StoreAssistantDock storeId={store.id} />
+      <StoreAssistantGate owner={membership?.role === "owner"} checked={Boolean(verified)} storeId={store.id} lockedTitle={FEATURE_LABELS["store-assistant"]} />
     </Suspense>
   );
 }

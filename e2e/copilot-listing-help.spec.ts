@@ -137,17 +137,20 @@ test("the store chat links each listing to fix to its form, and the owner edits 
   const { storeId, listingId } = await seed();
   await storeOwnerSignIn(page);
   await page.goto(`/store-admin/copilot?store=${SLUG}`);
+  // The chat is the Store assistant sheet (#855).
+  await page.getByTestId("assistant-launcher").click();
+  const sheet = page.getByRole("dialog", { name: "Store assistant" });
 
-  const fixes = page.getByRole("region", { name: "Listings to fix" });
+  const fixes = sheet.getByRole("region", { name: "Listings to fix" });
   await expect(fixes.getByRole("link", { name: new RegExp(`${NAME}.*No photo, no aisle, no description`) })).toBeVisible();
-  const waiting = page.getByLabel("Drafts waiting for you");
+  const waiting = sheet.getByLabel("Drafts waiting for you");
   await expect(waiting.getByRole("heading", { name: "Product description" })).toBeVisible();
   await expect(waiting.getByLabel("Description shoppers see")).toHaveValue(DRAFTED);
   await shoot(page, "820-chat-fixes-and-description");
 
   await waiting.getByLabel("Description shoppers see").fill(`${DRAFTED} From Nigeria.`);
   await waiting.getByRole("button", { name: "Save description" }).click();
-  await expect(page.getByText(`${DRAFTED} From Nigeria.`)).toBeVisible();
+  await expect(sheet.getByText(`${DRAFTED} From Nigeria.`)).toBeVisible();
 
   const prisma = db();
   try {
@@ -157,7 +160,10 @@ test("the store chat links each listing to fix to its form, and the owner edits 
     await prisma.$disconnect();
   }
 
+  // The link opens the listing behind the sheet; its Edit listing dialog takes over, so the sheet steps aside (#855).
   await fixes.getByRole("link", { name: new RegExp(NAME) }).click();
+  await expect(page).toHaveURL(/\/store-admin\/listings/);
+  await expect(sheet).toBeHidden();
   const dialog = page.getByRole("dialog", { name: "Edit listing" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel("Description")).toHaveValue(`${DRAFTED} From Nigeria.`);

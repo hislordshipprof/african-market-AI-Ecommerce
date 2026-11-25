@@ -112,8 +112,11 @@ test("the owner confirms chat drafts on cards: an edited coupon, ticked prices o
   const { storeId, variants } = await seed();
   await storeOwnerSignIn(page);
   await page.goto(`/store-admin/copilot?store=${SLUG}`);
+  // The chat is the Store assistant sheet (#855).
+  await page.getByTestId("assistant-launcher").click();
+  const sheet = page.getByRole("dialog", { name: "Store assistant" });
 
-  const waiting = page.getByLabel("Drafts waiting for you");
+  const waiting = sheet.getByLabel("Drafts waiting for you");
   await expect(waiting.getByText(/WEEKEND10: 10% off orders of \$30\.00 or more/)).toBeVisible();
   await expect(waiting.getByText(`${NAME} 5 lb`)).toBeVisible();
   await expect(waiting.getByText("$12.00 → $12.50")).toBeVisible();
@@ -124,12 +127,12 @@ test("the owner confirms chat drafts on cards: an edited coupon, ticked prices o
   // Untick the 5 lb line, then confirm one price.
   await waiting.getByLabel(`${NAME} 5 lb`).uncheck();
   await waiting.getByRole("button", { name: "Change 1 price" }).click();
-  await expect(page.getByText("Done").first()).toBeVisible();
+  await expect(sheet.getByText("Done").first()).toBeVisible();
 
   await waiting.getByRole("button", { name: "Edit terms" }).click();
   await waiting.getByLabel("Code").fill("WKND10");
   await waiting.getByRole("button", { name: "Create coupon" }).click();
-  await expect(page.getByText(/^WKND10: 10% off/)).toBeVisible();
+  await expect(sheet.getByText(/^WKND10: 10% off/)).toBeVisible();
 
   const prisma = db();
   try {

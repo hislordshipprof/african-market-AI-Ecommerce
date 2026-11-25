@@ -6,7 +6,6 @@ import { AssistantDock } from "@/components/assistant-dock/assistant-dock";
 import { AssistantTurn, Composer, Conversation, DockThread, EmptyIntro, Starters, UserTurn, Working, dockStyles } from "@/components/assistant-dock/chat";
 import { Button } from "@/components/ui/button";
 import { PlanLocked } from "@/components/store-admin/plan-locked";
-import { FEATURE_LABELS } from "@/lib/billing/plan";
 import {
   chooseProposalListing,
   confirmCopilotDraft,
@@ -70,7 +69,7 @@ const HIDDEN_PATHS = ["/store-admin/sign-in", "/store-admin/two-factor"];
  * The store assistant (the stock copilot's chat, #818–#820) as the floating button and chat sheet on every
  * /store-admin page (#855). Stock changes and drafts wait as cards; nothing changes until the owner confirms.
  */
-export function StoreAssistantDock({ storeId }: { storeId: string }) {
+export function StoreAssistantDock({ storeId, lockedTitle }: { storeId: string; lockedTitle: string }) {
   const [loaded, setLoaded] = useState(false);
   const [storeSlug, setStoreSlug] = useState("");
   const [chatAllowed, setChatAllowed] = useState(true);
@@ -268,7 +267,7 @@ export function StoreAssistantDock({ storeId }: { storeId: string }) {
           <>
             {notice ? <p className={dockStyles.notice} role="alert">{notice}</p> : null}
             <PlanLocked
-              title={FEATURE_LABELS["store-assistant"]}
+              title={lockedTitle}
               description="Ask how sales went this week or what sold most, and tell it what came in or sold at the counter. It answers from your own orders, lists the listings that need fixing, and drafts stock changes, coupons, price changes, one-day hours or delivery changes and product descriptions for you to confirm. Your past chats stay here to read."
               storeSlug={storeSlug}
             />
@@ -469,10 +468,10 @@ function FixList({ fixes }: { fixes: ListingFix[] }) {
       <ul className={dockStyles.brief}>
         {fixes.map((fix) => (
           <li key={fix.listingId} className={dockStyles.briefCard}>
-            <div>
-              <Link href={fix.href}>{fix.name}</Link>
-              <p>No {fix.missing.map((gap) => GAP_LABELS[gap]).join(", no ")}</p>
-            </div>
+            <Link href={fix.href} className="flex min-w-0 flex-1 flex-col">
+              <span>{fix.name}</span>
+              <span className="text-sm font-normal text-muted-foreground">No {fix.missing.map((gap) => GAP_LABELS[gap]).join(", no ")}</span>
+            </Link>
           </li>
         ))}
       </ul>

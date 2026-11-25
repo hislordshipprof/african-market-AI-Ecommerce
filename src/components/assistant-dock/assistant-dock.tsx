@@ -83,6 +83,23 @@ export function AssistantDock({
     node.showModal();
   }, [open, mounted]);
 
+  // A link in the sheet can open a page that shows its own dialog (Edit listing). That dialog hides the rest of
+  // the page from input, the sheet included, so the sheet steps aside and leaves focus with it.
+  const steppedAside = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    const check = () => {
+      const foreign = Array.from(document.querySelectorAll('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'))
+        .some((element) => !dialog.current?.contains(element));
+      if (!foreign) return;
+      steppedAside.current = true;
+      setOpen(false);
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-state"] });
+    return () => observer.disconnect();
+  }, [open]);
+
   useEffect(() => {
     const node = dialog.current;
     if (!node || open || !node.open) return;
@@ -91,7 +108,8 @@ export function AssistantDock({
       () => {
         node.close();
         delete node.dataset.closing;
-        launcher.current?.focus();
+        if (!steppedAside.current) launcher.current?.focus();
+        steppedAside.current = false;
       },
       window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200,
     );
