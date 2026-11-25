@@ -5,6 +5,17 @@ import { resolveDirectUrl } from "../src/lib/env";
 import { E2E_PORT } from "./urls";
 
 const apiBase = `http://localhost:${E2E_PORT}`;
+const PROOF = process.env.PROOF_DIR;
+
+/** Proof screenshots at 390 and 1280, only when PROOF_DIR is set. */
+async function proof(page: Page, name: string) {
+  if (!PROOF) return;
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.screenshot({ path: `${PROOF}/${name}-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+}
 
 async function asStore<T>(prisma: PrismaClient, storeId: string, work: (tx: Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]) => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -138,9 +149,11 @@ test("#806: a code that takes the goods under the store minimum says how much mo
     await applyCode(page, "TEN10");
     await expect(page.getByText("$2.63 more to reach the $35.00 minimum").first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("button", { name: "Continue to checkout" })).toBeDisabled();
+    await proof(page, "806-cart-minimum");
 
     await page.goto("/checkout");
     await expect(page.getByText("$2.63 more to reach the $35.00 minimum").first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("button", { name: /^Place order/ })).toBeDisabled();
+    await proof(page, "806-checkout-minimum");
   });
 });

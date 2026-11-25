@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Minus, Plus, Undo2, UserX } from "lucide-react";
@@ -16,7 +16,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { money } from "@/lib/format";
-import { markNoShowAction, storeRefundAction } from "@/lib/order/actions";
+import { markNoShowAction, storeRefundAction, storeRefundPreviewAction } from "@/lib/order/actions";
+import type { StoreRefundPreview } from "@/lib/order/store-refund";
 import { ActionError } from "./action-error";
 
 export type RefundableLine = { id: string; name: string; variant: string; unitPriceCents: number; refundableQty: number };
@@ -49,7 +50,24 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
 
   const refundable = lines.filter((line) => line.refundableQty > 0);
   const picks = Object.entries(qty).filter(([, n]) => n > 0).map(([lineId, n]) => ({ lineId, qty: n }));
-  const goodsCents = refundable.reduce((sum, line) => sum + (qty[line.id] ?? 0) * line.unitPriceCents, 0);
+  const picksKey = whole ? "whole_order" : JSON.stringify(picks);
+  // The amount comes from the server's refund calculation, so the dialog shows what the refund records (#806).
+  const [preview, setPreview] = useState<{ key: string; result: StoreRefundPreview } | null>(null);
+  const shown = open === "refund" && preview?.key === picksKey ? preview.result : null;
+
+  useEffect(() => {
+    if (open !== "refund" || picksKey === "[]") return;
+    let live = true;
+    const timer = setTimeout(() => {
+      storeRefundPreviewAction(orderId, whole ? "whole_order" : JSON.parse(picksKey))
+        .then((result) => live && setPreview({ key: picksKey, result }))
+        .catch(() => live && setPreview({ key: picksKey, result: { ok: false, error: "The amount could not be worked out. Try again." } }));
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [open, orderId, whole, picksKey]);
 
   function show(kind: "refund" | "no_show") {
     setWhole(refundable.length === 0);
@@ -57,6 +75,7 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
     setReason("");
     setError(null);
     setSubmissionId(crypto.randomUUID());
+    setPreview(null);
     setOpen(kind);
   }
 
@@ -80,7 +99,7 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
     });
   }
 
-  const ready = open === "no_show" || (reason.trim().length > 0 && (whole || picks.length > 0));
+  const ready = open === "no_show" || (reason.trim().length > 0 && (whole || picks.length > 0) && shown?.ok === true);
 
   return (
     <>
@@ -156,11 +175,7 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
                     ))}
                   </ul>
                 )}
-                {!whole && goodsCents > 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    Items {money(goodsCents)}, plus their share of the service fee and tax.
-                  </p>
-                )}
+                {(whole || picks.length > 0) && <RefundAmount preview={shown} />}
               </>
             )}
             <div className="space-y-1.5">
@@ -174,11 +189,42 @@ export function RefundOrder({ orderId, canMarkNoShow, wholeCancels, lines, onDon
               Keep order
             </Button>
             <Button variant="destructive" onClick={submit} disabled={isPending || !ready} className="min-h-12 rounded-full">
-              {open === "no_show" ? "Cancel and refund" : whole && wholeCancels ? "Cancel and refund" : "Refund"}
+              {open === "no_show" ? "Cancel and refund" : `${whole && wholeCancels ? "Cancel and refund" : "Refund"}${shown?.ok ? ` ${money(shown.amountCents)}` : ""}`}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** What the customer gets back, line by line, before the owner confirms (#806). */
+function RefundAmount({ preview }: { preview: StoreRefundPreview | null }) {
+  if (!preview) return <p className="text-sm text-muted-foreground" role="status">Working out the amount…</p>;
+  if (!preview.ok) return <ActionError message={preview.error} />;
+  return (
+    <dl className="space-y-1 rounded-lg border border-border px-3 py-2 text-sm" aria-live="polite" data-testid="refund-amount">
+      {!preview.whole && (
+        <>
+          <Row label="Items" cents={preview.itemsCents} />
+          {preview.couponShareCents > 0 && <Row label="Less their coupon discount" cents={-preview.couponShareCents} />}
+          {preview.serviceFeeCents > 0 && <Row label="Their service fee share" cents={preview.serviceFeeCents} />}
+          {preview.taxCents > 0 && <Row label="Their tax" cents={preview.taxCents} />}
+        </>
+      )}
+      <div className="flex justify-between gap-3 font-semibold">
+        <dt>The customer gets back</dt>
+        <dd className="tabular-nums">{money(preview.amountCents)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function Row({ label, cents }: { label: string; cents: number }) {
+  return (
+    <div className="flex justify-between gap-3 text-muted-foreground">
+      <dt>{label}</dt>
+      <dd className="tabular-nums">{cents < 0 ? `−${money(-cents)}` : money(cents)}</dd>
+    </div>
   );
 }
