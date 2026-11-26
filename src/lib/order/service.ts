@@ -294,7 +294,7 @@ function isTerminalRefundStatus(status: string): boolean {
 /** Statuses a picker can tick or short lines in. */
 export const PICKABLE_STATUSES: string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
 
-const ACTIVE_STATUSES: OrderStatus[] = [
+export const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
   "ACCEPTED",
   "PICKING",

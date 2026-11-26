@@ -2,11 +2,11 @@
 
 import { ProductThumb } from "@/components/store-admin/product-thumb";
 import { useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { toast } from "sonner";
-import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Info, RotateCw } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, Info, RotateCw } from "lucide-react";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -198,24 +198,14 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, 
   const failedCount = queue.filter((photo) => photo.error).length;
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-ink)]">
-      <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mb-6">
-          <Link
-            href={`/store-admin/listings?store=${storeSlug}`}
-            className="inline-flex min-h-11 items-center gap-1 text-sm text-[var(--color-muted)] transition-colors hover:text-[var(--color-ink)]"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden />
-            Products
-          </Link>
-        </div>
+    <>
+      <PageHeader
+        title="Add listings from shelf photos"
+        description={`Photograph your shelves. We read each product and match it to the catalog for ${storeName}. Nothing is listed until the owner sets a price and publishes.`}
+        parent={{ href: `/store-admin/listings?store=${storeSlug}`, label: "Products" }}
+      />
 
-        <h1 className="mb-1 font-[family-name:var(--font-display)] text-2xl font-bold">Add listings from shelf photos</h1>
-        <p className="mb-6 text-sm text-[var(--color-muted)]">
-          Photograph your shelves. We read each product and match it to the catalog for {storeName}. Nothing is listed until
-          the owner sets a price and publishes.
-        </p>
-
+      <div className="max-w-3xl">
         {!readOnly && (
           <Card className="mb-8">
             <CardHeader>
@@ -367,7 +357,7 @@ export function FromPhotosUi({ storeName, storeSlug, isOwner, readOnly, drafts, 
           </section>
         )}
       </div>
-    </div>
+    </>
   );
 }
 

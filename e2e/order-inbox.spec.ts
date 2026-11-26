@@ -26,8 +26,10 @@ test.describe("Order inbox", () => {
     await expect(page.locator("text=Adaeze Chukwu").first()).toBeVisible();
 
     const firstCard = page.locator("button", { hasText: "#1001" });
-    await expect(firstCard.locator("text=/\\d+ items?/")).toBeVisible();
-    const itemText = await firstCard.locator("text=/\\d+ items?/").textContent();
+    // The row carries its item count twice, one for a wide list and one for a stacked list.
+    const itemCount = firstCard.locator("text=/\\d+ items?/").filter({ visible: true });
+    await expect(itemCount).toBeVisible();
+    const itemText = await itemCount.textContent();
     const count = parseInt(itemText?.match(/(\d+)/)?.[1] ?? "0", 10);
     expect(count).toBeGreaterThan(0);
   });
@@ -42,13 +44,13 @@ test.describe("Order inbox", () => {
     await expect(page.locator("button[aria-label='Enable alerts']")).toBeVisible();
   });
 
-  test("back arrow navigates to store admin dashboard", async ({ page }) => {
+  test("the sidebar's Home link leads back to the store admin Home (#860)", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
-    const backLink = page.locator("a[href*='/store-admin?store=']");
-    await expect(backLink).toBeVisible();
-    await backLink.click();
+    const homeLink = page.getByRole("complementary", { name: "Store admin" }).getByRole("link", { name: "Home" });
+    await expect(homeLink).toBeVisible();
+    await homeLink.click();
     await page.waitForURL((url) => url.pathname === "/store-admin");
   });
 
@@ -65,9 +67,10 @@ test.describe("Order inbox", () => {
     await page.goto(ORDERS_URL);
 
     await page.locator("button", { hasText: "#1001" }).click();
-    await expect(page.locator("text=Order #1001")).toBeVisible();
-    await expect(page.locator("text=Adaeze Chukwu")).toBeVisible();
-    await expect(page.locator("text=Accept order")).toBeVisible();
+    const panel = page.getByTestId("order-panel");
+    await expect(panel.locator("text=Order #1001")).toBeVisible();
+    await expect(panel.locator("text=Adaeze Chukwu")).toBeVisible();
+    await expect(panel.locator("text=Accept order")).toBeVisible();
   });
 
   test("picking order shows pick list with frozen-last sort", async ({ page }) => {
@@ -97,7 +100,7 @@ test.describe("Order inbox", () => {
     await expect(markReadyBtn).toBeVisible({ timeout: 10000 });
     await expect(markReadyBtn).toBeDisabled();
 
-    const pickButtons = page.getByRole("button", { name: "Pick" });
+    const pickButtons = page.getByTestId("order-panel").getByRole("button", { name: "Pick", exact: true });
     let remaining = await pickButtons.count();
     while (remaining > 0) {
       await pickButtons.first().click();
@@ -112,7 +115,7 @@ test.describe("Order inbox", () => {
 
     await expect(page.locator("text=Order marked ready")).toBeVisible({ timeout: 15000 });
 
-    const awaitingBadge = page.getByText("Ready for pickup", { exact: true });
+    const awaitingBadge = page.getByTestId("order-panel").getByText("Ready for pickup", { exact: true });
     await expect(awaitingBadge).toBeVisible({ timeout: 15000 });
 
     const handOffBtn = page.getByRole("button", { name: "Hand off" });
@@ -302,7 +305,7 @@ test.describe("Order inbox", () => {
       await storeOwnerSignIn(page);
       await page.goto(ORDERS_URL);
       await page.locator("button", { hasText: `#${number}` }).click();
-      await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+      await expect(page.getByTestId("order-panel").getByText("Cancelled", { exact: true })).toBeVisible();
       await expect(page.getByText("Paid customer by Zelle 11/05")).toBeVisible();
       await expect(page.getByText("The platform resolved this refund.")).toBeVisible();
     } finally {
@@ -359,7 +362,7 @@ test.describe("Order inbox", () => {
       await page.getByRole("link", { name: "Past orders" }).click();
       await expect(page.getByRole("heading", { name: "Past orders" })).toBeVisible();
       await page.getByLabel("Order number or customer").fill(`#${number}`);
-      await page.getByRole("button", { name: "Search" }).click();
+      await page.getByRole("button", { name: "Search", exact: true }).click();
       const rows = page.getByTestId("past-orders").locator("li");
       await expect(rows).toHaveCount(1);
       await expect(rows.first()).toContainText(`Order #${number}`);
@@ -369,7 +372,7 @@ test.describe("Order inbox", () => {
       await expect(rows.first()).toContainText("$26.93");
 
       await page.getByLabel("Order number or customer").fill("no-such-customer-785");
-      await page.getByRole("button", { name: "Search" }).click();
+      await page.getByRole("button", { name: "Search", exact: true }).click();
       await expect(page.getByText('No past orders match "no-such-customer-785".')).toBeVisible();
 
       if (proofDir) {

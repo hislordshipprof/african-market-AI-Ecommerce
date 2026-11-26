@@ -558,3 +558,15 @@ export async function deleteShipRequoteOrder(number: number): Promise<void> {
 export async function inboxOrderId(number: number): Promise<string> {
   return withMama(async (tx, storeId) => (await tx.order.findFirstOrThrow({ where: { storeId, number }, select: { id: true } })).id);
 }
+
+/** Mama Ngozi's orders per status, for checking the store admin's counts (#860). */
+export async function mamaOrderStatusCounts(): Promise<Record<string, number>> {
+  return withMama(async (tx) => {
+    const rows = await tx.order.groupBy({ by: ["status"], _count: { _all: true } });
+    return Object.fromEntries(rows.map((row) => [row.status, row._count._all]));
+  });
+}
+
+export async function inboxOrderStatus(number: number): Promise<string> {
+  return withMama(async (tx, storeId) => (await tx.order.findFirstOrThrow({ where: { storeId, number }, select: { status: true } })).status);
+}

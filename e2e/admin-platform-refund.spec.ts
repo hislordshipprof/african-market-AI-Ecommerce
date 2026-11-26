@@ -64,7 +64,7 @@ test("an admin refunds a completed order once from the order detail, and the sto
   await storeOwnerSignIn(store);
   await store.goto(ORDERS_URL);
   await store.locator("button", { hasText: `#${NUMBER}` }).click();
-  const pick = store.getByRole("button", { name: "Pick" });
+  const pick = store.getByTestId("order-panel").getByRole("button", { name: "Pick", exact: true });
   for (let left = await pick.count(); left > 0; left -= 1) {
     await pick.first().click();
     await expect(pick).toHaveCount(left - 1);

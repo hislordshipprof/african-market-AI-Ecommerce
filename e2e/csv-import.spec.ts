@@ -68,7 +68,7 @@ test.describe("CSV import (authenticated)", () => {
         "Upload a CSV file to add listings to Mama Ngozi African Market.",
       ),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: "Products" })).toHaveAttribute(
+    await expect(page.getByRole("main").getByRole("link", { name: "Products" })).toHaveAttribute(
       "href",
       "/store-admin/listings?store=mama-ngozi",
     );
@@ -381,7 +381,7 @@ test.describe("CSV import (authenticated)", () => {
     await page.goto("/store-admin/listings/import?store=Not_Routable!");
     await expect(page).toHaveURL(/Not_Routable/);
     await expect(page.locator("h1")).toHaveText("Import listings");
-    await expect(page.getByRole("link", { name: "Products" })).toHaveAttribute(
+    await expect(page.getByRole("main").getByRole("link", { name: "Products" })).toHaveAttribute(
       "href",
       "/store-admin/listings?store=mama-ngozi",
     );
@@ -476,7 +476,8 @@ test.describe("CSV import (authenticated)", () => {
     const chooser = page.getByLabel("Choose a CSV file");
     await expect(chooser).toHaveAttribute("type", "file");
     await page.keyboard.press("Tab");
-    for (let i = 0; i < 20 && !(await chooser.evaluate((el) => el === document.activeElement)); i++) {
+    // The sidebar and top bar come first in the tab order (#860).
+    for (let i = 0; i < 60 && !(await chooser.evaluate((el) => el === document.activeElement)); i++) {
       await page.keyboard.press("Tab");
     }
     const ring = await chooser.evaluate((el) => getComputedStyle(el.parentElement!).boxShadow);

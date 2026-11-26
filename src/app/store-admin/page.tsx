@@ -8,6 +8,10 @@ import { PLAN_NAMES, planAllows } from "@/lib/billing/plan";
 import { directoryOrderCount } from "@/lib/directory/directory-orders";
 import { goLiveItemLabel, readGoLiveChecklist, type GoLiveItemKey } from "@/lib/go-live/checklist";
 import type { GoLiveItemView } from "@/components/go-live/go-live-items";
+import { storeHome } from "@/lib/store-admin/home";
+import { needsYouNow } from "@/lib/store-admin/home-needs";
+import { payoutsAlert } from "@/lib/store-admin/nav";
+import { isStoreOpen } from "@/lib/order/store-hours";
 import { StoreAdminDashboard } from "./dashboard";
 
 /** Set by the owner on the Settings page (#786). */
@@ -40,24 +44,37 @@ async function goLiveItems(storeId: string, storeSlug: string, isOwner: boolean)
 
 export default async function StoreAdminPage() {
   const session = await requireStoreMember();
-  const [unreadMessages, billing, directoryOrders] = await Promise.all([
+  const now = new Date();
+  const isOwner = session.membership.role === "owner";
+  const [unreadMessages, billing, directoryOrders, home] = await Promise.all([
     storeUnreadCount(session.store.id),
     getStoreBilling(session.store.id),
     directoryOrderCount(session.store.id),
+    storeHome(session.store.id, session.store.timezone, now, { sales: isOwner }),
   ]);
-  const isOwner = session.membership.role === "owner";
   const usage = isOwner ? await assistantChatUsage(session.store.id, billing.plan) : null;
   const goLive = session.store.status === "setup" ? await goLiveItems(session.store.id, session.store.slug, isOwner) : null;
   const host = (await headers()).get("host");
+  const needs = needsYouNow({
+    storeSlug: session.store.slug,
+    isOwner,
+    now,
+    newOrders: home.newOrders,
+    swaps: home.swaps,
+    payoutsAlert: isOwner ? payoutsAlert(session.store.stripeOnboardingStatus) : null,
+    lowStock: home.lowStock,
+    unreadMessages,
+    goLive: goLive ?? [],
+  });
 
   return (
     <StoreAdminDashboard
-      storeName={session.store.name}
       storeSlug={session.store.slug}
-      userName={session.user.name ?? session.user.email}
       role={session.membership.role}
-      stripeOnboardingStatus={session.store.stripeOnboardingStatus}
-      unreadMessages={unreadMessages}
+      timeZone={session.store.timezone}
+      openNow={session.store.hours == null ? null : isStoreOpen(session.store.hours, session.store.timezone, now)}
+      home={home}
+      needs={needs}
       directoryOrders={directoryOrders}
       goLive={goLive}
       storeAddress={host ? storeWebAddress(session.store.slug, host) : null}
@@ -67,7 +84,7 @@ export default async function StoreAdminPage() {
         name: PLAN_NAMES[billing.plan],
         status: billing.status,
         paymentFailed: billing.paymentFailedAt !== null,
-        chats: usage && usage.warning ? { used: usage.chats, cap: usage.cap, capped: usage.capped } : null,
+        usage: usage ? { used: usage.chats, cap: usage.cap, capped: usage.capped, warning: usage.warning } : null,
         readOnly: session.membership.readOnly,
         reportsAllowed: planAllows(billing.plan, "copilot-reports"),
         analyticsAllowed: planAllows(billing.plan, "analytics-dashboard"),

@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 import { toast } from "sonner";
-import { ArrowLeft, Check, CheckCircle2, Clock, Package, Truck } from "lucide-react";
+import { Check, CheckCircle2, Clock, Package, Truck } from "lucide-react";
 import { ProductImage } from "@/components/storefront/product-image";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -180,13 +181,13 @@ export function PackingScreen({ initial, storeParam, timeZone }: { initial: Pick
 
   if (!batch) {
     return (
-      <main className="mx-auto max-w-2xl px-4 py-16 text-center">
+      <div className="py-16 text-center">
         <p className="text-base font-medium text-foreground">This batch has ended</p>
         <p className="mt-1 text-sm text-muted-foreground">Each order is back in the order list with its progress kept.</p>
         <Link href={ordersHref} className={buttonVariants({ className: "mt-6 min-h-12 rounded-full px-6" })}>
           Back to orders
         </Link>
-      </main>
+      </div>
     );
   }
 
@@ -213,26 +214,18 @@ export function PackingScreen({ initial, storeParam, timeZone }: { initial: Pick
   }
 
   return (
-    <div className="min-h-dvh bg-background pb-28">
-      <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <Link
-            href={ordersHref}
-            className="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground"
-            aria-label="Back to orders"
-          >
-            <ArrowLeft className="size-5" />
-          </Link>
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold text-foreground">Pick together</h1>
-            <p className="text-xs text-muted-foreground tabular-nums">
-              {batch.totes.length} orders · {allLines - openLines} of {allLines} items done
-            </p>
-          </div>
-        </div>
-      </header>
+    <div className="pb-28">
+      <PageHeader
+        title="Pick together"
+        description={
+          <span className="tabular-nums">
+            {batch.totes.length} orders · {allLines - openLines} of {allLines} items done
+          </span>
+        }
+        parent={{ href: ordersHref, label: "Orders" }}
+      />
 
-      <main className="mx-auto max-w-2xl px-4 py-5">
+      <div className="max-w-3xl">
         <UpdatesPaused
           paused={refreshFailed}
           lastUpdated={lastRefreshed}
@@ -324,11 +317,11 @@ export function PackingScreen({ initial, storeParam, timeZone }: { initial: Pick
         {pickable.length > 0 && (
           <p className="mt-2 text-center text-xs text-muted-foreground">Leaving keeps what is picked; each order goes back to the order list.</p>
         )}
-      </main>
+      </div>
 
       {!batch.packingStarted && (
-        <div data-assistant-avoid className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-card/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
-          <div className="mx-auto max-w-2xl">
+        <div data-assistant-avoid className="fixed inset-x-0 bottom-0 z-10 border-t lg:left-64 border-border bg-card/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
+          <div className="max-w-3xl">
             <ActionError message={errorFor("start")} className="mb-2" />
             <Button
               className="min-h-12 w-full rounded-full text-base"
