@@ -95,7 +95,7 @@ export async function readPickBatch(storeId: string, batchId: string): Promise<P
                     customName: true,
                     frozen: true,
                     perishable: true,
-                    masterProduct: { select: { name: true, imageUrl: true, category: { select: { name: true, sortOrder: true, slug: true } } } },
+                    masterProduct: { select: { name: true, imageUrl: true, category: { select: { name: true, sortOrder: true, slug: true, parent: { select: { name: true, sortOrder: true, slug: true } } } } } },
                   },
                 },
               },
@@ -129,7 +129,8 @@ export async function readPickBatch(storeId: string, batchId: string): Promise<P
           imageUrl: listingImage(listing) ?? null,
           frozen: listing.frozen,
           perishable: listing.perishable,
-          zone: listing.masterProduct?.category ?? null,
+          // A subcategory picks in its aisle's zone (#861).
+          zone: listing.masterProduct?.category?.parent ?? listing.masterProduct?.category ?? null,
         };
       }),
     })),

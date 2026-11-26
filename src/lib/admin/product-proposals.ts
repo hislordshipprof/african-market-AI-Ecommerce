@@ -7,6 +7,7 @@ import { readPrivatePhoto } from "../r2";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { requirePlatformAdmin } from "./session";
+import { productCategoryError } from "../catalog/category-tree";
 
 export type ProductProposalRow = {
   id: string;
@@ -136,9 +137,8 @@ export async function approveProductProposal(input: unknown): Promise<ProposalAc
       masterProductId = product.id;
     } else {
       const categoryId = decision.categoryId ?? null;
-      if (categoryId && !(await tx.category.findUnique({ where: { id: categoryId }, select: { id: true } }))) {
-        return { error: "That category no longer exists. Pick another." };
-      }
+      const categoryError = categoryId ? await productCategoryError(tx, categoryId) : null;
+      if (categoryError) return { error: `${categoryError}.` };
       const product = await tx.masterProduct.create({
         data: { name: decision.name, unit: decision.size || null, categoryId, status: "active", imageUrl },
       });

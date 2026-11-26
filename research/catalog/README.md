@@ -23,7 +23,7 @@ id,english_name,local_names,search_synonyms,category,subcategory,origin_countrie
 | `english_name` | the name a US shopper would search, e.g. "Fluted pumpkin leaves" |
 | `local_names` | every well-known local name, pipe-separated, each as `name (language, country)`: `ugu (Igbo, Nigeria)|ugwu (Igbo, Nigeria)` |
 | `search_synonyms` | lowercase search terms customers type: spellings, misspellings, transliterations, brand-agnostic names: `ugu|ugwu|fluted pumpkin|pumpkin leaf` |
-| `category` | one slug from the taxonomy below |
+| `category` | the product's subcategory slug in the two-level tree (`src/lib/catalog/category-tree.ts`, #861); its aisle follows from it |
 | `subcategory` | free text, e.g. "leafy greens", "smoked fish", "stock cubes" |
 | `origin_countries` | pipe-separated countries where it's eaten or known by these names |
 | `product_type` | `generic` (yam, egusi) or `branded` (Indomie, Peak milk, Milo, Maggi) |
@@ -44,11 +44,7 @@ id,english_name,local_names,search_synonyms,category,subcategory,origin_countrie
 
 ## Category taxonomy
 
-Existing in the database: `tubers`, `grains-and-flours`, `spices`, `oils`, `vegetables`, `fish-and-meat`, `frozen`, `snacks`, `drinks`, `beauty`.
-
-Proposed additions (use them; the reviewer decides whether to add them to the database): `beans-and-legumes`, `fruits`, `seasonings-and-sauces` (stock cubes, tomato paste, soup bases, pepper sauces), `breakfast-and-dairy` (milk powder, evaporated milk, cocoa/malt drinks, cereals, custard), `canned-and-packaged` (sardines, corned beef, baked beans, noodles), `household` (sponges, chewing sticks, black soap if not beauty).
-
-Frozen items go in `frozen` when they're only sold frozen (frozen fish, goat meat, frozen leaves). Dried or smoked fish goes in `fish-and-meat`.
+The 16 aisles and their subcategories, and the rule for each edge case, are in `category-tree.md` section 4 (approved 2026-11-25, #861). The slugs are in `src/lib/catalog/category-tree.ts`. Frozen items go in Frozen when they ship frozen (frozen fish, goat meat, frozen leaves). Dried or smoked fish goes in Fish & Meat.
 
 ## Quality rules
 - Accuracy over volume. Don't invent local names. If unsure, mark `confidence` low and say why in `notes`.

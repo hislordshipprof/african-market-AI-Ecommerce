@@ -343,7 +343,7 @@ async function seedStoreCollections() {
       title: "Snack run",
       subtitle: "Chin chin, kulikuli and more",
       slug: "snack-run",
-      imageUrl: categoryPhotos.snacks,
+      imageUrl: categoryPhotos["snacks-and-sweets"],
       sortOrder: 3,
       listingIds: ["mn_chin_chin", "mn_plantain_chips", "mn_kulikuli", "mn_puff_puff_mix", "mn_zobo", "mn_malt"],
     },

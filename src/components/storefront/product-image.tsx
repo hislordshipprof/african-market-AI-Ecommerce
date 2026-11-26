@@ -28,10 +28,10 @@ export function productImageRetrySrc(src: string | undefined): string | null {
 }
 
 const glyphs = {
-  "tubers-and-roots": Carrot, "grains-and-flours": Wheat, vegetables: Leaf,
-  "fish-and-meat": Fish, frozen: Fish, drinks: CupSoda,
-  "spices-and-seasonings": CookingPot, "pantry-staples": Wheat,
-  "oils-and-butters": Droplets, snacks: Cookie, beauty: Sparkles,
+  "tubers-and-roots": Carrot, "fufu-flours-and-swallow": Wheat, "rice-grains-and-beans": Wheat, "fresh-produce": Leaf,
+  "fish-and-meat": Fish, frozen: Fish, drinks: CupSoda, "soup-ingredients": CookingPot,
+  "spices-and-seasonings": CookingPot, "canned-and-packaged": Wheat,
+  "oils-sauces-and-condiments": Droplets, "snacks-and-sweets": Cookie, "beauty-and-personal-care": Sparkles,
 };
 
 export function ProductImage({

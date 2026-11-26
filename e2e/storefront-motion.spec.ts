@@ -42,7 +42,7 @@ async function holdListingDetail(page: Page, edit?: (body: { variants?: { id: st
 }
 
 async function openEgusi(page: Page) {
-  await page.goto(`${BASE}/categories/grains-and-flours`);
+  await page.goto(`${BASE}/categories/soup-ingredients`);
   const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
   await card.hover();
   const trigger = card.getByRole("button", { name: /Quick view/ });
@@ -245,26 +245,26 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "true");
     await dialog.press("Escape");
     await expect(dialog).toBeHidden();
-    const ofada = page.getByTestId("listing-card").filter({ hasText: "Ofada Rice" }).first();
-    await ofada.hover();
-    await ofada.getByRole("button", { name: /Quick view/ }).click();
-    const other = page.getByRole("dialog", { name: "Quick view: Ofada Rice" });
+    const ogbono = page.getByTestId("listing-card").filter({ hasText: "Ogbono" }).first();
+    await ogbono.hover();
+    await ogbono.getByRole("button", { name: /Quick view/ }).click();
+    const other = page.getByRole("dialog", { name: /Quick view: Ogbono/ });
     await expect(other.getByText("Add to your basket")).toBeVisible();
-    await expect(other.getByRole("group", { name: "Choose pack size" }).getByRole("button")).toHaveText(["2 lb", "10 lb bag"]);
-    await expect(other.getByRole("button", { name: "2 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(other.getByLabel("$8.99")).toBeVisible();
+    await expect(other.getByRole("group", { name: "Choose pack size" }).getByRole("button")).toHaveText(["8 oz", "1 lb"]);
+    await expect(other.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(other.getByLabel("$12.99")).toBeVisible();
     release();
     await expect.poll(() => egusiFailure).toMatch(/net::ERR_ABORTED/);
-    await expect(other.getByRole("button", { name: "2 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(other.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(other.getByRole("button", { name: "5 lb bag", exact: true })).toHaveCount(0);
     await other.getByTestId("quick-add-btn").click();
     await expect(other.getByTestId("stepper-qty")).toHaveText("1");
     await expect(page.getByRole("button", { name: /in basket$|^Basket$/ })).not.toHaveAttribute("data-cart-pending");
     await other.press("Escape");
-    const ofadaCart = await settleCart(page);
-    await expect(ofadaCart.getByRole("listitem")).toHaveCount(1);
-    await expect(ofadaCart).toContainText("$8.99 / 2 lb");
-    await expect(ofadaCart).not.toContainText("5 lb bag");
+    const ogbonoCart = await settleCart(page);
+    await expect(ogbonoCart.getByRole("listitem")).toHaveCount(1);
+    await expect(ogbonoCart).toContainText("$12.99 / 8 oz");
+    await expect(ogbonoCart).not.toContainText("5 lb bag");
     await page.keyboard.press("Escape");
     const egusi = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
     await egusi.hover();
@@ -363,7 +363,7 @@ test.describe("Phase 3 motion and depth", () => {
 
   test("category pack filter reaches the actual quick view default", async ({ page }) => {
     const release = await holdListingDetail(page);
-    await page.goto(`${BASE}/categories/grains-and-flours?sizes=1`);
+    await page.goto(`${BASE}/categories/soup-ingredients?sizes=1`);
     const fivePound = page.getByTestId("filter-pack-option").filter({ hasText: "5 lb bag" });
     await fivePound.click();
     // The chip is a navigation. Opening quick view before it commits uses the
@@ -425,7 +425,7 @@ test.describe("Phase 3 motion and depth", () => {
   });
 
   test("adding a product updates the accessible badge and announces it", async ({ page }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/soup-ingredients`);
     await page.waitForTimeout(2000);
     const card = page.getByTestId("listing-card").filter({ has: page.locator('[data-testid="quick-add-btn"]:enabled') }).filter({ hasNot: page.locator(".sf-product-fallback") }).first();
     await expect(card.locator("img")).toBeVisible();

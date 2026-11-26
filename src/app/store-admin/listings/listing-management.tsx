@@ -29,7 +29,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -73,6 +75,7 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { shippableRefusal } from "@/lib/shipping/eligibility";
+import type { AisleChoice } from "@/lib/catalog/category-tree";
 
 interface Variant {
   id: string;
@@ -90,10 +93,7 @@ interface MasterProductOption {
   imageUrl: string | null;
 }
 
-interface Aisle {
-  id: string;
-  name: string;
-}
+type Aisle = AisleChoice;
 
 /** The aisle Select's value for a custom listing with no aisle. */
 const NO_AISLE = "none";
@@ -247,6 +247,16 @@ const PREPARED_LABELS: Record<string, string> = {
 };
 
 const HELD_FOR_ALLERGENS = "Saved, off sale. State its allergens under Ingredients and allergens, then reactivate it.";
+
+/** "Aisle › Subcategory" for a subcategory, the aisle's name for an aisle (#861). */
+function aisleLabel(aisles: Aisle[], id: string): string | undefined {
+  for (const aisle of aisles) {
+    if (aisle.id === id) return aisle.name;
+    const sub = aisle.subcategories.find((row) => row.id === id);
+    if (sub) return `${aisle.name} › ${sub.name}`;
+  }
+  return undefined;
+}
 
 export function ListingManagement({ storeName, storeSlug, storeShips, aisles, listings, canManage, canEditStock, photoUploads }: Props) {
   const router = useRouter();
@@ -583,13 +593,21 @@ export function ListingManagement({ storeName, storeSlug, storeShips, aisles, li
           <Label htmlFor="listing-aisle">Aisle</Label>
           <Select value={categoryId} onValueChange={(v) => { if (v) setCategoryId(v); }}>
             <SelectTrigger id="listing-aisle">
-              <SelectValue>{(v: string) => aisles.find((aisle) => aisle.id === v)?.name ?? "No aisle"}</SelectValue>
+              <SelectValue>{(v: string) => aisleLabel(aisles, v) ?? "No aisle"}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NO_AISLE}>No aisle</SelectItem>
-              {aisles.map((aisle) => (
-                <SelectItem key={aisle.id} value={aisle.id}>{aisle.name}</SelectItem>
-              ))}
+              {aisles.map((aisle) =>
+                aisle.subcategories.length ? (
+                  <SelectGroup key={aisle.id}>
+                    <SelectLabel>{aisle.name}</SelectLabel>
+                    {aisle.subcategories.map((sub) => (
+                      <SelectItem key={sub.id} value={sub.id}>{sub.name}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                ) : (
+                  <SelectItem key={aisle.id} value={aisle.id}>{aisle.name}</SelectItem>
+                ))}
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">Shoppers find it in this aisle. Without one, only search finds it.</p>

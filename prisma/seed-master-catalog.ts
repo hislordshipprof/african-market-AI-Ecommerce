@@ -8,6 +8,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { catalogImageUrl } from "../src/lib/r2";
 import { downloadAndUploadImage } from "../src/lib/catalog-image";
 import { upsertMasterProduct, type CsvRow } from "./master-catalog-upsert";
+import { subcategoryIdForSlug } from "../src/lib/catalog/category-tree";
 import {
   catalogPruneMode,
   CatalogPruneRefusal,
@@ -25,25 +26,6 @@ import {
 import { resolveDirectUrl } from "../src/lib/env";
 import { httpStatusOf } from "../src/lib/catalog-photo-audit";
 import type { DatabaseIdentity } from "../src/lib/catalog-prune";
-
-const CATEGORY_SLUG_TO_ID: Record<string, string> = {
-  tubers: "cat_tubers",
-  "grains-and-flours": "cat_grains",
-  spices: "cat_spices",
-  oils: "cat_oils",
-  vegetables: "cat_vegetables",
-  "fish-and-meat": "cat_fish_meat",
-  frozen: "cat_frozen",
-  snacks: "cat_snacks",
-  drinks: "cat_drinks",
-  beauty: "cat_beauty",
-  "beans-and-legumes": "cat_beans_legumes",
-  "breakfast-and-dairy": "cat_breakfast_dairy",
-  "canned-and-packaged": "cat_canned_packaged",
-  fruits: "cat_fruits",
-  household: "cat_household",
-  "seasonings-and-sauces": "cat_seasonings_sauces",
-};
 
 const MAX_RETRIES = 5;
 
@@ -275,7 +257,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
   let processed = 0;
 
   for (const row of highRows) {
-    const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
+    const categoryId = subcategoryIdForSlug(row.category);
     const imageSourceUrl = row.image_url?.trim() || null;
     let imageUrl: string | null = null;
 
@@ -341,7 +323,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
   }
 
   for (const row of reviewRows) {
-    const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
+    const categoryId = subcategoryIdForSlug(row.category);
     const { keptAdminChanges } = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;

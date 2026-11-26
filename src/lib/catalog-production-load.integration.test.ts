@@ -26,7 +26,7 @@ function csv(rows: Row[]): string {
     cols[1] = row.name;
     cols[2] = row.localNames ?? "";
     cols[3] = row.synonyms ?? "";
-    cols[4] = "spices";
+    cols[4] = "egusi-and-melon-seeds";
     cols[15] = row.imageUrl ?? "";
     cols[20] = row.confidence ?? "high";
     return cols.map((col) => (col.includes(",") ? `"${col}"` : col)).join(",");
@@ -104,7 +104,7 @@ describe.skipIf(!hasDb)("production catalogue load (lane DB, VERCEL_ENV=producti
 
     const product = await asAdmin(prisma, (tx) => tx.masterProduct.findUnique({ where: { id: productIds[0] }, include: { synonyms: true } }));
     expect(product?.status).toBe("active");
-    expect(product?.categoryId).toBe("cat_spices");
+    expect(product?.categoryId).toBe("sub_egusi_melon_seeds");
     expect(product?.synonyms.map((row) => row.term).sort()).toEqual(["agushi", "melon seed"]);
     const review = await asAdmin(prisma, (tx) => tx.masterProduct.findUnique({ where: { id: productIds[1] } }));
     expect(review?.status).toBe("needs_review");

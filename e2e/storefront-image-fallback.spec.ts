@@ -5,7 +5,7 @@ const BASE = storeUrl("mama-ngozi");
 
 test.describe("product image states", () => {
   test("a listing with no accepted photo shows the designed fallback, never 'Photo unavailable'", async ({ page }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     const cards = page.getByTestId("listing-card");
     await expect(cards.first()).toBeVisible();
     const designed = cards.filter({ has: page.getByTestId("designed-image-fallback") });
@@ -23,7 +23,7 @@ test.describe("product image states", () => {
       requested.push(decodeURIComponent(new URL(route.request().url()).searchParams.get("url") ?? ""));
       return route.abort("failed");
     });
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     const unavailable = page.getByTestId("listing-card").filter({ hasText: "Photo unavailable" }).first();
     await expect(unavailable).toBeVisible({ timeout: 15_000 });
     await expect(unavailable.getByRole("img", { name: /^Photo temporarily unavailable for / })).toBeVisible();

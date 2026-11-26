@@ -74,7 +74,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   it("uses the linked master image in browse, home rails, detail, search and collections", async () => {
     const expected = catalogImageUrl("catalog/storefront-test.jpg");
     const [browse, active, detail, search, rails, collection] = await Promise.all([
-      listingsByCategory(storeAId, "vegetables"), getActiveListings(storeAId),
+      listingsByCategory(storeAId, "fresh-produce"), getActiveListings(storeAId),
       getListingDetail(storeAId, listingAId), searchListings(storeAId, "ugu"),
       getListingsByCategory(storeAId), getCollectionListings(storeAId, "test-soup-kit"),
     ]);
@@ -110,8 +110,8 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       create: { id: "sf-test-user", email: "sf-test-user@example.com", name: "SF Test User", emailVerified: true },
     });
 
-    // Get the vegetables category (seeded by migration)
-    const vegCat = await rawPrisma.category.findUnique({ where: { slug: "vegetables" } });
+    // A subcategory of Fresh Produce (#861), seeded by migration
+    const vegCat = await rawPrisma.category.findUnique({ where: { slug: "leafy-greens-and-wrapping-leaves" } });
 
     // Create master product with category
     const mp = await rawPrisma.$transaction([
@@ -257,8 +257,8 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     frozenListingId = await mkListing({ masterProductId, customName: "Frozen Ugu Cubes", frozen: true });
     customOnlyListingId = await mkListing({ masterProductId: null, customName: "Custom Item", frozen: false });
     // #782: a custom listing in an aisle, and an inactive one whose aisle must stay hidden.
-    const oils = await rawPrisma.category.findUniqueOrThrow({ where: { slug: "oils-and-butters" } });
-    const snacks = await rawPrisma.category.findUniqueOrThrow({ where: { slug: "snacks" } });
+    const oils = await rawPrisma.category.findUniqueOrThrow({ where: { slug: "palm-oil" } });
+    const snacks = await rawPrisma.category.findUniqueOrThrow({ where: { slug: "chips-and-savoury-snacks" } });
     aisledCustomListingId = await mkListing({ masterProductId: null, customName: "Red Palm Oil 1L", categoryId: oils.id });
     await mkListing({ masterProductId: null, customName: "Old Chin Chin", categoryId: snacks.id, active: false });
 
@@ -331,23 +331,36 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   // #782 AC2: the aisle menu lists only aisles this store has an active listing in.
   it("lists only the aisles a store stocks", async () => {
     const slugsA = (await listCategories(storeAId)).map((category) => category.slug);
-    expect(slugsA).toEqual(["oils-and-butters", "vegetables"]);
+    expect(slugsA).toEqual(["fresh-produce", "oils-sauces-and-condiments"]);
     const slugsB = (await listCategories(storeBId)).map((category) => category.slug);
-    expect(slugsB).toEqual(["vegetables"]);
+    expect(slugsB).toEqual(["fresh-produce"]);
+  });
+
+  // #861: an aisle page shows its subcategories' listings and names the stocked subcategories; a
+  // subcategory page shows only its own and names its aisle.
+  it("browses an aisle through its subcategories", async () => {
+    const aisle = await listingsByCategory(storeAId, "fresh-produce");
+    expect(aisle.category).toEqual({ name: "Fresh Produce", slug: "fresh-produce", aisle: null });
+    expect(aisle.subcategories).toEqual([{ name: "Leafy Greens & Wrapping Leaves", slug: "leafy-greens-and-wrapping-leaves" }]);
+    const sub = await listingsByCategory(storeAId, "leafy-greens-and-wrapping-leaves");
+    expect(sub.category).toEqual({ name: "Leafy Greens & Wrapping Leaves", slug: "leafy-greens-and-wrapping-leaves", aisle: { name: "Fresh Produce", slug: "fresh-produce" } });
+    expect(sub.listings.map((l) => l.id).sort()).toEqual(aisle.listings.map((l) => l.id).sort());
+    expect((await listingsByCategory(storeAId, "palm-oil")).listings.map((l) => l.id)).toEqual([aisledCustomListingId]);
+    expect((await listingsByCategory(storeAId, "fresh-vegetables")).listings).toEqual([]);
   });
 
   // Seam 1: category browse store isolation
   it("category browse returns only store A listings for store A", async () => {
-    const result = await listingsByCategory(storeAId, "vegetables");
+    const result = await listingsByCategory(storeAId, "fresh-produce");
     expect(result.category).not.toBeNull();
-    expect(result.category!.slug).toBe("vegetables");
+    expect(result.category!.slug).toBe("fresh-produce");
     expect(result.listings.length).toBeGreaterThanOrEqual(1);
     expect(result.listings.some((l) => l.id === listingAId)).toBe(true);
     expect(result.listings.some((l) => l.id === listingBId)).toBe(false);
   });
 
   it("category browse returns only store B listings for store B", async () => {
-    const result = await listingsByCategory(storeBId, "vegetables");
+    const result = await listingsByCategory(storeBId, "fresh-produce");
     expect(result.listings.length).toBeGreaterThanOrEqual(1);
     expect(result.listings.some((l) => l.id === listingBId)).toBe(true);
     expect(result.listings.some((l) => l.id === listingAId)).toBe(false);
@@ -363,12 +376,12 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
 
   // #782 AC1: a custom listing with an aisle is browsed in that aisle and carries its slug.
   it("custom listing with an aisle shows in that aisle", async () => {
-    const browse = await listingsByCategory(storeAId, "oils-and-butters");
+    const browse = await listingsByCategory(storeAId, "oils-sauces-and-condiments");
     expect(browse.listings.map((l) => l.id)).toEqual([aisledCustomListingId]);
-    expect(browse.listings[0]?.categorySlug).toBe("oils-and-butters");
-    expect((await getListingDetail(storeAId, aisledCustomListingId))?.categorySlug).toBe("oils-and-butters");
+    expect(browse.listings[0]?.categorySlug).toBe("oils-sauces-and-condiments");
+    expect((await getListingDetail(storeAId, aisledCustomListingId))?.categorySlug).toBe("oils-sauces-and-condiments");
     const rails = await getListingsByCategory(storeAId);
-    expect(rails.find((rail) => rail.categorySlug === "oils-and-butters")?.listings.map((l) => l.id)).toEqual([aisledCustomListingId]);
+    expect(rails.find((rail) => rail.categorySlug === "oils-sauces-and-condiments")?.listings.map((l) => l.id)).toEqual([aisledCustomListingId]);
     const flow = await getFlowCatalog(storeAId);
     expect(flow.find((item) => item.listingId === aisledCustomListingId)?.categoryId).toBeTruthy();
     expect(flow.find((item) => item.listingId === aisledCustomListingId)?.categoryId).not.toBe("uncategorized");
@@ -376,7 +389,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
 
   // #72 AC5, #782 AC4: a custom listing without an aisle stays out of aisles but is searchable
   it("custom-only listing is absent from category browse but found by search", async () => {
-    const browse = await listingsByCategory(storeAId, "vegetables");
+    const browse = await listingsByCategory(storeAId, "fresh-produce");
     expect(browse.listings.some((l) => l.id === customOnlyListingId)).toBe(false);
     const search = await searchListings(storeAId, "Custom Item");
     expect(search.some((r) => r.id === customOnlyListingId)).toBe(true);
@@ -479,7 +492,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   it("category browse shows starting price from cheapest variant", async () => {
-    const result = await listingsByCategory(storeAId, "vegetables");
+    const result = await listingsByCategory(storeAId, "fresh-produce");
     const listing = result.listings.find((l) => l.id === listingAId);
     expect(listing).toBeDefined();
     expect(listing!.startingPrice).toBe(500);
@@ -490,7 +503,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   it("inactive listing excluded from category browse", async () => {
-    const result = await listingsByCategory(storeAId, "vegetables");
+    const result = await listingsByCategory(storeAId, "fresh-produce");
     expect(result.listings.some((l) => l.id === inactiveListingId)).toBe(false);
     expect(result.listings.some((l) => l.id === listingAId)).toBe(true);
   });
@@ -534,7 +547,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   it("never shows e2e-prefixed listings to customers on any storefront read (#116)", async () => {
     const [flow, browse, search, active, rails, collection] = await Promise.all([
       getFlowCatalog(storeAId),
-      listingsByCategory(storeAId, "vegetables"),
+      listingsByCategory(storeAId, "fresh-produce"),
       searchListings(storeAId, "E2E Sentinel"),
       getActiveListings(storeAId),
       getListingsByCategory(storeAId),
@@ -566,7 +579,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   it("getListingsByCategory returns category rails with slugs", async () => {
     const rails = await getListingsByCategory(storeAId);
     expect(rails.length).toBeGreaterThanOrEqual(1);
-    const vegRail = rails.find((r) => r.categorySlug === "vegetables");
+    const vegRail = rails.find((r) => r.categorySlug === "fresh-produce");
     expect(vegRail).toBeDefined();
     expect(vegRail!.listings.length).toBeGreaterThanOrEqual(1);
   });
@@ -615,7 +628,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
 
   async function packIds(listingId: string, collectionSlug: string) {
     const [browse, active, detail, rails, collection, flow] = await Promise.all([
-      listingsByCategory(storeAId, "vegetables"),
+      listingsByCategory(storeAId, "fresh-produce"),
       getActiveListings(storeAId),
       getListingDetail(storeAId, listingId),
       getListingsByCategory(storeAId),
@@ -660,7 +673,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
         rawPrisma.listingVariant.update({ where: { id: low }, data: { label: "Low" } }),
       ]);
       take();
-      await listingsByCategory(storeAId, "vegetables");
+      await listingsByCategory(storeAId, "fresh-produce");
       assertThisReadOrdersVariants("listingsByCategory");
       await getActiveListings(storeAId);
       assertThisReadOrdersVariants("getActiveListings");
@@ -729,7 +742,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
 
   it("store B reads never return store A's listing or packs", async () => {
     const [browse, active, rails, collection, detail, flow] = await Promise.all([
-      listingsByCategory(storeBId, "vegetables"),
+      listingsByCategory(storeBId, "fresh-produce"),
       getActiveListings(storeBId),
       getListingsByCategory(storeBId),
       getCollectionListings(storeBId, "test-soup-kit"),

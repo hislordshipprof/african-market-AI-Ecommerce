@@ -191,7 +191,7 @@ test.describe("Listing management (authenticated)", () => {
     await page.click("text=Add listing");
     await page.getByLabel("Product name").fill(uniqueName);
     await page.getByRole("combobox", { name: "Aisle" }).click();
-    await page.getByRole("option", { name: "Oils & Butters" }).click();
+    await page.getByRole("option", { name: "Palm Oil", exact: true }).click();
     await page.locator("input[placeholder='Label (e.g. 1kg)']").first().fill("1L");
     await page.locator("input[placeholder='Price']").first().fill("9.00");
     await page.locator("input[placeholder='Weight (g)']").first().fill("1000");
@@ -203,11 +203,11 @@ test.describe("Listing management (authenticated)", () => {
         const logs = await findListingAuditLogs("mama-ngozi", uniqueName);
         return logs.find((l) => l.action === "listing.create")?.after ?? null;
       }, { timeout: 10000 })
-      .toMatchObject({ categoryId: "cat_oils" });
+      .toMatchObject({ categoryId: "sub_palm_oil" });
 
     await page.goto(LISTINGS_URL);
     await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
-    await expect(page.getByRole("combobox", { name: "Aisle" })).toContainText("Oils & Butters");
+    await expect(page.getByRole("combobox", { name: "Aisle" })).toContainText("Oils, Sauces & Condiments › Palm Oil");
   });
 
   test("edit price and verify audit trail exists", async ({ page }) => {

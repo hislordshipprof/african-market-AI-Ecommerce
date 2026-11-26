@@ -78,7 +78,7 @@ test.describe("optimizer accepts ProductImage's single local retry", () => {
       }
       await route.abort("failed");
     });
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     const shown = page.locator(".sf-product-image").filter({ has: page.locator("img") });
     await expect(shown.first()).toBeVisible({ timeout: 15_000 });
     await expect.poll(() => retryResponses.length, { timeout: 15_000 }).toBeGreaterThan(0);

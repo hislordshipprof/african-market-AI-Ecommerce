@@ -58,7 +58,7 @@ test.describe("Storefront discovery (#727)", () => {
   });
 
   test("a category page counts products, not listings", async ({ page }) => {
-    await page.goto(`${BASE}/categories/vegetables`);
+    await page.goto(`${BASE}/categories/fresh-produce`);
     await expect(page.locator(".sf-result-count")).toContainText(/\d+ products?/);
     await expect(page.locator(".sf-result-count")).not.toContainText("listing");
   });

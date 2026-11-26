@@ -136,7 +136,7 @@ export function workflowTools(ctx: ToolContext) {
         const category = input.category?.trim().toLowerCase();
         const { matched, more } = await reviewQueue((product) =>
           (!input.productIds || input.productIds.includes(product.id))
-          && (!category || product.categoryName?.toLowerCase() === category)
+          && (!category || [product.categoryName ?? "", ...(product.categoryName ?? "").split(" › ")].some((name) => name.toLowerCase() === category))
           && (!onlyClean || reviewProblems(product).length === 0));
         if (matched.length === 0) return refused(onlyClean ? "No clean product is waiting in the review queue." : "No product matching that is waiting in the review queue.");
         link(book, "Catalog review", "/admin/catalog/review");
@@ -293,9 +293,14 @@ export function workflowTools(ctx: ToolContext) {
           }
         }
 
-        const categories = await listCatalogCategories();
-        const category = input.category ? categories.find((row) => row.name.toLowerCase() === input.category!.trim().toLowerCase()) : null;
-        if (input.category && !category) return refused(`No category is called ${input.category}. Categories: ${categories.map((row) => row.name).join(", ")}.`);
+        const aisles = await listCatalogCategories();
+        // A product sits in a subcategory, or in an aisle that has none (#861).
+        const categories = aisles.flatMap((aisle) => aisle.subcategories.length ? aisle.subcategories : [aisle]);
+        const wanted = input.category?.trim().toLowerCase();
+        const category = wanted ? categories.find((row) => row.name.toLowerCase() === wanted) : null;
+        const aisle = wanted && !category ? aisles.find((row) => row.name.toLowerCase() === wanted) : null;
+        if (aisle) return refused(`${aisle.name} has subcategories; pick one: ${aisle.subcategories.map((row) => row.name).join(", ")}.`);
+        if (input.category && !category) return refused(`No subcategory is called ${input.category}. Aisles and their subcategories: ${aisles.map((row) => row.subcategories.length ? `${row.name} (${row.subcategories.map((sub) => sub.name).join(", ")})` : row.name).join("; ")}.`);
         const categoryId = category?.id ?? current?.categoryId ?? null;
         if (!categoryId) return { drafted: false, missing: ["category"], reason: "Ask the admin which category it goes in." };
         const description = input.description?.trim() ?? current?.description ?? null;
