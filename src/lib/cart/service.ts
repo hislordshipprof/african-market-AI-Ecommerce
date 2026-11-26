@@ -618,7 +618,7 @@ export async function getCartWithLines(
           variant: {
             include: {
               listing: {
-                include: { masterProduct: { include: { category: { select: { slug: true } } } } },
+                include: { masterProduct: { include: { category: { select: { slug: true, parent: { select: { slug: true } } } } } } },
               },
             },
           },
@@ -642,7 +642,7 @@ export async function getCartWithLines(
       swapRule: line.swapRule as SwapRuleValue,
       substituteVariantId: line.substituteVariantId,
       imageUrl: photo?.imageUrl || undefined,
-      categorySlug: line.variant.listing.masterProduct?.category?.slug,
+      categorySlug: line.variant.listing.masterProduct?.category?.parent?.slug ?? line.variant.listing.masterProduct?.category?.slug,
       variant: {
         id: line.variant.id,
         label: shownPack(line.variant).label,

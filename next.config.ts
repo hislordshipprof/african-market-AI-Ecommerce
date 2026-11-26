@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { OLD_AISLE_SLUGS } from "./src/lib/catalog/category-tree";
 import { CSV_ACTION_BODY_LIMIT_BYTES } from "./src/lib/listing/csv-file-cap";
 import { staticSecurityHeaders } from "./src/lib/security/headers";
 
@@ -14,6 +15,14 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: CSV_ACTION_BODY_LIMIT_BYTES,
     },
+  },
+  // Aisles #861 renamed or retired keep their links and search ranking with a permanent redirect.
+  async redirects() {
+    return Object.entries(OLD_AISLE_SLUGS).map(([from, to]) => ({
+      source: `/categories/${from}`,
+      destination: `/categories/${to}`,
+      statusCode: 301 as const,
+    }));
   },
   async headers() {
     const headers = staticSecurityHeaders();

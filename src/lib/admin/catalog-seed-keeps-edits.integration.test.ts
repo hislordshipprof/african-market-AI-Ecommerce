@@ -64,7 +64,7 @@ type Column = (typeof HEADER)[number];
 function csvRow(id: string, over: Partial<Record<Column, string>> = {}): Record<Column, string> {
   const base = Object.fromEntries(HEADER.map((column) => [column, ""])) as Record<Column, string>;
   return {
-    ...base, id, english_name: `${RUN} ${id}`, category: "tubers", unit: "kg", storage: "ambient", perishable: "yes",
+    ...base, id, english_name: `${RUN} ${id}`, category: "yam", unit: "kg", storage: "ambient", perishable: "yes",
     description: "Seeded text", confidence: "high", ...over,
   };
 }
@@ -176,7 +176,7 @@ describe("master catalog seed keeps admin changes (lane DB)", () => {
     const untouched = `${RUN}-plantain`;
     await seed([csvRow(edited), csvRow(untouched)]);
 
-    const saved = await saveMasterProduct({}, await editorForm(edited, { name: `${RUN} Yam (admin)`, description: "Admin text", categoryId: "cat_grains" }));
+    const saved = await saveMasterProduct({}, await editorForm(edited, { name: `${RUN} Yam (admin)`, description: "Admin text", categoryId: "sub_garri_cassava_flour" }));
     expect(saved).toMatchObject({ ok: true, message: "Saved" });
 
     const added = `${RUN}-cassava`;
@@ -187,9 +187,9 @@ describe("master catalog seed keeps admin changes (lane DB)", () => {
     ]);
 
     expect(await readProduct(edited)).toMatchObject({
-      name: `${RUN} Yam (admin)`, description: "Admin text", categoryId: "cat_grains", unit: "piece", status: "active",
+      name: `${RUN} Yam (admin)`, description: "Admin text", categoryId: "sub_garri_cassava_flour", unit: "piece", status: "active",
     });
-    expect(await readProduct(untouched)).toMatchObject({ name: `${RUN} Plantain v2`, description: "Seeded text v2", categoryId: "cat_tubers" });
+    expect(await readProduct(untouched)).toMatchObject({ name: `${RUN} Plantain v2`, description: "Seeded text v2", categoryId: "sub_yam" });
     expect(await readProduct(added)).toMatchObject({ name: `${RUN} ${added}`, status: "active" });
     expect(lines).toContain("Kept admin changes on 1 product (the fields, status and synonyms an admin changed)");
   });

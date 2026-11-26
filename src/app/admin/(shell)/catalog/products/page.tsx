@@ -46,7 +46,7 @@ export default async function MasterProductsPage(props: { searchParams: Promise<
           <input id="q" name="q" type="search" defaultValue={filters.q ?? ""} maxLength={200} placeholder="Egusi, gari, palm oil…" autoComplete="off" spellCheck={false} className={FIELD} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <FilterSelect id="category" label="Category" value={filters.category} options={categories.map((c) => ({ value: c.id, label: c.name }))} />
+          <FilterSelect id="category" label="Category" value={filters.category} options={categories.flatMap((aisle) => [{ value: aisle.id, label: aisle.name }, ...aisle.subcategories.map((sub) => ({ value: sub.id, label: `${aisle.name} › ${sub.name}` }))])} />
           <FilterSelect id="status" label="Status" value={filters.status} options={MASTER_STATUSES.map((s) => ({ value: s, label: MASTER_STATUS_LABELS[s] }))} />
           <FilterSelect id="photo" label="Photo" value={filters.photo} anyLabel="With or without" options={[{ value: "missing", label: "Missing photo" }]} />
           <FilterSelect

@@ -18,7 +18,7 @@ import { storeUrl } from "./urls";
  * no time, provider-key or payment logic. E19 is the newer-intent recovery test.
  */
 const base = storeUrl("mama-ngozi");
-const grains = `${base}/categories/grains-and-flours`;
+const grains = `${base}/categories/fufu-flours-and-swallow`;
 const spices = `${base}/categories/spices-and-seasonings`;
 
 function garri(page: Page) {
@@ -3328,7 +3328,7 @@ test("cart recovery works with production Vercel flags and no provider keys", as
     healthOk: (status) => status === 200 || status === 503,
   });
   try {
-    await page.goto(`${origin}/categories/grains-and-flours`);
+    await page.goto(`${origin}/categories/fufu-flours-and-swallow`);
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     await expect(page.getByRole("heading", { name: "The market could not load" })).toHaveCount(0);
     await garri(page).getByTestId("quick-add-btn").click();

@@ -102,7 +102,7 @@ export default async function StorefrontPage() {
     .filter((l) => l.imageUrl && l.badge !== "ask-store" && !l.frozen)
     .slice(0, 10);
   const fresh = all.filter((l) => l.perishable && !l.frozen).slice(0, 10);
-  const pantry = rails.find((r) => r.categorySlug === "grains-and-flours");
+  const pantry = rails.find((r) => r.categorySlug === "fufu-flours-and-swallow");
   const demo = demoFlowsEnabled(process.env) && ["mama-ngozi", "tante-marie"].includes(store.slug);
   const subjects = ["Plantain", "Scotch Bonnet Pepper", "Yam"].flatMap(name => all.filter(p => p.displayName === name)).slice(0, 3);
   return (
@@ -138,14 +138,14 @@ export default async function StorefrontPage() {
           title={demo ? "Fresh in" : "Fresh ingredients"}
           description="Something good for tonight's pot."
           listings={fresh}
-          seeAllHref="/categories/vegetables"
+          seeAllHref="/categories/fresh-produce"
         />
         {pantry && (
           <ProductRail
             title="Pantry, sorted."
             description="Everyday staples worth keeping close."
             listings={pantry.listings}
-            seeAllHref="/categories/grains-and-flours"
+            seeAllHref="/categories/fufu-flours-and-swallow"
           />
         )}
         <ProductRail title={demo ? "Back in stock" : "Available today"} description={demo ? "Sample restocked picks from the demo shelves." : "Available on the shelves today."} listings={all.filter(l => l.badge === "in-stock").slice(-8)} seeAllHref="/categories" seeAllLabel="See all aisles" />

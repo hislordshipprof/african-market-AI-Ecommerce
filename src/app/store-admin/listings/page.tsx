@@ -4,13 +4,14 @@ import { platform } from "@/lib/db";
 import { catalogStorageConfigured } from "@/lib/catalog-image";
 import { listingImage } from "@/lib/storefront/images";
 import { ListingManagement } from "./listing-management";
+import { aisleChoices } from "@/lib/catalog/category-tree";
 
 /** Every member sees Products; staff only update stock, and the server actions hold to that (#784). */
 export default async function ListingsPage() {
   const session = await requireStoreMember();
   const [listings, aisles] = await Promise.all([
     listListings(session.store.id, true),
-    platform.category.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true, name: true } }),
+    platform.category.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true, parentId: true } }).then(aisleChoices),
   ]);
 
   return (

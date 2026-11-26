@@ -303,10 +303,18 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       expect(result).toMatchObject({ drafted: false, existing: expect.arrayContaining([expect.objectContaining({ id: product.clean1, name: `Ofada rice ${RUN}` })]) });
     });
 
+    // #861: a product sits in a subcategory, so an aisle that has subcategories is refused with their names.
+    it("refuses an aisle that has subcategories and names them", async () => {
+      signInAs(admin);
+      const { result, cards } = await draft("draft_product", { name: `Fonio ${RUN}`, category: `Grains ${RUN}`, size: "1 lb", notDuplicate: true });
+      expect(cards).toEqual([]);
+      expect(result).toMatchObject({ drafted: false, reason: `Grains ${RUN} has subcategories; pick one: Flours ${RUN}, Rice and grains ${RUN}.` });
+    });
+
     it("refuses a description with a health claim, a price or an origin the product data does not give", async () => {
       signInAs(admin);
       for (const description of ["Egusi seeds that boost your immune system.", "Egusi seeds, only $4.99 a bag.", "Egusi seeds grown in Ghana."]) {
-        const { result, cards } = await draft("draft_product", { name: `Egusi seeds ${RUN}`, category: `Grains ${RUN}`, size: "1 lb", description, notDuplicate: true });
+        const { result, cards } = await draft("draft_product", { name: `Egusi seeds ${RUN}`, category: `Rice and grains ${RUN}`, size: "1 lb", description, notDuplicate: true });
         expect(cards, description).toEqual([]);
         expect(result, description).toMatchObject({ drafted: false, reason: expect.stringContaining("The description has") });
       }
@@ -316,7 +324,7 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       signInAs(admin);
       const name = `Egusi seeds ${RUN}`;
       const { cards } = await draft("draft_product", {
-        name, category: `Grains ${RUN}`, size: "1 lb", description: "Ground melon seeds for egusi soup.", synonyms: [{ term: "agusi", language: "tw" }], notDuplicate: true,
+        name, category: `Rice and grains ${RUN}`, size: "1 lb", description: "Ground melon seeds for egusi soup.", synonyms: [{ term: "agusi", language: "tw" }], notDuplicate: true,
       });
       expect(cards[0]).toMatchObject({ title: "Create a catalogue product", acceptsPhoto: true });
       expect(cards[0]!.steps).toEqual(["Save the product", "Add 1 synonym", "Upload the photo, if you attach one"]);
@@ -327,7 +335,7 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       const result = await confirmAdminAssistantDraft(data);
       expect(result).toMatchObject({ ok: true, draft: { state: "confirmed" } });
       const created = await platformAdmin.masterProduct.findFirstOrThrow({ where: { name }, include: { synonyms: true } });
-      expect(created).toMatchObject({ categoryId: cat.parent, unit: "1 lb", description: "Ground melon seeds for egusi soup.", status: "active" });
+      expect(created).toMatchObject({ categoryId: cat.child, unit: "1 lb", description: "Ground melon seeds for egusi soup.", status: "active" });
       expect(created.synonyms.map((row) => row.term)).toEqual(["agusi"]);
       // No photo storage in tests: the upload's own refusal shows that the photo went through it.
       expect((result as { draft: AdminDraftCard }).draft.outcome).toMatch(/Step 3 did not run: (Upload a JPEG|Photo storage)/);
@@ -338,7 +346,7 @@ describe.skipIf(!hasDb)("platform admin assistant workflows at the tool and conf
       signInAs(admin);
       const name = `Ugu leaves ${RUN}`;
       const { cards } = await draft("draft_product", {
-        name, category: `Grains ${RUN}`, size: "200 g", description: "Dried fluted pumpkin leaves.", synonyms: [{ term: "fluted pumpkin", language: "en" }], notDuplicate: true,
+        name, category: `Rice and grains ${RUN}`, size: "200 g", description: "Dried fluted pumpkin leaves.", synonyms: [{ term: "fluted pumpkin", language: "en" }], notDuplicate: true,
       });
       synonymFault.callsBeforeThrow = 0;
 

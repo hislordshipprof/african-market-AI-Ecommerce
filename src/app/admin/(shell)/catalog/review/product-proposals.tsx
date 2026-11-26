@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { CircleAlert, ImageOff, Search } from "lucide-react";
 import { listMasterCatalog, type CatalogRow } from "@/lib/admin/master-catalog";
 import { approveProductProposal, rejectProductProposal, type ProductProposalRow } from "@/lib/admin/product-proposals";
+import type { AisleChoice } from "@/lib/catalog/category-tree";
+import { CategoryOptions } from "../category-options";
 
 type Mode = "create" | "link" | "reject";
 
@@ -29,7 +31,7 @@ export function ProductProposals({
   categories,
 }: {
   proposals: ProductProposalRow[];
-  categories: Array<{ id: string; name: string }>;
+  categories: AisleChoice[];
 }) {
   if (proposals.length === 0) {
     return (
@@ -47,7 +49,7 @@ export function ProductProposals({
   );
 }
 
-function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; categories: Array<{ id: string; name: string }> }) {
+function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; categories: AisleChoice[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [mode, setMode] = useState<Mode>("create");
@@ -175,9 +177,7 @@ function ProposalCard({ proposal, categories }: { proposal: ProductProposalRow; 
             Category
             <select id={id("category")} className={FIELD} value={fields.categoryId} onChange={(event) => setFields({ ...fields, categoryId: event.target.value })}>
               <option value="">No category</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>{category.name}</option>
-              ))}
+              <CategoryOptions aisles={categories} />
             </select>
           </label>
           <div className="flex flex-wrap items-center justify-end gap-3 sm:col-span-2">

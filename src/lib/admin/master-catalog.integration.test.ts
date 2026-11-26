@@ -285,6 +285,9 @@ describe("master catalog (real sessions, lane DB)", () => {
 
       const badCategory = await saveMasterProduct({}, editorForm(id, { version, name: `${RUN} Garri white`, categoryId: "no-such-category" }));
       expect(badCategory.fieldErrors?.categoryId).toBeTruthy();
+      // #861: a product picks a subcategory; its aisle follows from it.
+      const aisle = await saveMasterProduct({}, editorForm(id, { version, name: `${RUN} Garri white`, categoryId: "cat_health_wellness" }));
+      expect(aisle.fieldErrors?.categoryId).toBe("Choose a subcategory of Health & Wellness");
       expect(await readProduct(id)).toEqual(before);
       expect(await editAudits(id)).toHaveLength(0);
     });

@@ -42,7 +42,7 @@ test.describe("Storefront redesign interactions", () => {
   test("quick add expands, updates cart count and creates a drawer line", async ({
     page,
   }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     const addableCard = page
       .getByTestId("listing-card")
       .filter({ has: page.locator("[data-testid=quick-add-btn]:enabled") })
@@ -77,7 +77,7 @@ test.describe("Storefront redesign interactions", () => {
   test("category in-stock filter only shows in-stock cards", async ({
     page,
   }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     await page.getByTestId("filter-in-stock").click();
     await expect(page).toHaveURL(/stock=1/);
     await expect(page.getByTestId("filter-in-stock")).toHaveAttribute(
@@ -89,13 +89,13 @@ test.describe("Storefront redesign interactions", () => {
     for (const badge of await badges.all())
       await expect(badge).toHaveText("In stock");
     await page.getByTestId("clear-filters").first().click();
-    await expect(page).toHaveURL(`${BASE}/categories/grains-and-flours`);
+    await expect(page).toHaveURL(`${BASE}/categories/fufu-flours-and-swallow`);
   });
 
   test("category frozen and pack filters reflect actual product metadata", async ({
     page,
   }) => {
-    await page.goto(`${BASE}/categories/vegetables`);
+    await page.goto(`${BASE}/categories/fresh-produce`);
     await page.getByTestId("filter-frozen").click();
     await expect(page).toHaveURL(/frozen=1/);
     const cards = page.getByTestId("listing-card");
@@ -160,7 +160,7 @@ test.describe("Storefront redesign interactions", () => {
         return !!hit && el.contains(hit);
       });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`${BASE}/categories/grains-and-flours`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`, { waitUntil: "networkidle" });
     const header = page.getByTestId("storefront-header");
 
     await page.locator(".sf-window-chip").click();
@@ -177,7 +177,7 @@ test.describe("Storefront redesign interactions", () => {
   test("pack selection changes displayed price and cart pack", async ({
     page,
   }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     await page
       .getByTestId("listing-card")
       .filter({ hasText: "Garri" })
@@ -209,7 +209,7 @@ test.describe("Storefront redesign interactions", () => {
   });
 
   test("the product page asks for the pack before the add (#708 P2)", async ({ page }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     await page.getByTestId("listing-card").filter({ hasText: "Garri" }).first().locator(".sf-product-name").click();
     const detail = page.getByTestId("product-detail");
     await expect(detail.getByTestId("pack-option").nth(1)).toBeVisible();
@@ -265,7 +265,7 @@ test.describe("phone occlusion (#708 P1, #717 AC5)", () => {
     a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
   test("Shop with AI never covers card copy or quick add while the grid scrolls", async ({ page }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     const launcher = page.getByTestId("assistant-launcher");
     await expect(launcher).toBeVisible();
     await expect(page.getByTestId("listing-card").first()).toBeVisible();
@@ -285,7 +285,7 @@ test.describe("phone occlusion (#708 P1, #717 AC5)", () => {
   });
 
   test("the first basket line is clear of the checkout bar and nav at the top of the page", async ({ page }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
+    await page.goto(`${BASE}/categories/fufu-flours-and-swallow`);
     const card = page.getByTestId("listing-card").filter({ hasText: "Yellow Garri" }).first();
     await card.getByTestId("quick-add-btn").click();
     await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden({ timeout: 20_000 });

@@ -12,7 +12,7 @@ function placeholder(scope: Locator) {
 
 test.describe("#742: one placeholder for a product with no photo", () => {
   test("the quick view, the basket drawer and the pick list show the same placeholder", async ({ page }, testInfo) => {
-    await page.goto(`${storeUrl("mama-ngozi")}/categories/grains-and-flours`);
+    await page.goto(`${storeUrl("mama-ngozi")}/categories/rice-grains-and-beans`);
     const card = page.getByTestId("listing-card").filter({ hasText: PRODUCT }).first();
     await card.hover();
     await card.getByRole("button", { name: `Quick view ${PRODUCT}` }).click();

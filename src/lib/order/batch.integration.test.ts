@@ -118,8 +118,10 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
     await platformAdminTransaction(async (tx) => {
       await tx.storeSubscription.create({ data: { storeId, plan: "pro", status: "active" } });
       categoryId = (await tx.category.create({ data: { name: `Soup ${RUN}`, slug: `soup-${RUN}`, sortOrder: 99 } })).id;
+      // A subcategory picks in its aisle's zone (#861).
+      const sub = await tx.category.create({ data: { name: `Soup seeds ${RUN}`, slug: `soup-seeds-${RUN}`, sortOrder: 1, parentId: categoryId } });
       for (const name of ["Egusi", "Ogbono"]) {
-        masterIds.push((await tx.masterProduct.create({ data: { name: `${name} ${RUN}`, categoryId } })).id);
+        masterIds.push((await tx.masterProduct.create({ data: { name: `${name} ${RUN}`, categoryId: sub.id } })).id);
       }
     });
     v.egusi = await variant(storeId, "Egusi", 1000, { master: masterIds[0] });
@@ -155,6 +157,7 @@ describe.skipIf(!hasDb)("batch picking (#564, lane DB)", () => {
       await tx.auditLog.deleteMany({ where: { storeId: { in: [storeId, storeBId] } } });
       await tx.storeSubscription.deleteMany({ where: { storeId } });
       await tx.masterProduct.deleteMany({ where: { id: { in: masterIds } } });
+      await tx.category.deleteMany({ where: { parentId: categoryId } });
       await tx.category.deleteMany({ where: { id: categoryId } });
     });
     await raw.store.deleteMany({ where: { id: { in: [storeId, storeBId] } } });

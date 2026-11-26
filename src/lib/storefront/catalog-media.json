@@ -466,5 +466,14 @@
     "source": "https://commons.wikimedia.org/wiki/File:Raw_oxtail-01.jpg",
     "author": "FotoosVanRobin",
     "license": "CC BY-SA 2.0"
+  },
+  "aboniki balm": {
+    "catalogId": "aboniki-balm",
+    "localNames": "",
+    "description": "Menthol and methyl salicylate rubbing balm for aches and colds.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/1c/ABONIKI_BALM.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:ABONIKI_BALM.jpg",
+    "author": "Abdsomod",
+    "license": "CC0"
   }
 }

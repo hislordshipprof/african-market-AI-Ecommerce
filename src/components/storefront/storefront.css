@@ -1293,6 +1293,9 @@ html:has(.sf-header) {
   margin-bottom: 20px;
   flex-wrap: wrap;
 }
+.sf-filter-subrow.sf-subcategory-row {
+  margin-top: 16px;
+}
 .sf-search-results {
   list-style: none;
 }

@@ -13,9 +13,9 @@ test.describe("search box suggests as you type (#835)", () => {
     const palmOil = searches.getByRole("option", { name: "palm oil" });
     await expect(palmOil).toBeVisible();
     await expect(palmOil.locator("strong")).toHaveText("m oil");
-    await expect(box.getByRole("group", { name: "Aisles" }).getByRole("option", { name: "Oils & Butters" })).toHaveAttribute(
+    await expect(box.getByRole("group", { name: "Aisles" }).getByRole("option", { name: "Oils, Sauces & Condiments" })).toHaveAttribute(
       "href",
-      "/categories/oils-and-butters",
+      "/categories/oils-sauces-and-condiments",
     );
     const products = box.getByRole("group", { name: "Products" });
     await expect(products.getByRole("option").first()).toContainText(/palm oil/i);

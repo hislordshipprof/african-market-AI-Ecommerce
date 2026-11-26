@@ -1,3 +1,4 @@
+import { OLD_AISLE_SLUGS } from "../catalog/category-tree";
 import { listingImage } from "../storefront/images";
 import { parse } from "csv-parse/sync";
 import { z } from "zod";
@@ -735,17 +736,38 @@ function aisleKey(text: string): string {
 }
 
 /**
- * Puts each row's category or aisle cell in a platform aisle, by name or slug, ignoring case and
- * "&" versus "and". A cell naming no aisle is a row error.
+ * Puts each row's category or aisle cell in a platform aisle or subcategory (#861), by name or slug,
+ * ignoring case and "&" versus "and": "Aisle > Subcategory", a subcategory alone, or an aisle. An old
+ * aisle's name finds the aisle it became. A cell naming none of them is a row error.
  */
 async function resolveAisles(parsed: ReturnType<typeof parseCsvText>): Promise<ReturnType<typeof parseCsvText>> {
   if (!parsed.rows.some((row) => row.aisleCell)) return parsed;
-  const categories = await platform.category.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true, name: true, slug: true } });
+  const categories = await platform.category.findMany({
+    orderBy: { sortOrder: "asc" },
+    select: { id: true, name: true, slug: true, parentId: true },
+  });
+  const byId = new Map(categories.map((category) => [category.id, category]));
   const byKey = new Map<string, { id: string; name: string }>();
+  const add = (key: string, category: (typeof categories)[number]) => {
+    const parent = category.parentId ? byId.get(category.parentId) : undefined;
+    const name = parent ? `${parent.name} > ${category.name}` : category.name;
+    if (!byKey.has(key)) byKey.set(key, { id: category.id, name });
+  };
   for (const category of categories) {
-    byKey.set(aisleKey(category.slug), { id: category.id, name: category.name });
-    byKey.set(aisleKey(category.name), { id: category.id, name: category.name });
+    const parent = category.parentId ? byId.get(category.parentId) : undefined;
+    if (parent) {
+      for (const aisleName of [parent.name, parent.slug]) {
+        for (const subName of [category.name, category.slug]) add(`${aisleKey(aisleName)} > ${aisleKey(subName)}`, category);
+      }
+    }
+    add(aisleKey(category.slug), category);
+    add(aisleKey(category.name), category);
   }
+  for (const [oldSlug, newSlug] of Object.entries(OLD_AISLE_SLUGS)) {
+    const aisle = categories.find((category) => category.slug === newSlug);
+    if (aisle) add(aisleKey(oldSlug), aisle);
+  }
+  const cellKey = (cell: string) => cell.split(/\s*[>/]\s*/).map(aisleKey).join(" > ");
   const rows: ParsedRow[] = [];
   const errors = [...parsed.errors];
   for (const row of parsed.rows) {
@@ -753,12 +775,12 @@ async function resolveAisles(parsed: ReturnType<typeof parseCsvText>): Promise<R
       rows.push(row);
       continue;
     }
-    const aisle = byKey.get(aisleKey(row.aisleCell));
+    const aisle = byKey.get(cellKey(row.aisleCell));
     if (aisle) rows.push({ ...row, aisle });
     else errors.push({
       row: row.row,
       csvName: row.name,
-      reason: `Unknown aisle: "${row.aisleCell}". Use one of: ${categories.map((category) => category.name).join(", ")}.`,
+      reason: `Unknown aisle: "${row.aisleCell}". Use an aisle, or "Aisle > Subcategory": ${categories.filter((category) => !category.parentId).map((category) => category.name).join(", ")}.`,
     });
   }
   errors.sort((a, b) => a.row - b.row);

@@ -10,6 +10,8 @@ import { resolveDirectUrl } from "../env";
 
 const MIGRATIONS = path.resolve(__dirname, "../../../prisma/migrations");
 const TAX_MIGRATION = "20261118120000_sales_tax";
+// #861 rebuilt the aisles afterwards; this test reads the slugs the backfill left.
+const CATEGORY_TREE_MIGRATION = "20261208000000_category_tree_16_aisles";
 const SCHEMA = `tmp_t65_taxcode_${process.pid}`;
 const REPLAY_LOCK = 199031030;
 const FOOD = "txcd_40040000";
@@ -43,7 +45,7 @@ describe.skipIf(!directUrl)("category tax code backfill under forced RLS (#65)",
       await client.query(`CREATE SCHEMA ${SCHEMA}`);
       await client.query(`GRANT USAGE ON SCHEMA ${SCHEMA} TO app_user`);
       await client.query(`SET search_path = ${SCHEMA}, public`);
-      const dirs = fs.readdirSync(MIGRATIONS).filter((dir) => /^\d/.test(dir)).sort();
+      const dirs = fs.readdirSync(MIGRATIONS).filter((dir) => /^\d/.test(dir) && dir < CATEGORY_TREE_MIGRATION).sort();
       for (const dir of dirs) {
         if (dir === TAX_MIGRATION) {
           // Categories the platform admin added after the first ten (seed.ts names, as on preview).

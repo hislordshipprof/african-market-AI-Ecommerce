@@ -136,8 +136,8 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
   // #782 AC1: a custom listing has an aisle the owner picks and can change.
   it("stores and changes the aisle of a custom listing", async () => {
     const [oils, spices] = await Promise.all([
-      rawPrisma.category.findUniqueOrThrow({ where: { slug: "oils-and-butters" } }),
-      rawPrisma.category.findUniqueOrThrow({ where: { slug: "spices-and-seasonings" } }),
+      rawPrisma.category.findUniqueOrThrow({ where: { slug: "palm-oil" } }),
+      rawPrisma.category.findUniqueOrThrow({ where: { slug: "ground-spices" } }),
     ]);
     const listing = await createListing({
       storeId,
