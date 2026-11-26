@@ -88,10 +88,10 @@ export function AdminShell({ data, children }: { data: ShellData | null; childre
   // The layout is not rendered again on client navigation, so the counts are fetched per page.
   const firstPath = useRef(pathname);
   useEffect(() => {
-    if (pathname === firstPath.current || !dataRef.current) return;
+    if (pathname === firstPath.current || !dataRef.current || isBarePath(pathname)) return;
     let live = true;
     shellCountsAction()
-      .then((fresh) => live && setFetched({ after: dataRef.current, counts: fresh }))
+      .then((fresh) => live && fresh && setFetched({ after: dataRef.current, counts: fresh }))
       .catch(() => {});
     return () => {
       live = false;

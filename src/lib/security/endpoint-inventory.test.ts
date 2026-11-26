@@ -16,7 +16,7 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/delivery/driver-link-actions.ts",
   "src/lib/directory/request-actions.ts",
 ]);
-const GUARDS = ["requireStoreOwner", "requireStoreMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
+const GUARDS = ["requireStoreOwner", "requireStoreMember", "storeMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
 const ROUTE_GUARDS = [...GUARDS, "platformAdminApiDenial", "platformAdminApiActor"];
 /** Route methods with no session guard. Each is public or checks its own secret, signature or token. */
 const PUBLIC_ROUTES = new Map<string, string>([
