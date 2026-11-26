@@ -100,7 +100,8 @@ export function StoreAdminDashboard({
   const date = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", month: "long", day: "numeric" }).format(
     new Date(`${home.today.day}T12:00:00Z`),
   );
-  const change = compareToLastWeek(home.today.salesCents, home.today.lastWeekCents);
+  const sales = home.sales;
+  const change = sales ? compareToLastWeek(sales.todayCents, sales.lastWeekCents) : null;
   const weekday = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(new Date(`${home.today.day}T12:00:00Z`));
   const summary = [
     openNow === null ? null : openNow ? "Store open now." : "Store closed now.",
@@ -163,19 +164,25 @@ export function StoreAdminDashboard({
         </div>
       )}
 
-      <section aria-label="Today" className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border lg:grid-cols-4" data-testid="today-strip">
-        <Stat label="Sales today" value={money(home.today.salesCents)} testId="stat-sales">
-          {change === null ? (
-            <span>Nothing sold last {weekday}</span>
-          ) : (
-            <span className={`inline-flex items-center gap-1 ${change >= 0 ? "text-success" : "text-destructive"}`}>
-              {change >= 0 ? <TrendingUp className="size-3.5" aria-hidden /> : <TrendingDown className="size-3.5" aria-hidden />}
-              {Math.abs(change)}% {change >= 0 ? "up on" : "down on"} last {weekday}
-            </span>
-          )}
-        </Stat>
+      <section
+        aria-label="Today"
+        className={`grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border ${sales ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}
+        data-testid="today-strip"
+      >
+        {sales && (
+          <Stat label="Sales today" value={money(sales.todayCents)} testId="stat-sales">
+            {change === null ? (
+              <span>Nothing sold last {weekday}</span>
+            ) : (
+              <span className={`inline-flex items-center gap-1 ${change >= 0 ? "text-success" : "text-destructive"}`}>
+                {change >= 0 ? <TrendingUp className="size-3.5" aria-hidden /> : <TrendingDown className="size-3.5" aria-hidden />}
+                {Math.abs(change)}% {change >= 0 ? "up on" : "down on"} last {weekday}
+              </span>
+            )}
+          </Stat>
+        )}
         <Stat label="Orders" value={home.today.orders.toLocaleString("en-US")} testId="stat-orders">
-          {home.today.orders > 0 ? `Average basket ${money(home.today.averageBasketCents)}` : "Paid orders today"}
+          {sales && home.today.orders > 0 ? `Average basket ${money(sales.averageBasketCents)}` : "Paid orders today"}
         </Stat>
         <Stat label="To pack" value={home.toPack.total.toLocaleString("en-US")} testId="stat-to-pack">
           {home.toPack.fresh} new, {home.toPack.packing} packing
@@ -285,7 +292,7 @@ export function StoreAdminDashboard({
             </Card>
           )}
 
-          <WeekChart week={home.week} store={store} isOwner={isOwner} />
+          {sales && <WeekChart week={sales.week} store={store} />}
 
           {isOwner && (
             <Card className="gap-3 px-4 sm:px-5" data-testid="this-month">
@@ -365,7 +372,7 @@ function Stat({ label, value, testId, children }: { label: string; value: string
   );
 }
 
-function WeekChart({ week, store, isOwner }: { week: StoreHome["week"]; store: string; isOwner: boolean }) {
+function WeekChart({ week, store }: { week: NonNullable<StoreHome["sales"]>["week"]; store: string }) {
   const max = Math.max(...week.map((day) => day.salesCents), 1);
   const total = week.reduce((sum, day) => sum + day.salesCents, 0);
   const label = (day: string, style: "narrow" | "long") =>
@@ -397,11 +404,9 @@ function WeekChart({ week, store, isOwner }: { week: StoreHome["week"]; store: s
           );
         })}
       </ol>
-      {isOwner && (
-        <Link href={`/store-admin/analytics${store}`} className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">
-          Open analytics
-        </Link>
-      )}
+      <Link href={`/store-admin/analytics${store}`} className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">
+        Open analytics
+      </Link>
     </Card>
   );
 }

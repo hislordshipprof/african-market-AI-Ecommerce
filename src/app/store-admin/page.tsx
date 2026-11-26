@@ -45,13 +45,13 @@ async function goLiveItems(storeId: string, storeSlug: string, isOwner: boolean)
 export default async function StoreAdminPage() {
   const session = await requireStoreMember();
   const now = new Date();
+  const isOwner = session.membership.role === "owner";
   const [unreadMessages, billing, directoryOrders, home] = await Promise.all([
     storeUnreadCount(session.store.id),
     getStoreBilling(session.store.id),
     directoryOrderCount(session.store.id),
-    storeHome(session.store.id, session.store.timezone, now),
+    storeHome(session.store.id, session.store.timezone, now, { sales: isOwner }),
   ]);
-  const isOwner = session.membership.role === "owner";
   const usage = isOwner ? await assistantChatUsage(session.store.id, billing.plan) : null;
   const goLive = session.store.status === "setup" ? await goLiveItems(session.store.id, session.store.slug, isOwner) : null;
   const host = (await headers()).get("host");

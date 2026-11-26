@@ -146,11 +146,22 @@ test.describe.serial("Store admin dashboard (#784)", () => {
     await page.click("button[type='submit']");
     await page.waitForURL((url) => url.pathname === "/store-admin/two-factor", { timeout: 15_000 });
     await page.getByRole("link", { name: "Remind me later" }).click();
-    await page.waitForURL((url) => url.pathname === "/store-admin", { timeout: 15_000 });
+    // The page asked for survives sign-in: the shell's background count fetch never navigates (#797).
+    await page.waitForURL((url) => url.pathname === "/store-admin/listings", { timeout: 15_000 });
 
     await expect(shell.getByText("Ada Staff")).toBeVisible();
     await expect(shell.getByRole("navigation").getByRole("link")).toHaveCount(4);
     await expect(shell.getByRole("link", { name: "Payouts" })).toHaveCount(0);
+
+    // Store revenue is the owner's: staff Home has the counts but no sales, average basket or week chart.
+    // A full load, so the page's server payload is in the HTML and can be checked for sales fields.
+    await page.goto(`/store-admin?store=${slug}`);
+    await expect(page.getByTestId("stat-to-pack")).toBeVisible();
+    await expect(page.getByTestId("stat-orders")).toBeVisible();
+    await expect(page.getByTestId("stat-sales")).toHaveCount(0);
+    await expect(page.getByTestId("week-chart")).toHaveCount(0);
+    await expect(page.getByTestId("stat-orders")).not.toContainText("Average basket");
+    expect(await page.content()).not.toContain("salesCents");
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.waitForURL((url) => url.pathname === "/store-admin/sign-in", { timeout: 15_000 });
   });

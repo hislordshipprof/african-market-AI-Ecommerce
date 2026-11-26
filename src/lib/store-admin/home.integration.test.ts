@@ -79,15 +79,22 @@ describe.skipIf(!hasDb)("store admin Home and search (#860)", () => {
   });
 
   it("counts today's sales against the same weekday last week, from this store only", async () => {
-    const home = await storeHome(storeA, TZ, now);
-    expect(home.today).toMatchObject({ day: "2026-11-25", salesCents: 8000, lastWeekCents: 4000, orders: 2, averageBasketCents: 4000 });
-    expect(home.week).toHaveLength(7);
-    expect(home.week[6]).toEqual({ day: "2026-11-25", salesCents: 8000 });
-    expect(home.week[0].day).toBe("2026-11-19");
+    const home = await storeHome(storeA, TZ, now, { sales: true });
+    expect(home.today).toEqual({ day: "2026-11-25", orders: 2 });
+    expect(home.sales).toMatchObject({ todayCents: 8000, lastWeekCents: 4000, averageBasketCents: 4000 });
+    expect(home.sales?.week).toHaveLength(7);
+    expect(home.sales?.week[6]).toEqual({ day: "2026-11-25", salesCents: 8000 });
+    expect(home.sales?.week[0].day).toBe("2026-11-19");
+  });
+
+  it("leaves the money out for staff: they get today's order count but no sales (owner-only, platform-spec §3)", async () => {
+    const home = await storeHome(storeA, TZ, now, { sales: false });
+    expect(home.today).toEqual({ day: "2026-11-25", orders: 2 });
+    expect(home.sales).toBeNull();
   });
 
   it("counts orders to pack, new orders with the oldest first, swaps, and running-low products", async () => {
-    const home = await storeHome(storeA, TZ, now);
+    const home = await storeHome(storeA, TZ, now, { sales: true });
     expect(home.toPack).toEqual({ total: 4, fresh: 2, packing: 2 });
     expect(home.newOrders.count).toBe(2);
     expect(home.newOrders.oldestAt?.getTime()).toBe(now.getTime() - 27 * 60_000);
@@ -97,7 +104,7 @@ describe.skipIf(!hasDb)("store admin Home and search (#860)", () => {
   });
 
   it("lists the five most recent orders, newest first", async () => {
-    const home = await storeHome(storeA, TZ, now);
+    const home = await storeHome(storeA, TZ, now, { sales: true });
     expect(home.recent).toHaveLength(5);
     expect(home.recent[0]).toMatchObject({ customerName: "Ada Obi", status: "AUTHORIZED", active: true, totalCents: 2000 });
   });

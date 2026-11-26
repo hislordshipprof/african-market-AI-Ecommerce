@@ -10,9 +10,15 @@ const RECENT_ORDERS = 5;
 const PACKING: readonly string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
 
 export interface StoreHome {
-  today: { day: string; salesCents: number; lastWeekCents: number; orders: number; averageBasketCents: number };
-  /** The last seven store days, oldest first, ending today. */
-  week: { day: string; salesCents: number }[];
+  today: { day: string; orders: number };
+  /** Store revenue, owner-only (platform-spec §3: analytics is the owner's); null for staff. */
+  sales: {
+    todayCents: number;
+    lastWeekCents: number;
+    averageBasketCents: number;
+    /** The last seven store days, oldest first, ending today. */
+    week: { day: string; salesCents: number }[];
+  } | null;
   toPack: { total: number; fresh: number; packing: number };
   newOrders: { count: number; oldestAt: Date | null };
   swaps: { id: string; number: number; customerName: string }[];
@@ -24,7 +30,7 @@ export interface StoreHome {
  * The Home page's numbers (#860). Sales are the Analytics page's goods revenue (captured orders, by store day),
  * so Home and Analytics never disagree.
  */
-export async function storeHome(storeId: string, timeZone: string, now: Date = new Date()): Promise<StoreHome> {
+export async function storeHome(storeId: string, timeZone: string, now: Date, options: { sales: boolean }): Promise<StoreHome> {
   const today = storeToday(timeZone, now);
   const range = { preset: "custom" as const, from: addDays(today, -7), to: today };
   const scoped = storeScoped(storeId);
@@ -52,14 +58,15 @@ export async function storeHome(storeId: string, timeZone: string, now: Date = n
     .filter(isRunningLow)
     .sort((a, b) => (a.qty ?? Infinity) - (b.qty ?? Infinity));
   return {
-    today: {
-      day: today,
-      salesCents: todays.goodsCents,
-      lastWeekCents: days[0].goodsCents,
-      orders: todays.orders,
-      averageBasketCents: todays.averageOrderCents,
-    },
-    week: days.slice(1).map((day) => ({ day: day.day, salesCents: day.goodsCents })),
+    today: { day: today, orders: todays.orders },
+    sales: options.sales
+      ? {
+          todayCents: todays.goodsCents,
+          lastWeekCents: days[0].goodsCents,
+          averageBasketCents: todays.averageOrderCents,
+          week: days.slice(1).map((day) => ({ day: day.day, salesCents: day.goodsCents })),
+        }
+      : null,
     toPack: { total: active.length, fresh: fresh.length, packing: active.length - fresh.length },
     newOrders: { count: fresh.length, oldestAt: fresh[0]?.createdAt ?? null },
     swaps: active
