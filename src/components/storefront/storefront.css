@@ -2301,7 +2301,7 @@ html:has(.sf-header) {
 .sf-popular-chip:hover { border-color: var(--color-ink); }
 
 /* Home: two rows of aisle cards; the last opens the whole tree. */
-.sf-home-aisles h2, .sf-cook h2 { margin-bottom: 16px; font-size: 26px; line-height: 1.2; }
+.sf-home-aisles h2, .sf-cook h2 { margin-bottom: 16px; font-family: var(--font-display); font-size: 26px; font-weight: 700; line-height: 1.2; }
 .sf-aisle-cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
 .sf-aisle-card {
   display: flex;
@@ -2350,7 +2350,7 @@ html:has(.sf-header) {
 .sf-dish-thumb .sf-product-image { width: 100%; height: 100%; }
 .sf-dish-more { display: grid; place-items: center; background: var(--color-raised); color: var(--muted-foreground); font-size: 14px; font-weight: 600; }
 .sf-dish-text { grid-area: text; min-width: 0; }
-.sf-dish-text h3 { font-size: 18px; line-height: 1.2; }
+.sf-dish-text h3 { font-family: var(--font-display); font-size: 18px; font-weight: 700; line-height: 1.2; }
 .sf-dish-text p { margin-top: 2px; color: var(--muted-foreground); font-size: 14px; }
 .sf-dish-price { color: var(--color-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sf-dish-add {

@@ -110,7 +110,7 @@ export default async function StorefrontPage() {
   const pantry = rails.find((r) => r.categorySlug === "fufu-flours-and-swallow");
   const demo = demoFlowsEnabled(process.env) && ["mama-ngozi", "tante-marie"].includes(store.slug);
   // What shoppers here order most; a store with no orders yet shows its own shelf names (#862 AC1).
-  const popular = (searched.length ? searched : favorites.map((l) => l.displayName))
+  const popular = (searched.length ? searched : all.filter((l) => l.badge === "in-stock").map((l) => l.displayName.replace(/\s*\(.*\)$/, "")))
     .map((name) => name.charAt(0).toUpperCase() + name.slice(1))
     .filter((name, i, names) => names.indexOf(name) === i)
     .slice(0, 7);
