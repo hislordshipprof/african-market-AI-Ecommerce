@@ -23,9 +23,19 @@
 .cartTrigger:focus-visible,
 .iconButton:focus-visible,
 .primaryButton:focus-visible,
-.mobileNav a:focus-visible {
+.mobileNav a:focus-visible,
+.mobileNav button:focus-visible {
   outline: 2px solid var(--color-ink);
   outline-offset: 3px;
+}
+/* The Aisles tab is a button that opens the aisle sheet (#862). */
+button.navLink,
+button.activeNav {
+  border: 0;
+  font-family: inherit;
+}
+button.navLink {
+  background: transparent;
 }
 .stepper {
   position: relative;
@@ -129,6 +139,17 @@
 }
 .sheet[data-closing="true"] {
   animation: leave 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+.sheetStart {
+  inset: 0 auto 0 0;
+  width: min(400px, 92vw);
+  box-shadow: 12px 0 40px #0003;
+}
+.sheetStart[open] {
+  animation-name: enterStart;
+}
+.sheetStart[data-closing="true"] {
+  animation-name: leaveStart;
 }
 .sheet::backdrop {
   background: #0006;
@@ -559,6 +580,22 @@
     transform: translateX(0);
   }
 }
+@keyframes enterStart {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes leaveStart {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
 @keyframes leave {
   from {
     transform: translateX(0);
@@ -664,5 +701,18 @@
   .cartTrigger {
     transition: none !important;
     transform: none !important;
+  }
+}
+/* On phones the aisle sheet rises from the bottom like every other sheet (#862). */
+@media (max-width: 767px) {
+  .sheetStart {
+    width: 100%;
+    box-shadow: 0 -8px 40px #0003;
+  }
+  .sheetStart[open] {
+    animation-name: enter;
+  }
+  .sheetStart[data-closing="true"] {
+    animation-name: leave;
   }
 }

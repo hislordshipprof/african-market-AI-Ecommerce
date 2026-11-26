@@ -40,11 +40,6 @@
 .sf-hero .sf-round-button { color:var(--sf-hero-text); background:color-mix(in srgb,var(--sf-hero-ink) 85%,transparent); border-color:#ffffff66; }
 .sf-hero :is(a,button):focus-visible { outline-color:#fff; }
 .sf-reassurance { min-height:76px; padding:22px 0; align-items:center; }
-.sf-category-rail { display:block; }
-.sf-category-rail .sf-rail-label { flex-direction:row; align-items:center; justify-content:space-between; padding:0 0 24px; }
-.sf-category-rail .sf-rail-label h2 { font-size:32px; }
-.sf-category-rail .sf-rail-arrows { margin:0; padding:0; }
-.sf-category-rail .sf-rail-label .sf-text-link { margin-top:0; }
 .sf-category-tile { flex:0 0 180px; scroll-snap-align:start; background:transparent; overflow:visible; }
 .sf-category-tile .sf-product-image { border-radius:50%; background:var(--color-photo-well); }
 .sf-category-tile > div:last-child { position:static; color:var(--color-ink); margin-top:16px; padding-inline:4px; align-items:center; }
@@ -184,8 +179,6 @@
   .sf-reassurance { min-height:60px; justify-content:center; flex-wrap:wrap; gap:8px 24px; padding:14px 0; font-size:13px; }
   .sf-reassurance span { flex-shrink:0; display:flex; }
   .sf-category-tile { flex-basis:142px; }
-  .sf-category-rail .sf-rail-label h2 { font-size:26px; }
-  .sf-category-rail .sf-rail-arrows { display:none; }
   .sf-category-tile strong,.sf-category-tile:first-child strong { font-size:15px; }
   .sf-rail-item { width:185px; }
   /* Narrow cards: no side padding, so photo, price and name share one left edge. */
@@ -236,14 +229,6 @@
 .sf-product-fallback svg { opacity:.72; }
 .sf-collection-rail .sf-collection-card { height:330px; min-width:0; }
 .sf-collection-rail .sf-collection-card > div:last-child { padding:20px; }
-.sf-market-band { padding-block:12px; background:var(--color-surface); color:var(--color-ink); border-block:1px solid var(--color-line); }
-.sf-market-window { overflow-x:auto; scrollbar-width:none; padding:6px var(--sf-page-padding); }
-.sf-market-track { display:flex; gap:24px; width:max-content; margin-inline:auto; }
-.sf-market-item { display:flex; align-items:center; gap:24px; flex-shrink:0; }
-.sf-market-item img { object-fit:contain; }
-.sf-market-chip { display:inline-flex; align-items:center; min-height:44px; padding:8px 20px; border:1px solid var(--color-line-strong); border-radius:999px; background:var(--color-surface); color:var(--color-ink); font:650 clamp(18px,2vw,26px)/1.2 var(--font-display); white-space:nowrap; }
-/* Focus resets the decorative offset, so every chip stays reachable by keyboard. */
-.sf-market-window:focus-within .sf-market-track { transform:none!important; }
 .sf-reveal-ready [data-sf-reveal] { transition:opacity var(--sf-reveal-duration) ease-out var(--sf-reveal-delay,0ms),transform var(--sf-reveal-duration) ease-out var(--sf-reveal-delay,0ms); }
 .sf-reveal-ready [data-sf-reveal]:not([data-revealed="true"]):not(:focus-within) { opacity:0; transform:translateY(var(--sf-reveal-rise)); }
 @media (min-width:1800px) { .sf-storefront { --sf-content-max:1536px; --sf-rail-count:5.5; } }
@@ -258,11 +243,7 @@
   .sf-collection-rail .sf-collection-card p { padding:0; font-size:14px; }
   /* Phones: the arrow sits under the text instead of over it. */
   .sf-collection-rail .sf-collection-card .sf-round-button { position:static; margin-top:10px; }
-  .sf-market-track,.sf-market-item { gap:16px; }
 }
 @media (prefers-reduced-motion:reduce) {
   .sf-reveal-ready [data-sf-reveal] { opacity:1!important; transform:none!important; transition:none!important; }
-  .sf-market-track { transform:none!important; width:auto; flex-wrap:wrap; justify-content:center; }
-  .sf-market-window { overflow:visible; }
-  .sf-market-item img { width:36px; height:36px; }
 }

@@ -10,6 +10,7 @@ export function Sheet({
   title,
   children,
   footer,
+  side = "end",
 }: {
   open: boolean;
   onClose: () => void;
@@ -17,6 +18,8 @@ export function Sheet({
   children: ReactNode;
   /** A fixed footer below the independently scrolling body (e.g. the cart summary, #708 AC1). */
   footer?: ReactNode;
+  /** "start" opens from the left on desktop (the aisle drawer, #862); both sides rise from the bottom on phones. */
+  side?: "start" | "end";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const restore = useRef<(() => void) | null>(null);
@@ -65,7 +68,7 @@ export function Sheet({
   return (
     <dialog
       ref={ref}
-      className={styles.sheet}
+      className={side === "start" ? `${styles.sheet} ${styles.sheetStart}` : styles.sheet}
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();

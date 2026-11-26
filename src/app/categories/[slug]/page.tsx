@@ -2,10 +2,12 @@ import { ProductListMotion } from "@/components/storefront/product-list-motion";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStore } from "@/lib/get-store";
-import { listingsByCategory, listCategories } from "@/lib/storefront/service";
+import { listingsByCategory } from "@/lib/storefront/service";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { ListingCard } from "@/components/storefront/listing-card";
 import { EmptyState } from "@/components/storefront/primitives";
+import { AislePicker, AisleTree } from "@/components/storefront/aisle-menu";
+import { FilterSheet } from "@/components/storefront/filter-sheet";
 type Query = Record<string, string | string[] | undefined>;
 export default async function CategoryPage({
   params,
@@ -19,10 +21,7 @@ export default async function CategoryPage({
     searchParams,
     getStore(),
   ]);
-  const [{ category, subcategories, listings }, categories] = await Promise.all([
-    listingsByCategory(store.id, slug),
-    listCategories(store.id),
-  ]);
+  const { category, listings } = await listingsByCategory(store.id, slug);
   if (!category) notFound();
   const value = (key: string) =>
     typeof query[key] === "string" ? (query[key] as string) : "";
@@ -73,16 +72,54 @@ export default async function CategoryPage({
     visible.sort((a, b) => b.startingPrice - a.startingPrice);
   if (sort === "name")
     visible.sort((a, b) => a.displayName.localeCompare(b.displayName));
-  const categoryLinks = categories.map((c) => (
-    <Link
-      key={c.id}
-      className="sf-chip"
-      href={`/categories/${c.slug}`}
-      aria-current={c.slug === (category.aisle?.slug ?? slug) ? "page" : undefined}
-    >
-      {c.name}
-    </Link>
-  ));
+  // The refine filters: under the aisle rail on desktop, in the Filter sheet on phones (#862).
+  const refine = (
+    <>
+      <div className="sf-refine-chips">
+        <Link
+          className="sf-chip"
+          data-testid="filter-in-stock"
+          aria-current={stock ? "page" : undefined}
+          href={href({ stock: stock ? "" : "1" })}
+        >
+          In stock
+        </Link>
+        <Link
+          className="sf-chip"
+          data-testid="filter-frozen"
+          aria-current={frozen ? "page" : undefined}
+          href={href({ frozen: frozen ? "" : "1" })}
+        >
+          Frozen
+        </Link>
+        <Link
+          className="sf-chip"
+          data-testid="filter-pack-size"
+          aria-expanded={value("sizes") === "1"}
+          aria-current={pack ? "page" : undefined}
+          href={href({ sizes: value("sizes") === "1" ? "" : "1" })}
+        >
+          Pack size
+        </Link>
+      </div>
+      {value("sizes") === "1" && (
+        <div className="sf-refine-chips" aria-label="Pack sizes">
+          {packs.map((p) => (
+            <Link
+              className="sf-chip"
+              data-testid="filter-pack-option"
+              aria-current={pack === p ? "page" : undefined}
+              key={p}
+              href={href({ pack: pack === p ? "" : p })}
+            >
+              {p}
+            </Link>
+          ))}
+          {!packs.length && <p>No pack sizes available.</p>}
+        </div>
+      )}
+    </>
+  );
   return (
     <StorefrontShell store={store} pageTitled>
       <div className="sf-container">
@@ -99,67 +136,40 @@ export default async function CategoryPage({
           )}
           <span>{category.name}</span>
         </nav>
-        <div className="sf-mobile-chips" aria-label="Aisles">
-          {categoryLinks}
-        </div>
         <div className="sf-browse">
-          <aside className="sf-sidebar">
-            <p className="sf-sidebar-title">Shop the aisles</p>
-            <nav aria-label="Aisles">{categoryLinks}</nav>
+          <aside className="sf-aisle-rail" aria-label="Aisles">
+            <h2 className="sf-aisle-rail-title">Aisles</h2>
+            <AisleTree key={category.aisle?.slug ?? slug} idPrefix="rail" />
+            <section className="sf-refine" aria-label="Refine">
+              <h2 className="sf-aisle-rail-title">Refine</h2>
+              {refine}
+            </section>
           </aside>
           <section aria-label={category.name}>
             <h1 className="sf-page-title">{category.name}</h1>
             <p className="sf-page-intro">
               Good ingredients for the meals you love.
             </p>
-            {subcategories.length > 1 && (
-              <nav className="sf-filter-subrow sf-subcategory-row" aria-label={`${category.aisle?.name ?? category.name} subcategories`}>
-                <Link
-                  className="sf-chip"
-                  aria-current={category.aisle ? undefined : "page"}
-                  href={`/categories/${category.aisle?.slug ?? slug}`}
-                >
-                  All
-                </Link>
-                {subcategories.map((sub) => (
-                  <Link
-                    key={sub.slug}
-                    className="sf-chip"
-                    data-testid="subcategory-chip"
-                    aria-current={sub.slug === slug ? "page" : undefined}
-                    href={`/categories/${sub.slug}`}
-                  >
-                    {sub.name}
-                  </Link>
-                ))}
-              </nav>
-            )}
+            <div className="sf-aisle-tools">
+              <AislePicker />
+              <FilterSheet active={stock || frozen || !!pack}>{refine}</FilterSheet>
+            </div>
             <div className="sf-filters">
-              <Link
-                className="sf-chip"
-                data-testid="filter-in-stock"
-                aria-current={stock ? "page" : undefined}
-                href={href({ stock: stock ? "" : "1" })}
-              >
-                In stock
-              </Link>
-              <Link
-                className="sf-chip"
-                data-testid="filter-frozen"
-                aria-current={frozen ? "page" : undefined}
-                href={href({ frozen: frozen ? "" : "1" })}
-              >
-                Frozen
-              </Link>
-              <Link
-                className="sf-chip"
-                data-testid="filter-pack-size"
-                aria-expanded={value("sizes") === "1"}
-                aria-current={pack ? "page" : undefined}
-                href={href({ sizes: value("sizes") === "1" ? "" : "1" })}
-              >
-                Pack size
-              </Link>
+              <p className="sf-result-count">
+              {visible.length} {visible.length === 1 ? "product" : "products"}
+              {(stock || frozen || pack) && (
+                <>
+                  {" "}
+                  /{" "}
+                  <Link
+                    data-testid="clear-filters"
+                    href={`/categories/${slug}`}
+                  >
+                    Clear filters
+                  </Link>
+                </>
+              )}
+            </p>
               <form action={`/categories/${slug}`}>
                 <input type="hidden" name="stock" value={stock ? "1" : ""} />
                 <input type="hidden" name="frozen" value={frozen ? "1" : ""} />
@@ -178,37 +188,6 @@ export default async function CategoryPage({
                 </button>
               </form>
             </div>
-            {value("sizes") === "1" && (
-              <div className="sf-filter-subrow" aria-label="Pack sizes">
-                {packs.map((p) => (
-                  <Link
-                    className="sf-chip"
-                    data-testid="filter-pack-option"
-                    aria-current={pack === p ? "page" : undefined}
-                    key={p}
-                    href={href({ pack: pack === p ? "" : p })}
-                  >
-                    {p}
-                  </Link>
-                ))}
-                {!packs.length && <p>No pack sizes available.</p>}
-              </div>
-            )}
-            <p className="sf-result-count">
-              {visible.length} {visible.length === 1 ? "product" : "products"}
-              {(stock || frozen || pack) && (
-                <>
-                  {" "}
-                  /{" "}
-                  <Link
-                    data-testid="clear-filters"
-                    href={`/categories/${slug}`}
-                  >
-                    Clear filters
-                  </Link>
-                </>
-              )}
-            </p>
             {visible.length ? (
               <ProductListMotion className="sf-grid">
                 {visible.map((l) => (
