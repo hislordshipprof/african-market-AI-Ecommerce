@@ -4,7 +4,6 @@ import { ProductThumb } from "@/components/store-admin/product-thumb";
 import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
-import Link from "next/link";
 import { toast } from "sonner";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { Button } from "@/components/ui/button";
@@ -47,6 +46,7 @@ import {
   FileSpreadsheet,
   Download,
 } from "lucide-react";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 function countPhrase(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -228,26 +228,14 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
 
   return (
     <MotionConfig reducedMotion="user">
-    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-ink)]">
-      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
-        {/* Header */}
-        <div className="mb-6 flex items-center gap-3">
-          <Link
-            href={`/store-admin/listings?store=${storeSlug}`}
-            className="inline-flex items-center gap-1 text-sm text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Products
-          </Link>
-        </div>
+    <>
+      <PageHeader
+        title="Import listings"
+        description={`Upload a CSV file to add listings to ${storeName}.`}
+        parent={{ href: `/store-admin/listings?store=${storeSlug}`, label: "Products" }}
+      />
 
-        <h1 className="text-2xl font-bold font-[family-name:var(--font-display)] mb-1">
-          Import listings
-        </h1>
-        <p className="text-sm text-[var(--color-muted)] mb-6">
-          Upload a CSV file to add listings to {storeName}.
-        </p>
-
+      <div className="max-w-3xl">
         <AnimatePresence mode="wait">
           {step === "upload" && (
             <motion.div
@@ -323,8 +311,8 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
             </motion.div>
           )}
         </AnimatePresence>
-      </main>
-    </div>
+      </div>
+    </>
     </MotionConfig>
   );
 }

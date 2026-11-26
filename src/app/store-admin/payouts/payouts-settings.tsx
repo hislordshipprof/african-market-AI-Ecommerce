@@ -2,7 +2,6 @@
 
 import { setupHrefOf, TwoFactorSetupLink } from "../two-factor-error";
 import { useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,14 +13,13 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Store,
   CreditCard,
-  ArrowLeft,
   ExternalLink,
   CheckCircle2,
   AlertCircle,
   Clock,
 } from "lucide-react";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 interface Props {
   storeName: string;
@@ -120,30 +118,10 @@ export function PayoutsSettings({
   }
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Store className="size-5" />
-            </div>
-            <div>
-              <h1 className="text-base font-semibold text-foreground">Payouts</h1>
-              <p className="text-xs text-muted-foreground">{storeName}</p>
-            </div>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader title="Payouts" description={storeName} />
 
-      <main className="mx-auto max-w-4xl px-4 py-6">
-        <Link
-          href={`/store-admin?store=${storeParam}`}
-          className="mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-          Back to dashboard
-        </Link>
-
+      <div>
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-foreground">
             Payment setup
@@ -219,7 +197,7 @@ export function PayoutsSettings({
           </CardContent>
         </Card>
         {children}
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

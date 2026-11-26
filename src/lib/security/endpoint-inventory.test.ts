@@ -17,6 +17,10 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/directory/request-actions.ts",
 ]);
 const GUARDS = ["requireStoreOwner", "requireStoreMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
+/** Actions that read the member with `storeMember()` and return nothing when signed out, instead of redirecting. */
+const SELF_CHECKED_ACTIONS = new Map<string, string>([
+  ["src/app/store-admin/shell/actions.ts shellCountsAction", "storeMember(): null when signed out, reads only the session's store"],
+]);
 const ROUTE_GUARDS = [...GUARDS, "platformAdminApiDenial", "platformAdminApiActor"];
 /** Route methods with no session guard. Each is public or checks its own secret, signature or token. */
 const PUBLIC_ROUTES = new Map<string, string>([
@@ -209,7 +213,7 @@ describe("endpoint inventory", () => {
   it('every "use server" export calls a guard or is on the public allow-list', () => {
     const missing = actions()
       .filter((item) => !PUBLIC_ACTIONS.has(item.file))
-      .filter((item) => !callsGuard(item.source, item.name, GUARDS))
+      .filter((item) => !callsGuard(item.source, item.name, SELF_CHECKED_ACTIONS.has(`${item.file} ${item.name}`) ? ["storeMember"] : GUARDS))
       .map((item) => `${item.file} ${item.name}`);
     expect(missing).toEqual([]);
   });

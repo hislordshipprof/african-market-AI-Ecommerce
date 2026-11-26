@@ -22,7 +22,7 @@ export type PastOrderRow = {
   payoutCents: number | null;
 };
 
-function searchWhere(q: string | undefined): Prisma.OrderWhereInput {
+export function orderSearchWhere(q: string | undefined): Prisma.OrderWhereInput {
   const term = q?.trim().slice(0, 100) ?? "";
   if (!term) return {};
   const digits = term.replace(/^#/, "");
@@ -46,7 +46,7 @@ export async function pastStoreOrders(
   const rows = await storeScoped(storeId).order.findMany({
     where: {
       status: { in: PAST_STATUSES },
-      ...searchWhere(q),
+      ...orderSearchWhere(q),
       ...(after ? { OR: [{ createdAt: { lt: after.createdAt } }, { createdAt: after.createdAt, id: { lt: after.id } }] } : {}),
     },
     select: {

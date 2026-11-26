@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download, Store } from "lucide-react";
+import { Download } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { storePayoutDetail } from "@/lib/payouts/service";
 import type { PayoutOrderRow } from "@/lib/payouts/breakdown";
 import { money } from "@/lib/format";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 import { Notice, StripeDashboardButton, arrivalDate, payoutStatus } from "../payout-parts";
 
 const COLUMNS: Array<{ key: keyof PayoutOrderRow; label: string; minus?: boolean }> = [
@@ -25,54 +25,32 @@ export default async function PayoutDetailPage({ params }: { params: Promise<{ p
   const slug = encodeURIComponent(store.slug);
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
-          <Link href={`/store-admin?store=${slug}`} className="flex min-h-11 items-center gap-2 rounded-lg bg-primary px-3 text-primary-foreground">
-            <Store className="size-5" aria-hidden />
-            <span className="text-sm font-semibold">Dashboard</span>
-          </Link>
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold text-foreground">{store.name}</p>
-            <p className="text-xs text-muted-foreground">Payouts</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader
+        title={detail.ok ? `Payout of ${money(detail.payout.amountCents)}` : "Payout"}
+        description={detail.ok ? `${payoutStatus(detail.payout.status)} · arrives ${arrivalDate(detail.payout.arrivalDate)}` : undefined}
+        parent={{ href: `/store-admin/payouts?store=${slug}`, label: "Payouts" }}
+        actions={
+          detail.ok ? (
+            <>
+              <a
+                href={`/store-admin/payouts/${encodeURIComponent(payoutId)}/csv?store=${slug}`}
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                <Download className="size-4" aria-hidden />
+                CSV
+              </a>
+              <StripeDashboardButton slug={store.slug} />
+            </>
+          ) : undefined
+        }
+      />
 
-      <main className="mx-auto max-w-5xl px-4 py-6">
-        <Link
-          href={`/store-admin/payouts?store=${slug}`}
-          className="mb-6 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" aria-hidden />
-          All payouts
-        </Link>
-
+      <div>
         {!detail.ok ? (
           <Notice>{detail.error}</Notice>
         ) : (
           <>
-            <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h1 className="font-heading text-2xl font-bold tabular-nums text-foreground">
-                  Payout of {money(detail.payout.amountCents)}
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                  {payoutStatus(detail.payout.status)} · arrives {arrivalDate(detail.payout.arrivalDate)}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <a
-                  href={`/store-admin/payouts/${encodeURIComponent(payoutId)}/csv?store=${slug}`}
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                >
-                  <Download className="size-4" aria-hidden />
-                  CSV
-                </a>
-                <StripeDashboardButton slug={store.slug} />
-              </div>
-            </div>
-
             <p className="mb-4 max-w-prose text-sm text-muted-foreground">
               Net to store is goods, tip and tax, less promo discounts your store funds, your card fee and refunds. Goods include your own delivery fee.
               Stripe&apos;s reconciliation report in your Stripe dashboard shows every transaction.
@@ -159,7 +137,7 @@ export default async function PayoutDetailPage({ params }: { params: Promise<{ p
             )}
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

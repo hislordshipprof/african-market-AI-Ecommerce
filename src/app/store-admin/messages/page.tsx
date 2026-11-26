@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { Store } from "lucide-react";
 import { requireStoreMember } from "@/lib/store-admin/session";
 import { formatListTime } from "@/lib/format";
 import { getStoreThread, listStoreThreads } from "@/lib/support/thread";
 import { Badge } from "@/components/ui/badge";
 import { storeMayUse } from "@/lib/billing/plan";
 import { ThreadReply } from "./thread-reply";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 export default async function MessagesPage({
   searchParams,
@@ -24,23 +24,9 @@ export default async function MessagesPage({
   const base = `/store-admin/messages?store=${encodeURIComponent(session.store.slug)}`;
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
-          <Link
-            href={`/store-admin?store=${session.store.slug}`}
-            className="flex min-h-11 items-center gap-2 rounded-lg bg-primary px-3 text-primary-foreground"
-          >
-            <Store className="size-5" />
-            <span className="text-sm font-semibold">Dashboard</span>
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">{session.store.name}</h1>
-            <p className="text-xs text-muted-foreground">Messages</p>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto grid max-w-4xl gap-6 px-4 py-6 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+    <>
+      <PageHeader title="Messages" description={session.store.name} />
+      <div className="grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <nav aria-label="Threads">
           {threads.length === 0 ? (
             <p className="text-sm text-muted-foreground">No messages yet. Customers write from their order tracking page.</p>
@@ -99,7 +85,7 @@ export default async function MessagesPage({
             threads.length > 0 && <p className="text-sm text-muted-foreground">Choose a thread to read and reply.</p>
           )}
         </section>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

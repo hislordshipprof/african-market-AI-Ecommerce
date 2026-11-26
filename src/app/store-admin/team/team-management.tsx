@@ -24,7 +24,6 @@ import {
   revokeInviteAction,
 } from "@/lib/store-admin/actions";
 import {
-  ArrowLeft,
   UserPlus,
   Mail,
   Trash2,
@@ -32,6 +31,7 @@ import {
   AlertTriangle,
   Copy,
 } from "lucide-react";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 interface Member {
   userId: string;
@@ -163,22 +163,10 @@ export function TeamManagement({
   }
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <Link href={`/store-admin?store=${storeParam}`}>
-            <Button variant="ghost" size="icon" className="size-9">
-              <ArrowLeft className="size-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">Team</h1>
-            <p className="text-xs text-muted-foreground">{storeName}</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader title="Team" description={storeName} />
 
-      <main className="mx-auto max-w-2xl px-4 py-6">
+      <div className="max-w-3xl">
         <div className="flex flex-col gap-6">
           <Card>
             <CardHeader>
@@ -370,7 +358,7 @@ export function TeamManagement({
             </Card>
           )}
         </div>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

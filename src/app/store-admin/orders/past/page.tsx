@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { requireStoreMember } from "@/lib/store-admin/session";
 import { pastStoreOrders } from "@/lib/order/past-orders";
 import { FULFILLMENT_LABELS, orderStatusLabel } from "@/lib/order/status-labels";
@@ -7,6 +7,7 @@ import { formatListTime, money } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 /** Orders after hand-off (#785): completed, delivered, cancelled and refunded, newest first. */
 export default async function PastOrdersPage({
@@ -25,23 +26,13 @@ export default async function PastOrdersPage({
   const base = `/store-admin/orders/past?store=${slug}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
-          <Link
-            href={`/store-admin/orders?store=${slug}`}
-            aria-label="Back to orders"
-            className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-          >
-            <ArrowLeft className="size-5" aria-hidden />
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">Past orders</h1>
-            <p className="text-xs text-muted-foreground">{session.store.name}</p>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto max-w-4xl px-4 py-6">
+    <>
+      <PageHeader
+        title="Past orders"
+        description={session.store.name}
+        parent={{ href: `/store-admin/orders?store=${slug}`, label: "Orders" }}
+      />
+      <div>
         <form action="/store-admin/orders/past" method="get" role="search" className="mb-4 flex gap-2">
           <input type="hidden" name="store" value={session.store.slug} />
           <label htmlFor="past-orders-q" className="sr-only">Order number or customer</label>
@@ -106,7 +97,7 @@ export default async function PastOrdersPage({
             </Link>
           )}
         </nav>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

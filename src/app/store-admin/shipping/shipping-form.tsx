@@ -3,13 +3,14 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, CircleAlert } from "lucide-react";
+import { Check, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { updateStoreShipping } from "@/lib/store-admin/shipping-actions";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 const HANDLING_DAYS = Array.from({ length: 10 }, (_, i) => i + 1);
 const DEFAULT_HANDLING_DAYS = 2;
@@ -54,22 +55,10 @@ export function ShippingForm({ storeName, storeSlug, initialHandlingDays, states
   }
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <Link href={`/store-admin?store=${storeParam}`} aria-label="Back to store admin">
-            <Button variant="ghost" size="icon" className="size-9" tabIndex={-1}>
-              <ArrowLeft className="size-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">Shipping</h1>
-            <p className="text-xs text-muted-foreground">{storeName}</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader title="Shipping" description={storeName} />
 
-      <main className="mx-auto max-w-2xl px-4 py-6">
+      <div className="max-w-3xl">
         <form onSubmit={save} className="flex flex-col gap-6">
           <Card>
             <CardHeader>
@@ -184,7 +173,7 @@ export function ShippingForm({ storeName, storeSlug, initialHandlingDays, states
             ) : null}
           </div>
         </form>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

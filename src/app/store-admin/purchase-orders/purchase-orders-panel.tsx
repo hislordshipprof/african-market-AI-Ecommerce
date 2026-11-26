@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useId, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   archiveSupplierAction,
@@ -18,6 +17,7 @@ import {
 } from "@/lib/purchasing/actions";
 import type { PurchaseOrderView, ReceivedLine, ReceiveResult } from "@/lib/purchasing/purchase-orders";
 import type { SupplierChannel, SupplierView } from "@/lib/purchasing/suppliers";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 type OrderView = Omit<PurchaseOrderView, "sentAt" | "createdAt"> & { sentAt: string | null; createdAt: string };
 
@@ -481,19 +481,9 @@ export function PurchaseOrdersPage({
   }
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-          <Link href={`/store-admin?store=${store}`} aria-label="Back to store admin" className={buttonVariants({ variant: "ghost", size: "icon", className: "size-11" })}>
-            <ArrowLeft className="size-4" />
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">Purchase orders</h1>
-            <p className="text-xs text-muted-foreground">{storeName}</p>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-6">
+    <>
+      <PageHeader title="Purchase orders" description={storeName} />
+      <div className="flex flex-col gap-8">
         {locked ?? (
           <>
             <section aria-labelledby="orders-title" className="flex flex-col gap-3">
@@ -542,7 +532,7 @@ export function PurchaseOrdersPage({
             </section>
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

@@ -24,27 +24,17 @@ async function getAuthSession(): Promise<Session | null> {
   });
 }
 
-export async function requireStoreMember(): Promise<StoreSession> {
+/** The signed-in member of this store, or null: no session, 2FA not verified, or not a member. Never redirects. */
+export async function storeMember(): Promise<StoreSession | null> {
   const [session, store] = await Promise.all([getAuthSession(), getStore()]);
-  const signIn = storeSignInPath(store.slug, (await headers()).get("x-request-path"));
-
-  if (!session) {
-    redirect(signIn);
-  }
-
   // 2FA is optional for store members (#840, ADR-0015), but once on it is never skipped.
-  if (session.user.twoFactorEnabled && !session.session.twoFactorVerified) {
-    redirect(signIn);
-  }
+  if (!session || (session.user.twoFactorEnabled && !session.session.twoFactorVerified)) return null;
 
   const scoped = storeScoped(store.id);
   const membership = await scoped.storeMembership.findUnique({
     where: { storeId_userId: { storeId: store.id, userId: session.user.id } },
   });
-
-  if (!membership) {
-    redirect(signIn);
-  }
+  if (!membership) return null;
 
   let readOnly = false;
   if (membership.role !== "owner") {
@@ -58,7 +48,13 @@ export async function requireStoreMember(): Promise<StoreSession> {
   return { user: session.user, session: session.session, store, membership: { role: membership.role, readOnly } };
 }
 
-/** A member allowed to change things. Null for read-only staff: the caller returns READ_ONLY_MESSAGE. */
+export async function requireStoreMember(): Promise<StoreSession> {
+  const member = await storeMember();
+  if (member) return member;
+  const store = await getStore();
+  redirect(storeSignInPath(store.slug, (await headers()).get("x-request-path")));
+}
+
 export async function requireStoreWriter(): Promise<StoreSession | null> {
   const storeSession = await requireStoreMember();
   return storeSession.membership.readOnly ? null : storeSession;

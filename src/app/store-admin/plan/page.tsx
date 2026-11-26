@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { AlertCircle, MessageCircle, Store } from "lucide-react";
+import { AlertCircle, MessageCircle } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { getStoreBilling, PILOT_FREE_MONTHS, syncCheckoutReturn } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
@@ -9,6 +8,7 @@ import { PlanComparison } from "@/components/billing/plan-comparison";
 import { choosePlanAction, manageBillingAction } from "@/lib/billing/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/app/store-admin/shell/page-header";
 
 const dateFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" });
 /** An override ends at the start of its UTC date, the date the admin picked. */
@@ -34,28 +34,13 @@ export default async function PlanPage({
   // The plan the applicant said they wanted on /sell comes first; "Not sure yet" or no application falls back (#838).
   const appliedPlan = applied === "starter" || applied === "pro" ? applied : null;
   const preselected = appliedPlan ?? RECOMMENDED_PLAN;
-  const slug = session.store.slug;
   const usedPct = Math.min(100, Math.round((usage.chats / usage.cap) * 100));
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
-          <Link
-            href={`/store-admin?store=${slug}`}
-            className="flex min-h-11 items-center gap-2 rounded-lg bg-primary px-3 text-primary-foreground"
-          >
-            <Store className="size-5" aria-hidden />
-            <span className="text-sm font-semibold">Dashboard</span>
-          </Link>
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold text-foreground">{session.store.name}</h1>
-            <p className="text-xs text-muted-foreground">Plan and billing</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader title="Plan and billing" description={session.store.name} />
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-6">
+      <div className="space-y-6">
         {billing.paymentFailedAt && (
           <div role="alert" className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
             <AlertCircle className="mt-0.5 size-5 shrink-0 text-destructive" aria-hidden />
@@ -176,7 +161,7 @@ export default async function PlanPage({
         )}
 
         <PlanComparison currentPlan={billing.plan} />
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
