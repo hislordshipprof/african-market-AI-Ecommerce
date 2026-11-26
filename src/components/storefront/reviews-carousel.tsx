@@ -1,4 +1,3 @@
-import { RailScroller } from "./rail-scroller";
 import { SectionReveal } from "./scroll-motion";
 const reviews = [
   ["The names I grew up with, all in one basket. Sunday cooking feels a little closer to home.", "A pantry regular"],
@@ -8,8 +7,9 @@ const reviews = [
 export function ReviewsCarousel({ demo }: { demo: boolean }) {
   if (!demo) return null;
   return <SectionReveal className="sf-container sf-review-section"><section data-testid="reviews-carousel">
-    <RailScroller className="sf-reviews-rail" label="Sample store reviews" title="Around the table." description="Sample reviews for this demo. These are fictional, not customer testimonials.">
+    <div className="sf-rail-label"><div><h2>Around the table.</h2><p>Sample reviews for this demo. These are fictional, not customer testimonials.</p></div></div>
+    <div className="sf-card-grid sf-reviews-rail" aria-label="Sample store reviews">
       {reviews.map(([quote, name], i) => <figure key={name} className="sf-review-card"><span aria-hidden className="sf-quote-mark">“</span><blockquote>{quote}</blockquote><figcaption><span aria-hidden>{String(i + 1).padStart(2, "0")}</span><div>{name}<small>Sample review</small></div></figcaption></figure>)}
-    </RailScroller>
+    </div>
   </section></SectionReveal>;
 }

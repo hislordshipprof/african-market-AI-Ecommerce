@@ -7,6 +7,8 @@ import { AISLES, OLD_AISLE_DEFAULT_SUBCATEGORY, OLD_AISLE_SLUGS, RETIRED_AISLE_I
 
 const ROOT = path.resolve(__dirname, "../../..");
 const csv: Array<{ id: string; category: string }> = parse(fs.readFileSync(path.join(ROOT, "research/catalog/master-catalog.csv")), { columns: true });
+// Demo products first seeded after the #861 migration are created in their subcategory, so it never moves them.
+const ADDED_AFTER_MIGRATION = new Set(["mp_egusi_ground", "mp_onion"]);
 const migration = fs.readFileSync(path.join(ROOT, "prisma/migrations/20261208000000_category_tree_16_aisles/migration.sql"), "utf8");
 
 /** The `(...)` tuples of one VALUES list in the migration, as arrays of SQL literals. */
@@ -64,7 +66,7 @@ describe("the category tree (#861)", () => {
     const moved = Object.fromEntries(valuesAfter("UPDATE master_products mp SET category_id = v.subcategory_id, updated_at = now()\n  FROM (VALUES\n").map(([id, sub]) => [id, sub]));
     const seeded = Object.fromEntries([
       ...csv.map((row) => [row.id, subcategoryIdForSlug(row.category)]),
-      ...PRODUCTS.map((product) => [product.id, product.categoryId]),
+      ...PRODUCTS.filter((product) => !ADDED_AFTER_MIGRATION.has(product.id)).map((product) => [product.id, product.categoryId]),
     ]);
     expect(moved).toEqual(seeded);
   });

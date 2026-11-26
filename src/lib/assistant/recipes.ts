@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { anthropic } from "@ai-sdk/anthropic";
 import { APICallError, generateText, stepCountIs, tool, type LanguageModel, type ModelMessage } from "ai";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { insertLookedUpRecipe, platform } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { WEB_SEARCH_MICROS, billedSearches, callCostMicros, tokenUsageOf } from "./cost";
@@ -56,7 +57,22 @@ async function recipeByKey(key: string): Promise<RecipeRow | null> {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   const recipe = rows.find((row) => row.key === key) ?? rows.find((row) => row.origin === "curated") ?? rows[0];
-  if (!recipe) return null;
+  return recipe ? recipeRow(recipe) : null;
+}
+
+/** The seeded recipe base, oldest first: the dishes the storefront's Cook tonight may offer (#862). */
+export async function listCuratedRecipes(): Promise<RecipeRow[]> {
+  const rows = await platform.recipe.findMany({
+    where: { origin: "curated" },
+    include: { ingredients: { orderBy: { position: "asc" } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  return rows.map(recipeRow);
+}
+
+type RecipeWithIngredients = Prisma.RecipeGetPayload<{ include: { ingredients: true } }>;
+
+function recipeRow(recipe: RecipeWithIngredients): RecipeRow {
   return {
     name: recipe.name,
     origin: recipe.origin,

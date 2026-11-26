@@ -43,7 +43,7 @@ async function holdListingDetail(page: Page, edit?: (body: { variants?: { id: st
 
 async function openEgusi(page: Page) {
   await page.goto(`${BASE}/categories/soup-ingredients`);
-  const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+  const card = page.getByTestId("listing-card").filter({ hasText: "Egusi (Melon Seeds)" }).first();
   await card.hover();
   const trigger = card.getByRole("button", { name: /Quick view/ });
   await trigger.click();
@@ -85,19 +85,6 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dots.nth(1)).toHaveAttribute("aria-current", "true", { timeout: 7500 });
   });
 
-  test("scroll-linked band exposes searchable keyboard chips", async ({ page }) => {
-    await page.goto(BASE);
-    const band = page.getByTestId("market-band");
-    await expect(band.getByRole("link")).toHaveCount(6);
-    await expect(band.getByRole("button")).toHaveCount(0);
-    const chip = band.getByRole("link", { name: "Egusi", exact: true });
-    await chip.focus();
-    await expect(chip).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(/search\?q=egusi/);
-    await expect(page.getByTestId("listing-card").first()).toContainText(/egusi/i);
-  });
-
   test("hero remains edge to edge and layers overlap during a slide change", async ({ page }) => {
     test.setTimeout(45_000);
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -115,14 +102,15 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(stage).toHaveCSS("height", "600px");
   });
 
-  test("mobile collection controls and keyboard scrolling agree", async ({ page }) => {
+  // Collections wrap since #862; the product rail is the one sideways scroller left.
+  test("mobile product rail controls and keyboard scrolling agree", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(BASE);
-    const collections = page.getByTestId("collection-banners");
+    const collections = page.getByTestId("product-rail").first();
     const rail = collections.getByTestId("rail-scroll");
     await collections.scrollIntoViewIfNeeded();
     await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBe(0);
-    await collections.getByRole("button", { name: "Scroll Collections right" }).click();
+    await collections.getByRole("button", { name: /^Scroll .+ right$/ }).click();
     await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
     await rail.focus();
     await page.keyboard.press("Home");
@@ -266,7 +254,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(ogbonoCart).toContainText("$12.99 / 8 oz");
     await expect(ogbonoCart).not.toContainText("5 lb bag");
     await page.keyboard.press("Escape");
-    const egusi = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+    const egusi = page.getByTestId("listing-card").filter({ hasText: "Egusi (Melon Seeds)" }).first();
     await egusi.hover();
     await egusi.getByRole("button", { name: /Quick view/ }).click();
     const reopened = page.getByRole("dialog", { name: /Quick view: Egusi/ });
@@ -369,7 +357,7 @@ test.describe("Phase 3 motion and depth", () => {
     // The chip is a navigation. Opening quick view before it commits uses the
     // unfiltered pack, so aria-pressed on "5 lb bag" is false under load.
     await expect(fivePound).toHaveAttribute("aria-current", "page");
-    const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+    const card = page.getByTestId("listing-card").filter({ hasText: "Egusi (Melon Seeds)" }).first();
     await expect(card).toContainText("5 lb bag");
     await card.hover();
     await card.getByRole("button", { name: /Quick view/ }).click();
@@ -455,14 +443,11 @@ test.describe("Phase 3 motion and depth", () => {
     expect(await names.allTextContents()).not.toEqual(expect.arrayContaining([expect.stringMatching(/cassava|garden eggs/i)]));
   });
 
-  test("reduced motion disables autoplay and keeps static wrapping chips", async ({ page }) => {
+  test("reduced motion disables autoplay", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(BASE);
     await expect(page.getByTestId("hero-carousel")).toHaveAttribute("data-autoplay", "paused");
     await expect(page.getByRole("button", { name: "Play slideshow" })).toBeDisabled();
     await expect(page.locator("html")).not.toHaveClass(/sf-reveal-ready/);
-    await expect(page.locator(".sf-market-track")).toHaveCSS("transform", "none");
-    await expect(page.locator(".sf-market-track")).toHaveCSS("flex-wrap", "wrap");
-    await expect(page.getByTestId("market-band").getByRole("link")).toHaveCount(6);
   });
 });

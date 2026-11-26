@@ -2,12 +2,12 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import type { ValidatedStore } from "@/lib/get-store";
 import { auth } from "@/lib/auth";
-import { listCategories } from "@/lib/storefront/service";
 import { SearchBar } from "./search-bar";
 import { CartTrigger } from "./cart-provider";
 import { FulfillmentChip } from "./fulfillment-chip";
 import { ShrinkingHeader } from "./scroll-motion";
 import { StoreLogo } from "./store-logo";
+import { AislesButton } from "./aisle-menu";
 
 // Past this length a store name steps down a size so it fits three lines whole.
 const LONG_STORE_NAME = 30;
@@ -15,13 +15,11 @@ const LONG_STORE_NAME = 30;
 export async function StorefrontHeader({ store, pageTitled = false }: { store: ValidatedStore; pageTitled?: boolean }) {
   const StoreName = pageTitled ? "p" : "h1";
   const headerList = await headers();
-  const [categories, session] = await Promise.all([
-    listCategories(store.id),
-    auth.api.getSession({ headers: headerList }),
-  ]);
+  const session = await auth.api.getSession({ headers: headerList });
   return (
     <ShrinkingHeader>
       <div className="sf-header-main sf-container">
+        <AislesButton />
         <Link href="/" className="sf-brand">
           <StoreLogo src={store.logoUrl} name={store.name} />
           <StoreName className="sf-brand-name" translate="no" data-long={store.name.length > LONG_STORE_NAME || undefined} data-testid="store-name" title={store.name}>{store.name}</StoreName>
@@ -46,16 +44,6 @@ export async function StorefrontHeader({ store, pageTitled = false }: { store: V
         </Link>
         <CartTrigger className="sf-header-cart" />
       </div>
-      <nav aria-label="Store categories" className="sf-category-nav">
-        <div className="sf-container">
-          <Link href="/categories">All aisles</Link>
-          {categories.slice(0, 8).map((cat) => (
-            <Link key={cat.id} href={`/categories/${cat.slug}`}>
-              {cat.name}
-            </Link>
-          ))}
-        </div>
-      </nav>
     </ShrinkingHeader>
   );
 }

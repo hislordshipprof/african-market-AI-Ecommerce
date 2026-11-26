@@ -336,6 +336,17 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(slugsB).toEqual(["fresh-produce"]);
   });
 
+  // #862: the aisle tree counts each aisle's active listings and names only the subcategories the store stocks.
+  it("gives each aisle its listing count and its stocked subcategories with theirs", async () => {
+    const [produce, oils] = await listCategories(storeAId);
+    const leafy = (await listingsByCategory(storeAId, "leafy-greens-and-wrapping-leaves")).listings.length;
+    expect(leafy).toBeGreaterThan(0);
+    expect(produce.subcategories).toEqual([{ name: "Leafy Greens & Wrapping Leaves", slug: "leafy-greens-and-wrapping-leaves", count: leafy }]);
+    expect(produce.count).toBe((await listingsByCategory(storeAId, "fresh-produce")).listings.length);
+    expect(oils.subcategories).toEqual([{ name: "Palm Oil", slug: "palm-oil", count: 1 }]);
+    expect(oils.count).toBe(1);
+  });
+
   // #861: an aisle page shows its subcategories' listings and names the stocked subcategories; a
   // subcategory page shows only its own and names its aisle.
   it("browses an aisle through its subcategories", async () => {

@@ -9,8 +9,10 @@ import { StorefrontMotion } from "./motion-provider";
 import { QuickViewProvider } from "./quick-view-provider";
 import { InstallPrompt } from "../pwa/install-prompt-lazy";
 import { AssistantSlot } from "./assistant/assistant-slot";
+import { AisleMenuProvider } from "./aisle-menu";
+import { listCategories } from "@/lib/storefront/service";
 
-export function StorefrontShell({
+export async function StorefrontShell({
   store,
   pageTitled,
   children,
@@ -20,6 +22,7 @@ export function StorefrontShell({
   pageTitled?: boolean;
   children: ReactNode;
 }) {
+  const aisles = (await listCategories(store.id)).map(({ name, slug, count, subcategories }) => ({ name, slug, count, subcategories }));
   return (
     <div className="sf-storefront">
       <StorefrontMotion><CartProvider
@@ -28,7 +31,7 @@ export function StorefrontShell({
         storeName={store.name}
         minimumOrderCents={store.minimumOrderCents}
       >
-        <QuickViewProvider><a href="#main-content" className="sf-skip-link">
+        <QuickViewProvider><AisleMenuProvider aisles={aisles}><a href="#main-content" className="sf-skip-link">
           Skip to content
         </a>
         <StorefrontHeader store={store} pageTitled={pageTitled} />
@@ -41,7 +44,7 @@ export function StorefrontShell({
         <Suspense fallback={null}>
           <AssistantHost store={store} />
         </Suspense>
-        </QuickViewProvider>
+        </AisleMenuProvider></QuickViewProvider>
       </CartProvider></StorefrontMotion>
     </div>
   );

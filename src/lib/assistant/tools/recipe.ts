@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 import { platform, storeScoped } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
-import { hasConstraints, haveAtHomeCovers, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
+import { hasConstraints, haveAtHomeCovers, listingVerdicts, parseConstraints, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
 import type { ShopperNeed } from "../../catalog/attributes";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
@@ -118,6 +118,11 @@ function scaledAmount(qty: number | null, unit: string | null, base: number | nu
   if (qty == null || !base) return undefined;
   const scaled = Math.round((qty * servings * 100) / base) / 100;
   return unit ? `${scaled} ${unit}` : String(scaled);
+}
+
+/** The recipe's store items for a shopper with no constraints: the home's Cook tonight block (#862). */
+export function fillRecipe(storeId: string, recipe: RecipeRow, servings: number) {
+  return placeIngredients(storeId, recipe, servings, parseConstraints(null));
 }
 
 /**

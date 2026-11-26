@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { Home, LayoutGrid, Search, UserRound } from "lucide-react";
 import { CartTrigger } from "./cart-provider";
 import styles from "./cart.module.css";
+import { AislesOpener } from "./aisle-menu";
 const links = [
   { href: "/", label: "Home", icon: Home },
   { href: "/categories", label: "Aisles", icon: LayoutGrid },
@@ -19,18 +20,25 @@ export function MobileNav() {
           href === "/"
             ? pathname === href
             : pathname === href || pathname.startsWith(`${href}/`);
+        const className = active ? styles.activeNav : styles.navLink;
         return (
           <div key={href} className={styles.navSlot}>
             {index === 3 && <CartTrigger className={styles.navCart} />}
-            <Link
+            {/* The Aisles tab opens the aisle tree as a sheet (#862) instead of leaving the page. */}
+            {href === "/categories" ? (
+              <AislesOpener className={className} aria-label={label} aria-current={active ? "page" : undefined}>
+                <Icon size={21} />
+                <span>{label}</span>
+              </AislesOpener>
+            ) : <Link
               href={href}
               aria-label={label}
               aria-current={active ? "page" : undefined}
-              className={active ? styles.activeNav : styles.navLink}
+              className={className}
             >
               <Icon size={21} />
               <span>{label}</span>
-            </Link>
+            </Link>}
           </div>
         );
       })}

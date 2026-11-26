@@ -6,6 +6,7 @@ import {
   getActiveCollections,
   getListingsByCategory,
   extractStoreProfile,
+  popularSearches,
 } from "@/lib/storefront/service";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { HeroCarousel } from "@/components/storefront/hero-carousel";
@@ -16,7 +17,9 @@ import { PromoBand } from "@/components/storefront/promo-band";
 import { TrustStoryStrip } from "@/components/storefront/trust-story-strip";
 import { EmptyState } from "@/components/storefront/primitives";
 import { SectionReveal } from "@/components/storefront/scroll-motion";
-import { MarketMarquee } from "@/components/storefront/marquee";
+import { PopularNames } from "@/components/storefront/popular-names";
+import { CookTonight } from "@/components/storefront/cook-tonight";
+import { cookTonight } from "@/lib/storefront/cook-tonight";
 import { ReviewsCarousel } from "@/components/storefront/reviews-carousel";
 import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
 import { headers } from "next/headers";
@@ -91,11 +94,13 @@ export default async function StorefrontPage() {
         </EmptyState>
       </main>
     );
-  const [categories, banners, collections, rails] = await Promise.all([
+  const [categories, banners, collections, rails, searched, dishes] = await Promise.all([
     listCategories(store.id),
     getActiveBanners(store.id),
     getActiveCollections(store.id),
     getListingsByCategory(store.id),
+    popularSearches(store.id),
+    cookTonight(store.id),
   ]);
   const all = rails.flatMap((r) => r.listings);
   const favorites = all
@@ -104,6 +109,11 @@ export default async function StorefrontPage() {
   const fresh = all.filter((l) => l.perishable && !l.frozen).slice(0, 10);
   const pantry = rails.find((r) => r.categorySlug === "fufu-flours-and-swallow");
   const demo = demoFlowsEnabled(process.env) && ["mama-ngozi", "tante-marie"].includes(store.slug);
+  // What shoppers here order most; a store with no orders yet shows its own shelf names (#862 AC1).
+  const popular = (searched.length ? searched : all.filter((l) => l.badge === "in-stock").map((l) => l.displayName.replace(/\s*\(.*\)$/, "")))
+    .map((name) => name.charAt(0).toUpperCase() + name.slice(1))
+    .filter((name, i, names) => names.indexOf(name) === i)
+    .slice(0, 7);
   const subjects = ["Plantain", "Scotch Bonnet Pepper", "Yam"].flatMap(name => all.filter(p => p.displayName === name)).slice(0, 3);
   return (
     <StorefrontShell store={store}>
@@ -115,9 +125,10 @@ export default async function StorefrontPage() {
         </div>
       )}
       <HeroCarousel banners={banners} products={subjects.length ? subjects : favorites.slice(0, 3)} pickupMinutes={store.prepTimeMinutes} pickupEnabled={store.pickupEnabled} hours={store.hours} timezone={store.timezone} />
-      <MarketMarquee />
+      <PopularNames names={popular} />
       <div className="sf-container sf-stack">
         <SectionReveal><CategoryMosaic categories={categories} /></SectionReveal>
+        <CookTonight dishes={dishes} />
         {!all.length && (
           <EmptyState
             title="The shelves are getting ready"

@@ -150,27 +150,38 @@ export async function readCartAlternatives(
 }
 
 /** The aisles this store has an active listing in (#782), in platform order; a subcategory counts for its aisle (#861). */
+/** The aisles this store stocks, each with its active-listing count and its stocked subcategories (#782, #862). */
 async function readListCategories(storeId: string) {
   const listings = await storeScoped(storeId).listing.findMany({
     where: { active: true, ...notE2eListing },
     select: { categoryId: true, masterProductId: true, masterProduct: { select: { categoryId: true } } },
   });
-  const stocked = new Set(
-    listings.flatMap((listing) => {
-      const id = listing.masterProductId ? listing.masterProduct?.categoryId : listing.categoryId;
-      return id ? [id] : [];
-    }),
-  );
+  const perCategory = new Map<string, number>();
+  for (const listing of listings) {
+    const id = listing.masterProductId ? listing.masterProduct?.categoryId : listing.categoryId;
+    if (id) perCategory.set(id, (perCategory.get(id) ?? 0) + 1);
+  }
+  const stocked = [...perCategory.keys()];
   const categories = await platform.category.findMany({
-    where: { parentId: null, OR: [{ id: { in: [...stocked] } }, { children: { some: { id: { in: [...stocked] } } } }] },
+    where: { parentId: null, OR: [{ id: { in: stocked } }, { children: { some: { id: { in: stocked } } } }] },
     orderBy: { sortOrder: "asc" },
-    include: { masterProducts: { where: { imageUrl: { not: null }, status: "active" }, orderBy: { id: "asc" }, take: 1, select: { imageUrl: true } } },
+    include: {
+      masterProducts: { where: { imageUrl: { not: null }, status: "active" }, orderBy: { id: "asc" }, take: 1, select: { imageUrl: true } },
+      children: { where: { id: { in: stocked } }, orderBy: { sortOrder: "asc" }, select: { id: true, name: true, slug: true } },
+    },
   });
-  return categories.map(({ masterProducts, ...category }) => ({
-    ...category,
-    imageUrl: storefrontPhoto(category.imageUrl) ?? storefrontPhoto(masterProducts[0]?.imageUrl) ?? null,
-  }));
+  return categories.map(({ masterProducts, children, ...category }) => {
+    const subcategories = children.map(({ id, name, slug }) => ({ name, slug, count: perCategory.get(id) ?? 0 }));
+    return {
+      ...category,
+      imageUrl: storefrontPhoto(category.imageUrl) ?? storefrontPhoto(masterProducts[0]?.imageUrl) ?? null,
+      count: (perCategory.get(category.id) ?? 0) + subcategories.reduce((sum, sub) => sum + sub.count, 0),
+      subcategories,
+    };
+  });
 }
+
+export type StoreAisle = Awaited<ReturnType<typeof readListCategories>>[number];
 
 export interface StorefrontListing {
   id: string;
