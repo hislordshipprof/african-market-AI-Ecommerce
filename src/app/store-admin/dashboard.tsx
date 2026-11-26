@@ -187,7 +187,7 @@ export function StoreAdminDashboard({
         <Stat label="To pack" value={home.toPack.total.toLocaleString("en-US")} testId="stat-to-pack">
           {home.toPack.fresh} new, {home.toPack.packing} packing
         </Stat>
-        <Stat label="Low stock" value={home.lowStock.count.toLocaleString("en-US")} testId="stat-low-stock">
+        <Stat label="Low stock" value={home.lowStock.count.toLocaleString("en-US")} testId="stat-low-stock" className={sales ? "" : "col-span-2 lg:col-span-1"}>
           {home.lowStock.names.length > 0 ? `${home.lowStock.names.join(" and ")} first` : "Nothing running low"}
         </Stat>
       </section>
@@ -362,9 +362,9 @@ export function StoreAdminDashboard({
   );
 }
 
-function Stat({ label, value, testId, children }: { label: string; value: string; testId: string; children: React.ReactNode }) {
+function Stat({ label, value, testId, className = "", children }: { label: string; value: string; testId: string; className?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-card p-4 sm:p-5" data-testid={testId}>
+    <div className={`bg-card p-4 sm:p-5 ${className}`} data-testid={testId}>
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-1 font-heading text-2xl font-bold tabular-nums text-foreground sm:text-3xl">{value}</p>
       <p className="mt-1 text-xs text-muted-foreground">{children}</p>
