@@ -73,6 +73,12 @@ export const PRODUCTS: CatalogProduct[] = [
     synonyms: [{ term: "egusi", language: "igbo" }, { term: "agushi", language: "hausa" }],
   },
   {
+    id: "mp_egusi_ground",
+    name: "Ground Egusi",
+    categoryId: "sub_egusi_melon_seeds",
+    synonyms: [{ term: "egusi powder" }, { term: "milled egusi" }],
+  },
+  {
     id: "mp_ogbono",
     name: "Ogbono (Wild Mango Seed)",
     categoryId: "sub_ogbono_thickeners",
@@ -207,6 +213,12 @@ export const PRODUCTS: CatalogProduct[] = [
     name: "Scotch Bonnet Pepper",
     categoryId: "sub_fresh_peppers_herbs",
     synonyms: [{ term: "ata rodo", language: "yoruba" }, { term: "ose oyibo", language: "igbo" }],
+  },
+  {
+    id: "mp_onion",
+    name: "Yellow Onions",
+    categoryId: "sub_fresh_vegetables",
+    synonyms: [{ term: "onion" }, { term: "alubosa", language: "yoruba" }, { term: "yabasi", language: "igbo" }],
   },
   {
     id: "mp_garden_eggs",
@@ -452,6 +464,22 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_egusi_v1`, label: "8 oz", price: 1099, weightG: 227 },
         { id: `${prefix}_egusi_v2`, label: "1 lb", price: 1899, weightG: 454 },
         { id: `${prefix}_egusi_v3`, label: "5 lb bag", price: 7999, weightG: 2268 },
+      ],
+    },
+    {
+      id: `${prefix}_egusi_ground`,
+      masterProductId: "mp_egusi_ground",
+      customName: null,
+      price: 1199,
+      stockMode: "counted",
+      qty: 10,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_egusi_ground_v1`, label: "8 oz", price: 1199, weightG: 227 },
+        { id: `${prefix}_egusi_ground_v2`, label: "1 lb", price: 1999, weightG: 454 },
       ],
     },
     {
@@ -767,6 +795,22 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
       active: true,
       variants: [
         { id: `${prefix}_wleaf_v1`, label: "8 oz bag (frozen)", price: 499, weightG: 227 },
+      ],
+    },
+    {
+      id: `${prefix}_onion`,
+      masterProductId: "mp_onion",
+      customName: null,
+      price: 249,
+      stockMode: "counted",
+      qty: 30,
+      status: null,
+      frozen: false,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_onion_v1`, label: "1 lb", price: 249, weightG: 454 },
+        { id: `${prefix}_onion_v2`, label: "3 lb bag", price: 599, weightG: 1362 },
       ],
     },
     {

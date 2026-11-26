@@ -8,7 +8,7 @@ import { cookTonight } from "./cook-tonight";
 
 const hasDb = !!process.env.DATABASE_URL;
 
-// #862 AC5: home's Cook tonight offers the store's recipes it can fill, each with every item it has in stock.
+// #862 AC5: home's Cook tonight offers only the store's recipes it can fill completely (owner: hide dishes the store can't fill).
 describe.skipIf(!hasDb)("Cook tonight", () => {
   let raw: PrismaClient;
   const tag = randomUUID().slice(0, 8);
@@ -50,6 +50,7 @@ describe.skipIf(!hasDb)("Cook tonight", () => {
       }));
       recipeIds.push(row.id);
     };
+    await recipe("Zx full", [["zxseed", seed], ["zxleaf", leaf], ["zxstock", stock]]);
     await recipe("Zx soup", [["zxseed", seed], ["zxleaf", leaf], ["zxstock", stock], ["zxonion", null]]);
     await recipe("Zx stew", [["zxpepper", pepper], ["zxstock", stock], ["zxrare", rare]]);
     await recipe("Zx thin", [["zxrare", rare], ["zxonion", null], ["zxpepper", pepper]]);
@@ -67,28 +68,15 @@ describe.skipIf(!hasDb)("Cook tonight", () => {
     await raw?.$disconnect();
   });
 
-  it("offers each dish the store has most of, fullest first, with its in-stock items and what it lacks", async () => {
-    const dishes = (await cookTonight(storeId)).filter((dish) => dish.name.endsWith(tag));
-    expect(dishes.map((dish) => dish.name)).toEqual([`Zx soup ${tag}`, `Zx stew ${tag}`]);
-    const [soup, stew] = dishes;
-    expect(soup.items.map((item) => item.variantId).sort()).toEqual([variantOf.seed, variantOf.leaf, variantOf.stock].sort());
-    expect(soup.ingredientCount).toBe(4);
-    expect(soup.missing).toEqual([`zxonion ${tag}`]);
-    expect(soup.totalCents).toBe(899 + 499 + 299);
-    expect(soup.servings).toBe(4);
-    expect(stew.items.map((item) => item.variantId).sort()).toEqual([variantOf.pepper, variantOf.stock].sort());
-  });
-
-  it("hides a dish the store has less than half of", async () => {
-    const names = (await cookTonight(storeId)).map((dish) => dish.name);
-    expect(names).not.toContain(`Zx thin ${tag}`);
-  });
-
-  it("offers no dish to a store that sells none of the ingredients", async () => {
+  it("offers only the dishes the store can fill completely, each with its in-stock items, at most three", async () => {
+    const dishes = await cookTonight(storeId);
+    expect(dishes.length).toBeLessThanOrEqual(3);
+    const ours = dishes.filter((dish) => dish.name.endsWith(tag));
+    expect(ours.map((dish) => dish.name)).toEqual([`Zx full ${tag}`]);
+    const [full] = ours;
+    expect(full.items.map((item) => item.variantId).sort()).toEqual([variantOf.seed, variantOf.leaf, variantOf.stock].sort());
+    expect(full.totalCents).toBe(899 + 499 + 299);
+    expect(full.servings).toBe(4);
     expect((await cookTonight(emptyStoreId)).filter((dish) => dish.name.endsWith(tag))).toEqual([]);
-  });
-
-  it("offers at most three dishes", async () => {
-    expect((await cookTonight(storeId)).length).toBeLessThanOrEqual(3);
   });
 });

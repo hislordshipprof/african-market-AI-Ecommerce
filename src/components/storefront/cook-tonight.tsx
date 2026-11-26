@@ -36,7 +36,6 @@ export function CookTonight({ dishes }: { dishes: CookTonightDish[] }) {
                 <p>
                   Serves {dish.servings} · {n} {n === 1 ? "item" : "items"} · <span className="sf-dish-price">{money(dish.totalCents)}</span>
                 </p>
-                {dish.missing.length > 0 && <p className="sf-dish-missing">You’ll also need {dish.missing.join(", ")}</p>}
               </div>
               {toAdd.length ? (
                 <button
