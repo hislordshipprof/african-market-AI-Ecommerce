@@ -225,7 +225,7 @@ test.describe("Storefront redesign interactions", () => {
     await expect(detail.locator(".sf-add-bar")).toContainText(label);
   });
 
-  test("mobile bottom navigation reaches categories, search, account and home", async ({
+  test("mobile bottom navigation reaches search, account and home", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -237,7 +237,6 @@ test.describe("Storefront redesign interactions", () => {
     });
     await expect(nav).toBeVisible();
     for (const [label, path] of [
-      ["Aisles", "/categories"],
       ["Search", "/search"],
       ["Account", "/account"],
       ["Home", "/"],

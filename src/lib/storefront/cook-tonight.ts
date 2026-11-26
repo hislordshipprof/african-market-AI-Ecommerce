@@ -37,7 +37,9 @@ export interface CookTonightDish {
 async function readCookTonight(storeId: string): Promise<CookTonightDish[]> {
   const [recipes, listings] = await Promise.all([listCuratedRecipes(), getActiveListings(storeId)]);
   const byId = new Map<string, StorefrontListing>(listings.map((listing) => [listing.id, listing]));
-  const dishes = await Promise.all(recipes.map(async (recipe) => {
+  const dishes: CookTonightDish[] = [];
+  // One recipe at a time: each fill opens several store-scoped transactions, and in parallel they drain the pool.
+  for (const recipe of recipes) {
     const servings = recipe.servings ?? 4;
     const filled = await fillRecipe(storeId, recipe, servings);
     const items = filled.inStock.map((placed): CookTonightItem => {
@@ -57,15 +59,15 @@ async function readCookTonight(storeId: string): Promise<CookTonightDish[]> {
     });
     const covered = new Set(filled.inStock.flatMap((placed) => [placed.ingredient, ...(placed.covers ?? [])]));
     const missing = recipe.ingredients.map((ingredient) => ingredient.name).filter((name) => !covered.has(name));
-    return {
+    dishes.push({
       name: recipe.name,
       servings,
       ingredientCount: recipe.ingredients.length,
       items,
       missing,
       totalCents: items.reduce((sum, item) => sum + item.price, 0),
-    };
-  }));
+    });
+  }
   return dishes
     .filter((dish) => dish.items.length > 0 && dish.missing.length * 2 <= dish.ingredientCount)
     .sort((left, right) => left.missing.length / left.ingredientCount - right.missing.length / right.ingredientCount || left.name.localeCompare(right.name))
