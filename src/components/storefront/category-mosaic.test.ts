@@ -10,9 +10,8 @@ const aisle = (slug: string, name: string) => ({ id: `cat_${slug}`, slug, name, 
 describe("CategoryMosaic on the home page", () => {
   it("shows the first eleven stocked aisles and a card for all of them", () => {
     const stocked = Array.from({ length: 13 }, (_, i) => aisle(`aisle-${i}`, `Aisle ${i}`));
-    const html = renderToStaticMarkup(
-      createElement(AisleMenuProvider, { aisles: [], children: createElement(CategoryMosaic, { categories: stocked }) }),
-    );
+    const provider = { aisles: [], children: createElement(CategoryMosaic, { categories: stocked }) };
+    const html = renderToStaticMarkup(createElement(AisleMenuProvider, provider));
     const hrefs = [...html.matchAll(/href="(\/categories\/[^"]+)"/g)].map((m) => m[1]);
     expect(hrefs).toEqual(stocked.slice(0, 11).map((c) => `/categories/${c.slug}`));
     expect(html).toContain("All 13 aisles");

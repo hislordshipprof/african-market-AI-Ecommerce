@@ -253,18 +253,17 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     }
   });
 
-  it("lists nothing the seed store stocks as not carried for egusi soup", async () => {
+  it("fills egusi soup from the seed store's own stock", async () => {
     const seedStore = await raw.store.findUnique({ where: { slug: "mama-ngozi" }, select: { id: true } });
     expect(seedStore, "the seeded demo store").not.toBeNull();
     const ctx = await conversation(seedStore!.id);
     try {
       const result = await getRecipe(ctx, { dish: "egusi soup", servings: 4 }, { onlineLookup: false }) as unknown as RecipeOutput;
       expect(result.recipe).toBe("Egusi soup");
-      // The seed store sells no onion; every other ingredient is stocked.
-      expect(result.notCarried.filter((name) => name !== "onion")).toEqual([]);
+      // The seed store stocks every ingredient, so home's Cook tonight can offer the dish (#862).
+      expect(result.notCarried).toEqual([]);
       const placed = Object.fromEntries([...result.inStock, ...result.lowOrOut].map((item) => [item.ingredient, item.listingId]));
-      expect(placed).toMatchObject({ "red palm oil": "mn_palm_oil", "fluted pumpkin leaves": "mn_ugu" });
-      expect(result.similar).toContainEqual(expect.objectContaining({ ingredient: "ground egusi", listingId: "mn_egusi" }));
+      expect(placed).toMatchObject({ "red palm oil": "mn_palm_oil", "fluted pumpkin leaves": "mn_ugu", "ground egusi": "mn_egusi_ground", onion: "mn_onion" });
     } finally {
       await storeScoped(seedStore!.id).aiConversation.delete({ where: { id: ctx.conversationId } });
       await storeScoped(seedStore!.id).cart.delete({ where: { id: ctx.cartId } });

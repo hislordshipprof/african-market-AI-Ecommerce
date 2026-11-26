@@ -43,7 +43,7 @@ async function holdListingDetail(page: Page, edit?: (body: { variants?: { id: st
 
 async function openEgusi(page: Page) {
   await page.goto(`${BASE}/categories/soup-ingredients`);
-  const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+  const card = page.getByTestId("listing-card").filter({ hasText: "Egusi (Melon Seeds)" }).first();
   await card.hover();
   const trigger = card.getByRole("button", { name: /Quick view/ });
   await trigger.click();
@@ -254,7 +254,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(ogbonoCart).toContainText("$12.99 / 8 oz");
     await expect(ogbonoCart).not.toContainText("5 lb bag");
     await page.keyboard.press("Escape");
-    const egusi = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+    const egusi = page.getByTestId("listing-card").filter({ hasText: "Egusi (Melon Seeds)" }).first();
     await egusi.hover();
     await egusi.getByRole("button", { name: /Quick view/ }).click();
     const reopened = page.getByRole("dialog", { name: /Quick view: Egusi/ });
@@ -357,7 +357,7 @@ test.describe("Phase 3 motion and depth", () => {
     // The chip is a navigation. Opening quick view before it commits uses the
     // unfiltered pack, so aria-pressed on "5 lb bag" is false under load.
     await expect(fivePound).toHaveAttribute("aria-current", "page");
-    const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+    const card = page.getByTestId("listing-card").filter({ hasText: "Egusi (Melon Seeds)" }).first();
     await expect(card).toContainText("5 lb bag");
     await card.hover();
     await card.getByRole("button", { name: /Quick view/ }).click();
