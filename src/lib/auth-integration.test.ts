@@ -302,7 +302,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     const message = getTestSentEmails().at(-1);
     expect(message?.subject).toBe("Sign in to Integ Test Store");
     expect(message?.html).toContain("Integ Test Store");
-    expect(message?.html).not.toContain("African Markets");
+    expect(message?.html).not.toContain("Globe Grocer");
     expect(message?.from).toContain("Integ Test Store");
   });
 

@@ -24,8 +24,8 @@ export function DirectoryHome({ stores, states, plans, feeNote }: { stores: Card
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
-        <span className={styles.wordmark}>African Markets</span>
-        <Link className={styles.sell} href="/sell">Sell on African Markets</Link>
+        <span className={styles.wordmark}>Globe Grocer</span>
+        <Link className={styles.sell} href="/sell">Sell on Globe Grocer</Link>
       </header>
       <main>
         <NearMe
@@ -35,7 +35,7 @@ export function DirectoryHome({ stores, states, plans, feeNote }: { stores: Card
             <>
               <h1 id="directory-title" className={styles.heroTitle}>Order from the African market near you</h1>
               <p className={styles.heroLede}>
-                African Markets puts independent African and Caribbean grocery markets online. Each one has its own shop, with its own shelves and prices, for pickup or delivery.
+                Globe Grocer puts independent African and Caribbean grocery markets online. Each one has its own shop, with its own shelves and prices, for pickup or delivery.
               </p>
             </>
           )}

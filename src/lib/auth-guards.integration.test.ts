@@ -180,6 +180,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       const enabled = await authPost("/two-factor/enable", { password }, first);
       const { totpURI, backupCodes } = (await enabled.json()) as { totpURI: string; backupCodes: string[] };
       expect(backupCodes.length).toBeGreaterThan(0);
+      expect(new URL(totpURI).searchParams.get("issuer")).toBe("Globe Grocer");
       const secret = secretFromUri(totpURI);
       const enrolled = await verifyTotp(generateTOTP(secret), first);
       expect(enrolled.status, await enrolled.clone().text()).toBe(200);

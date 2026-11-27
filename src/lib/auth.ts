@@ -325,7 +325,7 @@ export const auth = betterAuth({
   },
   plugins: [
     twoFactor({
-      issuer: "African Markets Platform",
+      issuer: "Globe Grocer",
     }),
     magicLink({
       expiresIn: MAGIC_LINK_TTL_SECONDS,

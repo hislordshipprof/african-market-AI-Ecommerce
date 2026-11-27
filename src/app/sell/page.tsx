@@ -8,7 +8,7 @@ import { SELL_STEPS } from "@/lib/store-application/steps";
 import { SellForm } from "./sell-form";
 import styles from "./sell.module.css";
 
-export const metadata = { title: "Sell on African Markets" };
+export const metadata = { title: "Sell on Globe Grocer" };
 
 export default async function SellPage() {
   // The application form lives on the root domain only; a store's own site has no /sell (#554).
@@ -18,11 +18,11 @@ export default async function SellPage() {
   return (
     <div className={directory.page}>
       <header className={styles.bar}>
-        <Link href="/" className={directory.wordmark}>African Markets</Link>
+        <Link href="/" className={directory.wordmark}>Globe Grocer</Link>
       </header>
       <main className={`${directory.main} ${styles.layout}`}>
         <section aria-labelledby="sell-title">
-          <h1 id="sell-title" className={directory.title}>Sell on African Markets</h1>
+          <h1 id="sell-title" className={directory.title}>Sell on Globe Grocer</h1>
           <p className={directory.lede}>
             Your own online shop under your store&apos;s name, for pickup and delivery. No commission on your sales.
           </p>

@@ -26,7 +26,7 @@ const figtree = Figtree({
 
 export async function generateMetadata(): Promise<Metadata> {
   const headerList = await headers();
-  if (headerList.get("x-platform-root") === "1") return { title: "Store directory · African Markets" };
+  if (headerList.get("x-platform-root") === "1") return { title: "Store directory · Globe Grocer" };
   const store = await findStoreForHeaders(headerList);
   if (!store) return { title: "Store not found" };
   return { title: store.name, ...pwaMetadata(store, "storefront") };

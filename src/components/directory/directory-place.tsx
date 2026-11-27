@@ -19,7 +19,7 @@ export function DirectoryPlace({ crumbs, title, lede, stores, places }: {
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
-        <Link href="/" className={styles.wordmark}>African Markets</Link>
+        <Link href="/" className={styles.wordmark}>Globe Grocer</Link>
       </header>
       <main className={styles.main}>
         <nav aria-label="Breadcrumb" className={styles.crumbs}>

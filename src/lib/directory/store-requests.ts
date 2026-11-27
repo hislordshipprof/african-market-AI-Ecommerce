@@ -83,7 +83,7 @@ export function storeOpenedEmail(zip: string, store: OpenedStore): { subject: st
   return {
     subject: `A store is open near ${zip}`,
     html: [
-      `<p><a href="${escapeHtml(store.href)}">${name}</a>${place ? ` in ${escapeHtml(place)}` : ""} is now on African Markets, ${store.distanceMi.toFixed(1)} miles from ${zip}. You can order pickup or delivery straight from the store.</p>`,
+      `<p><a href="${escapeHtml(store.href)}">${name}</a>${place ? ` in ${escapeHtml(place)}` : ""} is now on Globe Grocer, ${store.distanceMi.toFixed(1)} miles from ${zip}. You can order pickup or delivery straight from the store.</p>`,
       `<p>You asked us to tell you when a store opened near you. This is the only message we will send, and we have deleted your email address.</p>`,
     ].join(""),
   };
@@ -91,7 +91,7 @@ export function storeOpenedEmail(zip: string, store: OpenedStore): { subject: st
 
 export function storeOpenedText(zip: string, store: OpenedStore): string {
   const place = placeOf(store);
-  return `${store.name}${place ? ` (${place})` : ""} is open on African Markets, ${store.distanceMi.toFixed(1)} mi from ${zip}: ${store.href} This is the only text we will send.`;
+  return `${store.name}${place ? ` (${place})` : ""} is open on Globe Grocer, ${store.distanceMi.toFixed(1)} mi from ${zip}: ${store.href} This is the only text we will send.`;
 }
 
 function storeHref(slug: string, env: Record<string, string | undefined> = process.env): string | null {

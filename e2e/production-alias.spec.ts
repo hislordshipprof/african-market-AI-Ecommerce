@@ -54,7 +54,7 @@ test("the production alias serves the directory, /sell, the admin and stores, no
 
     // The marketplace's own pages forget the store, so their links to / lead home.
     await page.goto(`https://${ALIAS}/sell`);
-    await page.getByRole("link", { name: "African Markets", exact: true }).click();
+    await page.getByRole("link", { name: "Globe Grocer", exact: true }).click();
     await expect(page).toHaveTitle(/Store directory/);
 
     const admin = await page.goto(`https://${ALIAS}/admin/sign-in`);
