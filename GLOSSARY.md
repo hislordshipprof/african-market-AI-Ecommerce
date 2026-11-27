@@ -5,7 +5,7 @@ A shared system that gives each independent US grocery or food store its own bra
 ## Stores and people
 
 **Platform**:
-The shared system we build and run that powers every store's website and admin. Customers rarely see its name.
+The shared system we build and run that powers every store's website and admin. Named Globe Grocer, at `globegrocer.com` (decided 2026-11-27). Customers rarely see its name.
 _Avoid_: Marketplace
 
 **Store**:

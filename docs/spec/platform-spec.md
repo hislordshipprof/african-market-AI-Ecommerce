@@ -1,6 +1,6 @@
 # African Markets Platform: Product & Technical Spec (v0.1)
 
-Date: 2026-10-30 · Status: draft for review · Working name: **"the Platform"** (brand TBD)
+Date: 2026-10-30 · Status: draft for review · Platform name: **Globe Grocer** (`globegrocer.com`, decided 2026-11-27)
 Research: [US competitor report](../../research/us-competitor-report.md) · [Danlex teardown](../../research/danlex-teardown.md)
 
 ---
@@ -643,7 +643,7 @@ Second metro, native apps, scheduled van slots, nationwide shipping for dry good
 2. **Pricing numbers:** **Decided** 2026-11-12 in [ADR-0021](../adr/0021-pricing-and-courier-plan.md): Starter $49, Pro $99, a 3% customer service fee ($0.99–$2.99). Still to do: validate with 3–5 store owners before launch.
 3. **Merchant of record & tax:** (build approach settled in ADR-0008; advisor sign-off still needed) confirm destination-charge setup and marketplace-facilitator obligations per state with a tax advisor. Also open: whether the customer service fee (ADR-0021) is taxable per state. **Until the advisor rules, the service fee is not taxed** (#495).
 4. **Uber Direct account:** confirm multi-location/organization setup and US pricing for platform accounts; confirm weight limits with both providers. Courier costs and build order are in [ADR-0021](../adr/0021-pricing-and-courier-plan.md).
-5. **Brand:** (storefronts are store-branded per ADR-0003; only the platform name remains open) platform name and whether customers see the platform brand at all on tenant stores ("powered by").
+5. **Brand:** platform name **decided** 2026-11-27: Globe Grocer, on `globegrocer.com` (stores at `slug.globegrocer.com`; see `research/per-store-provisioning.md`). Storefronts stay store-branded (ADR-0003). Still open: whether customers see the platform brand at all on tenant stores ("powered by").
 6. ~~Customer accounts~~ **Resolved:** ADR-0002. Was: one platform login (current spec) vs per-store accounts; affects phase-2 marketplace.
 7. ~~Customer support~~ **Resolved:** the store is first line (in-app chat, refunds). A platform admin handles payment, courier and app issues, or steps in when a store doesn't respond within the SLA (30 open minutes, set per store; owner decision 2026-11-10).
 8. ~~Delivery fee policy~~ **Resolved:** ADR-0006. Was: flat by distance band vs pass-through quote; who pays above free-delivery threshold.
