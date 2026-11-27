@@ -167,12 +167,12 @@ async function emailNewApplication(application: NewApplication): Promise<void> {
 function receivedMessage(application: NewApplication): EmailMessage {
   return {
     to: application.email,
-    subject: "We have your application to sell on African Markets",
+    subject: "We have your application to sell on Globe Grocer",
     html: emailHtml([
       `Hello ${escapeHtml(application.ownerName)},`,
-      `Thank you for applying to sell ${escapeHtml(application.businessName)} on African Markets.`,
+      `Thank you for applying to sell ${escapeHtml(application.businessName)} on Globe Grocer.`,
       "Our team checks every application and replies to this email address. If we approve it, you get an invite to set up your shop.",
-      "The African Markets team",
+      "The Globe Grocer team",
     ]),
     idempotencyKey: `store-application-received/${application.id}`,
   };
@@ -181,7 +181,7 @@ function receivedMessage(application: NewApplication): EmailMessage {
 function adminNoticeHtml(application: NewApplication): string {
   const link = `${resolveAuthBaseUrl()}/admin/applications`;
   return emailHtml([
-    `${escapeHtml(application.businessName)} in ${escapeHtml(application.city)}, ${escapeHtml(application.state)} applied to sell on African Markets.`,
+    `${escapeHtml(application.businessName)} in ${escapeHtml(application.city)}, ${escapeHtml(application.state)} applied to sell on Globe Grocer.`,
     `Review it on <a href="${escapeHtml(link)}">the Applications page</a>.`,
   ]);
 }
@@ -383,7 +383,7 @@ export async function rejectStoreApplication(id: string, rawReason: string, acto
 export function rejectionMessage(application: { id: string; email: string; ownerName: string; businessName: string }): EmailMessage {
   return {
     to: application.email,
-    subject: "Your application to sell on African Markets",
+    subject: "Your application to sell on Globe Grocer",
     html: rejectionHtml(application.ownerName, application.businessName),
     idempotencyKey: `store-application-rejected/${application.id}`,
   };
@@ -392,9 +392,9 @@ export function rejectionMessage(application: { id: string; email: string; owner
 function rejectionHtml(ownerName: string, businessName: string): string {
   return emailHtml([
     `Hello ${escapeHtml(ownerName)},`,
-    `Thank you for applying to sell ${escapeHtml(businessName)} on African Markets. We can't offer you a store at this time.`,
+    `Thank you for applying to sell ${escapeHtml(businessName)} on Globe Grocer. We can't offer you a store at this time.`,
     "You're welcome to apply again later.",
-    "The African Markets team",
+    "The Globe Grocer team",
   ]);
 }
 

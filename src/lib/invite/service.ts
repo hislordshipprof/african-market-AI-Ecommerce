@@ -295,7 +295,7 @@ function buildInviteHtml(storeName: string, role: string, url: string): string {
         Join ${safeName}
       </h1>
       <p style="font-size: 16px; color: #55625A; line-height: 1.5; margin-bottom: 24px;">
-        You've been invited as <strong>${safeRole}</strong> for ${safeName} on the African Markets Platform.
+        You've been invited as <strong>${safeRole}</strong> for ${safeName} on Globe Grocer.
         Click the button below to set up your account.
       </p>
       <a href="${safeUrl}" style="display: inline-block; background: #1F5A43; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 999px; font-size: 16px; font-weight: 600;">

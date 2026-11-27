@@ -73,7 +73,7 @@ export function AdminShell({ email, counts, children }: { email: string; counts:
               AM
             </span>
             <span className="min-w-0 leading-tight">
-              <span className="block truncate font-semibold text-foreground">African Markets</span>
+              <span className="block truncate font-semibold text-foreground">Globe Grocer</span>
               <span className="block truncate text-sm text-muted-foreground">Platform admin</span>
             </span>
           </Link>

@@ -178,12 +178,14 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     const applicant = input.email!.toLowerCase();
     const toApplicant = getTestSentEmails().filter((m) => m.to === applicant);
     expect(toApplicant).toHaveLength(1);
-    expect(toApplicant[0].subject).toContain("We have your application");
+    expect(toApplicant[0].subject).toBe("We have your application to sell on Globe Grocer");
     expect(toApplicant[0].html).toContain(input.businessName);
+    expect(toApplicant[0].html).toContain("The Globe Grocer team");
     const toAdmin = getTestSentEmails().filter((m) => m.to === platformAdminUser.email);
     expect(toAdmin).toHaveLength(1);
     expect(toAdmin[0].subject).toContain(input.businessName!);
     expect(toAdmin[0].html).toContain("/admin/applications");
+    expect(toAdmin[0].html).toContain("applied to sell on Globe Grocer");
 
     expect(await submitStoreApplication({ ...input }, ip(), NOW)).toEqual({ ok: true });
     expect(getTestSentEmails().filter((m) => m.to === applicant)).toHaveLength(1);
@@ -346,6 +348,8 @@ describe.skipIf(!process.env.DATABASE_URL)("store applications (#554)", () => {
     expect(mails[0].html).not.toContain("Internal note");
     expect(mails[0].html).not.toContain("launch metros");
     expect(mails[0].subject).not.toContain("Internal note");
+    expect(mails[0].subject).toBe("Your application to sell on Globe Grocer");
+    expect(mails[0].html).toContain("The Globe Grocer team");
 
     const row = await platformAdmin.storeApplication.findUniqueOrThrow({ where: { id: app.id } });
     expect(row).toMatchObject({ status: "rejected", rejectReason: reason });
