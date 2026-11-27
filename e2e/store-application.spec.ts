@@ -86,9 +86,9 @@ test("a store applies on /sell; a platform admin approves one into a setup store
     expect(storeHost?.status()).toBe(404);
 
     await page.goto(`${root}/`);
-    await page.getByRole("banner").getByRole("link", { name: "Sell on African Markets" }).click();
+    await page.getByRole("banner").getByRole("link", { name: "Sell on Globe Grocer" }).click();
     await expect(page).toHaveURL(`${root}/sell`);
-    await expect(page.getByRole("heading", { level: 1, name: "Sell on African Markets" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Sell on Globe Grocer" })).toBeVisible();
     // #838: what each plan gives and costs shows before applying, from the plan module.
     const plans = page.getByRole("table", { name: "Starter and Pro compared" });
     await expect(plans.getByRole("columnheader", { name: /Starter\s*\$49/ })).toBeVisible();

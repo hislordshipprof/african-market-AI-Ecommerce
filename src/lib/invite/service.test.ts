@@ -169,6 +169,7 @@ describe.skipIf(!hasDb)("Invite service", () => {
       expect(emails[0].to).toBe("new-staff@example.com");
       expect(emails[0].subject).toContain("Invite Svc Store A");
       expect(emails[0].html).toContain("invite-svc-a");
+      expect(emails[0].html).toContain("on Globe Grocer.");
     });
 
     it("dedup: marks old invite used and creates new one", async () => {

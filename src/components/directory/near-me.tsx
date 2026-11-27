@@ -285,7 +285,7 @@ function EmptyArea({ answer, refreshing, turnstileSiteKey }: { answer: StoresAns
         <aside aria-labelledby="empty-owner" className={styles.ownerBand}>
           <h3 id="empty-owner" className={styles.ownerBandTitle}>Know a market owner near {place}?</h3>
           <p>Send them the sell page. They keep their own brand, prices and customers.</p>
-          <Link href="/sell" className={styles.lightButton}>Sell on African Markets</Link>
+          <Link href="/sell" className={styles.lightButton}>Sell on Globe Grocer</Link>
         </aside>
       </div>
       {answer.stores.length > 0 ? (

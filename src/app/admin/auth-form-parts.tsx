@@ -28,7 +28,7 @@ export function totpDigits(value: string): string {
 export const NETWORK_ERROR = "Couldn't reach the server. Check your connection and try again.";
 
 // The name authenticator apps show for this account: the issuer in src/lib/auth.ts.
-export const AUTHENTICATOR_ENTRY = "African Markets Platform";
+export const AUTHENTICATOR_ENTRY = "Globe Grocer";
 
 export const CREDENTIALS_ERRORS: Record<string, string> = {
   INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",

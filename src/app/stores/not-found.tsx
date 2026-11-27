@@ -7,7 +7,7 @@ export default function DirectoryNotFound() {
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
-        <Link href="/" className={styles.wordmark}>African Markets</Link>
+        <Link href="/" className={styles.wordmark}>Globe Grocer</Link>
       </header>
       <main className={styles.main}>
         <section className={styles.intro}>

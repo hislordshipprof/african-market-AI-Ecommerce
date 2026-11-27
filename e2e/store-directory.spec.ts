@@ -379,7 +379,7 @@ test("state and city pages: cached, GroceryStore JSON-LD, sitemap and robots, 40
   try {
     await page.goto(`${root}/stores/texas`);
     await expect(page.getByRole("heading", { level: 1, name: "African grocery stores in Texas" })).toBeVisible();
-    await expect(page).toHaveTitle("African grocery stores in Texas · African Markets");
+    await expect(page).toHaveTitle("African grocery stores in Texas · Globe Grocer");
     await expect(page.getByRole("link", { name: /Mama Ngozi African Market/ })).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
     await page.getByRole("link", { name: /^Houston/ }).click();
     await expect(page).toHaveURL(`${root}/stores/texas/houston`);
@@ -697,7 +697,7 @@ test("directory home B2 (#863): hero search, the owner link, delivery or pickup,
     const hero = page.getByRole("region", { name: "Order from the African market near you" });
     await hero.getByRole("link", { name: "Open your store" }).click();
     await expect(page).toHaveURL(`${root}/sell`);
-    await expect(page.getByRole("heading", { level: 1, name: "Sell on African Markets" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Sell on Globe Grocer" })).toBeVisible();
     await context.close();
 
     // Lighthouse's mobile slow 4G, as for the city page: the home must keep the 2.5 s LCP budget.

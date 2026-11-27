@@ -36,14 +36,14 @@ describe("store opened messages", () => {
     expect(email.subject).toBe("A store is open near 77002");
     expect(email.html).toContain("Mama&#39;s &lt;Kitchen&gt;");
     expect(email.html).toContain("Houston, TX");
-    expect(email.html).toContain("3.2 miles from 77002");
+    expect(email.html).toContain("is now on Globe Grocer, 3.2 miles from 77002");
     expect(email.html).toContain(`href="https://mamas.example.com/?ref=directory"`);
     expect(email.html).toContain("only message");
   });
 
   it("text fits one line with the link", () => {
     const text = storeOpenedText("77002", store);
-    expect(text).toContain("Mama's <Kitchen> (Houston, TX) is open on African Markets, 3.2 mi from 77002");
+    expect(text).toContain("Mama's <Kitchen> (Houston, TX) is open on Globe Grocer, 3.2 mi from 77002");
     expect(text).toContain("https://mamas.example.com/?ref=directory");
   });
 });

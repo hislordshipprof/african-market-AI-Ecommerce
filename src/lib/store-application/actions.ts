@@ -24,7 +24,7 @@ export async function submitStoreApplicationAction(_previous: SellFormState, for
     for (const [key, value] of Object.entries(parsed.data)) if (key !== "fax" && value) values[key] = value;
   }
   if (incoming.get("x-platform-root") !== "1") {
-    return { status: "error", message: "Applications are taken on the African Markets home site.", fieldErrors: {}, values };
+    return { status: "error", message: "Applications are taken on the Globe Grocer home site.", fieldErrors: {}, values };
   }
   if (!parsed.ok) return { status: "error", message: "Check the form and try again.", fieldErrors: {}, values };
   // Fails closed: with siteverify unreachable no application is taken (#872).

@@ -22,9 +22,9 @@ async function load(params: Props["params"]) {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const page = await load(params);
-  if (!page) return { title: "Not found · African Markets" };
+  if (!page) return { title: "Not found · Globe Grocer" };
   return {
-    title: `African grocery stores in ${page.city}, ${page.state.code} · African Markets`,
+    title: `African grocery stores in ${page.city}, ${page.state.code} · Globe Grocer`,
     description: `${page.stores.length === 1 ? "1 independent store" : `${page.stores.length} independent stores`} in ${page.city}, ${page.state.name}. Order pickup or delivery straight from the store.`,
     alternates: { canonical: `${directoryOrigin()}/stores/${page.state.slug}/${page.slug}` },
   };
