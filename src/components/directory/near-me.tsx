@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { Check, LocateFixed, MapPin, MapPinOff, RotateCw, ShoppingBag, Truck } from "lucide-react";
 import { NEARBY_MILES } from "@/lib/directory/distance";
@@ -8,8 +8,10 @@ import { splitByDelivery } from "@/lib/directory/delivery-line";
 import { withCuisine, type CuisineChip } from "@/lib/directory/cuisine-filter";
 import { fetchNear, nearSearch, type NearAnswer, type NearState } from "@/lib/directory/near-search";
 import { StoreCard, type CardStore } from "./store-card";
-import { StoreRequestForm } from "./store-request-form";
 import styles from "./directory.module.css";
+
+// Shown only when no store is near, so it and its Turnstile widget stay out of the home's first-load JS (#629, #872).
+const StoreRequestForm = lazy(() => import("./store-request-form").then((mod) => ({ default: mod.StoreRequestForm })));
 
 type PlaceLink = { name: string; href: string; count: number };
 export type StateGroup = { code: string; name: string; href: string; count: number; cities: PlaceLink[] };
@@ -211,7 +213,7 @@ function AllStores({ stores, turnstileSiteKey }: { stores: CardStore[]; turnstil
       {stores.length === 0 ? (
         <>
           <p className={styles.note}>Suggest a store: leave your ZIP code and we&apos;ll tell you when a market opens near you.</p>
-          <StoreRequestForm zip={null} turnstileSiteKey={turnstileSiteKey} />
+          <Suspense fallback={null}><StoreRequestForm zip={null} turnstileSiteKey={turnstileSiteKey} /></Suspense>
         </>
       ) : (
         <StoreGrid stores={stores} />
@@ -279,7 +281,7 @@ function EmptyArea({ answer, refreshing, turnstileSiteKey }: { answer: StoresAns
         </p>
       </div>
       <div className={styles.emptyGrid}>
-        <StoreRequestForm zip={zip} turnstileSiteKey={turnstileSiteKey} />
+        <Suspense fallback={null}><StoreRequestForm zip={zip} turnstileSiteKey={turnstileSiteKey} /></Suspense>
         <aside aria-labelledby="empty-owner" className={styles.ownerBand}>
           <h3 id="empty-owner" className={styles.ownerBandTitle}>Know a market owner near {place}?</h3>
           <p>Send them the sell page. They keep their own brand, prices and customers.</p>

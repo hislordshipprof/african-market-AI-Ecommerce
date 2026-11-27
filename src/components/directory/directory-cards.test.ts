@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { prerender } from "react-dom/static";
 import { NearMe } from "./near-me";
 import { StoreCard, type CardStore } from "./store-card";
 
@@ -29,8 +30,10 @@ const store: CardStore = {
 const card = (over: Partial<CardStore> = {}) => renderToStaticMarkup(createElement(StoreCard, { store: { ...store, ...over } }));
 const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
 
-function nearMe(stores: CardStore[]) {
-  return renderToStaticMarkup(createElement(NearMe, { stores, chips: [], intro: null, owner: null, figure: null, turnstileSiteKey: null }));
+// The store request form loads lazily (#872), so render the way the server does: wait for it.
+async function nearMe(stores: CardStore[]) {
+  const { prelude } = await prerender(createElement(NearMe, { stores, chips: [], intro: null, owner: null, figure: null, turnstileSiteKey: null }));
+  return new Response(prelude).text();
 }
 
 describe("store card (#863 AC3)", () => {
@@ -56,16 +59,16 @@ describe("store card (#863 AC3)", () => {
 });
 
 describe("empty directory (#728 AC2)", () => {
-  it("offers the tell-me-when-a-store-opens form instead of only asking people to check back", () => {
-    const html = nearMe([]);
+  it("offers the tell-me-when-a-store-opens form instead of only asking people to check back", async () => {
+    const html = await nearMe([]);
     expect(html).toContain("No stores are listed yet");
     expect(html).toContain("Tell me when a store opens near me");
     expect(html).toMatch(/<button[^>]*type="submit"[^>]*>Notify me<\/button>/);
     expect(html).not.toContain("Check back soon");
   });
 
-  it("keeps the form off a directory that has stores", () => {
-    expect(nearMe([store])).not.toContain("Tell me when a store opens near me");
+  it("keeps the form off a directory that has stores", async () => {
+    expect(await nearMe([store])).not.toContain("Tell me when a store opens near me");
   });
 
   it("shows no cuisine filter before a search (#863 AC2)", () => {
