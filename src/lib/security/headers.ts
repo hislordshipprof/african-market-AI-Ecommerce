@@ -84,7 +84,7 @@ function sharedDirectives(env: Record<string, string | undefined>): string[] {
     `img-src ${imgSrc}`,
     "font-src 'self'",
     "connect-src 'self' https://api.stripe.com",
-    "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
+    "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://challenges.cloudflare.com",
     "worker-src 'self' blob:",
     // The payouts dashboard form is answered with a 303 to connect.stripe.com, and form-action covers redirects.
     "form-action 'self' https://connect.stripe.com",
@@ -94,7 +94,7 @@ function sharedDirectives(env: Record<string, string | undefined>): string[] {
 }
 
 function scriptSrc(withEval: boolean): string {
-  return `script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com${withEval ? " 'unsafe-eval'" : ""}`;
+  return `script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com https://challenges.cloudflare.com${withEval ? " 'unsafe-eval'" : ""}`;
 }
 
 /**

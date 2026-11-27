@@ -23,6 +23,8 @@ import type { CheckoutQuote, Contact, Fulfillment } from "../customer-flow/contr
 import { parseInput } from "../security/parse-input";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { clientIp } from "../assistant/client-ip";
+import { logSecurityEvent } from "../security/events";
+import { TURNSTILE_FAILED, turnstileRequest, verifyTurnstile } from "../security/turnstile";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform, storeScoped } from "../db";
 import { loadCheckoutDraft } from "../assistant/checkout-draft";
@@ -157,6 +159,7 @@ export async function createPaymentIntentAction(
   selection?: { saveCard?: boolean; savedCardId?: string | null; attemptToken?: string | null },
   delivery?: unknown,
   slot?: unknown,
+  turnstileToken?: unknown,
 ): Promise<
   | { ok: true; orderedToken: string }
   | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number; attemptToken?: string }
@@ -257,6 +260,11 @@ export async function createPaymentIntentAction(
         leaveAtDoor: request.leaveAtDoor,
       };
     }
+    // Last before the hold, so a refused quote or slot leaves the shopper's token unspent. Fails open (logged):
+    // a Cloudflare outage never blocks a paying customer (#872).
+    const human = await verifyTurnstile(turnstileToken, turnstileRequest(await headers()));
+    if (!human.ok && human.reason !== "unavailable") return { ok: false, error: TURNSTILE_FAILED };
+    if (!human.ok) logSecurityEvent("turnstile_checkout_failed_open", { store: store.id });
     const result = await createPaymentIntent(store.id, cartId, quote.holdCents, actorUserId
       ? {
           actorUserId,

@@ -13,7 +13,9 @@ describe("security headers", () => {
     const directive = (name: string) => enforced.split("; ").find((d) => d.startsWith(`${name} `));
     expect(directive("default-src")).toBe("default-src 'self'");
     expect(directive("connect-src")).toBe("connect-src 'self' https://api.stripe.com");
-    expect(directive("frame-src")).toBe("frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com");
+    expect(directive("frame-src")).toBe("frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://challenges.cloudflare.com");
+    // The Turnstile widget script and its challenge iframe (#872).
+    expect(directive("script-src")).toContain("https://challenges.cloudflare.com");
     expect(directive("img-src")).toContain("https://cdn.example.test");
     // Catalog photos (src/lib/storefront/catalog-media.json) are served from Wikimedia.
     expect(directive("img-src")).toContain("https://upload.wikimedia.org");

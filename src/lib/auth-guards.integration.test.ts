@@ -36,6 +36,8 @@ import { createInvite, setInviteePassword } from "./invite/service";
 import { sendSignInLinkAction } from "./customer-sign-in/actions";
 import { AUTH_BASE, authGet, authPost, createTestUser, testSignUp, collectCookies, latestMagicLink, verifyUrlFromEmail } from "./test-auth";
 import { storeScoped } from "./db";
+import { stubTurnstile, TURNSTILE_DUMMY_TOKEN } from "./security/turnstile-fake";
+import { TURNSTILE_FAILED } from "./security/turnstile";
 
 const suffix = `${Date.now()}-c1`;
 const password = "GuardPass-123!";
@@ -243,6 +245,42 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       expect((await sendSignInLinkAction({ status: "idle", email: "" }, form)).status).toBe("sent");
       expect(getTestSentEmails()).toHaveLength(0);
     } finally {
+      for (const key of [...headerState.keys()]) headerState.delete(key);
+      await removeAuthFixtures([email], []);
+    }
+  });
+
+  it("#872: with Turnstile keys set, a missing or failed token, or siteverify down, sends no link; a passing one sends it", async () => {
+    const email = `c1-turnstile-${suffix}@test.example`;
+    const form = new FormData();
+    form.set("email", email);
+    const refused = { status: "error", email, message: TURNSTILE_FAILED };
+    try {
+      clearTestSentEmails();
+      for (const key of [...headerState.keys()]) headerState.delete(key);
+      headerState.set("host", `${storeSlug}.localhost:3000`);
+      headerState.set("x-forwarded-for", "10.181.0.11");
+      headerState.set("x-store-slug", storeSlug);
+
+      stubTurnstile("pass");
+      expect(await sendSignInLinkAction({ status: "idle", email: "" }, form)).toEqual(refused);
+      // The auth route checks the token itself, so posting to it directly does not skip the check.
+      const direct = await authPost("/sign-in/magic-link", { email }, undefined, { host: `${storeSlug}.localhost:3000`, "x-store-slug": storeSlug });
+      expect(direct.status).toBe(400);
+      stubTurnstile("fail");
+      form.set("cf-turnstile-response", TURNSTILE_DUMMY_TOKEN);
+      expect(await sendSignInLinkAction({ status: "idle", email: "" }, form)).toEqual(refused);
+      stubTurnstile("down");
+      expect(await sendSignInLinkAction({ status: "idle", email: "" }, form)).toEqual(refused);
+      expect(getTestSentEmails()).toHaveLength(0);
+      expect(await authPrisma.user.count({ where: { email } })).toBe(0);
+
+      stubTurnstile("pass");
+      expect(await sendSignInLinkAction({ status: "idle", email: "" }, form)).toEqual({ status: "sent", email });
+      expect(getTestSentEmails().at(-1)?.to).toBe(email);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
       for (const key of [...headerState.keys()]) headerState.delete(key);
       await removeAuthFixtures([email], []);
     }

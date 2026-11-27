@@ -299,7 +299,7 @@ describe("runHealthChecks", () => {
   it("names the optional setup production lacks (#765), by name only and without failing", async () => {
     const result = await runHealthChecks({ env: productionEnv, queryRaw: makeQueryRaw() });
     expect(result.status).toBe(200);
-    expect(result.body.missingSetup).toEqual(["EMAIL_FROM", "R2_PROOF_BUCKET", "SHIPPO_API_KEY"]);
+    expect(result.body.missingSetup).toEqual(["EMAIL_FROM", "R2_PROOF_BUCKET", "SHIPPO_API_KEY", "TURNSTILE_SECRET_KEY"]);
   });
 
   it("reports missing Inngest keys in preview without failing", async () => {
@@ -484,12 +484,24 @@ describe.skipIf(!hasRuntime)("Health check proves app_runtime connection", () =>
 
 describe("missingSetup (#765)", () => {
   it("is empty once a real sender, the proof bucket and the Shippo key are set, and never carries their values", () => {
-    const env = { EMAIL_FROM: "Market <orders@markets.example>", R2_PROOF_BUCKET: "proofs-secret-name", SHIPPO_API_KEY: "shippo_live_secret" };
+    const env = {
+      EMAIL_FROM: "Market <orders@markets.example>",
+      R2_PROOF_BUCKET: "proofs-secret-name",
+      SHIPPO_API_KEY: "shippo_live_secret",
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: "0x4AAAA-site",
+      TURNSTILE_SECRET_KEY: "0x4AAAA-secret",
+    };
     expect(missingSetup(env)).toEqual([]);
   });
 
   it("counts Resend's sandbox sender and a blank bucket as missing: neither reaches anyone", () => {
     const env = { EMAIL_FROM: "onboarding@resend.dev", R2_PROOF_BUCKET: "  ", SHIPPO_API_KEY: "shippo_live_secret" };
-    expect(missingSetup(env)).toEqual(["EMAIL_FROM", "R2_PROOF_BUCKET"]);
+    expect(missingSetup(env)).toEqual(["EMAIL_FROM", "R2_PROOF_BUCKET", "TURNSTILE_SECRET_KEY"]);
+  });
+
+  it("names TURNSTILE_SECRET_KEY while either Turnstile key is unset (#872): the bot check is off", () => {
+    const base = { EMAIL_FROM: "Market <orders@markets.example>", R2_PROOF_BUCKET: "proofs", SHIPPO_API_KEY: "shippo_live_secret" };
+    expect(missingSetup({ ...base, TURNSTILE_SECRET_KEY: "0x4AAAA-secret" })).toEqual(["TURNSTILE_SECRET_KEY"]);
+    expect(missingSetup({ ...base, NEXT_PUBLIC_TURNSTILE_SITE_KEY: "0x4AAAA-site" })).toEqual(["TURNSTILE_SECRET_KEY"]);
   });
 });
