@@ -241,7 +241,7 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
     const bannerId = `${RUN}-hidden-banner`;
     bannerIds.push(bannerId);
     await asAdmin(prisma, (tx) => tx.storeBanner.create({
-      data: { id: bannerId, storeId: storeB, title: "Hidden", imageUrl: key, active: true },
+      data: { id: bannerId, storeId: storeB, title: "Hidden", imageUrl: key, active: false },
     }));
     const visible = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id FROM master_products LIMIT 1`;
     expect(visible.length).toBeGreaterThan(0);
@@ -733,8 +733,9 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
       await tx.masterProduct.create({
         data: { id: masterId, name: masterId, imageUrl: `/api/catalog-image/${ref}`, status: "active" },
       });
+      // Inactive: an active banner on a demo store fails seed-catalog.test.ts running beside this file.
       await tx.storeBanner.create({
-        data: { id: bannerId, storeId: storeA, title: "Banner", imageUrl: bannerKey, active: true },
+        data: { id: bannerId, storeId: storeA, title: "Banner", imageUrl: bannerKey, active: false },
       });
       await tx.storeCollection.create({
         data: {
