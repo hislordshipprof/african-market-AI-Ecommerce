@@ -239,6 +239,11 @@
   overflow: hidden;
 }
 
+/* The widget's own height, held before it loads so the button does not jump. */
+.turnstile {
+  min-height: 65px;
+}
+
 .submit {
   min-height: 48px;
   border: 0;

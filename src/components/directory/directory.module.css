@@ -619,6 +619,11 @@
   outline-offset: 2px;
 }
 
+/* The widget's own height, held before it loads so the button does not jump. */
+.turnstile {
+  min-height: 65px;
+}
+
 .requestActions {
   display: flex;
   flex-wrap: wrap;

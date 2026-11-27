@@ -2,6 +2,7 @@ import { CustomerSignIn } from "@/components/storefront/customer-sign-in";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { getStore } from "@/lib/get-store";
 import { EMAIL_SIGN_IN_UNAVAILABLE, emailSignInAvailable } from "@/lib/email/send";
+import { turnstileSiteKey } from "@/lib/security/turnstile";
 
 export default async function SignInPage({
   searchParams,
@@ -15,6 +16,7 @@ export default async function SignInPage({
         storeName={store.name}
         linkError={params.error ?? null}
         unavailable={emailSignInAvailable() ? null : EMAIL_SIGN_IN_UNAVAILABLE}
+        turnstileSiteKey={turnstileSiteKey()}
       />
     </StorefrontShell>
   );

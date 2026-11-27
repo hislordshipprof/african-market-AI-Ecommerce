@@ -30,7 +30,7 @@ const card = (over: Partial<CardStore> = {}) => renderToStaticMarkup(createEleme
 const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
 
 function nearMe(stores: CardStore[]) {
-  return renderToStaticMarkup(createElement(NearMe, { stores, chips: [], intro: null, owner: null, figure: null }));
+  return renderToStaticMarkup(createElement(NearMe, { stores, chips: [], intro: null, owner: null, figure: null, turnstileSiteKey: null }));
 }
 
 describe("store card (#863 AC3)", () => {
@@ -69,7 +69,7 @@ describe("empty directory (#728 AC2)", () => {
   });
 
   it("shows no cuisine filter before a search (#863 AC2)", () => {
-    const html = renderToStaticMarkup(createElement(NearMe, { stores: [store], chips: [{ value: "west-african", label: "West African" }], intro: null, owner: null, figure: null }));
+    const html = renderToStaticMarkup(createElement(NearMe, { stores: [store], chips: [{ value: "west-african", label: "West African" }], intro: null, owner: null, figure: null, turnstileSiteKey: null }));
     expect(html).not.toContain("Filter markets by cuisine");
   });
 });

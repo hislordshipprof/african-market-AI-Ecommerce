@@ -66,6 +66,7 @@ import type { AccountAddressView, CheckoutPrefill } from "@/lib/customer-account
 import type { SlotOptions } from "@/lib/checkout/slots";
 import { shipsToLabel } from "@/lib/shipping/eligibility";
 import { CouponField } from "./coupon-field";
+import { TurnstileWidget } from "@/components/turnstile-widget";
 import styles from "./cart-checkout.module.css";
 
 type Outcome =
@@ -89,6 +90,8 @@ interface StripeConfig {
   pickupSlots?: SlotOptions;
   /** The store has a registered WhatsApp number, so checkout offers order updates there (#560). */
   whatsappUpdates?: boolean;
+  /** Set once both Turnstile keys are (#872): the widget sits beside Pay. */
+  turnstileSiteKey?: string | null;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -394,6 +397,9 @@ function RealCheckoutForm({
     }
   };
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped once a token has been sent: it is good for one check, so the next Pay needs a fresh one.
+  const [turnstileSent, setTurnstileSent] = useState(0);
   const [notes, setNotes] = useState("");
   // The default saved address fills delivery, courier and ship; its notes join the order only off pickup (#763).
   const savedAddresses = prefill?.addresses ?? [];
@@ -633,7 +639,9 @@ function RealCheckoutForm({
           : undefined,
         delivery,
         chosenSlot,
+        turnstileToken,
       );
+      setTurnstileSent((sent) => sent + 1);
       if (!piResult.ok) {
         if (piResult.code === "quote_changed") {
           setQuote(piResult.quote);
@@ -946,6 +954,9 @@ function RealCheckoutForm({
       addressHold={addressRefused && fulfillment !== "pickup" && !delivery}
       paymentHold={payment === "ready" ? null : payment}
       onSubmit={pay}
+      beforePay={stripeConfig.turnstileSiteKey
+        ? <TurnstileWidget siteKey={stripeConfig.turnstileSiteKey} onToken={setTurnstileToken} resetOn={turnstileSent} className="min-h-[65px]" />
+        : undefined}
       contactNote={contactPrefillNote(stripeConfig.signedIn ? prefill?.contact ?? { name: "", phone: "", email: "" } : null)}
       paymentSection={
         <>
@@ -1242,6 +1253,8 @@ interface CheckoutLayoutProps {
   /** Place order waits while payment loads, or after it failed to load (#783). */
   paymentHold?: "loading" | "failed" | null;
   onSubmit: (e: FormEvent) => void;
+  /** Shown just above Pay: the Turnstile widget on a real payment (#872). */
+  beforePay?: React.ReactNode;
   paymentSection: React.ReactNode;
   payLabel: string;
   isRealPayment: boolean;
@@ -1285,7 +1298,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     quote, quotePending, quoteFailed = false, quoteFailMessage, onRetryQuote,
     issue, onClearIssue, onUseAnotherCard, onRefresh, submitAttempt, errorHref, submitted, payState,
     frozen, hot = false, prepMinutes, weightG, courierEligible, addressHold = false, paymentHold = null,
-    onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
+    onSubmit, beforePay, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     contactNote = contactPrefillNote(null), identityLocked = false, whatsapp,
   } = props;
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
@@ -1843,6 +1856,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 order, the hold is released.
               </p>
             )}
+            {beforePay}
             <PayButton
               type="submit"
               state={payState}

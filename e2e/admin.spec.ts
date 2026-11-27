@@ -804,13 +804,15 @@ test.describe("Admin shell (authenticated)", () => {
   });
 
   test("home names the setup this deployment is missing, by name only (#765)", async ({ page }) => {
-    // The e2e server has a proof bucket but no sender address and no Shippo key (playwright.config.ts).
+    // The e2e server has a proof bucket but no sender address, no Shippo key and no Turnstile keys (playwright.config.ts).
     const missing = page.getByRole("region", { name: "Missing setup" });
     await expect(missing).toBeVisible();
-    await expect(missing.getByRole("listitem")).toHaveCount(2);
+    await expect(missing.getByRole("listitem")).toHaveCount(3);
     await expect(missing).toContainText("EMAIL_FROM");
     await expect(missing).toContainText("Sign-in links and order emails reach no one");
     await expect(missing).toContainText("SHIPPO_API_KEY");
+    await expect(missing).toContainText("TURNSTILE_SECRET_KEY");
+    await expect(missing).toContainText("No bot check on the store application");
     await expect(missing).not.toContainText("R2_PROOF_BUCKET");
     const proof = process.env.PROOF_DIR;
     if (proof) {

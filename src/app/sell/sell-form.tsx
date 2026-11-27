@@ -6,11 +6,12 @@ import { CircleAlert } from "lucide-react";
 import { submitStoreApplicationAction, type SellFormState } from "@/lib/store-application/actions";
 import { PLAN_CHOICES, STORE_TYPES } from "@/lib/store-application/fields";
 import { USPS_STATE_CODES } from "@/lib/customer-account/address-validation";
+import { TurnstileWidget } from "@/components/turnstile-widget";
 import styles from "./sell.module.css";
 
 const INITIAL: SellFormState = { status: "idle" };
 
-export function SellForm() {
+export function SellForm({ turnstileSiteKey }: { turnstileSiteKey: string | null }) {
   const [state, action, pending] = useActionState(submitStoreApplicationAction, INITIAL);
   const formRef = useRef<HTMLFormElement>(null);
   const summaryRef = useRef<HTMLParagraphElement>(null);
@@ -157,6 +158,8 @@ export function SellForm() {
         <label htmlFor="fax">Fax</label>
         <input id="fax" name="fax" type="text" tabIndex={-1} autoComplete="off" />
       </div>
+
+      {turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} className={styles.turnstile} />}
 
       <button type="submit" className={styles.submit} disabled={pending}>
         {pending ? "Sending…" : "Send application"}
