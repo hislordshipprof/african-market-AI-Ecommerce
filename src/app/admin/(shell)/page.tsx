@@ -34,6 +34,7 @@ const SETUP_EFFECT: Record<string, string> = {
   EMAIL_FROM: "Sign-in links and order emails reach no one. Shoppers and staff are told email sign-in is not available yet.",
   R2_PROOF_BUCKET: "Store delivery and shipping are hidden at checkout: delivery photos and labels have nowhere to be kept.",
   SHIPPO_API_KEY: "Shipping is hidden at checkout: labels cannot be bought.",
+  TURNSTILE_SECRET_KEY: "No bot check on the store application, store suggestions, shopper sign-in and checkout. Set it and NEXT_PUBLIC_TURNSTILE_SITE_KEY.",
 };
 
 type Queue = { href: string; label: string; count: keyof Omit<AdminHomeCounts, "stores">; detail: string; icon: LucideIcon; urgent?: boolean; testId: string };

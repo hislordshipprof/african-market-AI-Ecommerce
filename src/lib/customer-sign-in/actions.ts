@@ -5,6 +5,7 @@ import { z } from "zod";
 import { auth } from "../auth";
 import { EMAIL_SIGN_IN_UNAVAILABLE, emailSignInAvailable } from "../email/send";
 import { parseInput, readFormField } from "../security/parse-input";
+import { TURNSTILE_FAILED, TURNSTILE_FIELD, TURNSTILE_HEADER } from "../security/turnstile";
 
 export type SignInLinkState =
   | { status: "idle"; email: string }
@@ -39,6 +40,9 @@ export async function sendSignInLinkAction(
     if (value) forwarded.set(name, value);
   }
   if (!forwarded.has("origin")) forwarded.set("origin", `${proto}://${host}`);
+  // The auth route checks it (src/lib/auth.ts), so a direct POST cannot skip it.
+  const token = readFormField(form, TURNSTILE_FIELD);
+  if (typeof token === "string" && token) forwarded.set(TURNSTILE_HEADER, token);
 
   try {
     const res = await auth.handler(
@@ -51,7 +55,11 @@ export async function sendSignInLinkAction(
     if (res.status === 429) {
       return { status: "error", email, message: "Too many attempts. Wait a minute and try again." };
     }
-    if (!res.ok) return { status: "error", email, message: "We couldn't send the link. Try again." };
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+      if (body?.message === TURNSTILE_FAILED) return { status: "error", email, message: TURNSTILE_FAILED };
+      return { status: "error", email, message: "We couldn't send the link. Try again." };
+    }
     return { status: "sent", email };
   } catch {
     return { status: "error", email, message: "Something went wrong. Please try again." };

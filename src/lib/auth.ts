@@ -9,6 +9,7 @@ import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { fallbackRootHost, isFallbackRoot, isSlugRoutable, slugFromHost } from "./slug";
 import { testOnlyRoutesAllowed } from "./security/test-only-routes";
+import { TURNSTILE_FAILED, TURNSTILE_HEADER, turnstileRequest, verifyTurnstile } from "./security/turnstile";
 
 /**
  * A real deployment: VERCEL set, or NODE_ENV=production without CI=true (the /api/e2e rule).
@@ -297,6 +298,13 @@ async function refuseTokenFromAnotherStore(ctx: {
   if (binding.value !== (store?.id ?? "")) throw refusedHere();
 }
 
+// Fails closed: with siteverify unreachable no sign-in link is sent.
+async function refuseWithoutTurnstile(ctx: unknown): Promise<void> {
+  const headers = requestHeaders(ctx) ?? new Headers();
+  const check = await verifyTurnstile(headers.get(TURNSTILE_HEADER), turnstileRequest(headers));
+  if (!check.ok) throw new APIError("BAD_REQUEST", { message: TURNSTILE_FAILED });
+}
+
 function refusedHere(): APIError {
   return new APIError("FORBIDDEN", { message: "This sign-in link is not valid here" });
 }
@@ -378,6 +386,8 @@ export const auth = betterAuth({
     // would reject that session anyway: never issue one.
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/magic-link/verify") await refuseTokenFromAnotherStore(ctx);
+      // Here, not only in the sign-in form's action, so a direct POST to the route needs a token too (#872).
+      if (ctx.path === "/sign-in/magic-link") await refuseWithoutTurnstile(ctx);
       if (ctx.path.startsWith("/two-factor/") && ctx.body?.trustDevice) {
         return { context: { body: { ...ctx.body, trustDevice: false } } };
       }

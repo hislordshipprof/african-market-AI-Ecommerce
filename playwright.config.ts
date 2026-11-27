@@ -87,6 +87,9 @@ export default defineConfig({
           R2_PROOF_BUCKET: "e2e-proof-bucket",
           EMAIL_FROM: "",
           SHIPPO_API_KEY: "",
+          // Off here, so every form runs as before (#872); e2e/turnstile.spec.ts boots its own server with test keys.
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: "",
+          TURNSTILE_SECRET_KEY: "",
           VERCEL_ENV: "preview",
           STOREFRONT_REVALIDATION_SECRET: "e2e-storefront-revalidate",
         },

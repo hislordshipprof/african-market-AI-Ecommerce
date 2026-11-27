@@ -3,7 +3,8 @@
 import { headers } from "next/headers";
 import { z } from "zod";
 import { clientIp } from "../assistant/client-ip";
-import { parseInput, readFormFields } from "../security/parse-input";
+import { parseInput, readFormField, readFormFields } from "../security/parse-input";
+import { TURNSTILE_FAILED, TURNSTILE_FIELD, turnstileRequest, verifyTurnstile } from "../security/turnstile";
 import { APPLICATION_FIELDS } from "./fields";
 import { submitStoreApplication } from "./service";
 
@@ -26,6 +27,9 @@ export async function submitStoreApplicationAction(_previous: SellFormState, for
     return { status: "error", message: "Applications are taken on the Globe Grocer home site.", fieldErrors: {}, values };
   }
   if (!parsed.ok) return { status: "error", message: "Check the form and try again.", fieldErrors: {}, values };
+  // Fails closed: with siteverify unreachable no application is taken (#872).
+  const human = await verifyTurnstile(readFormField(form, TURNSTILE_FIELD), turnstileRequest(incoming));
+  if (!human.ok) return { status: "error", message: TURNSTILE_FAILED, fieldErrors: {}, values };
 
   try {
     const result = await submitStoreApplication(parsed.data, clientIp(incoming));

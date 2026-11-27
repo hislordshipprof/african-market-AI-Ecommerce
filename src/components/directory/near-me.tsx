@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { Check, LocateFixed, MapPin, MapPinOff, RotateCw, ShoppingBag, Truck } from "lucide-react";
 import { NEARBY_MILES } from "@/lib/directory/distance";
@@ -8,8 +8,10 @@ import { splitByDelivery } from "@/lib/directory/delivery-line";
 import { withCuisine, type CuisineChip } from "@/lib/directory/cuisine-filter";
 import { fetchNear, nearSearch, type NearAnswer, type NearState } from "@/lib/directory/near-search";
 import { StoreCard, type CardStore } from "./store-card";
-import { StoreRequestForm } from "./store-request-form";
 import styles from "./directory.module.css";
+
+// Shown only when no store is near, so it and its Turnstile widget stay out of the home's first-load JS (#629, #872).
+const StoreRequestForm = lazy(() => import("./store-request-form").then((mod) => ({ default: mod.StoreRequestForm })));
 
 type PlaceLink = { name: string; href: string; count: number };
 export type StateGroup = { code: string; name: string; href: string; count: number; cities: PlaceLink[] };
@@ -26,8 +28,9 @@ const UNAVAILABLE = "We couldn't get your location. Enter your ZIP code or city 
  * The hero frames the search; results split into the store's own delivery to the shopper and pickup,
  * and a cuisine chip filters them. A new or failed search keeps the last results on screen (#728).
  */
-export function NearMe({ stores, chips, intro, owner, figure }: {
+export function NearMe({ stores, chips, intro, owner, figure, turnstileSiteKey }: {
   stores: CardStore[];
+  turnstileSiteKey: string | null;
   chips: CuisineChip[];
   intro: ReactNode;
   owner: ReactNode;
@@ -153,8 +156,8 @@ export function NearMe({ stores, chips, intro, owner, figure }: {
         {answer?.kind === "stores" && answer.nearby && answer.stores.length > 0 ? (
           <Results answer={answer} chips={chips} cuisine={chosen} refreshing={pending} onChoose={toggleCuisine} onClear={clearCuisine} />
         ) : null}
-        {answer?.kind === "stores" && !(answer.nearby && answer.stores.length > 0) ? <EmptyArea answer={answer} refreshing={pending} /> : null}
-        {answer?.kind === "stores" || answer?.kind === "outside" ? null : <AllStores stores={stores} />}
+        {answer?.kind === "stores" && !(answer.nearby && answer.stores.length > 0) ? <EmptyArea answer={answer} refreshing={pending} turnstileSiteKey={turnstileSiteKey} /> : null}
+        {answer?.kind === "stores" || answer?.kind === "outside" ? null : <AllStores stores={stores} turnstileSiteKey={turnstileSiteKey} />}
       </div>
     </>
   );
@@ -200,7 +203,7 @@ function NoneTagged({ cuisine, onClear }: { cuisine: CuisineChip; onClear: () =>
   );
 }
 
-function AllStores({ stores }: { stores: CardStore[] }) {
+function AllStores({ stores, turnstileSiteKey }: { stores: CardStore[]; turnstileSiteKey: string | null }) {
   return (
     <section aria-labelledby="directory-stores" className={styles.results}>
       <div className={styles.resultsHead}>
@@ -210,7 +213,7 @@ function AllStores({ stores }: { stores: CardStore[] }) {
       {stores.length === 0 ? (
         <>
           <p className={styles.note}>Suggest a store: leave your ZIP code and we&apos;ll tell you when a market opens near you.</p>
-          <StoreRequestForm zip={null} />
+          <Suspense fallback={null}><StoreRequestForm zip={null} turnstileSiteKey={turnstileSiteKey} /></Suspense>
         </>
       ) : (
         <StoreGrid stores={stores} />
@@ -263,7 +266,7 @@ function Results({ answer, chips, cuisine, refreshing, onChoose, onClear }: {
 }
 
 /** No store within 50 miles (#455, #863): ask to hear when one opens, and see the closest stores anyway. */
-function EmptyArea({ answer, refreshing }: { answer: StoresAnswer; refreshing: boolean }) {
+function EmptyArea({ answer, refreshing, turnstileSiteKey }: { answer: StoresAnswer; refreshing: boolean; turnstileSiteKey: string | null }) {
   const place = answer.label ?? "your area";
   const zip = answer.label && /^\d{5}$/.test(answer.label) ? answer.label : null;
   return (
@@ -278,7 +281,7 @@ function EmptyArea({ answer, refreshing }: { answer: StoresAnswer; refreshing: b
         </p>
       </div>
       <div className={styles.emptyGrid}>
-        <StoreRequestForm zip={zip} />
+        <Suspense fallback={null}><StoreRequestForm zip={zip} turnstileSiteKey={turnstileSiteKey} /></Suspense>
         <aside aria-labelledby="empty-owner" className={styles.ownerBand}>
           <h3 id="empty-owner" className={styles.ownerBandTitle}>Know a market owner near {place}?</h3>
           <p>Send them the sell page. They keep their own brand, prices and customers.</p>

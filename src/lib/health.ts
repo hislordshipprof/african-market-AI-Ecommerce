@@ -1,6 +1,7 @@
 import { emailFromSet } from "./email/send";
 import { inngestDevOn } from "./inngest/event-key";
 import { deliveryProofBucket } from "./r2";
+import { turnstileSiteKey } from "./security/turnstile";
 
 export type QueryRawFn = (
   strings: TemplateStringsArray,
@@ -73,13 +74,15 @@ export function checkEnv(
 
 /**
  * Optional setup the platform runs without, by name only (#765). Without a sender sign-in links reach no one;
- * without the proof bucket store delivery and shipping are hidden; without Shippo shipping is. Never fails the probe.
+ * without the proof bucket store delivery and shipping are hidden; without Shippo shipping is; without both
+ * Turnstile keys the public forms run with no bot check (#872). Never fails the probe.
  */
 export function missingSetup(env: Record<string, string | undefined>): string[] {
   const missing: string[] = [];
   if (!emailFromSet(env)) missing.push("EMAIL_FROM");
   if (!deliveryProofBucket(env)) missing.push("R2_PROOF_BUCKET");
   if (!env.SHIPPO_API_KEY?.trim()) missing.push("SHIPPO_API_KEY");
+  if (!turnstileSiteKey(env)) missing.push("TURNSTILE_SECRET_KEY");
   return missing;
 }
 

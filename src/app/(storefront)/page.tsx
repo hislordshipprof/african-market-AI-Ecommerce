@@ -32,6 +32,7 @@ import { statePages } from "@/lib/directory/places";
 import { feeNote } from "@/lib/directory/fee-note";
 import { pilotOffer } from "@/lib/billing/service";
 import { readServiceFeeSettings } from "@/lib/order/service-fee-settings";
+import { turnstileSiteKey } from "@/lib/security/turnstile";
 
 // The pilot offer and the fee note read the database, so they stream in on their own and the rest of the
 // home renders in one pass: a /#stores-by-state link then lands on the list (#810, #863).
@@ -65,6 +66,7 @@ export default async function StorefrontPage() {
         states={states}
         plans={<Suspense fallback={<PlanComparison recommend />}><DirectoryPlans /></Suspense>}
         feeNote={<Suspense fallback={null}><DirectoryFeeNote /></Suspense>}
+        turnstileSiteKey={turnstileSiteKey()}
       />
     );
   }

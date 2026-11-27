@@ -20,7 +20,13 @@ import styles from "./directory.module.css";
  * The Store directory home, design B2 (#863): the shopper's search first, then what the platform gives
  * shoppers and store owners. Plans, the pilot offer and the fee note come from code, never this page.
  */
-export function DirectoryHome({ stores, states, plans, feeNote }: { stores: CardStore[]; states: StateGroup[]; plans: ReactNode; feeNote: ReactNode }) {
+export function DirectoryHome({ stores, states, plans, feeNote, turnstileSiteKey }: {
+  stores: CardStore[];
+  states: StateGroup[];
+  plans: ReactNode;
+  feeNote: ReactNode;
+  turnstileSiteKey: string | null;
+}) {
   return (
     <div className={styles.page}>
       <header className={styles.bar}>
@@ -30,6 +36,7 @@ export function DirectoryHome({ stores, states, plans, feeNote }: { stores: Card
       <main>
         <NearMe
           stores={stores}
+          turnstileSiteKey={turnstileSiteKey}
           chips={cuisineChips(stores)}
           intro={(
             <>

@@ -5,6 +5,7 @@ import directory from "@/components/directory/directory.module.css";
 import { PlanComparison } from "@/components/billing/plan-comparison";
 import { pilotOffer } from "@/lib/billing/service";
 import { SELL_STEPS } from "@/lib/store-application/steps";
+import { turnstileSiteKey } from "@/lib/security/turnstile";
 import { SellForm } from "./sell-form";
 import styles from "./sell.module.css";
 
@@ -41,7 +42,7 @@ export default async function SellPage() {
             <PlanComparison offer={offer} />
           </div>
         </section>
-        <SellForm />
+        <SellForm turnstileSiteKey={turnstileSiteKey()} />
       </main>
     </div>
   );

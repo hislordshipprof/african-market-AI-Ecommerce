@@ -13,17 +13,20 @@ import {
 import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
 import { sendSignInLinkAction, type SignInLinkState } from "@/lib/customer-sign-in/actions";
 import { Mail, ArrowLeft } from "lucide-react";
+import { TurnstileWidget } from "@/components/turnstile-widget";
 
 interface Props {
   storeName: string;
   linkError?: string | null;
   /** Set while no sign-in link can reach anyone (#765): shown instead of the form. */
   unavailable?: string | null;
+  /** Set once both Turnstile keys are (#872): the form shows the widget. */
+  turnstileSiteKey?: string | null;
 }
 
 const INITIAL: SignInLinkState = { status: "idle", email: "" };
 
-export function CustomerSignIn({ storeName, linkError = null, unavailable = null }: Props) {
+export function CustomerSignIn({ storeName, linkError = null, unavailable = null, turnstileSiteKey = null }: Props) {
   // A server action, so a submit before hydration (or with no JS) still sends the typed email.
   const [state, formAction, pending] = useActionState(sendSignInLinkAction, INITIAL);
   const [dismissed, setDismissed] = useState<SignInLinkState | null>(null);
@@ -90,6 +93,8 @@ export function CustomerSignIn({ storeName, linkError = null, unavailable = null
                   aria-describedby={state.status === "error" ? "customer-sign-in-error" : undefined}
                 />
               </div>
+
+              {turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} className="min-h-[65px]" />}
 
               <Button type="submit" disabled={pending} className="w-full min-h-[44px]">
                 {pending ? "Sending..." : "Send sign-in link"}
